@@ -160,6 +160,7 @@ const PROXY_ALLOWLIST = normalizeProxyAllowlist(USER_CONFIG.proxyAllowlist);
 
 const LISTEN_HOST = safeText(process.env.LISTEN_HOST || SERVER_CONFIG.listenHost);
 const LISTEN_PORT = configNumber(process.env.LISTEN_PORT || SERVER_CONFIG.listenPort);
+const ALLOW_SUBNETS = SERVER_CONFIG.allowSubnets;
 const OH_TARGET = safeText(process.env.OH_TARGET || SERVER_CONFIG.openhab?.target);
 const OH_USER = safeText(process.env.OH_USER || SERVER_CONFIG.openhab?.user || '');
 const OH_PASS = safeText(process.env.OH_PASS || SERVER_CONFIG.openhab?.pass || '');
@@ -257,11 +258,29 @@ function isValidCidr(value) {
 	return Number.isInteger(mask) && mask >= 0 && mask <= 32;
 }
 
+function isAllowAllSubnet(value) {
+	return safeText(value).trim() === '0.0.0.0';
+}
+
+function isValidAllowSubnet(value) {
+	if (isAllowAllSubnet(value)) return true;
+	return isValidCidr(value);
+}
+
 function ensureCidrList(value, name, { allowEmpty = false } = {}, errors) {
 	if (!ensureArray(value, name, { allowEmpty }, errors)) return;
 	value.forEach((entry, index) => {
 		if (!isValidCidr(entry)) {
 			errors.push(`${name}[${index}] must be IPv4 CIDR but currently is ${describeValue(entry)}`);
+		}
+	});
+}
+
+function ensureAllowSubnets(value, name, errors) {
+	if (!ensureArray(value, name, { allowEmpty: false }, errors)) return;
+	value.forEach((entry, index) => {
+		if (!isValidAllowSubnet(entry)) {
+			errors.push(`${name}[${index}] must be IPv4 CIDR or 0.0.0.0 but currently is ${describeValue(entry)}`);
 		}
 	});
 }
@@ -329,6 +348,7 @@ function validateConfig() {
 
 	ensureString(LISTEN_HOST, 'server.listenHost', { allowEmpty: false }, errors);
 	ensureNumber(LISTEN_PORT, 'server.listenPort', { min: 1, max: 65535 }, errors);
+	ensureAllowSubnets(ALLOW_SUBNETS, 'server.allowSubnets', errors);
 
 	if (ensureObject(SERVER_CONFIG.openhab, 'server.openhab', errors)) {
 		ensureUrl(OH_TARGET, 'server.openhab.target', errors);
@@ -432,6 +452,41 @@ function validateConfig() {
 	}
 
 	return errors;
+}
+
+function normalizeRemoteIp(value) {
+	const raw = safeText(value).trim();
+	if (!raw) return '';
+	if (raw.startsWith('::ffff:')) return raw.slice(7);
+	if (raw.includes(':')) return '';
+	return raw;
+}
+
+function ipToLong(ip) {
+	if (!isValidIpv4(ip)) return null;
+	return ip.split('.').reduce((acc, part) => (acc << 8) + Number(part), 0);
+}
+
+function ipInSubnet(ip, cidr) {
+	const parts = safeText(cidr).split('/');
+	if (parts.length !== 2) return false;
+	const subnet = parts[0];
+	const mask = Number(parts[1]);
+	if (!Number.isInteger(mask) || mask < 0 || mask > 32) return false;
+	const ipLong = ipToLong(ip);
+	const subnetLong = ipToLong(subnet);
+	if (ipLong === null || subnetLong === null) return false;
+	const maskLong = mask === 0 ? 0 : (0xffffffff << (32 - mask)) >>> 0;
+	return (ipLong & maskLong) === (subnetLong & maskLong);
+}
+
+function ipInAnySubnet(ip, subnets) {
+	if (!Array.isArray(subnets) || !subnets.length) return false;
+	for (const cidr of subnets) {
+		if (isAllowAllSubnet(cidr)) return true;
+		if (ipInSubnet(ip, cidr)) return true;
+	}
+	return false;
 }
 
 const configErrors = validateConfig();
@@ -1126,6 +1181,16 @@ app.use(morgan('combined', {
 		write: (line) => logAccess(line),
 	},
 }));
+app.use((req, res, next) => {
+	if (Array.isArray(ALLOW_SUBNETS) && ALLOW_SUBNETS.some((entry) => isAllowAllSubnet(entry))) return next();
+	const ip = normalizeRemoteIp(req.ip || req.socket?.remoteAddress || '');
+	if (!ip || !ipInAnySubnet(ip, ALLOW_SUBNETS)) {
+		logMessage(`Blocked request from ${ip || 'unknown'} for ${req.method} ${req.originalUrl}`);
+		res.status(403).type('text/plain').send('Forbidden');
+		return;
+	}
+	next();
+});
 app.use(compression());
 
 app.get('/config.js', (req, res) => {

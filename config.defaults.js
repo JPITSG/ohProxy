@@ -7,6 +7,8 @@ module.exports = {
 		listenHost: '',
 		// Bind port.
 		listenPort: 0,
+		// Allowed client subnets.
+		allowSubnets: [],
 		// openHAB target credentials.
 		openhab: {
 			// openHAB base URL.
