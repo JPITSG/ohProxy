@@ -37,6 +37,8 @@ module.exports = {
 		proxyLogLevel: 'warn',
 		// Log file path.
 		logFile: '',
+		// Access log file path.
+		accessLog: '',
 		// Background worker timing.
 		backgroundTasks: {
 			// Sitemap refresh interval.

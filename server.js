@@ -33,6 +33,30 @@ function safeText(value) {
 	return value === null || value === undefined ? '' : String(value);
 }
 
+function formatLogTimestamp(date) {
+	const pad = (value) => String(value).padStart(2, '0');
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function formatLogLine(message) {
+	const text = safeText(message).replace(/[\r\n]+/g, ' ').trim();
+	if (!text) return '';
+	return `${formatLogTimestamp(new Date())} | ${text}\n`;
+}
+
+function writeLogLine(filePath, message) {
+	const line = formatLogLine(message);
+	if (!line) return;
+	process.stdout.write(line);
+	if (!filePath) return;
+	try {
+		fs.appendFileSync(filePath, line);
+	} catch (err) {
+		const fallback = formatLogLine(`Failed to write log file ${filePath}: ${err.message || err}`);
+		if (fallback) process.stdout.write(fallback);
+	}
+}
+
 function escapeHtml(value) {
 	const text = safeText(value);
 	return text
@@ -48,6 +72,11 @@ function configNumber(value, fallback) {
 	return Number.isFinite(num) ? num : fallback;
 }
 
+const BOOT_LOG_FILE = safeText(process.env.LOG_FILE || '');
+function bootLog(message) {
+	writeLogLine(BOOT_LOG_FILE, message);
+}
+
 function loadUserConfig() {
 	try {
 		if (!fs.existsSync(CONFIG_PATH)) return {};
@@ -56,7 +85,7 @@ function loadUserConfig() {
 		return cfg && typeof cfg === 'object' ? cfg : {};
 	} catch (err) {
 		if (err && err.code !== 'MODULE_NOT_FOUND') {
-			console.warn(`Failed to load ${CONFIG_PATH}:`, err.message || err);
+			bootLog(`Failed to load ${CONFIG_PATH}: ${err.message || err}`);
 		}
 		return {};
 	}
@@ -118,47 +147,284 @@ const LISTEN_PORT = configNumber(process.env.LISTEN_PORT || SERVER_CONFIG.listen
 const OH_TARGET = safeText(process.env.OH_TARGET || SERVER_CONFIG.openhab?.target);
 const OH_USER = safeText(process.env.OH_USER || SERVER_CONFIG.openhab?.user || '');
 const OH_PASS = safeText(process.env.OH_PASS || SERVER_CONFIG.openhab?.pass || '');
-const ICON_VERSION = safeText(process.env.ICON_VERSION || SERVER_CONFIG.iconVersion || 'v3');
-const USER_AGENT = safeText(process.env.USER_AGENT || SERVER_CONFIG.userAgent || 'ohProxy/1.0');
-const ASSET_JS_VERSION = safeText(SERVER_CONFIG.assets?.jsVersion || 'v1');
-const ASSET_CSS_VERSION = safeText(SERVER_CONFIG.assets?.cssVersion || 'v1');
-const APPLE_TOUCH_VERSION_RAW = safeText(SERVER_CONFIG.assets?.appleTouchIconVersion || 'v1');
-const APPLE_TOUCH_VERSION = APPLE_TOUCH_VERSION_RAW.startsWith('v')
-	? APPLE_TOUCH_VERSION_RAW
-	: `v${APPLE_TOUCH_VERSION_RAW}`;
-const ICON_SIZE = configNumber(SERVER_CONFIG.iconSize, 64);
-const DELTA_CACHE_LIMIT = configNumber(SERVER_CONFIG.deltaCacheLimit, 50);
-const PROXY_LOG_LEVEL = safeText(process.env.PROXY_LOG_LEVEL || SERVER_CONFIG.proxyLogLevel || 'warn');
+const ICON_VERSION = safeText(process.env.ICON_VERSION || SERVER_CONFIG.iconVersion);
+const USER_AGENT = safeText(process.env.USER_AGENT || SERVER_CONFIG.userAgent);
+const ASSET_JS_VERSION = safeText(SERVER_CONFIG.assets?.jsVersion);
+const ASSET_CSS_VERSION = safeText(SERVER_CONFIG.assets?.cssVersion);
+const APPLE_TOUCH_VERSION_RAW = safeText(SERVER_CONFIG.assets?.appleTouchIconVersion);
+const APPLE_TOUCH_VERSION = APPLE_TOUCH_VERSION_RAW
+	? (APPLE_TOUCH_VERSION_RAW.startsWith('v')
+		? APPLE_TOUCH_VERSION_RAW
+		: `v${APPLE_TOUCH_VERSION_RAW}`)
+	: '';
+const ICON_SIZE = configNumber(SERVER_CONFIG.iconSize);
+const DELTA_CACHE_LIMIT = configNumber(SERVER_CONFIG.deltaCacheLimit);
+const PROXY_LOG_LEVEL = safeText(process.env.PROXY_LOG_LEVEL || SERVER_CONFIG.proxyLogLevel);
 const LOG_FILE = safeText(process.env.LOG_FILE || SERVER_CONFIG.logFile);
+const ACCESS_LOG = safeText(process.env.ACCESS_LOG || SERVER_CONFIG.accessLog);
 const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(
-	process.env.SITEMAP_REFRESH_MS || TASK_CONFIG.sitemapRefreshMs,
-	60000
+	process.env.SITEMAP_REFRESH_MS || TASK_CONFIG.sitemapRefreshMs
 );
 
-const configErrors = [];
-if (!LISTEN_HOST) configErrors.push('server.listenHost');
-if (!Number.isFinite(LISTEN_PORT) || LISTEN_PORT <= 0) configErrors.push('server.listenPort');
-if (!OH_TARGET) configErrors.push('server.openhab.target');
-if (OH_TARGET) {
-	try {
-		new URL(OH_TARGET);
-	} catch {
-		configErrors.push('server.openhab.target (invalid URL)');
+function logMessage(message) {
+	writeLogLine(LOG_FILE, message);
+}
+
+function logAccess(message) {
+	writeLogLine(ACCESS_LOG, message);
+}
+
+function isPlainObject(value) {
+	return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function ensureString(value, name, { allowEmpty = false } = {}, errors) {
+	if (typeof value !== 'string') {
+		errors.push(`${name} must be a string`);
+		return;
+	}
+	if (!allowEmpty && value.trim() === '') {
+		errors.push(`${name} is required`);
 	}
 }
+
+function ensureNumber(value, name, { min, max, integer = true } = {}, errors) {
+	if (!Number.isFinite(value)) {
+		errors.push(`${name} must be a number`);
+		return;
+	}
+	if (integer && !Number.isInteger(value)) {
+		errors.push(`${name} must be an integer`);
+		return;
+	}
+	if (min !== undefined && value < min) {
+		errors.push(`${name} must be >= ${min}`);
+	}
+	if (max !== undefined && value > max) {
+		errors.push(`${name} must be <= ${max}`);
+	}
+}
+
+function ensureArray(value, name, { allowEmpty = false } = {}, errors) {
+	if (!Array.isArray(value)) {
+		errors.push(`${name} must be an array`);
+		return false;
+	}
+	if (!allowEmpty && value.length === 0) {
+		errors.push(`${name} must not be empty`);
+		return false;
+	}
+	return true;
+}
+
+function ensureObject(value, name, errors) {
+	if (!isPlainObject(value)) {
+		errors.push(`${name} must be an object`);
+		return false;
+	}
+	return true;
+}
+
+function isValidIpv4(value) {
+	const parts = safeText(value).split('.');
+	if (parts.length !== 4) return false;
+	return parts.every((part) => /^\d+$/.test(part) && Number(part) >= 0 && Number(part) <= 255);
+}
+
+function isValidCidr(value) {
+	const raw = safeText(value).trim();
+	const parts = raw.split('/');
+	if (parts.length !== 2) return false;
+	if (!isValidIpv4(parts[0])) return false;
+	const mask = Number(parts[1]);
+	return Number.isInteger(mask) && mask >= 0 && mask <= 32;
+}
+
+function ensureCidrList(value, name, { allowEmpty = false } = {}, errors) {
+	if (!ensureArray(value, name, { allowEmpty }, errors)) return;
+	value.forEach((entry, index) => {
+		if (!isValidCidr(entry)) {
+			errors.push(`${name}[${index}] must be IPv4 CIDR`);
+		}
+	});
+}
+
+function ensureUrl(value, name, errors) {
+	ensureString(value, name, { allowEmpty: false }, errors);
+	if (typeof value !== 'string' || value.trim() === '') return;
+	try {
+		const parsed = new URL(value);
+		if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+			errors.push(`${name} must use http or https`);
+		}
+	} catch {
+		errors.push(`${name} must be a valid URL`);
+	}
+}
+
+function ensureVersion(value, name, errors) {
+	ensureString(value, name, { allowEmpty: false }, errors);
+	if (typeof value !== 'string' || value.trim() === '') return;
+	if (!/^v\\d+$/i.test(value.trim())) {
+		errors.push(`${name} must look like v123`);
+	}
+}
+
+function ensureLogPath(value, name, errors) {
+	ensureString(value, name, { allowEmpty: false }, errors);
+	if (typeof value !== 'string' || value.trim() === '') return;
+	if (!path.isAbsolute(value)) {
+		errors.push(`${name} must be an absolute path`);
+		return;
+	}
+	const dir = path.dirname(value);
+	if (!fs.existsSync(dir)) {
+		errors.push(`${name} directory does not exist`);
+		return;
+	}
+	try {
+		fs.accessSync(dir, fs.constants.W_OK);
+	} catch {
+		errors.push(`${name} directory is not writable`);
+	}
+}
+
+function ensureReadableFile(value, name, errors) {
+	ensureString(value, name, { allowEmpty: false }, errors);
+	if (typeof value !== 'string' || value.trim() === '') return;
+	if (!path.isAbsolute(value)) {
+		errors.push(`${name} must be an absolute path`);
+		return;
+	}
+	if (!fs.existsSync(value)) {
+		errors.push(`${name} does not exist`);
+		return;
+	}
+	try {
+		fs.accessSync(value, fs.constants.R_OK);
+	} catch {
+		errors.push(`${name} is not readable`);
+	}
+}
+
+function validateConfig() {
+	const errors = [];
+
+	ensureString(LISTEN_HOST, 'server.listenHost', { allowEmpty: false }, errors);
+	ensureNumber(LISTEN_PORT, 'server.listenPort', { min: 1, max: 65535 }, errors);
+
+	if (ensureObject(SERVER_CONFIG.openhab, 'server.openhab', errors)) {
+		ensureUrl(OH_TARGET, 'server.openhab.target', errors);
+		ensureString(OH_USER, 'server.openhab.user', { allowEmpty: true }, errors);
+		ensureString(OH_PASS, 'server.openhab.pass', { allowEmpty: true }, errors);
+	}
+
+	if (ensureObject(SERVER_CONFIG.assets, 'server.assets', errors)) {
+		ensureVersion(ASSET_JS_VERSION, 'server.assets.jsVersion', errors);
+		ensureVersion(ASSET_CSS_VERSION, 'server.assets.cssVersion', errors);
+		const appleRaw = safeText(APPLE_TOUCH_VERSION_RAW);
+		if (!appleRaw) {
+			errors.push('server.assets.appleTouchIconVersion is required');
+		} else if (!/^(v\\d+|\\d+)$/i.test(appleRaw.trim())) {
+			errors.push('server.assets.appleTouchIconVersion must be digits or v123');
+		}
+	}
+
+	ensureVersion(ICON_VERSION, 'server.iconVersion', errors);
+	ensureString(USER_AGENT, 'server.userAgent', { allowEmpty: false }, errors);
+	ensureNumber(ICON_SIZE, 'server.iconSize', { min: 1 }, errors);
+	ensureNumber(DELTA_CACHE_LIMIT, 'server.deltaCacheLimit', { min: 1 }, errors);
+	ensureString(PROXY_LOG_LEVEL, 'server.proxyLogLevel', { allowEmpty: false }, errors);
+	ensureLogPath(LOG_FILE, 'server.logFile', errors);
+	ensureLogPath(ACCESS_LOG, 'server.accessLog', errors);
+
+	if (ensureObject(SERVER_CONFIG.backgroundTasks, 'server.backgroundTasks', errors)) {
+		ensureNumber(SITEMAP_REFRESH_MS, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
+	}
+
+	if (ensureObject(USER_CONFIG.ohProxy, 'ohProxy', errors)) {
+		const ohp = USER_CONFIG.ohProxy;
+		ensureNumber(ohp.configTtlSeconds, 'ohProxy.configTtlSeconds', { min: 1 }, errors);
+		ensureNumber(ohp.connectTimeout, 'ohProxy.connectTimeout', { min: 1 }, errors);
+		ensureNumber(ohp.requestTimeout, 'ohProxy.requestTimeout', { min: 1 }, errors);
+		ensureReadableFile(ohp.usersFile, 'ohProxy.usersFile', errors);
+		ensureCidrList(ohp.whitelistSubnets, 'ohProxy.whitelistSubnets', { allowEmpty: false }, errors);
+		ensureString(ohp.authCookieName, 'ohProxy.authCookieName', { allowEmpty: false }, errors);
+		ensureNumber(ohp.authCookieDays, 'ohProxy.authCookieDays', { min: 1 }, errors);
+		ensureString(ohp.authCookieKey, 'ohProxy.authCookieKey', { allowEmpty: false }, errors);
+		ensureString(ohp.authFailNotifyCmd, 'ohProxy.authFailNotifyCmd', { allowEmpty: true }, errors);
+		ensureNumber(ohp.authFailNotifyCooldown, 'ohProxy.authFailNotifyCooldown', { min: 0 }, errors);
+	}
+
+	if (ensureArray(USER_CONFIG.proxyAllowlist, 'proxyAllowlist', { allowEmpty: false }, errors)) {
+		USER_CONFIG.proxyAllowlist.forEach((entry, index) => {
+			if (!parseProxyAllowEntry(entry)) {
+				errors.push(`proxyAllowlist[${index}] is not a valid host or host:port`);
+			}
+		});
+	}
+
+	if (ensureObject(CLIENT_CONFIG, 'client', errors)) {
+		ensureCidrList(CLIENT_CONFIG.lanSubnets, 'client.lanSubnets', { allowEmpty: false }, errors);
+		if (ensureArray(CLIENT_CONFIG.glowSections, 'client.glowSections', { allowEmpty: true }, errors)) {
+			CLIENT_CONFIG.glowSections.forEach((entry, index) => {
+				if (typeof entry !== 'string' || entry.trim() === '') {
+					errors.push(`client.glowSections[${index}] must be a string`);
+				}
+			});
+		}
+		ensureNumber(CLIENT_CONFIG.pageFadeOutMs, 'client.pageFadeOutMs', { min: 0 }, errors);
+		ensureNumber(CLIENT_CONFIG.pageFadeInMs, 'client.pageFadeInMs', { min: 0 }, errors);
+		ensureNumber(CLIENT_CONFIG.loadingDelayMs, 'client.loadingDelayMs', { min: 0 }, errors);
+		ensureNumber(CLIENT_CONFIG.minImageRefreshMs, 'client.minImageRefreshMs', { min: 0 }, errors);
+		ensureNumber(CLIENT_CONFIG.imageLoadTimeoutMs, 'client.imageLoadTimeoutMs', { min: 0 }, errors);
+
+		if (ensureObject(CLIENT_CONFIG.pollIntervalsMs, 'client.pollIntervalsMs', errors)) {
+			ensureNumber(CLIENT_CONFIG.pollIntervalsMs?.default?.active, 'client.pollIntervalsMs.default.active', { min: 1 }, errors);
+			ensureNumber(CLIENT_CONFIG.pollIntervalsMs?.default?.idle, 'client.pollIntervalsMs.default.idle', { min: 1 }, errors);
+			ensureNumber(CLIENT_CONFIG.pollIntervalsMs?.slim?.active, 'client.pollIntervalsMs.slim.active', { min: 1 }, errors);
+			ensureNumber(CLIENT_CONFIG.pollIntervalsMs?.slim?.idle, 'client.pollIntervalsMs.slim.idle', { min: 1 }, errors);
+		}
+
+		if (ensureObject(CLIENT_CONFIG.searchDebounceMs, 'client.searchDebounceMs', errors)) {
+			ensureNumber(CLIENT_CONFIG.searchDebounceMs?.default, 'client.searchDebounceMs.default', { min: 0 }, errors);
+			ensureNumber(CLIENT_CONFIG.searchDebounceMs?.slim, 'client.searchDebounceMs.slim', { min: 0 }, errors);
+		}
+
+		if (ensureObject(CLIENT_CONFIG.searchStateMinIntervalMs, 'client.searchStateMinIntervalMs', errors)) {
+			ensureNumber(CLIENT_CONFIG.searchStateMinIntervalMs?.default, 'client.searchStateMinIntervalMs.default', { min: 0 }, errors);
+			ensureNumber(CLIENT_CONFIG.searchStateMinIntervalMs?.slim, 'client.searchStateMinIntervalMs.slim', { min: 0 }, errors);
+		}
+
+		if (ensureObject(CLIENT_CONFIG.searchStateConcurrency, 'client.searchStateConcurrency', errors)) {
+			ensureNumber(CLIENT_CONFIG.searchStateConcurrency?.default, 'client.searchStateConcurrency.default', { min: 1 }, errors);
+			ensureNumber(CLIENT_CONFIG.searchStateConcurrency?.slim, 'client.searchStateConcurrency.slim', { min: 1 }, errors);
+		}
+
+		ensureNumber(CLIENT_CONFIG.sliderDebounceMs, 'client.sliderDebounceMs', { min: 0 }, errors);
+		ensureNumber(CLIENT_CONFIG.idleAfterMs, 'client.idleAfterMs', { min: 0 }, errors);
+		ensureNumber(CLIENT_CONFIG.activityThrottleMs, 'client.activityThrottleMs', { min: 0 }, errors);
+
+		if (ensureArray(CLIENT_CONFIG.hideTitleItems, 'client.hideTitleItems', { allowEmpty: true }, errors)) {
+			CLIENT_CONFIG.hideTitleItems.forEach((entry, index) => {
+				if (typeof entry !== 'string' || entry.trim() === '') {
+					errors.push(`client.hideTitleItems[${index}] must be a string`);
+				}
+			});
+		}
+	}
+
+	return errors;
+}
+
+const configErrors = validateConfig();
 if (configErrors.length) {
-	console.error(`Missing required config values: ${configErrors.join(', ')}`);
+	configErrors.forEach((msg) => logMessage(`Config error: ${msg}`));
 	process.exit(1);
 }
 
-if (LOG_FILE) {
-	try {
-		fs.appendFileSync(LOG_FILE, 'Starting ohProxy instance...\n');
-	} catch (err) {
-		console.error(`Failed to write log file ${LOG_FILE}: ${err.message || err}`);
-	}
-}
+logMessage('Starting ohProxy instance...');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const APP_BUNDLE_PATH = path.join(PUBLIC_DIR, 'app.js');
@@ -200,7 +466,7 @@ async function runBackgroundTask(task) {
 		await task.run();
 		task.lastRun = Date.now();
 	} catch (err) {
-		console.warn(`Background task ${task.name} failed:`, err.message || err);
+		logMessage(`Background task ${task.name} failed: ${err.message || err}`);
 	} finally {
 		task.running = false;
 		scheduleBackgroundTask(task);
@@ -613,7 +879,7 @@ function purgeOldIconCache() {
 			if (fs.rmSync) fs.rmSync(target, { recursive: true, force: true });
 			else fs.rmdirSync(target, { recursive: true });
 		} catch (err) {
-			console.warn(`Failed to purge icon cache ${target}:`, err.message || err);
+			logMessage(`Failed to purge icon cache ${target}: ${err.message || err}`);
 		}
 	}
 }
@@ -750,12 +1016,12 @@ async function refreshSitemapCache() {
 	try {
 		body = await fetchOpenhab('/rest/sitemaps?type=json');
 	} catch (err) {
-		console.warn('Sitemap cache refresh failed:', err.message || err);
+		logMessage(`Sitemap cache refresh failed: ${err.message || err}`);
 		return false;
 	}
 
 	if (!body || !body.ok) {
-		console.warn('Sitemap cache refresh failed: upstream error');
+		logMessage('Sitemap cache refresh failed: upstream error');
 		return false;
 	}
 
@@ -763,7 +1029,7 @@ async function refreshSitemapCache() {
 	try {
 		data = JSON.parse(body.body);
 	} catch {
-		console.warn('Sitemap cache refresh failed: non-JSON response');
+		logMessage('Sitemap cache refresh failed: non-JSON response');
 		return false;
 	}
 
@@ -840,7 +1106,9 @@ async function getCachedIcon(cachePath, sourcePath, sourceExt) {
 const app = express();
 app.disable('x-powered-by');
 app.use(morgan('combined', {
-	skip: (req, res) => res.statusCode < 400,
+	stream: {
+		write: (line) => logAccess(line),
+	},
 }));
 app.use(compression());
 
@@ -1025,7 +1293,7 @@ app.get(/^\/(?:openhab\.app\/)?images\/(v\d+)\/(.+)$/i, async (req, res, next) =
 		res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
 		res.send(buffer);
 	} catch (err) {
-		console.warn(`Icon cache failed for ${rawRel}:`, err.message || err);
+		logMessage(`Icon cache failed for ${rawRel}: ${err.message || err}`);
 		next();
 	}
 });
@@ -1157,7 +1425,7 @@ app.get('/proxy', async (req, res, next) => {
 		res.setHeader('Cache-Control', 'no-store');
 		res.send(result.body);
 	} catch (err) {
-		console.warn(`Direct proxy failed for ${target.toString()}:`, err.message || err);
+		logMessage(`Direct proxy failed for ${target.toString()}: ${err.message || err}`);
 		res.status(502).send('Proxy error');
 	}
 });
@@ -1199,6 +1467,6 @@ if (SITEMAP_REFRESH_MS > 0) {
 startBackgroundTasks();
 
 app.listen(LISTEN_PORT, LISTEN_HOST, () => {
-	console.log(`Modern openHAB wrapper: http://${LISTEN_HOST}:${LISTEN_PORT}`);
-	console.log(`Proxying openHAB from: ${OH_TARGET}`);
+logMessage(`Modern openHAB wrapper: http://${LISTEN_HOST}:${LISTEN_PORT}`);
+logMessage(`Proxying openHAB from: ${OH_TARGET}`);
 });
