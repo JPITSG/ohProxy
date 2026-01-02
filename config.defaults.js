@@ -48,8 +48,10 @@ module.exports = {
 		},
 	},
 
-	// ohProxy.php settings.
-	ohProxy: {
+	// PHP relay settings.
+	relay: {
+		// Relay config version.
+		version: 'v2',
 		// Config cache TTL.
 		configTtlSeconds: 86400,
 		// cURL connect timeout.

@@ -155,7 +155,7 @@ function hashString(value) {
 const USER_CONFIG = loadUserConfig();
 const SERVER_CONFIG = USER_CONFIG.server || {};
 const CLIENT_CONFIG = USER_CONFIG.client || {};
-const OHPROXY_CONFIG = USER_CONFIG.ohProxy || {};
+const RELAY_CONFIG = USER_CONFIG.relay || {};
 const PROXY_ALLOWLIST = normalizeProxyAllowlist(USER_CONFIG.proxyAllowlist);
 
 const LISTEN_HOST = safeText(process.env.LISTEN_HOST || SERVER_CONFIG.listenHost);
@@ -179,6 +179,7 @@ const DELTA_CACHE_LIMIT = configNumber(SERVER_CONFIG.deltaCacheLimit);
 const PROXY_LOG_LEVEL = safeText(process.env.PROXY_LOG_LEVEL || SERVER_CONFIG.proxyLogLevel);
 const LOG_FILE = safeText(process.env.LOG_FILE || SERVER_CONFIG.logFile);
 const ACCESS_LOG = safeText(process.env.ACCESS_LOG || SERVER_CONFIG.accessLog);
+const RELAY_VERSION = safeText(RELAY_CONFIG.version);
 const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(
 	process.env.SITEMAP_REFRESH_MS || TASK_CONFIG.sitemapRefreshMs
@@ -379,18 +380,19 @@ function validateConfig() {
 		ensureNumber(SITEMAP_REFRESH_MS, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
 	}
 
-	if (ensureObject(USER_CONFIG.ohProxy, 'ohProxy', errors)) {
-		const ohp = USER_CONFIG.ohProxy;
-		ensureNumber(ohp.configTtlSeconds, 'ohProxy.configTtlSeconds', { min: 1 }, errors);
-		ensureNumber(ohp.connectTimeout, 'ohProxy.connectTimeout', { min: 1 }, errors);
-		ensureNumber(ohp.requestTimeout, 'ohProxy.requestTimeout', { min: 1 }, errors);
-		ensureReadableFile(ohp.usersFile, 'ohProxy.usersFile', errors);
-		ensureCidrList(ohp.whitelistSubnets, 'ohProxy.whitelistSubnets', { allowEmpty: false }, errors);
-		ensureString(ohp.authCookieName, 'ohProxy.authCookieName', { allowEmpty: false }, errors);
-		ensureNumber(ohp.authCookieDays, 'ohProxy.authCookieDays', { min: 1 }, errors);
-		ensureString(ohp.authCookieKey, 'ohProxy.authCookieKey', { allowEmpty: false }, errors);
-		ensureString(ohp.authFailNotifyCmd, 'ohProxy.authFailNotifyCmd', { allowEmpty: true }, errors);
-		ensureNumber(ohp.authFailNotifyCooldown, 'ohProxy.authFailNotifyCooldown', { min: 0 }, errors);
+	if (ensureObject(USER_CONFIG.relay, 'relay', errors)) {
+		const relay = USER_CONFIG.relay;
+		ensureVersion(relay.version, 'relay.version', errors);
+		ensureNumber(relay.configTtlSeconds, 'relay.configTtlSeconds', { min: 1 }, errors);
+		ensureNumber(relay.connectTimeout, 'relay.connectTimeout', { min: 1 }, errors);
+		ensureNumber(relay.requestTimeout, 'relay.requestTimeout', { min: 1 }, errors);
+		ensureReadableFile(relay.usersFile, 'relay.usersFile', errors);
+		ensureCidrList(relay.whitelistSubnets, 'relay.whitelistSubnets', { allowEmpty: false }, errors);
+		ensureString(relay.authCookieName, 'relay.authCookieName', { allowEmpty: false }, errors);
+		ensureNumber(relay.authCookieDays, 'relay.authCookieDays', { min: 1 }, errors);
+		ensureString(relay.authCookieKey, 'relay.authCookieKey', { allowEmpty: false }, errors);
+		ensureString(relay.authFailNotifyCmd, 'relay.authFailNotifyCmd', { allowEmpty: true }, errors);
+		ensureNumber(relay.authFailNotifyCooldown, 'relay.authFailNotifyCooldown', { min: 0 }, errors);
 	}
 
 	if (ensureArray(USER_CONFIG.proxyAllowlist, 'proxyAllowlist', { allowEmpty: false }, errors)) {
@@ -1182,6 +1184,12 @@ app.use(morgan('combined', {
 	},
 }));
 app.use((req, res, next) => {
+	if (RELAY_VERSION && req.get('X-OhProxy-ClientIP')) {
+		res.setHeader('X-Config-Version', RELAY_VERSION);
+	}
+	next();
+});
+app.use((req, res, next) => {
 	if (Array.isArray(ALLOW_SUBNETS) && ALLOW_SUBNETS.some((entry) => isAllowAllSubnet(entry))) return next();
 	const ip = normalizeRemoteIp(req.ip || req.socket?.remoteAddress || '');
 	if (!ip || !ipInAnySubnet(ip, ALLOW_SUBNETS)) {
@@ -1206,9 +1214,12 @@ app.get('/config.js', (req, res) => {
 app.get('/ohproxy-config', (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-store');
+	if (RELAY_VERSION) {
+		res.setHeader('X-Config-Version', RELAY_VERSION);
+	}
 	res.send(JSON.stringify({
 		version: 1,
-		settings: OHPROXY_CONFIG && typeof OHPROXY_CONFIG === 'object' ? OHPROXY_CONFIG : {},
+		settings: RELAY_CONFIG && typeof RELAY_CONFIG === 'object' ? RELAY_CONFIG : {},
 		generatedAt: Date.now(),
 	}));
 });

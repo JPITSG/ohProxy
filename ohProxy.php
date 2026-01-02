@@ -129,8 +129,27 @@ function normalizeStringList($list) {
 	return $out;
 }
 
+function normalizeConfigVersion($value) {
+	$version = trim((string)$value);
+	if ($version === '') return null;
+	if (!preg_match('/^v?\\d+$/i', $version)) return null;
+	return $version;
+}
+
+function getHeaderValue($headers, $name) {
+	if (!is_array($headers)) return null;
+	$pattern = '/^' . preg_quote($name, '/') . '\\s*:\\s*(.+)$/i';
+	foreach ($headers as $header) {
+		if (preg_match($pattern, $header, $m)) {
+			return trim($m[1]);
+		}
+	}
+	return null;
+}
+
 function normalizeOhProxySettings($settings) {
 	if (!is_array($settings)) return null;
+	$version = normalizeConfigVersion($settings['version'] ?? '');
 	$connectTimeout = isset($settings['connectTimeout']) ? (int)$settings['connectTimeout'] : 0;
 	$requestTimeout = isset($settings['requestTimeout']) ? (int)$settings['requestTimeout'] : 0;
 	$usersFile = trim((string)($settings['usersFile'] ?? ''));
@@ -145,6 +164,7 @@ function normalizeOhProxySettings($settings) {
 		: 0;
 	$configTtlSeconds = isset($settings['configTtlSeconds']) ? (int)$settings['configTtlSeconds'] : 0;
 
+	if ($version === null) return null;
 	if ($connectTimeout <= 0 || $requestTimeout <= 0) return null;
 	if ($usersFile === '' || $authCookieName === '' || $authCookieKey === '') return null;
 	if (!is_array($whitelistSubnets)) return null;
@@ -153,6 +173,7 @@ function normalizeOhProxySettings($settings) {
 	if ($authFailNotifyCooldown < 0) return null;
 
 	return [
+		'version' => $version,
 		'connectTimeout' => $connectTimeout,
 		'requestTimeout' => $requestTimeout,
 		'usersFile' => $usersFile,
@@ -175,6 +196,7 @@ function fetchOhProxySettings($endpoint) {
 	]);
 	$raw = @file_get_contents($endpoint, false, $context);
 	if ($raw === false) return null;
+	$headerVersion = null;
 	if (isset($http_response_header) && is_array($http_response_header)) {
 		foreach ($http_response_header as $header) {
 			if (preg_match('/^HTTP\\/\\S+\\s+(\\d+)/', $header, $m)) {
@@ -183,12 +205,18 @@ function fetchOhProxySettings($endpoint) {
 				break;
 			}
 		}
+		$headerVersion = normalizeConfigVersion(getHeaderValue($http_response_header, 'X-Config-Version'));
 	}
 	$data = json_decode($raw, true);
 	if (!is_array($data)) return null;
 	if (empty($data['version']) || (int)$data['version'] < 1) return null;
 	$settings = $data['settings'] ?? null;
-	return normalizeOhProxySettings($settings);
+	$normalized = normalizeOhProxySettings($settings);
+	if ($normalized === null) return null;
+	return [
+		'settings' => $normalized,
+		'headerVersion' => $headerVersion,
+	];
 }
 
 function loadOhProxyStore($targetBase, $storePath) {
@@ -218,10 +246,11 @@ function loadOhProxyStore($targetBase, $storePath) {
 	}
 
 	$endpoint = configEndpointUrl($targetBase);
-	$settings = fetchOhProxySettings($endpoint);
-	if ($settings === null) {
+	$result = fetchOhProxySettings($endpoint);
+	if ($result === null || !isset($result['settings'])) {
 		requireAuthConfigError();
 	}
+	$settings = $result['settings'];
 	$notifyLastAt = $store !== null && isset($store['notifyLastAt'])
 		? (int)$store['notifyLastAt']
 		: 0;
@@ -232,6 +261,23 @@ function loadOhProxyStore($targetBase, $storePath) {
 	];
 	writeConfigStore($storePath, $newStore);
 	return $newStore;
+}
+
+function refreshConfigStore($targetBase, $storePath, $currentStore) {
+	$endpoint = configEndpointUrl($targetBase);
+	$result = fetchOhProxySettings($endpoint);
+	if ($result === null || !isset($result['settings'])) return false;
+	$settings = $result['settings'];
+	$notifyLastAt = isset($currentStore['notifyLastAt']) ? (int)$currentStore['notifyLastAt'] : 0;
+	@unlink($storePath);
+	$payload = json_encode([
+		'fetchedAt' => time(),
+		'settings' => $settings,
+		'notifyLastAt' => $notifyLastAt,
+	]);
+	if ($payload === false) return false;
+	$result = @file_put_contents($storePath, $payload, LOCK_EX);
+	return $result !== false;
 }
 
 function sendAuthFailNotify($command, $cooldownSeconds, $clientIp, &$store, $storePath) {
@@ -472,6 +518,7 @@ $authCookieDays = $settings['authCookieDays'];
 $authCookieKey = $settings['authCookieKey'];
 $authFailNotifyCmd = $settings['authFailNotifyCmd'];
 $authFailNotifyCooldown = $settings['authFailNotifyCooldown'];
+$currentRelayVersion = $settings['version'] ?? '';
 
 $clientIps = getClientIps();
 $clientIpHeader = $_SERVER['REMOTE_ADDR'] ?? '';
@@ -586,7 +633,8 @@ if ($method === 'HEAD') {
 	}
 }
 
-curl_setopt($ch, CURLOPT_HEADERFUNCTION, function ($ch, $headerLine) use ($targetBase, $proxyBase, $hop) {
+$configRefreshDone = false;
+curl_setopt($ch, CURLOPT_HEADERFUNCTION, function ($ch, $headerLine) use ($targetBase, $proxyBase, $hop, $configStorePath, $ohProxyStore, $currentRelayVersion, &$configRefreshDone) {
 	$len = strlen($headerLine);
 	$trim = trim($headerLine);
 	if ($trim === '') return $len;
@@ -602,6 +650,16 @@ curl_setopt($ch, CURLOPT_HEADERFUNCTION, function ($ch, $headerLine) use ($targe
 	$value = trim($parts[1]);
 	$value = str_replace(["\r", "\n"], '', $value);
 	$lower = strtolower($name);
+	if ($lower === 'x-config-version') {
+		$headerVersion = normalizeConfigVersion($value);
+		if ($headerVersion !== null && $currentRelayVersion !== '' && strcasecmp($headerVersion, $currentRelayVersion) !== 0) {
+			if (!$configRefreshDone) {
+				$configRefreshDone = true;
+				refreshConfigStore($targetBase, $configStorePath, $ohProxyStore);
+			}
+		}
+		return $len;
+	}
 	if (isset($hop[$lower])) return $len;
 	if ($lower === 'location') {
 		$value = rewriteLocation($value, $targetBase, $proxyBase);
