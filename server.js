@@ -57,6 +57,22 @@ function writeLogLine(filePath, message) {
 	}
 }
 
+function describeValue(value) {
+	if (value === undefined) return '<undefined>';
+	if (value === null) return '<null>';
+	if (typeof value === 'string') {
+		const text = value.replace(/[\r\n]+/g, ' ');
+		return text === '' ? "''" : `'${text}'`;
+	}
+	try {
+		const json = JSON.stringify(value);
+		if (json !== undefined) return json;
+	} catch {
+		// ignore
+	}
+	return String(value);
+}
+
 function escapeHtml(value) {
 	const text = safeText(value);
 	return text
@@ -181,38 +197,38 @@ function isPlainObject(value) {
 
 function ensureString(value, name, { allowEmpty = false } = {}, errors) {
 	if (typeof value !== 'string') {
-		errors.push(`${name} must be a string`);
+		errors.push(`${name} must be a string but currently is ${describeValue(value)}`);
 		return;
 	}
 	if (!allowEmpty && value.trim() === '') {
-		errors.push(`${name} is required`);
+		errors.push(`${name} is required but currently is ${describeValue(value)}`);
 	}
 }
 
 function ensureNumber(value, name, { min, max, integer = true } = {}, errors) {
 	if (!Number.isFinite(value)) {
-		errors.push(`${name} must be a number`);
+		errors.push(`${name} must be a number but currently is ${describeValue(value)}`);
 		return;
 	}
 	if (integer && !Number.isInteger(value)) {
-		errors.push(`${name} must be an integer`);
+		errors.push(`${name} must be an integer but currently is ${describeValue(value)}`);
 		return;
 	}
 	if (min !== undefined && value < min) {
-		errors.push(`${name} must be >= ${min}`);
+		errors.push(`${name} must be >= ${min} but currently is ${describeValue(value)}`);
 	}
 	if (max !== undefined && value > max) {
-		errors.push(`${name} must be <= ${max}`);
+		errors.push(`${name} must be <= ${max} but currently is ${describeValue(value)}`);
 	}
 }
 
 function ensureArray(value, name, { allowEmpty = false } = {}, errors) {
 	if (!Array.isArray(value)) {
-		errors.push(`${name} must be an array`);
+		errors.push(`${name} must be an array but currently is ${describeValue(value)}`);
 		return false;
 	}
 	if (!allowEmpty && value.length === 0) {
-		errors.push(`${name} must not be empty`);
+		errors.push(`${name} must not be empty but currently is ${describeValue(value)}`);
 		return false;
 	}
 	return true;
@@ -220,7 +236,7 @@ function ensureArray(value, name, { allowEmpty = false } = {}, errors) {
 
 function ensureObject(value, name, errors) {
 	if (!isPlainObject(value)) {
-		errors.push(`${name} must be an object`);
+		errors.push(`${name} must be an object but currently is ${describeValue(value)}`);
 		return false;
 	}
 	return true;
@@ -245,7 +261,7 @@ function ensureCidrList(value, name, { allowEmpty = false } = {}, errors) {
 	if (!ensureArray(value, name, { allowEmpty }, errors)) return;
 	value.forEach((entry, index) => {
 		if (!isValidCidr(entry)) {
-			errors.push(`${name}[${index}] must be IPv4 CIDR`);
+			errors.push(`${name}[${index}] must be IPv4 CIDR but currently is ${describeValue(entry)}`);
 		}
 	});
 }
@@ -256,18 +272,18 @@ function ensureUrl(value, name, errors) {
 	try {
 		const parsed = new URL(value);
 		if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-			errors.push(`${name} must use http or https`);
+			errors.push(`${name} must use http or https but currently is ${describeValue(value)}`);
 		}
 	} catch {
-		errors.push(`${name} must be a valid URL`);
+		errors.push(`${name} must be a valid URL but currently is ${describeValue(value)}`);
 	}
 }
 
 function ensureVersion(value, name, errors) {
 	ensureString(value, name, { allowEmpty: false }, errors);
 	if (typeof value !== 'string' || value.trim() === '') return;
-	if (!/^v\\d+$/i.test(value.trim())) {
-		errors.push(`${name} must look like v123`);
+	if (!/^v?\d+$/i.test(value.trim())) {
+		errors.push(`${name} must be digits or v123 but currently is ${describeValue(value)}`);
 	}
 }
 
@@ -275,18 +291,18 @@ function ensureLogPath(value, name, errors) {
 	ensureString(value, name, { allowEmpty: false }, errors);
 	if (typeof value !== 'string' || value.trim() === '') return;
 	if (!path.isAbsolute(value)) {
-		errors.push(`${name} must be an absolute path`);
+		errors.push(`${name} must be an absolute path but currently is ${describeValue(value)}`);
 		return;
 	}
 	const dir = path.dirname(value);
 	if (!fs.existsSync(dir)) {
-		errors.push(`${name} directory does not exist`);
+		errors.push(`${name} directory does not exist for ${describeValue(value)}`);
 		return;
 	}
 	try {
 		fs.accessSync(dir, fs.constants.W_OK);
 	} catch {
-		errors.push(`${name} directory is not writable`);
+		errors.push(`${name} directory is not writable for ${describeValue(value)}`);
 	}
 }
 
@@ -294,17 +310,17 @@ function ensureReadableFile(value, name, errors) {
 	ensureString(value, name, { allowEmpty: false }, errors);
 	if (typeof value !== 'string' || value.trim() === '') return;
 	if (!path.isAbsolute(value)) {
-		errors.push(`${name} must be an absolute path`);
+		errors.push(`${name} must be an absolute path but currently is ${describeValue(value)}`);
 		return;
 	}
 	if (!fs.existsSync(value)) {
-		errors.push(`${name} does not exist`);
+		errors.push(`${name} does not exist for ${describeValue(value)}`);
 		return;
 	}
 	try {
 		fs.accessSync(value, fs.constants.R_OK);
 	} catch {
-		errors.push(`${name} is not readable`);
+		errors.push(`${name} is not readable for ${describeValue(value)}`);
 	}
 }
 
@@ -325,9 +341,9 @@ function validateConfig() {
 		ensureVersion(ASSET_CSS_VERSION, 'server.assets.cssVersion', errors);
 		const appleRaw = safeText(APPLE_TOUCH_VERSION_RAW);
 		if (!appleRaw) {
-			errors.push('server.assets.appleTouchIconVersion is required');
-		} else if (!/^(v\\d+|\\d+)$/i.test(appleRaw.trim())) {
-			errors.push('server.assets.appleTouchIconVersion must be digits or v123');
+			errors.push(`server.assets.appleTouchIconVersion is required but currently is ${describeValue(APPLE_TOUCH_VERSION_RAW)}`);
+		} else if (!/^(v\d+|\d+)$/i.test(appleRaw.trim())) {
+			errors.push(`server.assets.appleTouchIconVersion must be digits or v123 but currently is ${describeValue(APPLE_TOUCH_VERSION_RAW)}`);
 		}
 	}
 
