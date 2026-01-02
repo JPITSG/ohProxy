@@ -1,0 +1,22 @@
+{
+  "name": "openhab-modern-proxy",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build:tailwind": "tailwindcss -c tailwind.config.js -i ./tailwind.input.css -o ./public/tailwind.css --minify",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "compression": "^1.8.1",
+    "express": "^5.2.1",
+    "http-proxy-middleware": "^3.0.5",
+    "morgan": "^1.10.1"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

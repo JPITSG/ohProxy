@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>__DOC_TITLE__</title>
+	<link rel="manifest" href="manifest.webmanifest" />
+	<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png" />
+	<link rel="apple-touch-icon" href="icons/apple-touch-icon.__APPLE_TOUCH_VERSION__.png" />
+	<meta name="theme-color" content="#0f172a" />
+	<meta name="apple-mobile-web-app-capable" content="yes" />
+	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+	<meta name="apple-mobile-web-app-title" content="OpenHAB" />
+
+	<script>
+		(() => {
+			try {
+				const params = new URLSearchParams(window.location.search);
+				if (params.get('slim') === 'true') document.documentElement.classList.add('slim');
+				if (params.get('tablet') === 'true') document.documentElement.classList.add('tablet');
+				const modeParam = params.get('mode');
+				let stored = null;
+				try { stored = localStorage.getItem('ohTheme'); } catch {}
+				const mode = (modeParam === 'dark' || modeParam === 'light')
+					? modeParam
+					: (stored === 'dark' || stored === 'light') ? stored : null;
+				if (mode) {
+					const themeColor = mode === 'light' ? '#f8fafc' : '#0f172a';
+					const metaTheme = document.querySelector('meta[name="theme-color"]');
+					if (metaTheme) metaTheme.setAttribute('content', themeColor);
+					const metaApple = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+					if (metaApple) metaApple.setAttribute('content', mode === 'light' ? 'default' : 'black');
+					const manifest = document.querySelector('link[rel="manifest"]');
+					if (manifest) manifest.setAttribute('href', `manifest.webmanifest?theme=${mode}`);
+				}
+			} catch {}
+		})();
+	</script>
+
+	<link rel="stylesheet" href="tailwind.__CSS_VERSION__.css" />
+	<link rel="stylesheet" href="styles.__CSS_VERSION__.css" />
+</head>
+
+<body class="min-h-screen bg-slate-950 text-slate-100 theme-light">
+	<div class="fixed inset-0 bg-grid opacity-60"></div>
+	<div class="fixed inset-0 bg-gradient-to-b from-indigo-950/60 via-slate-950 to-slate-950 theme-overlay"></div>
+
+	<div class="relative">
+		<header class="sticky top-0 z-40 border-b border-white/10 bg-slate-950/40 backdrop-blur">
+			<div id="headerTop" class="mx-auto max-w-6xl px-4 py-3 flex items-center gap-3">
+				<div id="brandWrap" class="flex-1">
+					<div id="pageTitle" class="text-lg leading-tight">__PAGE_TITLE__</div>
+				</div>
+
+				<div id="statusBar" class="status-bar __STATUS_CLASS__">
+					<span id="statusDot" class="status-dot"></span>
+					<span id="statusText" class="status-text">__STATUS_TEXT__</span>
+				</div>
+			</div>
+
+			<div id="headerBottom" class="mx-auto max-w-6xl px-4 pb-3 flex flex-wrap items-center gap-3">
+				<div id="searchWrap" class="flex-1 min-w-[220px]">
+					<input id="search" name="oh-search" type="search"
+						class="w-full px-4 py-2 rounded-xl glass placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500/60"
+						autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="search"
+						placeholder="Search items…" />
+				</div>
+
+				<div id="navWrap" class="flex items-center gap-2">
+					<button id="backBtn" type="button" class="px-3 py-2 rounded-xl glass hover:bg-white/10 transition disabled:opacity-40 disabled:hover:bg-transparent" disabled>
+						<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+							<g id="SVGRepo_bgCarrier" stroke-width="0"></g>
+							<g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
+							<g id="SVGRepo_iconCarrier">
+								<path d="M31.667 45.024V18.024" stroke="#000000" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
+								<path d="M22.667 39.024L31.667 45.024L40.666 39.024" stroke="#000000" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
+								<path d="M31.667 58.191C46.3948 58.191 58.334 46.2518 58.334 31.5241C58.334 16.7963 46.3948 4.85706 31.667 4.85706C16.9392 4.85706 5 16.7963 5 31.5241C5 46.2518 16.9392 58.191 31.667 58.191Z" stroke="#000000" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
+							</g>
+						</svg>
+					</button>
+					<button id="pauseBtn" type="button" class="px-3 py-2 rounded-xl glass hover:bg-white/10 transition">
+						Pause
+					</button>
+					<button id="homeBtn" type="button" class="px-3 py-2 rounded-xl glass hover:bg-white/10 transition">
+						<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+							<g id="SVGRepo_bgCarrier" stroke-width="0"></g>
+							<g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
+							<g id="SVGRepo_iconCarrier">
+								<path d="M20 22L4 22" stroke="#000000" stroke-width="1.5" stroke-linecap="round"></path>
+								<path d="M2 11L10.1259 4.49931C11.2216 3.62279 12.7784 3.62279 13.8741 4.49931L22 11" stroke="#000000" stroke-width="1.5" stroke-linecap="round"></path>
+								<path d="M15.5 5.5V3.5C15.5 3.22386 15.7239 3 16 3H18.5C18.7761 3 19 3.22386 19 3.5V8.5" stroke="#000000" stroke-width="1.5" stroke-linecap="round"></path>
+								<path d="M4 22V9.5" stroke="#000000" stroke-width="1.5" stroke-linecap="round"></path>
+								<path d="M20 22V9.5" stroke="#000000" stroke-width="1.5" stroke-linecap="round"></path>
+								<path d="M15 22V17C15 15.5858 15 14.8787 14.5607 14.4393C14.1213 14 13.4142 14 12 14C10.5858 14 9.87868 14 9.43934 14.4393C9 14.8787 9 15.5858 9 17V22" stroke="#000000" stroke-width="1.5"></path>
+								<path d="M14 9.5C14 10.6046 13.1046 11.5 12 11.5C10.8954 11.5 10 10.6046 10 9.5C10 8.39543 10.8954 7.5 12 7.5C13.1046 7.5 14 8.39543 14 9.5Z" stroke="#000000" stroke-width="1.5"></path>
+							</g>
+						</svg>
+					</button>
+					<button id="themeToggleBtn" type="button" class="px-3 py-2 rounded-xl glass hover:bg-white/10 transition">
+						<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" fill="#000000" stroke="#000000" stroke-width="0.00048000000000000007">
+							<g id="SVGRepo_bgCarrier" stroke-width="0"></g>
+							<g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
+							<g id="SVGRepo_iconCarrier">
+								<title>dark-mode</title>
+								<g id="Layer_2" data-name="Layer 2">
+									<g id="Icons">
+										<g>
+											<rect width="48" height="48" fill="none"></rect>
+											<g>
+												<path d="M14,24A10,10,0,0,0,24,34V14A10,10,0,0,0,14,24Z"></path>
+												<path d="M24,2A22,22,0,1,0,46,24,21.9,21.9,0,0,0,24,2ZM6,24A18.1,18.1,0,0,1,24,6v8a10,10,0,0,1,0,20v8A18.1,18.1,0,0,1,6,24Z"></path>
+											</g>
+										</g>
+									</g>
+								</g>
+							</g>
+						</svg>
+					</button>
+				</div>
+			</div>
+		</header>
+
+		<main class="mx-auto max-w-6xl p-4">
+			<div id="status" class="hidden text-sm text-slate-300"></div>
+
+			<div id="grid" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 mb-0">
+				<!-- cards -->
+			</div>
+
+		</main>
+	</div>
+
+	<script src="config.js"></script>
+	<script>
+		if ('serviceWorker' in navigator && window.isSecureContext) {
+			window.addEventListener('load', () => {
+				navigator.serviceWorker.register('sw.js').catch(() => {});
+			});
+		}
+	</script>
+	<script src="app.__JS_VERSION__.js"></script>
+</body>
+</html>
