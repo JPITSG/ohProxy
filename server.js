@@ -499,6 +499,39 @@ if (configErrors.length) {
 
 logMessage('Starting ohProxy instance...');
 
+const LOCAL_CONFIG_PATH = path.join(__dirname, 'config.local.js');
+let lastConfigMtime = 0;
+let configRestartScheduled = false;
+let configRestartTriggered = false;
+
+function readConfigLocalMtime() {
+	try {
+		const stat = fs.statSync(LOCAL_CONFIG_PATH);
+		const mtime = stat.mtimeMs || stat.mtime.getTime();
+		return Number.isFinite(mtime) ? mtime : 0;
+	} catch (err) {
+		if (err && err.code === 'ENOENT') return 0;
+		logMessage(`Failed to stat ${LOCAL_CONFIG_PATH}: ${err.message || err}`);
+		return 0;
+	}
+}
+
+lastConfigMtime = readConfigLocalMtime();
+
+function scheduleConfigRestart() {
+	if (configRestartScheduled) return;
+	configRestartScheduled = true;
+	logMessage('Detected config.local.js change, scheduling restart.');
+}
+
+function maybeTriggerRestart() {
+	if (configRestartTriggered) return;
+	configRestartTriggered = true;
+	setTimeout(() => {
+		process.exit(0);
+	}, 50);
+}
+
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const APP_BUNDLE_PATH = path.join(PUBLIC_DIR, 'app.js');
 const STYLE_BUNDLE_PATH = path.join(PUBLIC_DIR, 'styles.css');
@@ -1184,6 +1217,15 @@ app.use(morgan('combined', {
 	},
 }));
 app.use((req, res, next) => {
+	if (!configRestartScheduled) {
+		const currentMtime = readConfigLocalMtime();
+		if (currentMtime !== lastConfigMtime) {
+			lastConfigMtime = currentMtime;
+			scheduleConfigRestart();
+			res.once('finish', maybeTriggerRestart);
+			res.once('close', maybeTriggerRestart);
+		}
+	}
 	if (RELAY_VERSION && req.get('X-OhProxy-ClientIP')) {
 		res.setHeader('X-Config-Version', RELAY_VERSION);
 	}
