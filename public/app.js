@@ -1077,8 +1077,32 @@ function toggleImageViewerZoom() {
 	setImageViewerZoom(!imageViewerZoomed);
 }
 
+function syncAuthFromHeaders(res) {
+	if (!res || !res.headers) return;
+	const rawAuth = safeText(res.headers.get('X-OhProxy-Authenticated') || '').trim().toLowerCase();
+	const rawUser = safeText(res.headers.get('X-OhProxy-Username') || '').trim();
+	if (!rawAuth && !rawUser) return;
+	const authenticated = ['true', '1', 'yes', 'authenticated'].includes(rawAuth);
+	const nextAuth = authenticated ? 'authenticated' : 'unauthenticated';
+	const nextUser = authenticated ? rawUser : '';
+	const nextLan = !authenticated;
+	const changed = nextAuth !== state.proxyAuth
+		|| nextUser !== state.proxyUser
+		|| nextLan !== state.authIsLan;
+	state.proxyAuth = nextAuth;
+	state.proxyUser = nextUser;
+	state.authIsLan = nextLan;
+	if (changed) updateStatusBar();
+}
+
+async function fetchWithAuth(url, options) {
+	const res = await fetch(url, options);
+	syncAuthFromHeaders(res);
+	return res;
+}
+
 async function fetchJson(url) {
-	const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+	const res = await fetchWithAuth(url, { headers: { 'Accept': 'application/json' } });
 	const text = await res.text();
 	try {
 		return JSON.parse(text);
@@ -1136,7 +1160,7 @@ async function refreshSearchStates(matches) {
 				const name = list[index];
 				if (!name) continue;
 				try {
-					const res = await fetch(`rest/items/${encodeURIComponent(name)}/state`, {
+					const res = await fetchWithAuth(`rest/items/${encodeURIComponent(name)}/state`, {
 						headers: { 'Accept': 'text/plain' },
 						signal: controller.signal,
 					});
@@ -1194,7 +1218,7 @@ async function fetchPage(url, options) {
 		deltaUrl.searchParams.delete('since');
 	}
 
-	const res = await fetch(deltaUrl.toString(), { headers: { 'Accept': 'application/json' } });
+	const res = await fetchWithAuth(deltaUrl.toString(), { headers: { 'Accept': 'application/json' } });
 	const text = await res.text();
 	let data;
 	try {
@@ -1299,7 +1323,7 @@ function updateItemState(itemName, nextState) {
 async function fetchItemState(itemName) {
 	if (!itemName) return null;
 	try {
-		const res = await fetch(`rest/items/${encodeURIComponent(itemName)}/state`, {
+		const res = await fetchWithAuth(`rest/items/${encodeURIComponent(itemName)}/state`, {
 			headers: { 'Accept': 'text/plain' },
 		});
 		if (!res.ok) return null;
@@ -1506,7 +1530,7 @@ async function sendCommand(itemName, command, options = {}) {
 	// openHAB REST: POST /rest/items/<item> with text/plain body
 	const opts = (options && typeof options === 'object') ? options : {};
 	const optimistic = opts.optimistic !== false;
-	const res = await fetch(`rest/items/${encodeURIComponent(itemName)}`, {
+	const res = await fetchWithAuth(`rest/items/${encodeURIComponent(itemName)}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'text/plain' },
 		body: String(command),

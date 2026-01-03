@@ -88,6 +88,12 @@ function configNumber(value, fallback) {
 	return Number.isFinite(num) ? num : fallback;
 }
 
+function setAuthResponseHeaders(res, authenticated, user) {
+	res.setHeader('X-OhProxy-Authenticated', authenticated ? 'true' : 'false');
+	const safeUser = authenticated ? safeText(user).replace(/[\r\n]/g, '').trim() : '';
+	res.setHeader('X-OhProxy-Username', safeUser);
+}
+
 const BOOT_LOG_FILE = safeText(process.env.LOG_FILE || '');
 function bootLog(message) {
 	writeLogLine(BOOT_LOG_FILE, message);
@@ -1530,6 +1536,10 @@ app.use(morgan('combined', {
 	},
 }));
 app.use((req, res, next) => {
+	setAuthResponseHeaders(res, false, '');
+	next();
+});
+app.use((req, res, next) => {
 	if (!configRestartScheduled) {
 		const currentMtime = readConfigLocalMtime();
 		if (currentMtime !== lastConfigMtime) {
@@ -1606,6 +1616,11 @@ app.use((req, res, next) => {
 	setAuthCookie(res, authenticatedUser, users[authenticatedUser]);
 	req.ohProxyAuth = 'authenticated';
 	req.ohProxyUser = authenticatedUser;
+	next();
+});
+app.use((req, res, next) => {
+	const authenticated = req.ohProxyAuth === 'authenticated' && req.ohProxyUser;
+	setAuthResponseHeaders(res, authenticated, req.ohProxyUser);
 	next();
 });
 app.use(compression());
