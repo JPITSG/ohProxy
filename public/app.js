@@ -486,7 +486,10 @@ function connectionStatusInfo() {
 	if (headerAuth === 'authenticated' && headerUser) {
 		return { label: `Connected · ${headerUser}`, isError: false };
 	}
-	return { label: 'Connected · LAN', isError: false };
+	if (state.authIsLan) {
+		return { label: 'Connected · LAN', isError: false };
+	}
+	return { label: 'Connected', isError: false };
 }
 
 function normalizeFrameName(name) {
@@ -521,6 +524,9 @@ function stripLeadingSlash(path) {
 	return path[0] === '/' ? path.slice(1) : path;
 }
 
+const colorResolveCache = new Map();
+let colorResolveEl = null;
+
 function hexToRgb(hex) {
 	const raw = hex.replace('#', '').trim();
 	if (![3, 6, 8].includes(raw.length)) return null;
@@ -536,76 +542,157 @@ function hexToRgb(hex) {
 	};
 }
 
-function colorToRgba(color, alpha) {
-	const c = safeText(color).trim();
-	if (!c) return '';
-	if (c.startsWith('#')) {
-		let rgb = hexToRgb(c);
-		if (rgb && rgb.g >= rgb.r && rgb.g >= rgb.b) {
-			rgb = {
-				r: Math.min(255, rgb.r + 24),
-				g: Math.min(255, rgb.g + 36),
-				b: Math.min(255, rgb.b + 20),
-			};
-		}
-		if (!rgb) return '';
-		return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+function parseRgbString(value) {
+	const match = safeText(value).match(/rgba?\s*\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s]+([\d.]+))?/i);
+	if (!match) return null;
+	const r = Number(match[1]);
+	const g = Number(match[2]);
+	const b = Number(match[3]);
+	const a = match[4] === undefined ? null : Number(match[4]);
+	if (![r, g, b].every((n) => Number.isFinite(n))) return null;
+	if (a !== null && (!Number.isFinite(a) || a <= 0)) return null;
+	return { r, g, b };
+}
+
+function resolveNamedColor(color) {
+	if (!document || !document.body) return null;
+	if (!colorResolveEl) {
+		colorResolveEl = document.createElement('span');
+		colorResolveEl.style.display = 'none';
+		document.body.appendChild(colorResolveEl);
 	}
-	return c;
+	colorResolveEl.style.color = '';
+	colorResolveEl.style.color = color;
+	const computed = getComputedStyle(colorResolveEl).color;
+	return parseRgbString(computed);
+}
+
+function resolveColorToRgb(color) {
+	const c = safeText(color).trim();
+	if (!c) return null;
+	const key = c.toLowerCase();
+	if (colorResolveCache.has(key)) return colorResolveCache.get(key);
+	let rgb = null;
+	if (c.startsWith('#')) {
+		rgb = hexToRgb(c);
+	} else if (c.startsWith('rgb')) {
+		rgb = parseRgbString(c);
+	} else {
+		rgb = resolveNamedColor(c);
+	}
+	colorResolveCache.set(key, rgb);
+	return rgb;
+}
+
+function isGreenishRgb(rgb) {
+	return !!rgb && rgb.g >= rgb.r && rgb.g >= rgb.b;
 }
 
 function isGreenish(color) {
-	const c = safeText(color).trim().toLowerCase();
-	if (!c) return false;
-	if (c.includes('green')) return true;
-	if (c.startsWith('#')) {
-		const rgb = hexToRgb(c);
-		if (!rgb) return false;
-		return rgb.g >= rgb.r && rgb.g >= rgb.b;
+	return isGreenishRgb(resolveColorToRgb(color));
+}
+
+function colorToRgba(color, alpha) {
+	const c = safeText(color).trim();
+	if (!c) return '';
+	let rgb = resolveColorToRgb(c);
+	if (!rgb) return c;
+	if (isGreenishRgb(rgb)) {
+		rgb = {
+			r: Math.min(255, rgb.r + 24),
+			g: Math.min(255, rgb.g + 36),
+			b: Math.min(255, rgb.b + 20),
+		};
 	}
-	if (c.startsWith('rgb')) {
-		const match = c.match(/rgba?\s*\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
-		if (!match) return false;
-		const r = Number(match[1]);
-		const g = Number(match[2]);
-		const b = Number(match[3]);
-		if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return false;
-		return g >= r && g >= b;
-	}
-	return false;
+	return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 }
 
 function isGlowContext(widget) {
 	const { set, all } = getGlowSectionConfig();
 	if (all) return true;
 	if (!set.size) return false;
-
-	const candidates = [];
-	const frame = safeText(widget?.__frame || '');
-	if (frame) candidates.push(frame);
-	const path = Array.isArray(widget?.__path) ? widget.__path : [];
-	if (path.length) candidates.push(path[path.length - 1]);
-
-	if (!state.filter.trim()) {
-		const parts = splitLabelState(state.pageTitle || '');
-		const label = parts.title || safeText(state.pageTitle || '');
-		if (label) candidates.push(label);
-	}
-
+	const candidates = getGlowCandidates(widget);
 	for (const candidate of candidates) {
-		if (set.has(normalizeFrameName(candidate))) return true;
+		if (set.has(candidate)) return true;
 	}
 	return false;
 }
 
-function applyGlow(card, color, widget) {
-	if (!isGlowContext(widget)) return;
+function getGlowCandidates(widget) {
+	const candidates = [];
+	const frame = safeText(widget?.__frame || '');
+	if (frame) candidates.push(normalizeFrameName(frame));
+	const path = Array.isArray(widget?.__path) ? widget.__path : [];
+	if (path.length) candidates.push(normalizeFrameName(path[path.length - 1]));
+
+	if (!state.filter.trim()) {
+		const parts = splitLabelState(state.pageTitle || '');
+		const label = parts.title || safeText(state.pageTitle || '');
+		if (label) candidates.push(normalizeFrameName(label));
+	}
+
+	return candidates.filter(Boolean);
+}
+
+let stateGlowRules = null;
+
+function normalizeStateKey(value) {
+	return safeText(value).trim().toLowerCase();
+}
+
+function getStateGlowConfig() {
+	if (stateGlowRules) return stateGlowRules;
+	const raw = CLIENT_CONFIG.stateGlowSections;
+	const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+	const rules = [];
+	for (const entry of list) {
+		if (!entry || typeof entry !== 'object') continue;
+		const section = normalizeFrameName(entry.section);
+		if (!section) continue;
+		const states = entry.states;
+		if (!states || typeof states !== 'object') continue;
+		const stateMap = new Map();
+		for (const [key, color] of Object.entries(states)) {
+			const stateKey = normalizeStateKey(key);
+			const colorValue = safeText(color).trim();
+			if (!stateKey || !colorValue) continue;
+			stateMap.set(stateKey, colorValue);
+		}
+		if (stateMap.size) rules.push({ section, states: stateMap });
+	}
+	rules.sort((a, b) => b.section.length - a.section.length);
+	stateGlowRules = rules;
+	return rules;
+}
+
+function getStateGlowColor(widget, stateValue) {
+	const rules = getStateGlowConfig();
+	if (!rules.length) return '';
+	const normalizedState = normalizeStateKey(stateValue);
+	if (!normalizedState) return '';
+	const candidates = getGlowCandidates(widget);
+	for (const candidate of candidates) {
+		for (const rule of rules) {
+			if (!candidate.startsWith(rule.section)) continue;
+			const color = rule.states.get(normalizedState);
+			if (color) return color;
+		}
+	}
+	return '';
+}
+
+function applyGlowStyle(card, color) {
 	const edge = colorToRgba(color, 0.45) || color;
 	const glow = colorToRgba(color, 0.28) || color;
 	if (!edge || !glow) return;
 	card.classList.add('glow-card');
 	card.style.setProperty('--glow-edge', edge);
 	card.style.setProperty('--glow-color', glow);
+}
+
+function applyGlow(card, color, widget) {
+	if (!isGlowContext(widget)) return;
+	applyGlowStyle(card, color);
 }
 
 function ensureJsonParam(url) {
@@ -1764,7 +1851,9 @@ function updateCard(card, w, afterImage, info) {
 	}
 	metaEl.textContent = labelParts.state;
 	if (labelParts.state) card.classList.add('has-meta');
-	if (valueColor) applyGlow(card, valueColor, w);
+	const stateGlowColor = getStateGlowColor(w, labelParts.state || st);
+	if (stateGlowColor) applyGlowStyle(card, stateGlowColor);
+	else if (valueColor) applyGlow(card, valueColor, w);
 
 	if (isImage) {
 		labelRow.classList.add('hidden');

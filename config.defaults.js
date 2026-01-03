@@ -96,6 +96,8 @@ module.exports = {
 	client: {
 		// Subsections using valueColor glow (titles; case-insensitive; "*" for all; empty allowed).
 		glowSections: [],
+		// State-based glow rules (array; section prefix match; e.g. [{ section: 'Interior Open', states: { Closed: 'green', Open: 'red' } }]).
+		stateGlowSections: [],
 		// Section fade-out duration (ms; >=0).
 		pageFadeOutMs: 250,
 		// Section fade-in duration (ms; >=0).

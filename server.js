@@ -92,7 +92,8 @@ function setAuthResponseHeaders(res, authInfo) {
 	const authenticated = authInfo && authInfo.auth === 'authenticated';
 	res.setHeader('X-OhProxy-Authenticated', authenticated ? 'true' : 'false');
 	const safeUser = authenticated ? safeText(authInfo.user).replace(/[\r\n]/g, '').trim() : '';
-	res.setHeader('X-OhProxy-Username', safeUser);
+	if (safeUser) res.setHeader('X-OhProxy-Username', safeUser);
+	else res.removeHeader('X-OhProxy-Username');
 	res.setHeader('X-OhProxy-Lan', authInfo && authInfo.lan ? 'true' : 'false');
 }
 
@@ -489,6 +490,30 @@ function validateConfig() {
 			CLIENT_CONFIG.glowSections.forEach((entry, index) => {
 				if (typeof entry !== 'string' || entry.trim() === '') {
 					errors.push(`client.glowSections[${index}] must be a string`);
+				}
+			});
+		}
+		if (ensureArray(CLIENT_CONFIG.stateGlowSections, 'client.stateGlowSections', { allowEmpty: true }, errors)) {
+			CLIENT_CONFIG.stateGlowSections.forEach((entry, index) => {
+				if (!isPlainObject(entry)) {
+					errors.push(`client.stateGlowSections[${index}] must be an object`);
+					return;
+				}
+				if (typeof entry.section !== 'string' || entry.section.trim() === '') {
+					errors.push(`client.stateGlowSections[${index}].section must be a string`);
+				}
+				if (!isPlainObject(entry.states)) {
+					errors.push(`client.stateGlowSections[${index}].states must be an object`);
+					return;
+				}
+				for (const [stateKey, colorValue] of Object.entries(entry.states)) {
+					if (typeof stateKey !== 'string' || stateKey.trim() === '') {
+						errors.push(`client.stateGlowSections[${index}].states must use non-empty string keys`);
+						break;
+					}
+					if (typeof colorValue !== 'string' || colorValue.trim() === '') {
+						errors.push(`client.stateGlowSections[${index}].states["${stateKey}"] must be a string`);
+					}
 				}
 			});
 		}
@@ -984,7 +1009,8 @@ function getInitialStatusLabel(req) {
 	if (info.auth === 'authenticated' && info.user) {
 		return `Connected · ${info.user}`;
 	}
-	return 'Connected · LAN';
+	if (info.lan) return 'Connected · LAN';
+	return 'Connected';
 }
 
 function getInitialStatusInfo(req) {
