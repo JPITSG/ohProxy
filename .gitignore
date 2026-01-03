@@ -1,5 +1,4 @@
 config.local.js
-ohProxy.config.php
 node_modules/
 .icon-cache/
 *.log
