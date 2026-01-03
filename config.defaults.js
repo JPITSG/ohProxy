@@ -56,6 +56,33 @@ module.exports = {
 			// Auth failure notify command (shell; {IP} placeholder; empty disables; max 1 per 15 min).
 			authFailNotifyCmd: '',
 		},
+		// Security headers (HSTS/CSP/Referrer-Policy).
+		securityHeaders: {
+			// Enable security headers (true/false).
+			enabled: true,
+			// HSTS settings (HTTPS only).
+			hsts: {
+				// Enable HSTS header (true/false).
+				enabled: true,
+				// HSTS max-age in seconds (int; >=0).
+				maxAge: 31536000,
+				// Include subdomains in HSTS (true/false).
+				includeSubDomains: true,
+				// Enable preload directive (true/false).
+				preload: false,
+			},
+			// Content-Security-Policy settings.
+			csp: {
+				// Enable CSP header (true/false).
+				enabled: true,
+				// Use report-only mode (true/false).
+				reportOnly: false,
+				// CSP policy string (empty disables).
+				policy: "default-src 'self'; img-src 'self' data: https: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https:; font-src 'self' data:;",
+			},
+			// Referrer-Policy value (no-referrer|no-referrer-when-downgrade|origin|origin-when-cross-origin|same-origin|strict-origin|strict-origin-when-cross-origin|unsafe-url|empty).
+			referrerPolicy: 'no-referrer',
+		},
 		// Asset version strings.
 		assets: {
 			// App JS version (v### or ###).

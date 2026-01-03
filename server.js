@@ -166,6 +166,7 @@ const SERVER_CONFIG = USER_CONFIG.server || {};
 const HTTP_CONFIG = SERVER_CONFIG.http || {};
 const HTTPS_CONFIG = SERVER_CONFIG.https || {};
 const SERVER_AUTH = SERVER_CONFIG.auth || {};
+const SECURITY_HEADERS = SERVER_CONFIG.securityHeaders || {};
 const CLIENT_CONFIG = USER_CONFIG.client || {};
 const PROXY_ALLOWLIST = normalizeProxyAllowlist(SERVER_CONFIG.proxyAllowlist);
 
@@ -208,14 +209,60 @@ const AUTH_COOKIE_DAYS = configNumber(SERVER_AUTH.cookieDays, 0);
 const AUTH_COOKIE_KEY = safeText(SERVER_AUTH.cookieKey || '');
 const AUTH_FAIL_NOTIFY_CMD = safeText(SERVER_AUTH.authFailNotifyCmd || '');
 const AUTH_FAIL_NOTIFY_INTERVAL_MS = 15 * 60 * 1000;
+const AUTH_LOCKOUT_THRESHOLD = 3;
+const AUTH_LOCKOUT_MS = 15 * 60 * 1000;
+const SECURITY_HEADERS_ENABLED = SECURITY_HEADERS.enabled !== false;
+const SECURITY_HSTS = SECURITY_HEADERS.hsts || {};
+const SECURITY_CSP = SECURITY_HEADERS.csp || {};
+const SECURITY_REFERRER_POLICY = safeText(SECURITY_HEADERS.referrerPolicy || '');
 const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(
 	process.env.SITEMAP_REFRESH_MS || TASK_CONFIG.sitemapRefreshMs
 );
 let lastAuthFailNotifyAt = 0;
+const authLockouts = new Map();
 
 function logMessage(message) {
 	writeLogLine(LOG_FILE, message);
+}
+
+function getLockoutKey(ip) {
+	return ip || 'unknown';
+}
+
+function getAuthLockout(key) {
+	if (!key) return null;
+	const entry = authLockouts.get(key);
+	if (!entry) return null;
+	const now = Date.now();
+	if (entry.lockUntil && entry.lockUntil <= now) {
+		authLockouts.delete(key);
+		return null;
+	}
+	return entry;
+}
+
+function recordAuthFailure(key) {
+	if (!key) return null;
+	const now = Date.now();
+	let entry = authLockouts.get(key);
+	if (!entry || (entry.lockUntil && entry.lockUntil <= now)) {
+		entry = { count: 1, lockUntil: 0, lastFailAt: now };
+		authLockouts.set(key, entry);
+		return entry;
+	}
+	entry.count += 1;
+	entry.lastFailAt = now;
+	if (entry.count >= AUTH_LOCKOUT_THRESHOLD) {
+		entry.lockUntil = now + AUTH_LOCKOUT_MS;
+	}
+	authLockouts.set(key, entry);
+	return entry;
+}
+
+function clearAuthFailures(key) {
+	if (!key) return;
+	authLockouts.delete(key);
 }
 
 function logAccess(message) {
@@ -473,6 +520,41 @@ function validateConfig() {
 		}
 	}
 
+	if (ensureObject(SERVER_CONFIG.securityHeaders, 'server.securityHeaders', errors)) {
+		ensureBoolean(SECURITY_HEADERS.enabled, 'server.securityHeaders.enabled', errors);
+		if (ensureObject(SECURITY_HEADERS.hsts, 'server.securityHeaders.hsts', errors)) {
+			ensureBoolean(SECURITY_HSTS.enabled, 'server.securityHeaders.hsts.enabled', errors);
+			ensureNumber(SECURITY_HSTS.maxAge, 'server.securityHeaders.hsts.maxAge', { min: 0 }, errors);
+			ensureBoolean(SECURITY_HSTS.includeSubDomains, 'server.securityHeaders.hsts.includeSubDomains', errors);
+			ensureBoolean(SECURITY_HSTS.preload, 'server.securityHeaders.hsts.preload', errors);
+		}
+		if (ensureObject(SECURITY_HEADERS.csp, 'server.securityHeaders.csp', errors)) {
+			ensureBoolean(SECURITY_CSP.enabled, 'server.securityHeaders.csp.enabled', errors);
+			ensureBoolean(SECURITY_CSP.reportOnly, 'server.securityHeaders.csp.reportOnly', errors);
+			ensureString(SECURITY_CSP.policy, 'server.securityHeaders.csp.policy', { allowEmpty: true }, errors);
+			if (SECURITY_CSP.enabled && !safeText(SECURITY_CSP.policy).trim()) {
+				errors.push(`server.securityHeaders.csp.policy must be set when CSP is enabled but currently is ${describeValue(SECURITY_CSP.policy)}`);
+			}
+		}
+		ensureString(SECURITY_HEADERS.referrerPolicy, 'server.securityHeaders.referrerPolicy', { allowEmpty: true }, errors);
+		const ref = safeText(SECURITY_HEADERS.referrerPolicy).trim();
+		if (ref) {
+			const allowed = new Set([
+				'no-referrer',
+				'no-referrer-when-downgrade',
+				'origin',
+				'origin-when-cross-origin',
+				'same-origin',
+				'strict-origin',
+				'strict-origin-when-cross-origin',
+				'unsafe-url',
+			]);
+			if (!allowed.has(ref)) {
+				errors.push(`server.securityHeaders.referrerPolicy must be a supported value but currently is ${describeValue(SECURITY_HEADERS.referrerPolicy)}`);
+			}
+		}
+	}
+
 	if (ensureObject(SERVER_CONFIG.backgroundTasks, 'server.backgroundTasks', errors)) {
 		ensureNumber(SITEMAP_REFRESH_MS, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
 	}
@@ -700,6 +782,36 @@ function getCookieValue(req, name) {
 function isSecureRequest(req) {
 	if (req?.secure) return true;
 	return false;
+}
+
+function buildHstsHeader() {
+	const maxAge = Number.isFinite(Number(SECURITY_HSTS.maxAge))
+		? Math.max(0, Math.floor(Number(SECURITY_HSTS.maxAge)))
+		: 0;
+	const parts = [`max-age=${maxAge}`];
+	if (SECURITY_HSTS.includeSubDomains) parts.push('includeSubDomains');
+	if (SECURITY_HSTS.preload) parts.push('preload');
+	return parts.join('; ');
+}
+
+function applySecurityHeaders(req, res) {
+	if (!SECURITY_HEADERS_ENABLED) return;
+	if (res.statusCode === 401) return;
+	if (SECURITY_HSTS.enabled && isSecureRequest(req)) {
+		res.setHeader('Strict-Transport-Security', buildHstsHeader());
+	}
+	if (SECURITY_CSP.enabled) {
+		const policy = safeText(SECURITY_CSP.policy).trim();
+		if (policy) {
+			const headerName = SECURITY_CSP.reportOnly
+				? 'Content-Security-Policy-Report-Only'
+				: 'Content-Security-Policy';
+			res.setHeader(headerName, policy);
+		}
+	}
+	if (SECURITY_REFERRER_POLICY) {
+		res.setHeader('Referrer-Policy', SECURITY_REFERRER_POLICY);
+	}
 }
 
 function appendSetCookie(res, value) {
@@ -1602,6 +1714,14 @@ app.use((req, res, next) => {
 		req.ohProxyUser = '';
 		return next();
 	}
+	const lockKey = getLockoutKey(clientIp);
+	const lockout = getAuthLockout(lockKey);
+	if (lockout && lockout.lockUntil) {
+		const remaining = Math.max(0, Math.ceil((lockout.lockUntil - Date.now()) / 1000));
+		logMessage(`Auth lockout active for ${lockKey} (${remaining}s remaining)`);
+		res.status(429).type('text/plain').send('Too many authentication attempts');
+		return;
+	}
 	const users = loadAuthUsers(AUTH_USERS_FILE);
 	if (!users || Object.keys(users).length === 0) {
 		res.status(500).type('text/plain').send('Auth config unavailable');
@@ -1613,6 +1733,12 @@ app.use((req, res, next) => {
 		if (!Object.prototype.hasOwnProperty.call(users, user) || users[user] !== pass) {
 			const notifyIp = clientIp || '';
 			maybeNotifyAuthFailure(notifyIp);
+			const entry = recordAuthFailure(lockKey);
+			if (entry && entry.lockUntil) {
+				logMessage(`Auth lockout triggered for ${lockKey} after ${entry.count} failures`);
+				res.status(429).type('text/plain').send('Too many authentication attempts');
+				return;
+			}
 			sendAuthRequired(res);
 			return;
 		}
@@ -1629,6 +1755,7 @@ app.use((req, res, next) => {
 		sendAuthRequired(res);
 		return;
 	}
+	clearAuthFailures(lockKey);
 	setAuthCookie(res, authenticatedUser, users[authenticatedUser]);
 	req.ohProxyAuth = 'authenticated';
 	req.ohProxyUser = authenticatedUser;
@@ -1637,6 +1764,10 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
 	const info = getAuthInfo(req);
 	setAuthResponseHeaders(res, info);
+	next();
+});
+app.use((req, res, next) => {
+	applySecurityHeaders(req, res);
 	next();
 });
 app.use(compression());
