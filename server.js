@@ -57,17 +57,6 @@ function writeLogLine(filePath, message) {
 	}
 }
 
-function writeLogLineFileOnly(filePath, message) {
-	const line = formatLogLine(message);
-	if (!line || !filePath) return;
-	try {
-		fs.appendFileSync(filePath, line);
-	} catch (err) {
-		const fallback = formatLogLine(`Failed to write log file ${filePath}: ${err.message || err}`);
-		if (fallback) process.stdout.write(fallback);
-	}
-}
-
 function describeValue(value) {
 	if (value === undefined) return '<undefined>';
 	if (value === null) return '<null>';
@@ -223,7 +212,15 @@ function logAccess(message) {
 		const status = match ? Number(match[1]) : NaN;
 		if (Number.isFinite(status) && status < 400) return;
 	}
-	writeLogLineFileOnly(ACCESS_LOG, message);
+	const line = safeText(message);
+	if (!line || !ACCESS_LOG) return;
+	const text = line.endsWith('\n') ? line : `${line}\n`;
+	try {
+		fs.appendFileSync(ACCESS_LOG, text);
+	} catch (err) {
+		const fallback = formatLogLine(`Failed to write log file ${ACCESS_LOG}: ${err.message || err}`);
+		if (fallback) process.stdout.write(fallback);
+	}
 }
 
 function shouldSkipAccessLog(res) {
