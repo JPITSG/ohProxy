@@ -75,32 +75,6 @@ module.exports = {
 		},
 	},
 
-	// PHP relay settings.
-	relay: {
-		// Relay config version.
-		version: 'v2',
-		// Config cache TTL.
-		configTtlSeconds: 86400,
-		// cURL connect timeout.
-		connectTimeout: 5,
-		// cURL request timeout.
-		requestTimeout: 30,
-		// Auth users file path.
-		usersFile: '',
-		// Subnets allowed without auth.
-		whitelistSubnets: [],
-		// Auth cookie name.
-		authCookieName: 'AuthStore',
-		// Auth cookie lifetime days.
-		authCookieDays: 365,
-		// Auth cookie HMAC key.
-		authCookieKey: '',
-		// Auth failure notify command.
-		authFailNotifyCmd: '',
-		// Auth failure notify cooldown.
-		authFailNotifyCooldown: 900,
-	},
-
 	// Allowlist for /proxy?url=.
 	proxyAllowlist: [],
 

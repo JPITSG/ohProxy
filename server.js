@@ -158,7 +158,6 @@ const HTTP_CONFIG = SERVER_CONFIG.http || {};
 const HTTPS_CONFIG = SERVER_CONFIG.https || {};
 const SERVER_AUTH = SERVER_CONFIG.auth || {};
 const CLIENT_CONFIG = USER_CONFIG.client || {};
-const RELAY_CONFIG = USER_CONFIG.relay || {};
 const PROXY_ALLOWLIST = normalizeProxyAllowlist(USER_CONFIG.proxyAllowlist);
 
 const HTTP_ENABLED = typeof HTTP_CONFIG.enabled === 'boolean' ? HTTP_CONFIG.enabled : false;
@@ -191,7 +190,6 @@ const ACCESS_LOG = safeText(process.env.ACCESS_LOG || SERVER_CONFIG.accessLog);
 const AUTH_USERS_FILE = safeText(SERVER_AUTH.usersFile);
 const AUTH_WHITELIST = SERVER_AUTH.whitelistSubnets;
 const AUTH_REALM = safeText(SERVER_AUTH.realm || 'openHAB Proxy');
-const RELAY_VERSION = safeText(RELAY_CONFIG.version);
 const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(
 	process.env.SITEMAP_REFRESH_MS || TASK_CONFIG.sitemapRefreshMs
@@ -424,21 +422,6 @@ function validateConfig() {
 		ensureNumber(SITEMAP_REFRESH_MS, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
 	}
 
-	if (ensureObject(USER_CONFIG.relay, 'relay', errors)) {
-		const relay = USER_CONFIG.relay;
-		ensureVersion(relay.version, 'relay.version', errors);
-		ensureNumber(relay.configTtlSeconds, 'relay.configTtlSeconds', { min: 1 }, errors);
-		ensureNumber(relay.connectTimeout, 'relay.connectTimeout', { min: 1 }, errors);
-		ensureNumber(relay.requestTimeout, 'relay.requestTimeout', { min: 1 }, errors);
-		ensureReadableFile(relay.usersFile, 'relay.usersFile', errors);
-		ensureCidrList(relay.whitelistSubnets, 'relay.whitelistSubnets', { allowEmpty: false }, errors);
-		ensureString(relay.authCookieName, 'relay.authCookieName', { allowEmpty: false }, errors);
-		ensureNumber(relay.authCookieDays, 'relay.authCookieDays', { min: 1 }, errors);
-		ensureString(relay.authCookieKey, 'relay.authCookieKey', { allowEmpty: false }, errors);
-		ensureString(relay.authFailNotifyCmd, 'relay.authFailNotifyCmd', { allowEmpty: true }, errors);
-		ensureNumber(relay.authFailNotifyCooldown, 'relay.authFailNotifyCooldown', { min: 0 }, errors);
-	}
-
 	if (ensureArray(USER_CONFIG.proxyAllowlist, 'proxyAllowlist', { allowEmpty: false }, errors)) {
 		USER_CONFIG.proxyAllowlist.forEach((entry, index) => {
 			if (!parseProxyAllowEntry(entry)) {
@@ -620,6 +603,38 @@ function getClientIps(req) {
 function sendAuthRequired(res) {
 	res.setHeader('WWW-Authenticate', `Basic realm="${AUTH_REALM}"`);
 	res.status(401).type('text/plain').send('Unauthorized');
+}
+
+function getRequestPath(req) {
+	const direct = safeText(req?.path || '').trim();
+	if (direct) return direct;
+	const raw = safeText(req?.originalUrl || '').trim();
+	if (!raw) return '';
+	const q = raw.indexOf('?');
+	return q === -1 ? raw : raw.slice(0, q);
+}
+
+function isAuthExemptPath(req) {
+	const pathname = getRequestPath(req);
+	if (!pathname) return false;
+	if (pathname === '/manifest.webmanifest') return true;
+	if (pathname === '/sw.js') return true;
+	if (pathname === '/favicon.ico') return true;
+	if (pathname.startsWith('/icons/')) return true;
+	return false;
+}
+
+function hasMatchingReferrer(req) {
+	const ref = safeText(req?.headers?.referer || req?.headers?.referrer || '').trim();
+	const host = safeText(req?.headers?.host || '').trim().toLowerCase();
+	if (!ref || !host) return false;
+	let refUrl;
+	try {
+		refUrl = new URL(ref);
+	} catch {
+		return false;
+	}
+	return safeText(refUrl.host).trim().toLowerCase() === host;
 }
 
 const configErrors = validateConfig();
@@ -1350,9 +1365,6 @@ app.use((req, res, next) => {
 			res.once('close', maybeTriggerRestart);
 		}
 	}
-	if (RELAY_VERSION && req.get('X-OhProxy-ClientIP')) {
-		res.setHeader('X-Config-Version', RELAY_VERSION);
-	}
 	next();
 });
 app.use((req, res, next) => {
@@ -1371,6 +1383,12 @@ app.use((req, res, next) => {
 	if (clientIpHeader) {
 		res.setHeader('X-OhProxy-ClientIP', clientIpHeader);
 		req.ohProxyClientIp = clientIpHeader;
+	}
+	if (isAuthExemptPath(req) && hasMatchingReferrer(req)) {
+		res.setHeader('X-OhProxy-Auth', 'unauthenticated');
+		req.ohProxyAuth = 'unauthenticated';
+		req.ohProxyUser = '';
+		return next();
 	}
 	let requiresAuth = clientIps.length === 0;
 	for (const ip of clientIps) {
@@ -1411,19 +1429,6 @@ app.get('/config.js', (req, res) => {
 		iconVersion: ICON_VERSION,
 		client: clientConfig,
 	})};`);
-});
-
-app.get('/ohproxy-config', (req, res) => {
-	res.setHeader('Content-Type', 'application/json; charset=utf-8');
-	res.setHeader('Cache-Control', 'no-store');
-	if (RELAY_VERSION) {
-		res.setHeader('X-Config-Version', RELAY_VERSION);
-	}
-	res.send(JSON.stringify({
-		version: 1,
-		settings: RELAY_CONFIG && typeof RELAY_CONFIG === 'object' ? RELAY_CONFIG : {},
-		generatedAt: Date.now(),
-	}));
 });
 
 app.get('/sw.js', (req, res) => {

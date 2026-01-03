@@ -3,6 +3,8 @@ ohProxy.config.php
 node_modules/
 .icon-cache/
 *.log
+fullchain.pem
+privkey.pem
 .*
 !.gitignore
 npm-debug.log*
