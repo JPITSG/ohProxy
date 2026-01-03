@@ -55,6 +55,8 @@ module.exports = {
 			cookieDays: 365,
 			// Auth cookie HMAC key (string; empty disables cookie auth).
 			cookieKey: '',
+			// Auth failure notify command (shell; {IP} placeholder; empty disables; max 1 per 15 min).
+			authFailNotifyCmd: '',
 		},
 		// Asset version strings.
 		assets: {

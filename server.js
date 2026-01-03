@@ -197,10 +197,13 @@ const AUTH_TRUST_FORWARDED = SERVER_AUTH.trustForwardedIps === true;
 const AUTH_COOKIE_NAME = safeText(SERVER_AUTH.cookieName || 'AuthStore');
 const AUTH_COOKIE_DAYS = configNumber(SERVER_AUTH.cookieDays, 0);
 const AUTH_COOKIE_KEY = safeText(SERVER_AUTH.cookieKey || '');
+const AUTH_FAIL_NOTIFY_CMD = safeText(SERVER_AUTH.authFailNotifyCmd || '');
+const AUTH_FAIL_NOTIFY_INTERVAL_MS = 15 * 60 * 1000;
 const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(
 	process.env.SITEMAP_REFRESH_MS || TASK_CONFIG.sitemapRefreshMs
 );
+let lastAuthFailNotifyAt = 0;
 
 function logMessage(message) {
 	writeLogLine(LOG_FILE, message);
@@ -450,6 +453,7 @@ function validateConfig() {
 		ensureString(AUTH_COOKIE_NAME, 'server.auth.cookieName', { allowEmpty: true }, errors);
 		ensureNumber(AUTH_COOKIE_DAYS, 'server.auth.cookieDays', { min: 0 }, errors);
 		ensureString(AUTH_COOKIE_KEY, 'server.auth.cookieKey', { allowEmpty: true }, errors);
+		ensureString(SERVER_AUTH.authFailNotifyCmd, 'server.auth.authFailNotifyCmd', { allowEmpty: true }, errors);
 		if (AUTH_COOKIE_KEY) {
 			if (!AUTH_COOKIE_NAME) {
 				errors.push(`server.auth.cookieName is required when cookieKey is set but currently is ${describeValue(AUTH_COOKIE_NAME)}`);
@@ -759,6 +763,29 @@ function getClientIps(req) {
 		if (!unique.includes(ip)) unique.push(ip);
 	}
 	return unique;
+}
+
+function normalizeNotifyIp(value) {
+	const raw = safeText(value).trim();
+	if (!raw) return 'unknown';
+	const cleaned = raw.replace(/[^0-9a-fA-F:.]/g, '');
+	return cleaned || 'unknown';
+}
+
+function maybeNotifyAuthFailure(ip) {
+	if (!AUTH_FAIL_NOTIFY_CMD) return;
+	const now = Date.now();
+	if (lastAuthFailNotifyAt && now - lastAuthFailNotifyAt < AUTH_FAIL_NOTIFY_INTERVAL_MS) return;
+	const safeIp = normalizeNotifyIp(ip);
+	const command = AUTH_FAIL_NOTIFY_CMD.replace(/\{IP\}/g, safeIp).trim();
+	if (!command) return;
+	lastAuthFailNotifyAt = now;
+	try {
+		const child = execFile('/bin/sh', ['-c', command], { detached: true, stdio: 'ignore' });
+		child.unref();
+	} catch (err) {
+		logMessage(`Failed to run auth failure notify command: ${err.message || err}`);
+	}
 }
 
 function sendAuthRequired(res) {
@@ -1555,6 +1582,8 @@ app.use((req, res, next) => {
 	let authenticatedUser = null;
 	if (user) {
 		if (!Object.prototype.hasOwnProperty.call(users, user) || users[user] !== pass) {
+			const notifyIp = clientIpHeader || normalizeRemoteIp(req.ip || req.socket?.remoteAddress || '');
+			maybeNotifyAuthFailure(notifyIp);
 			sendAuthRequired(res);
 			return;
 		}
