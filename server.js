@@ -1623,12 +1623,6 @@ app.get('/config.js', (req, res) => {
 	})};`);
 });
 
-app.get('/auth-info', (req, res) => {
-	res.setHeader('Cache-Control', 'no-cache');
-	res.setHeader('Content-Type', 'application/json; charset=utf-8');
-	res.send(JSON.stringify(getAuthInfo(req)));
-});
-
 app.get('/sw.js', (req, res) => {
 	sendServiceWorker(res);
 });

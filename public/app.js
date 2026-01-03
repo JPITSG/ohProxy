@@ -84,12 +84,9 @@ const LOADING_DELAY_MS = configNumber(CLIENT_CONFIG.loadingDelayMs, 1000);
 const MIN_IMAGE_REFRESH_MS = configNumber(CLIENT_CONFIG.minImageRefreshMs, 5000);
 const IMAGE_LOAD_TIMEOUT_MS = configNumber(CLIENT_CONFIG.imageLoadTimeoutMs, 15000);
 const CONNECTION_PENDING_DELAY_MS = 500;
-const AUTH_INFO_REFRESH_MS = 5000;
 const IMAGE_VIEWER_MAX_VIEWPORT = 0.9;
 
 let connectionPendingTimer = null;
-let authInfoInFlight = null;
-let lastAuthInfoAt = 0;
 
 function scheduleConnectionPending() {
 	if (connectionPendingTimer) clearTimeout(connectionPendingTimer);
@@ -104,35 +101,6 @@ function clearConnectionPending() {
 	if (connectionPendingTimer) clearTimeout(connectionPendingTimer);
 	connectionPendingTimer = null;
 	state.connectionPending = false;
-}
-
-async function refreshAuthInfo(force = false) {
-	if (!force && !state.connectionOk) return;
-	const now = Date.now();
-	if (!force && now - lastAuthInfoAt < AUTH_INFO_REFRESH_MS) return;
-	if (authInfoInFlight) return;
-	authInfoInFlight = (async () => {
-		try {
-			const res = await fetch('auth-info', { headers: { 'Accept': 'application/json' } });
-			if (!res.ok) return;
-			const data = await res.json();
-			const nextAuth = typeof data.auth === 'string' ? data.auth.toLowerCase() : '';
-			const nextUser = typeof data.user === 'string' ? data.user : '';
-			const nextLan = !!data.lan;
-			const changed = nextAuth !== state.proxyAuth
-				|| nextUser !== state.proxyUser
-				|| nextLan !== state.authIsLan;
-			state.proxyAuth = nextAuth;
-			state.proxyUser = nextUser;
-			state.authIsLan = nextLan;
-			if (changed) updateStatusBar();
-		} catch {
-			// Ignore transient auth info errors.
-		} finally {
-			lastAuthInfoAt = Date.now();
-			authInfoInFlight = null;
-		}
-	})();
 }
 
 const pollIntervals = CLIENT_CONFIG.pollIntervalsMs || {};
@@ -2699,7 +2667,6 @@ async function refresh(showLoading) {
 			state.isRefreshing = false;
 			clearLoadingStatusTimer();
 			setConnectionStatus(true);
-			refreshAuthInfo();
 			saveHomeSnapshot();
 			return;
 		}
@@ -2715,7 +2682,6 @@ async function refresh(showLoading) {
 		if (fade) runPageFadeIn(fade.token);
 		state.isRefreshing = false;
 		setConnectionStatus(true);
-		refreshAuthInfo();
 	} catch (e) {
 		console.error(e);
 		clearLoadingStatusTimer();
