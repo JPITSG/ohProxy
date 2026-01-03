@@ -486,9 +486,6 @@ function connectionStatusInfo() {
 	if (headerAuth === 'authenticated' && headerUser) {
 		return { label: `Connected · ${headerUser}`, isError: false };
 	}
-	if (state.authIsLan) {
-		return { label: 'Connected · LAN', isError: false };
-	}
 	return { label: 'Connected · LAN', isError: false };
 }
 
@@ -1081,11 +1078,12 @@ function syncAuthFromHeaders(res) {
 	if (!res || !res.headers) return;
 	const rawAuth = safeText(res.headers.get('X-OhProxy-Authenticated') || '').trim().toLowerCase();
 	const rawUser = safeText(res.headers.get('X-OhProxy-Username') || '').trim();
-	if (!rawAuth && !rawUser) return;
+	const rawLan = safeText(res.headers.get('X-OhProxy-Lan') || '').trim().toLowerCase();
+	if (!rawAuth && !rawUser && !rawLan) return;
 	const authenticated = ['true', '1', 'yes', 'authenticated'].includes(rawAuth);
 	const nextAuth = authenticated ? 'authenticated' : 'unauthenticated';
 	const nextUser = authenticated ? rawUser : '';
-	const nextLan = !authenticated;
+	const nextLan = ['true', '1', 'yes', 'lan'].includes(rawLan);
 	const changed = nextAuth !== state.proxyAuth
 		|| nextUser !== state.proxyUser
 		|| nextLan !== state.authIsLan;

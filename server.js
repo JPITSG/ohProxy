@@ -88,10 +88,12 @@ function configNumber(value, fallback) {
 	return Number.isFinite(num) ? num : fallback;
 }
 
-function setAuthResponseHeaders(res, authenticated, user) {
+function setAuthResponseHeaders(res, authInfo) {
+	const authenticated = authInfo && authInfo.auth === 'authenticated';
 	res.setHeader('X-OhProxy-Authenticated', authenticated ? 'true' : 'false');
-	const safeUser = authenticated ? safeText(user).replace(/[\r\n]/g, '').trim() : '';
+	const safeUser = authenticated ? safeText(authInfo.user).replace(/[\r\n]/g, '').trim() : '';
 	res.setHeader('X-OhProxy-Username', safeUser);
+	res.setHeader('X-OhProxy-Lan', authInfo && authInfo.lan ? 'true' : 'false');
 }
 
 const BOOT_LOG_FILE = safeText(process.env.LOG_FILE || '');
@@ -978,18 +980,10 @@ function extractHostIp(host) {
 }
 
 function getInitialStatusLabel(req) {
-	const authState = safeText(req?.ohProxyAuth || '').trim().toLowerCase();
-	const authUser = safeText(req?.ohProxyUser || '').trim();
-	if (authState === 'authenticated' && authUser) {
-		return `Connected · ${authUser}`;
+	const info = getAuthInfo(req);
+	if (info.auth === 'authenticated' && info.user) {
+		return `Connected · ${info.user}`;
 	}
-
-	const clientIp = normalizeRequestIp(req?.ohProxyClientIp || '');
-	if (clientIp && ipInAnySubnet(clientIp, LAN_SUBNETS)) return 'Connected · LAN';
-
-	const remote = normalizeRequestIp(req?.socket?.remoteAddress || '');
-	if (remote && ipInAnySubnet(remote, LAN_SUBNETS)) return 'Connected · LAN';
-
 	return 'Connected · LAN';
 }
 
@@ -1542,10 +1536,6 @@ app.use(morgan('combined', {
 	},
 }));
 app.use((req, res, next) => {
-	setAuthResponseHeaders(res, false, '');
-	next();
-});
-app.use((req, res, next) => {
 	if (!configRestartScheduled) {
 		const currentMtime = readConfigLocalMtime();
 		if (currentMtime !== lastConfigMtime) {
@@ -1619,8 +1609,8 @@ app.use((req, res, next) => {
 	next();
 });
 app.use((req, res, next) => {
-	const authenticated = req.ohProxyAuth === 'authenticated' && req.ohProxyUser;
-	setAuthResponseHeaders(res, authenticated, req.ohProxyUser);
+	const info = getAuthInfo(req);
+	setAuthResponseHeaders(res, info);
 	next();
 });
 app.use(compression());
