@@ -37,7 +37,7 @@ module.exports = {
 		allowSubnets: [],
 		// Allowlist for /proxy?url= (host or host:port; required, non-empty).
 		proxyAllowlist: [],
-		// LAN subnets used for status labeling (IPv4 CIDR list; 0.0.0.0 for all; empty allowed).
+		// LAN subnets used for auth bypass + status labeling (IPv4 CIDR list; 0.0.0.0 for all; empty allowed).
 		lanSubnets: [],
 		// Basic auth settings.
 		auth: {

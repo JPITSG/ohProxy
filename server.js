@@ -1564,7 +1564,9 @@ app.use((req, res, next) => {
 	}
 	let requiresAuth = clientIps.length === 0;
 	for (const ip of clientIps) {
-		if (!ipInAnySubnet(ip, AUTH_WHITELIST)) {
+		const inWhitelist = ipInAnySubnet(ip, AUTH_WHITELIST);
+		const inLan = ipInAnySubnet(ip, LAN_SUBNETS);
+		if (!inWhitelist && !inLan) {
 			requiresAuth = true;
 			break;
 		}
