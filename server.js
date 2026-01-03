@@ -190,6 +190,7 @@ const ACCESS_LOG = safeText(process.env.ACCESS_LOG || SERVER_CONFIG.accessLog);
 const AUTH_USERS_FILE = safeText(SERVER_AUTH.usersFile);
 const AUTH_WHITELIST = SERVER_AUTH.whitelistSubnets;
 const AUTH_REALM = safeText(SERVER_AUTH.realm || 'openHAB Proxy');
+const AUTH_TRUST_FORWARDED = SERVER_AUTH.trustForwardedIps === true;
 const AUTH_COOKIE_NAME = safeText(SERVER_AUTH.cookieName || 'AuthStore');
 const AUTH_COOKIE_DAYS = configNumber(SERVER_AUTH.cookieDays, 0);
 const AUTH_COOKIE_KEY = safeText(SERVER_AUTH.cookieKey || '');
@@ -419,6 +420,7 @@ function validateConfig() {
 		ensureReadableFile(SERVER_AUTH.usersFile, 'server.auth.usersFile', errors);
 		ensureCidrList(SERVER_AUTH.whitelistSubnets, 'server.auth.whitelistSubnets', { allowEmpty: true }, errors);
 		ensureString(AUTH_REALM, 'server.auth.realm', { allowEmpty: false }, errors);
+		ensureBoolean(SERVER_AUTH.trustForwardedIps, 'server.auth.trustForwardedIps', errors);
 		ensureString(AUTH_COOKIE_NAME, 'server.auth.cookieName', { allowEmpty: true }, errors);
 		ensureNumber(AUTH_COOKIE_DAYS, 'server.auth.cookieDays', { min: 0 }, errors);
 		ensureString(AUTH_COOKIE_KEY, 'server.auth.cookieKey', { allowEmpty: true }, errors);
@@ -713,15 +715,17 @@ function clearAuthCookie(res) {
 
 function getClientIps(req) {
 	const ips = [];
-	const forwarded = safeText(req?.headers?.['x-forwarded-for'] || '').trim();
-	if (forwarded) {
-		for (const part of forwarded.split(',')) {
-			const ip = part.trim();
-			if (ip) ips.push(ip);
+	if (AUTH_TRUST_FORWARDED) {
+		const forwarded = safeText(req?.headers?.['x-forwarded-for'] || '').trim();
+		if (forwarded) {
+			for (const part of forwarded.split(',')) {
+				const ip = part.trim();
+				if (ip) ips.push(ip);
+			}
 		}
+		const real = safeText(req?.headers?.['x-real-ip'] || '').trim();
+		if (real) ips.push(real);
 	}
-	const real = safeText(req?.headers?.['x-real-ip'] || '').trim();
-	if (real) ips.push(real);
 	const remote = normalizeRemoteIp(req?.socket?.remoteAddress || '');
 	if (remote) ips.push(remote);
 	const unique = [];
@@ -913,43 +917,6 @@ function getInitialPageTitleHtml() {
 	const home = 'Home';
 	return `<span class="font-semibold">${site}</span>` +
 		`<span class="font-extralight text-slate-300"> · ${escapeHtml(home)}</span>`;
-}
-
-function ipv4ToLong(ip) {
-	const raw = safeText(ip).trim();
-	if (!raw) return null;
-	const parts = raw.split('.');
-	if (parts.length != 4) return null;
-	let num = 0;
-	for (const part of parts) {
-		if (!/^\d{1,3}$/.test(part)) return null;
-		const val = Number(part);
-		if (!Number.isInteger(val) || val < 0 || val > 255) return null;
-		num = (num * 256) + val;
-	}
-	return num >>> 0;
-}
-
-function ipInSubnet(ip, cidr) {
-	const ipLong = ipv4ToLong(ip);
-	if (ipLong === null) return false;
-	const parts = safeText(cidr).trim().split('/');
-	if (parts.length != 2) return false;
-	const subnetLong = ipv4ToLong(parts[0]);
-	const mask = Number(parts[1]);
-	if (subnetLong === null) return false;
-	if (!Number.isInteger(mask) || mask < 0 || mask > 32) return false;
-	if (mask === 0) return true;
-	const maskLong = (0xFFFFFFFF << (32 - mask)) >>> 0;
-	return ((ipLong & maskLong) >>> 0) === ((subnetLong & maskLong) >>> 0);
-}
-
-function ipInAnySubnet(ip, subnets) {
-	if (!Array.isArray(subnets) || !subnets.length) return false;
-	for (const cidr of subnets) {
-		if (ipInSubnet(ip, cidr)) return true;
-	}
-	return false;
 }
 
 function normalizeRequestIp(raw) {

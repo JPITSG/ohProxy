@@ -71,6 +71,8 @@ module.exports = {
 			whitelistSubnets: [],
 			// Basic auth realm label.
 			realm: 'openHAB Proxy',
+			// Trust X-Forwarded-For/X-Real-IP headers.
+			trustForwardedIps: false,
 			// Auth cookie name.
 			cookieName: 'AuthStore',
 			// Auth cookie lifetime days.
