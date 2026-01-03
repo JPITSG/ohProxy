@@ -3,10 +3,28 @@
 module.exports = {
 	// Server configuration.
 	server: {
-		// Bind address.
-		listenHost: '',
-		// Bind port.
-		listenPort: 0,
+		// HTTP listener settings.
+		http: {
+			// Enable HTTP listener.
+			enabled: false,
+			// HTTP bind address.
+			host: '',
+			// HTTP bind port.
+			port: 0,
+		},
+		// HTTPS listener settings.
+		https: {
+			// Enable HTTPS listener.
+			enabled: false,
+			// HTTPS bind address.
+			host: '',
+			// HTTPS bind port.
+			port: 0,
+			// TLS certificate path.
+			certFile: '',
+			// TLS key path.
+			keyFile: '',
+		},
 		// Allowed client subnets.
 		allowSubnets: [],
 		// openHAB target credentials.

@@ -154,13 +154,21 @@ function hashString(value) {
 
 const USER_CONFIG = loadUserConfig();
 const SERVER_CONFIG = USER_CONFIG.server || {};
+const HTTP_CONFIG = SERVER_CONFIG.http || {};
+const HTTPS_CONFIG = SERVER_CONFIG.https || {};
 const SERVER_AUTH = SERVER_CONFIG.auth || {};
 const CLIENT_CONFIG = USER_CONFIG.client || {};
 const RELAY_CONFIG = USER_CONFIG.relay || {};
 const PROXY_ALLOWLIST = normalizeProxyAllowlist(USER_CONFIG.proxyAllowlist);
 
-const LISTEN_HOST = safeText(process.env.LISTEN_HOST || SERVER_CONFIG.listenHost);
-const LISTEN_PORT = configNumber(process.env.LISTEN_PORT || SERVER_CONFIG.listenPort);
+const HTTP_ENABLED = typeof HTTP_CONFIG.enabled === 'boolean' ? HTTP_CONFIG.enabled : false;
+const HTTPS_ENABLED = typeof HTTPS_CONFIG.enabled === 'boolean' ? HTTPS_CONFIG.enabled : false;
+const HTTP_HOST = safeText(HTTP_CONFIG.host);
+const HTTP_PORT = configNumber(HTTP_CONFIG.port);
+const HTTPS_HOST = safeText(HTTPS_CONFIG.host);
+const HTTPS_PORT = configNumber(HTTPS_CONFIG.port);
+const HTTPS_CERT_FILE = safeText(HTTPS_CONFIG.certFile);
+const HTTPS_KEY_FILE = safeText(HTTPS_CONFIG.keyFile);
 const ALLOW_SUBNETS = SERVER_CONFIG.allowSubnets;
 const OH_TARGET = safeText(process.env.OH_TARGET || SERVER_CONFIG.openhab?.target);
 const OH_USER = safeText(process.env.OH_USER || SERVER_CONFIG.openhab?.user || '');
@@ -225,6 +233,12 @@ function ensureNumber(value, name, { min, max, integer = true } = {}, errors) {
 	}
 	if (max !== undefined && value > max) {
 		errors.push(`${name} must be <= ${max} but currently is ${describeValue(value)}`);
+	}
+}
+
+function ensureBoolean(value, name, errors) {
+	if (typeof value !== 'boolean') {
+		errors.push(`${name} must be true/false but currently is ${describeValue(value)}`);
 	}
 }
 
@@ -351,8 +365,28 @@ function ensureReadableFile(value, name, errors) {
 function validateConfig() {
 	const errors = [];
 
-	ensureString(LISTEN_HOST, 'server.listenHost', { allowEmpty: false }, errors);
-	ensureNumber(LISTEN_PORT, 'server.listenPort', { min: 1, max: 65535 }, errors);
+	if (ensureObject(SERVER_CONFIG.http, 'server.http', errors)) {
+		ensureBoolean(HTTP_CONFIG.enabled, 'server.http.enabled', errors);
+		if (HTTP_ENABLED) {
+			ensureString(HTTP_HOST, 'server.http.host', { allowEmpty: false }, errors);
+			ensureNumber(HTTP_PORT, 'server.http.port', { min: 1, max: 65535 }, errors);
+		}
+	}
+
+	if (ensureObject(SERVER_CONFIG.https, 'server.https', errors)) {
+		ensureBoolean(HTTPS_CONFIG.enabled, 'server.https.enabled', errors);
+		if (HTTPS_ENABLED) {
+			ensureString(HTTPS_HOST, 'server.https.host', { allowEmpty: false }, errors);
+			ensureNumber(HTTPS_PORT, 'server.https.port', { min: 1, max: 65535 }, errors);
+			ensureReadableFile(HTTPS_CERT_FILE, 'server.https.certFile', errors);
+			ensureReadableFile(HTTPS_KEY_FILE, 'server.https.keyFile', errors);
+		}
+	}
+
+	if (!HTTP_ENABLED && !HTTPS_ENABLED) {
+		errors.push('At least one of server.http.enabled or server.https.enabled must be true');
+	}
+
 	ensureAllowSubnets(ALLOW_SUBNETS, 'server.allowSubnets', errors);
 
 	if (ensureObject(SERVER_CONFIG.openhab, 'server.openhab', errors)) {
@@ -1726,7 +1760,41 @@ if (SITEMAP_REFRESH_MS > 0) {
 }
 startBackgroundTasks();
 
-app.listen(LISTEN_PORT, LISTEN_HOST, () => {
-logMessage(`Modern openHAB wrapper: http://${LISTEN_HOST}:${LISTEN_PORT}`);
+function startHttpServer() {
+	const server = http.createServer(app);
+	server.on('error', (err) => {
+		logMessage(`HTTP server error: ${err.message || err}`);
+		process.exit(1);
+	});
+	server.listen(HTTP_PORT, HTTP_HOST || undefined, () => {
+		const host = HTTP_HOST || '0.0.0.0';
+		logMessage(`ohProxy listening (HTTP): http://${host}:${HTTP_PORT}`);
+	});
+}
+
+function startHttpsServer() {
+	let tlsOptions;
+	try {
+		tlsOptions = {
+			key: fs.readFileSync(HTTPS_KEY_FILE),
+			cert: fs.readFileSync(HTTPS_CERT_FILE),
+		};
+	} catch (err) {
+		logMessage(`Failed to read HTTPS credentials: ${err.message || err}`);
+		process.exit(1);
+	}
+	const server = https.createServer(tlsOptions, app);
+	server.on('error', (err) => {
+		logMessage(`HTTPS server error: ${err.message || err}`);
+		process.exit(1);
+	});
+	server.listen(HTTPS_PORT, HTTPS_HOST || undefined, () => {
+		const host = HTTPS_HOST || '0.0.0.0';
+		logMessage(`ohProxy listening (HTTPS): https://${host}:${HTTPS_PORT}`);
+	});
+}
+
+if (HTTP_ENABLED) startHttpServer();
+if (HTTPS_ENABLED) startHttpsServer();
+
 logMessage(`Proxying openHAB from: ${OH_TARGET}`);
-});
