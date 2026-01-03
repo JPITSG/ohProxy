@@ -73,6 +73,8 @@ module.exports = {
 		userAgent: 'ohProxy/1.0',
 		// Icon size in pixels (integer >=1).
 		iconSize: 64,
+		// Max concurrent icon conversions (integer >=1).
+		iconCacheConcurrency: 5,
 		// Max delta cache size (integer >=1).
 		deltaCacheLimit: 50,
 		// Proxy middleware logging level (silent|error|warn|info|debug).

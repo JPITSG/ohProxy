@@ -189,6 +189,7 @@ const APPLE_TOUCH_VERSION = APPLE_TOUCH_VERSION_RAW
 		: `v${APPLE_TOUCH_VERSION_RAW}`)
 	: '';
 const ICON_SIZE = configNumber(SERVER_CONFIG.iconSize);
+const ICON_CACHE_CONCURRENCY = Math.max(1, Math.floor(configNumber(SERVER_CONFIG.iconCacheConcurrency, 5)));
 const DELTA_CACHE_LIMIT = configNumber(SERVER_CONFIG.deltaCacheLimit);
 const PROXY_LOG_LEVEL = safeText(process.env.PROXY_LOG_LEVEL || SERVER_CONFIG.proxyMiddlewareLogLevel);
 const LOG_FILE = safeText(process.env.LOG_FILE || SERVER_CONFIG.logFile);
@@ -441,6 +442,7 @@ function validateConfig() {
 
 	ensureString(USER_AGENT, 'server.userAgent', { allowEmpty: false }, errors);
 	ensureNumber(ICON_SIZE, 'server.iconSize', { min: 1 }, errors);
+	ensureNumber(SERVER_CONFIG.iconCacheConcurrency, 'server.iconCacheConcurrency', { min: 1 }, errors);
 	ensureNumber(DELTA_CACHE_LIMIT, 'server.deltaCacheLimit', { min: 1 }, errors);
 	ensureString(PROXY_LOG_LEVEL, 'server.proxyMiddlewareLogLevel', { allowEmpty: false }, errors);
 	ensureLogPath(LOG_FILE, 'server.logFile', errors);
@@ -1301,6 +1303,31 @@ function execFileAsync(cmd, args) {
 	});
 }
 
+let iconConvertActive = 0;
+const iconConvertQueue = [];
+
+function enqueueIconConvert(task) {
+	return new Promise((resolve, reject) => {
+		iconConvertQueue.push({ task, resolve, reject });
+		drainIconConvertQueue();
+	});
+}
+
+function drainIconConvertQueue() {
+	while (iconConvertActive < ICON_CACHE_CONCURRENCY && iconConvertQueue.length) {
+		const next = iconConvertQueue.shift();
+		if (!next) return;
+		iconConvertActive += 1;
+		Promise.resolve()
+			.then(next.task)
+			.then(next.resolve, next.reject)
+			.finally(() => {
+				iconConvertActive -= 1;
+				drainIconConvertQueue();
+			});
+	}
+}
+
 function buildTargetUrl(baseUrl, pathname) {
 	const base = new URL(baseUrl);
 	const basePath = base.pathname && base.pathname !== '/' ? base.pathname.replace(/\/$/, '') : '';
@@ -1475,14 +1502,14 @@ async function buildIconCache(cachePath, sourcePath, sourceExt) {
 		}
 		fs.writeFileSync(srcPath, res.body);
 		ensureDir(path.dirname(cachePath));
-		await execFileAsync('convert', [
+		await enqueueIconConvert(() => execFileAsync('convert', [
 			srcPath,
 			'-resize', `${ICON_SIZE}x${ICON_SIZE}`,
 			'-background', 'none',
 			'-gravity', 'center',
 			'-extent', `${ICON_SIZE}x${ICON_SIZE}`,
 			`PNG32:${cachePath}`,
-		]);
+		]));
 	} finally {
 		try {
 			if (fs.rmSync) fs.rmSync(tmpDir, { recursive: true, force: true });
