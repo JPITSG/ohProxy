@@ -59,6 +59,10 @@ module.exports = {
 		logFile: '',
 		// Access log file path.
 		accessLog: '',
+		// Allowlist for /proxy?url=.
+		proxyAllowlist: [],
+		// LAN subnets for status UI.
+		lanSubnets: [],
 		// Basic auth settings.
 		auth: {
 			// Basic auth users file.
@@ -81,13 +85,8 @@ module.exports = {
 		},
 	},
 
-	// Allowlist for /proxy?url=.
-	proxyAllowlist: [],
-
 	// Client-visible settings.
 	client: {
-		// LAN subnets for status UI.
-		lanSubnets: [],
 		// Subsections using valueColor glow.
 		glowSections: [],
 		// Section fade-out duration.

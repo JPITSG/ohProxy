@@ -158,7 +158,7 @@ const HTTP_CONFIG = SERVER_CONFIG.http || {};
 const HTTPS_CONFIG = SERVER_CONFIG.https || {};
 const SERVER_AUTH = SERVER_CONFIG.auth || {};
 const CLIENT_CONFIG = USER_CONFIG.client || {};
-const PROXY_ALLOWLIST = normalizeProxyAllowlist(USER_CONFIG.proxyAllowlist);
+const PROXY_ALLOWLIST = normalizeProxyAllowlist(SERVER_CONFIG.proxyAllowlist);
 
 const HTTP_ENABLED = typeof HTTP_CONFIG.enabled === 'boolean' ? HTTP_CONFIG.enabled : false;
 const HTTPS_ENABLED = typeof HTTPS_CONFIG.enabled === 'boolean' ? HTTPS_CONFIG.enabled : false;
@@ -436,16 +436,15 @@ function validateConfig() {
 		ensureNumber(SITEMAP_REFRESH_MS, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
 	}
 
-	if (ensureArray(USER_CONFIG.proxyAllowlist, 'proxyAllowlist', { allowEmpty: false }, errors)) {
-		USER_CONFIG.proxyAllowlist.forEach((entry, index) => {
+	if (ensureArray(SERVER_CONFIG.proxyAllowlist, 'server.proxyAllowlist', { allowEmpty: false }, errors)) {
+		SERVER_CONFIG.proxyAllowlist.forEach((entry, index) => {
 			if (!parseProxyAllowEntry(entry)) {
-				errors.push(`proxyAllowlist[${index}] is not a valid host or host:port`);
+				errors.push(`server.proxyAllowlist[${index}] is not a valid host or host:port`);
 			}
 		});
 	}
 
 	if (ensureObject(CLIENT_CONFIG, 'client', errors)) {
-		ensureCidrList(CLIENT_CONFIG.lanSubnets, 'client.lanSubnets', { allowEmpty: false }, errors);
 		if (ensureArray(CLIENT_CONFIG.glowSections, 'client.glowSections', { allowEmpty: true }, errors)) {
 			CLIENT_CONFIG.glowSections.forEach((entry, index) => {
 				if (typeof entry !== 'string' || entry.trim() === '') {
@@ -875,7 +874,7 @@ const backgroundState = {
 };
 
 const DEFAULT_PAGE_TITLE = 'OpenHAB';
-const LAN_SUBNETS = Array.isArray(CLIENT_CONFIG.lanSubnets) ? CLIENT_CONFIG.lanSubnets : [];
+const LAN_SUBNETS = Array.isArray(SERVER_CONFIG.lanSubnets) ? SERVER_CONFIG.lanSubnets : [];
 
 function getInitialPageTitle() {
 	const cached = safeText(backgroundState.sitemap.title);
@@ -1575,6 +1574,9 @@ app.get('/config.js', (req, res) => {
 	const clientConfig = CLIENT_CONFIG && typeof CLIENT_CONFIG === 'object' ? CLIENT_CONFIG : {};
 	res.send(`window.__OH_CONFIG__=${JSON.stringify({
 		iconVersion: ICON_VERSION,
+		server: {
+			lanSubnets: Array.isArray(SERVER_CONFIG.lanSubnets) ? SERVER_CONFIG.lanSubnets : [],
+		},
 		client: clientConfig,
 	})};`);
 });
