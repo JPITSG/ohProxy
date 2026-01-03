@@ -132,6 +132,9 @@
 
 	<script src="config.js"></script>
 	<script>
+		window.__OH_AUTH__ = __AUTH_INFO__;
+	</script>
+	<script>
 		if ('serviceWorker' in navigator && window.isSecureContext) {
 			window.addEventListener('load', () => {
 				navigator.serviceWorker.register('sw.js').catch(() => {});

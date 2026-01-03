@@ -768,6 +768,24 @@ function hasMatchingReferrer(req) {
 	return safeText(refUrl.host).trim().toLowerCase() === host;
 }
 
+function getAuthInfo(req) {
+	const authState = safeText(req?.ohProxyAuth || '').trim().toLowerCase();
+	const authUser = safeText(req?.ohProxyUser || '').trim();
+	if (authState === 'authenticated' && authUser) {
+		return { auth: 'authenticated', user: authUser, lan: false };
+	}
+	const clientIp = normalizeRequestIp(req?.ohProxyClientIp || '');
+	const remote = normalizeRequestIp(req?.socket?.remoteAddress || '');
+	const isLan = (clientIp && ipInAnySubnet(clientIp, LAN_SUBNETS))
+		|| (remote && ipInAnySubnet(remote, LAN_SUBNETS));
+	return { auth: 'unauthenticated', user: '', lan: isLan };
+}
+
+function inlineJson(value) {
+	const json = JSON.stringify(value);
+	return json ? json.replace(/</g, '\\u003c') : 'null';
+}
+
 const configErrors = validateConfig();
 if (configErrors.length) {
 	configErrors.forEach((msg) => logMessage(`Config error: ${msg}`));
@@ -985,6 +1003,7 @@ function renderIndexHtml(options) {
 	html = html.replace(/__DOC_TITLE__/g, escapeHtml(getInitialDocumentTitle()));
 	html = html.replace(/__STATUS_TEXT__/g, escapeHtml(opts.statusText || 'Connected'));
 	html = html.replace(/__STATUS_CLASS__/g, escapeHtml(opts.statusClass || 'status-pending'));
+	html = html.replace(/__AUTH_INFO__/g, inlineJson(opts.authInfo || {}));
 	return html;
 }
 
@@ -1000,7 +1019,9 @@ function renderServiceWorker() {
 function sendIndex(req, res) {
 	res.setHeader('Cache-Control', 'no-cache');
 	res.setHeader('Content-Type', 'text/html; charset=utf-8');
-	res.send(renderIndexHtml(getInitialStatusInfo(req)));
+	const status = getInitialStatusInfo(req);
+	status.authInfo = getAuthInfo(req);
+	res.send(renderIndexHtml(status));
 }
 
 function sendServiceWorker(res) {
@@ -1512,11 +1533,9 @@ app.use((req, res, next) => {
 	const clientIps = getClientIps(req);
 	const clientIpHeader = clientIps[0] || normalizeRemoteIp(req.ip || req.socket?.remoteAddress || '');
 	if (clientIpHeader) {
-		res.setHeader('X-OhProxy-ClientIP', clientIpHeader);
 		req.ohProxyClientIp = clientIpHeader;
 	}
 	if (isAuthExemptPath(req) && hasMatchingReferrer(req)) {
-		res.setHeader('X-OhProxy-Auth', 'unauthenticated');
 		req.ohProxyAuth = 'unauthenticated';
 		req.ohProxyUser = '';
 		return next();
@@ -1529,7 +1548,6 @@ app.use((req, res, next) => {
 		}
 	}
 	if (!requiresAuth) {
-		res.setHeader('X-OhProxy-Auth', 'unauthenticated');
 		req.ohProxyAuth = 'unauthenticated';
 		req.ohProxyUser = '';
 		return next();
@@ -1560,10 +1578,8 @@ app.use((req, res, next) => {
 		return;
 	}
 	setAuthCookie(res, authenticatedUser, users[authenticatedUser]);
-	res.setHeader('X-OhProxy-Auth', 'authenticated');
 	req.ohProxyAuth = 'authenticated';
 	req.ohProxyUser = authenticatedUser;
-	res.setHeader('X-OhProxy-User', safeText(authenticatedUser).replace(/[\r\n]/g, ''));
 	next();
 });
 app.use(compression());

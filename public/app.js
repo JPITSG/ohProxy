@@ -49,9 +49,9 @@ const state = {
 	connectionReady: false,
 	connectionPending: false,
 	lastError: '',
-	proxyClientIp: '',
 	proxyAuth: '',
 	proxyUser: '',
+	authIsLan: false,
 	isRefreshing: false,
 	pendingScrollTop: false,
 	initialStatusText: '',
@@ -63,6 +63,13 @@ const OH_CONFIG = (window.__OH_CONFIG__ && typeof window.__OH_CONFIG__ === 'obje
 const CLIENT_CONFIG = (OH_CONFIG.client && typeof OH_CONFIG.client === 'object')
 	? OH_CONFIG.client
 	: {};
+const AUTH_INFO = (window.__OH_AUTH__ && typeof window.__OH_AUTH__ === 'object')
+	? window.__OH_AUTH__
+	: {};
+
+state.proxyAuth = typeof AUTH_INFO.auth === 'string' ? AUTH_INFO.auth.toLowerCase() : '';
+state.proxyUser = typeof AUTH_INFO.user === 'string' ? AUTH_INFO.user : '';
+state.authIsLan = !!AUTH_INFO.lan;
 
 function configNumber(value, fallback) {
 	const num = Number(value);
@@ -125,7 +132,6 @@ const SEARCH_STATE_CONCURRENCY_SLIM = Math.max(
 const SLIDER_DEBOUNCE_MS = configNumber(CLIENT_CONFIG.sliderDebounceMs, 250);
 const IDLE_AFTER_MS = configNumber(CLIENT_CONFIG.idleAfterMs, 60000);
 const ACTIVITY_THROTTLE_MS = configNumber(CLIENT_CONFIG.activityThrottleMs, 250);
-const LAN_SUBNETS = Array.isArray(OH_CONFIG?.server?.lanSubnets) ? OH_CONFIG.server.lanSubnets : [];
 const HOME_CACHE_KEY = 'ohProxyHomeSnapshot';
 const HIDE_TITLE_ITEMS = Array.isArray(CLIENT_CONFIG.hideTitleItems) ? CLIENT_CONFIG.hideTitleItems : [];
 const HIDE_TITLE_SET = new Set(
@@ -474,67 +480,16 @@ function shouldHideTitle(itemName) {
 	return key ? HIDE_TITLE_SET.has(key) : false;
 }
 
-function ipv4ToLong(ip) {
-	const raw = safeText(ip).trim();
-	if (!raw) return null;
-	const parts = raw.split('.');
-	if (parts.length !== 4) return null;
-	let num = 0;
-	for (const part of parts) {
-		if (!/^\d{1,3}$/.test(part)) return null;
-		const val = Number(part);
-		if (!Number.isInteger(val) || val < 0 || val > 255) return null;
-		num = (num * 256) + val;
-	}
-	return num >>> 0;
-}
-
-function ipInSubnet(ip, cidr) {
-	const ipLong = ipv4ToLong(ip);
-	if (ipLong === null) return false;
-	const parts = safeText(cidr).trim().split('/');
-	if (parts.length !== 2) return false;
-	const subnetLong = ipv4ToLong(parts[0]);
-	const mask = Number(parts[1]);
-	if (subnetLong === null) return false;
-	if (!Number.isInteger(mask) || mask < 0 || mask > 32) return false;
-	if (mask === 0) return true;
-	const maskLong = (0xFFFFFFFF << (32 - mask)) >>> 0;
-	return ((ipLong & maskLong) >>> 0) === ((subnetLong & maskLong) >>> 0);
-}
-
-function ipInAnySubnet(ip, subnets) {
-	if (!Array.isArray(subnets) || !subnets.length) return false;
-	for (const cidr of subnets) {
-		if (ipInSubnet(ip, cidr)) return true;
-	}
-	return false;
-}
-
 function connectionStatusInfo() {
-	const headerIp = safeText(state.proxyClientIp).trim();
 	const headerAuth = safeText(state.proxyAuth).trim().toLowerCase();
 	const headerUser = safeText(state.proxyUser).trim();
 	if (headerAuth === 'authenticated' && headerUser) {
 		return { label: `Connected · ${headerUser}`, isError: false };
 	}
-	if (headerIp && ipInAnySubnet(headerIp, LAN_SUBNETS)) {
+	if (state.authIsLan) {
 		return { label: 'Connected · LAN', isError: false };
 	}
 	return { label: 'Connected · LAN', isError: false };
-}
-
-function updateProxyInfoFromResponse(res) {
-	if (!res || !res.headers) return;
-	const nextIp = safeText(res.headers.get('X-OhProxy-ClientIP') || '').trim();
-	const nextAuth = safeText(res.headers.get('X-OhProxy-Auth') || '').trim().toLowerCase();
-	const nextUserRaw = safeText(res.headers.get('X-OhProxy-User') || '').trim();
-	const nextUser = nextAuth === 'authenticated' ? nextUserRaw : '';
-	const changed = nextIp !== state.proxyClientIp || nextAuth !== state.proxyAuth || nextUser !== state.proxyUser;
-	state.proxyClientIp = nextIp;
-	state.proxyAuth = nextAuth;
-	state.proxyUser = nextUser;
-	if (changed && state.connectionOk) updateStatusBar();
 }
 
 function normalizeFrameName(name) {
@@ -1124,7 +1079,6 @@ function toggleImageViewerZoom() {
 
 async function fetchJson(url) {
 	const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
-	updateProxyInfoFromResponse(res);
 	const text = await res.text();
 	try {
 		return JSON.parse(text);
@@ -1186,7 +1140,6 @@ async function refreshSearchStates(matches) {
 						headers: { 'Accept': 'text/plain' },
 						signal: controller.signal,
 					});
-					updateProxyInfoFromResponse(res);
 					if (!res.ok) continue;
 					const txt = await res.text();
 					stateMap.set(name, safeText(txt));
@@ -1242,7 +1195,6 @@ async function fetchPage(url, options) {
 	}
 
 	const res = await fetch(deltaUrl.toString(), { headers: { 'Accept': 'application/json' } });
-	updateProxyInfoFromResponse(res);
 	const text = await res.text();
 	let data;
 	try {
@@ -1350,7 +1302,6 @@ async function fetchItemState(itemName) {
 		const res = await fetch(`rest/items/${encodeURIComponent(itemName)}/state`, {
 			headers: { 'Accept': 'text/plain' },
 		});
-		updateProxyInfoFromResponse(res);
 		if (!res.ok) return null;
 		return await res.text();
 	} catch {
@@ -1560,7 +1511,6 @@ async function sendCommand(itemName, command, options = {}) {
 		headers: { 'Content-Type': 'text/plain' },
 		body: String(command),
 	});
-	updateProxyInfoFromResponse(res);
 	if (!res.ok) {
 		const txt = await res.text().catch(() => '');
 		throw new Error(`Command failed (${res.status}): ${txt || res.statusText}`);
