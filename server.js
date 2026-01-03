@@ -18,8 +18,8 @@ const CONFIG_PATH = path.join(__dirname, 'config.js');
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 
 function authHeader() {
-	if (!OH_USER || !OH_PASS) return null;
-	const token = Buffer.from(`${OH_USER}:${OH_PASS}`).toString('base64');
+	if (!liveConfig.ohUser || !liveConfig.ohPass) return null;
+	const token = Buffer.from(`${liveConfig.ohUser}:${liveConfig.ohPass}`).toString('base64');
 	return `Basic ${token}`;
 }
 
@@ -181,6 +181,7 @@ const HTTPS_CERT_FILE = safeText(HTTPS_CONFIG.certFile);
 const HTTPS_KEY_FILE = safeText(HTTPS_CONFIG.keyFile);
 const HTTPS_HTTP2 = typeof HTTPS_CONFIG.http2 === 'boolean' ? HTTPS_CONFIG.http2 : false;
 const ALLOW_SUBNETS = SERVER_CONFIG.allowSubnets;
+const LAN_SUBNETS = Array.isArray(SERVER_CONFIG.lanSubnets) ? SERVER_CONFIG.lanSubnets : [];
 const OH_TARGET = safeText(process.env.OH_TARGET || SERVER_CONFIG.openhab?.target);
 const OH_USER = safeText(process.env.OH_USER || SERVER_CONFIG.openhab?.user || '');
 const OH_PASS = safeText(process.env.OH_PASS || SERVER_CONFIG.openhab?.pass || '');
@@ -789,32 +790,33 @@ function isSecureRequest(req) {
 }
 
 function buildHstsHeader() {
-	const maxAge = Number.isFinite(Number(SECURITY_HSTS.maxAge))
-		? Math.max(0, Math.floor(Number(SECURITY_HSTS.maxAge)))
+	const hsts = liveConfig.securityHsts;
+	const maxAge = Number.isFinite(Number(hsts.maxAge))
+		? Math.max(0, Math.floor(Number(hsts.maxAge)))
 		: 0;
 	const parts = [`max-age=${maxAge}`];
-	if (SECURITY_HSTS.includeSubDomains) parts.push('includeSubDomains');
-	if (SECURITY_HSTS.preload) parts.push('preload');
+	if (hsts.includeSubDomains) parts.push('includeSubDomains');
+	if (hsts.preload) parts.push('preload');
 	return parts.join('; ');
 }
 
 function applySecurityHeaders(req, res) {
-	if (!SECURITY_HEADERS_ENABLED) return;
+	if (!liveConfig.securityHeadersEnabled) return;
 	if (res.statusCode === 401) return;
-	if (SECURITY_HSTS.enabled && isSecureRequest(req)) {
+	if (liveConfig.securityHsts.enabled && isSecureRequest(req)) {
 		res.setHeader('Strict-Transport-Security', buildHstsHeader());
 	}
-	if (SECURITY_CSP.enabled) {
-		const policy = safeText(SECURITY_CSP.policy).trim();
+	if (liveConfig.securityCsp.enabled) {
+		const policy = safeText(liveConfig.securityCsp.policy).trim();
 		if (policy) {
-			const headerName = SECURITY_CSP.reportOnly
+			const headerName = liveConfig.securityCsp.reportOnly
 				? 'Content-Security-Policy-Report-Only'
 				: 'Content-Security-Policy';
 			res.setHeader(headerName, policy);
 		}
 	}
-	if (SECURITY_REFERRER_POLICY) {
-		res.setHeader('Referrer-Policy', SECURITY_REFERRER_POLICY);
+	if (liveConfig.securityReferrerPolicy) {
+		res.setHeader('Referrer-Policy', liveConfig.securityReferrerPolicy);
 	}
 }
 
@@ -841,7 +843,7 @@ function buildAuthCookieValue(user, pass, key, expiry) {
 
 function getAuthCookieUser(req, users, key) {
 	if (!key) return null;
-	const raw = getCookieValue(req, AUTH_COOKIE_NAME);
+	const raw = getCookieValue(req, liveConfig.authCookieName);
 	if (!raw) return null;
 	const decoded = base64UrlDecode(raw);
 	if (!decoded) return null;
@@ -862,14 +864,14 @@ function getAuthCookieUser(req, users, key) {
 }
 
 function setAuthCookie(res, user, pass) {
-	if (!AUTH_COOKIE_KEY || !AUTH_COOKIE_NAME || AUTH_COOKIE_DAYS <= 0) return;
-	const expiry = Math.floor(Date.now() / 1000) + Math.round(AUTH_COOKIE_DAYS * 86400);
-	const value = buildAuthCookieValue(user, pass, AUTH_COOKIE_KEY, expiry);
+	if (!liveConfig.authCookieKey || !liveConfig.authCookieName || liveConfig.authCookieDays <= 0) return;
+	const expiry = Math.floor(Date.now() / 1000) + Math.round(liveConfig.authCookieDays * 86400);
+	const value = buildAuthCookieValue(user, pass, liveConfig.authCookieKey, expiry);
 	const expires = new Date(expiry * 1000).toUTCString();
-	const maxAge = Math.round(AUTH_COOKIE_DAYS * 86400);
+	const maxAge = Math.round(liveConfig.authCookieDays * 86400);
 	const secure = isSecureRequest(res.req);
 	const parts = [
-		`${AUTH_COOKIE_NAME}=${value}`,
+		`${liveConfig.authCookieName}=${value}`,
 		'Path=/',
 		`Expires=${expires}`,
 		`Max-Age=${maxAge}`,
@@ -881,10 +883,10 @@ function setAuthCookie(res, user, pass) {
 }
 
 function clearAuthCookie(res) {
-	if (!AUTH_COOKIE_NAME) return;
+	if (!liveConfig.authCookieName) return;
 	const secure = isSecureRequest(res.req);
 	const parts = [
-		`${AUTH_COOKIE_NAME}=`,
+		`${liveConfig.authCookieName}=`,
 		'Path=/',
 		'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
 		'Max-Age=0',
@@ -903,11 +905,11 @@ function normalizeNotifyIp(value) {
 }
 
 function maybeNotifyAuthFailure(ip) {
-	if (!AUTH_FAIL_NOTIFY_CMD) return;
+	if (!liveConfig.authFailNotifyCmd) return;
 	const now = Date.now();
 	if (lastAuthFailNotifyAt && now - lastAuthFailNotifyAt < AUTH_FAIL_NOTIFY_INTERVAL_MS) return;
 	const safeIp = normalizeNotifyIp(ip);
-	const command = AUTH_FAIL_NOTIFY_CMD.replace(/\{IP\}/g, safeIp).trim();
+	const command = liveConfig.authFailNotifyCmd.replace(/\{IP\}/g, safeIp).trim();
 	if (!command) return;
 	lastAuthFailNotifyAt = now;
 	try {
@@ -920,7 +922,7 @@ function maybeNotifyAuthFailure(ip) {
 }
 
 function sendAuthRequired(res) {
-	res.setHeader('WWW-Authenticate', `Basic realm="${AUTH_REALM}"`);
+	res.setHeader('WWW-Authenticate', `Basic realm="${liveConfig.authRealm}"`);
 	res.status(401).type('text/plain').send('Unauthorized');
 }
 
@@ -964,8 +966,8 @@ function getAuthInfo(req) {
 	}
 	const clientIp = normalizeRequestIp(req?.ohProxyClientIp || '');
 	const remote = normalizeRequestIp(req?.socket?.remoteAddress || '');
-	const isLan = (clientIp && ipInAnySubnet(clientIp, LAN_SUBNETS))
-		|| (remote && ipInAnySubnet(remote, LAN_SUBNETS));
+	const isLan = (clientIp && ipInAnySubnet(clientIp, liveConfig.lanSubnets))
+		|| (remote && ipInAnySubnet(remote, liveConfig.lanSubnets));
 	return { auth: 'unauthenticated', user: '', lan: isLan };
 }
 
@@ -987,6 +989,48 @@ let lastConfigMtime = 0;
 let configRestartScheduled = false;
 let configRestartTriggered = false;
 
+// Live config - values that can be hot-reloaded without restart
+const liveConfig = {
+	allowSubnets: ALLOW_SUBNETS,
+	lanSubnets: LAN_SUBNETS,
+	proxyAllowlist: PROXY_ALLOWLIST,
+	ohTarget: OH_TARGET,
+	ohUser: OH_USER,
+	ohPass: OH_PASS,
+	iconVersion: ICON_VERSION,
+	userAgent: USER_AGENT,
+	assetJsVersion: ASSET_JS_VERSION,
+	assetCssVersion: ASSET_CSS_VERSION,
+	appleTouchVersion: APPLE_TOUCH_VERSION,
+	iconSize: ICON_SIZE,
+	iconCacheConcurrency: ICON_CACHE_CONCURRENCY,
+	deltaCacheLimit: DELTA_CACHE_LIMIT,
+	slowQueryMs: SLOW_QUERY_MS,
+	authWhitelist: AUTH_WHITELIST,
+	authRealm: AUTH_REALM,
+	authCookieName: AUTH_COOKIE_NAME,
+	authCookieDays: AUTH_COOKIE_DAYS,
+	authCookieKey: AUTH_COOKIE_KEY,
+	authFailNotifyCmd: AUTH_FAIL_NOTIFY_CMD,
+	securityHeadersEnabled: SECURITY_HEADERS_ENABLED,
+	securityHsts: SECURITY_HSTS,
+	securityCsp: SECURITY_CSP,
+	securityReferrerPolicy: SECURITY_REFERRER_POLICY,
+	sitemapRefreshMs: SITEMAP_REFRESH_MS,
+	clientConfig: CLIENT_CONFIG,
+};
+
+// Values that require restart if changed
+const restartRequiredKeys = [
+	'http.enabled', 'http.host', 'http.port',
+	'https.enabled', 'https.host', 'https.port', 'https.certFile', 'https.keyFile', 'https.http2',
+	'logFile', 'accessLog',
+];
+
+function getNestedValue(obj, path) {
+	return path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj);
+}
+
 function readConfigLocalMtime() {
 	try {
 		const stat = fs.statSync(LOCAL_CONFIG_PATH);
@@ -999,12 +1043,92 @@ function readConfigLocalMtime() {
 	}
 }
 
+function reloadLiveConfig() {
+	// Re-read config file
+	let newConfig;
+	try {
+		delete require.cache[require.resolve('./config.local.js')];
+		delete require.cache[require.resolve('./config.js')];
+		newConfig = loadUserConfig();
+	} catch (err) {
+		logMessage(`Hot reload failed to load config: ${err.message || err}`);
+		return false;
+	}
+
+	const newServer = newConfig.server || {};
+	const oldServer = SERVER_CONFIG;
+
+	// Check if restart is required
+	for (const key of restartRequiredKeys) {
+		const oldVal = getNestedValue(oldServer, key);
+		const newVal = getNestedValue(newServer, key);
+		if (oldVal !== newVal) {
+			logMessage(`Config change requires restart: server.${key} changed`);
+			return true; // Restart required
+		}
+	}
+
+	// Hot reload - update live config values
+	const newAuth = newServer.auth || {};
+	const newSecurityHeaders = newServer.securityHeaders || {};
+	const newAssets = newServer.assets || {};
+	const newTasks = newServer.backgroundTasks || {};
+
+	liveConfig.allowSubnets = newServer.allowSubnets;
+	liveConfig.lanSubnets = Array.isArray(newServer.lanSubnets) ? newServer.lanSubnets : [];
+	liveConfig.proxyAllowlist = normalizeProxyAllowlist(newServer.proxyAllowlist);
+	liveConfig.ohTarget = safeText(newServer.openhab?.target);
+	liveConfig.ohUser = safeText(newServer.openhab?.user || '');
+	liveConfig.ohPass = safeText(newServer.openhab?.pass || '');
+	const oldIconVersion = liveConfig.iconVersion;
+	liveConfig.iconVersion = safeText(newAssets.iconVersion);
+	if (liveConfig.iconVersion !== oldIconVersion) {
+		purgeOldIconCache();
+		ensureDir(getIconCacheDir());
+	}
+	liveConfig.userAgent = safeText(newServer.userAgent);
+	liveConfig.assetJsVersion = safeText(newAssets.jsVersion);
+	liveConfig.assetCssVersion = safeText(newAssets.cssVersion);
+	const appleTouchRaw = safeText(newAssets.appleTouchIconVersion);
+	liveConfig.appleTouchVersion = appleTouchRaw
+		? (appleTouchRaw.startsWith('v') ? appleTouchRaw : `v${appleTouchRaw}`)
+		: '';
+	liveConfig.iconSize = configNumber(newServer.iconSize);
+	liveConfig.iconCacheConcurrency = Math.max(1, Math.floor(configNumber(newServer.iconCacheConcurrency, 5)));
+	liveConfig.deltaCacheLimit = configNumber(newServer.deltaCacheLimit);
+	liveConfig.slowQueryMs = configNumber(newServer.slowQueryMs, 0);
+	liveConfig.authWhitelist = newAuth.whitelistSubnets;
+	liveConfig.authRealm = safeText(newAuth.realm || 'openHAB Proxy');
+	liveConfig.authCookieName = safeText(newAuth.cookieName || 'AuthStore');
+	liveConfig.authCookieDays = configNumber(newAuth.cookieDays, 0);
+	liveConfig.authCookieKey = safeText(newAuth.cookieKey || '');
+	liveConfig.authFailNotifyCmd = safeText(newAuth.authFailNotifyCmd || '');
+	liveConfig.securityHeadersEnabled = newSecurityHeaders.enabled !== false;
+	liveConfig.securityHsts = newSecurityHeaders.hsts || {};
+	liveConfig.securityCsp = newSecurityHeaders.csp || {};
+	liveConfig.securityReferrerPolicy = safeText(newSecurityHeaders.referrerPolicy || '');
+	liveConfig.sitemapRefreshMs = configNumber(newTasks.sitemapRefreshMs);
+	liveConfig.clientConfig = newConfig.client || {};
+
+	logMessage('Config hot-reloaded successfully');
+	return false; // No restart required
+}
+
 lastConfigMtime = readConfigLocalMtime();
 
 function scheduleConfigRestart() {
 	if (configRestartScheduled) return;
 	configRestartScheduled = true;
 	logMessage('Detected config.local.js change, scheduling restart.');
+}
+
+function handleConfigChange() {
+	const needsRestart = reloadLiveConfig();
+	if (needsRestart) {
+		scheduleConfigRestart();
+		return true;
+	}
+	return false;
 }
 
 function maybeTriggerRestart() {
@@ -1022,7 +1146,9 @@ const TAILWIND_BUNDLE_PATH = path.join(PUBLIC_DIR, 'tailwind.css');
 const INDEX_HTML_PATH = path.join(PUBLIC_DIR, 'index.html');
 const SERVICE_WORKER_PATH = path.join(PUBLIC_DIR, 'sw.js');
 const ICON_CACHE_ROOT = path.join(__dirname, '.icon-cache');
-const ICON_CACHE_DIR = path.join(ICON_CACHE_ROOT, ICON_VERSION);
+function getIconCacheDir() {
+	return path.join(ICON_CACHE_ROOT, liveConfig.iconVersion);
+}
 const iconInflight = new Map();
 const deltaCache = new Map();
 let indexTemplate = null;
@@ -1080,7 +1206,6 @@ const backgroundState = {
 };
 
 const DEFAULT_PAGE_TITLE = 'openHAB';
-const LAN_SUBNETS = Array.isArray(SERVER_CONFIG.lanSubnets) ? SERVER_CONFIG.lanSubnets : [];
 
 function getInitialPageTitle() {
 	const cached = safeText(backgroundState.sitemap.title);
@@ -1140,9 +1265,9 @@ function renderIndexHtml(options) {
 	if (!indexTemplate) indexTemplate = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
 	const opts = options || {};
 	let html = indexTemplate;
-	html = html.replace(/__CSS_VERSION__/g, ASSET_CSS_VERSION);
-	html = html.replace(/__JS_VERSION__/g, ASSET_JS_VERSION);
-	html = html.replace(/__APPLE_TOUCH_VERSION__/g, APPLE_TOUCH_VERSION);
+	html = html.replace(/__CSS_VERSION__/g, liveConfig.assetCssVersion);
+	html = html.replace(/__JS_VERSION__/g, liveConfig.assetJsVersion);
+	html = html.replace(/__APPLE_TOUCH_VERSION__/g, liveConfig.appleTouchVersion);
 	html = html.replace(/__PAGE_TITLE__/g, getInitialPageTitleHtml());
 	html = html.replace(/__DOC_TITLE__/g, escapeHtml(getInitialDocumentTitle()));
 	html = html.replace(/__STATUS_TEXT__/g, escapeHtml(opts.statusText || 'Connected'));
@@ -1154,9 +1279,9 @@ function renderIndexHtml(options) {
 function renderServiceWorker() {
 	if (!serviceWorkerTemplate) serviceWorkerTemplate = fs.readFileSync(SERVICE_WORKER_PATH, 'utf8');
 	let script = serviceWorkerTemplate;
-	script = script.replace(/__CSS_VERSION__/g, ASSET_CSS_VERSION);
-	script = script.replace(/__JS_VERSION__/g, ASSET_JS_VERSION);
-	script = script.replace(/__APPLE_TOUCH_VERSION__/g, APPLE_TOUCH_VERSION);
+	script = script.replace(/__CSS_VERSION__/g, liveConfig.assetCssVersion);
+	script = script.replace(/__JS_VERSION__/g, liveConfig.assetJsVersion);
+	script = script.replace(/__APPLE_TOUCH_VERSION__/g, liveConfig.appleTouchVersion);
 	return script;
 }
 
@@ -1226,7 +1351,7 @@ function normalizeOpenhabPath(link) {
 	const text = safeText(link);
 	if (!text) return '';
 	try {
-		const base = new URL(OH_TARGET);
+		const base = new URL(liveConfig.ohTarget);
 		const u = new URL(text, base);
 		let out = u.pathname || '/';
 		const basePath = base.pathname && base.pathname !== '/' ? base.pathname.replace(/\/$/, '') : '';
@@ -1235,7 +1360,7 @@ function normalizeOpenhabPath(link) {
 	} catch {
 		let out = text.startsWith('/') ? text : `/${text}`;
 		try {
-			const base = new URL(OH_TARGET);
+			const base = new URL(liveConfig.ohTarget);
 			const basePath = base.pathname && base.pathname !== '/' ? base.pathname.replace(/\/$/, '') : '';
 			if (basePath && out.startsWith(basePath)) out = out.slice(basePath.length) || '/';
 		} catch {}
@@ -1414,7 +1539,7 @@ function purgeOldIconCache() {
 	const entries = fs.readdirSync(ICON_CACHE_ROOT, { withFileTypes: true });
 	for (const entry of entries) {
 		if (!entry.isDirectory()) continue;
-		if (entry.name === ICON_VERSION) continue;
+		if (entry.name === liveConfig.iconVersion) continue;
 		const target = path.join(ICON_CACHE_ROOT, entry.name);
 		try {
 			if (fs.rmSync) fs.rmSync(target, { recursive: true, force: true });
@@ -1500,7 +1625,7 @@ function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3) {
 
 		const isHttps = url.protocol === 'https:';
 		const client = isHttps ? https : http;
-		const requestHeaders = { ...headers, 'User-Agent': USER_AGENT };
+		const requestHeaders = { ...headers, 'User-Agent': liveConfig.userAgent };
 		const req = client.request({
 			method: 'GET',
 			hostname: url.hostname,
@@ -1546,12 +1671,12 @@ function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3) {
 
 function fetchOpenhab(pathname) {
 	return new Promise((resolve, reject) => {
-		const target = new URL(OH_TARGET);
+		const target = new URL(liveConfig.ohTarget);
 		const isHttps = target.protocol === 'https:';
 		const basePath = target.pathname && target.pathname !== '/' ? target.pathname.replace(/\/$/, '') : '';
 		const reqPath = `${basePath}${pathname}`;
 		const client = isHttps ? https : http;
-		const headers = { Accept: 'application/json', 'User-Agent': USER_AGENT };
+		const headers = { Accept: 'application/json', 'User-Agent': liveConfig.userAgent };
 		const ah = authHeader();
 		if (ah) headers.Authorization = ah;
 
@@ -1620,8 +1745,8 @@ async function refreshSitemapCache() {
 }
 
 function fetchOpenhabBinary(pathname, options = {}) {
-	const baseUrl = options.baseUrl || OH_TARGET;
-	const headers = { Accept: 'image/*,*/*;q=0.8', 'User-Agent': USER_AGENT };
+	const baseUrl = options.baseUrl || liveConfig.ohTarget;
+	const headers = { Accept: 'image/*,*/*;q=0.8', 'User-Agent': liveConfig.userAgent };
 	const ah = authHeader();
 	if (ah) headers.Authorization = ah;
 	return fetchBinaryFromUrl(buildTargetUrl(baseUrl, pathname), headers);
@@ -1678,36 +1803,39 @@ app.use(morgan('combined', {
 	},
 }));
 
-// Slow query logging middleware
-if (SLOW_QUERY_MS > 0) {
-	app.use((req, res, next) => {
+// Slow query logging middleware (threshold checked dynamically for hot reload)
+app.use((req, res, next) => {
+	const threshold = liveConfig.slowQueryMs;
+	if (threshold > 0) {
 		const start = Date.now();
 		res.once('finish', () => {
 			const duration = Date.now() - start;
-			if (duration >= SLOW_QUERY_MS) {
+			if (duration >= threshold) {
 				logMessage(`Slow request (${duration}ms): ${req.method} ${req.originalUrl}`);
 			}
 		});
-		next();
-	});
-}
+	}
+	next();
+});
 
 app.use((req, res, next) => {
 	if (!configRestartScheduled) {
 		const currentMtime = readConfigLocalMtime();
 		if (currentMtime !== lastConfigMtime) {
 			lastConfigMtime = currentMtime;
-			scheduleConfigRestart();
-			res.once('finish', maybeTriggerRestart);
-			res.once('close', maybeTriggerRestart);
+			const needsRestart = handleConfigChange();
+			if (needsRestart) {
+				res.once('finish', maybeTriggerRestart);
+				res.once('close', maybeTriggerRestart);
+			}
 		}
 	}
 	next();
 });
 app.use((req, res, next) => {
-	if (Array.isArray(ALLOW_SUBNETS) && ALLOW_SUBNETS.some((entry) => isAllowAllSubnet(entry))) return next();
+	if (Array.isArray(liveConfig.allowSubnets) && liveConfig.allowSubnets.some((entry) => isAllowAllSubnet(entry))) return next();
 	const ip = getRemoteIp(req);
-	if (!ip || !ipInAnySubnet(ip, ALLOW_SUBNETS)) {
+	if (!ip || !ipInAnySubnet(ip, liveConfig.allowSubnets)) {
 		logMessage(`Blocked request from ${ip || 'unknown'} for ${req.method} ${req.originalUrl}`);
 		res.status(403).type('text/plain').send('Forbidden');
 		return;
@@ -1724,8 +1852,8 @@ app.use((req, res, next) => {
 	}
 	let requiresAuth = !clientIp;
 	if (clientIp) {
-		const inWhitelist = ipInAnySubnet(clientIp, AUTH_WHITELIST);
-		const inLan = ipInAnySubnet(clientIp, LAN_SUBNETS);
+		const inWhitelist = ipInAnySubnet(clientIp, liveConfig.authWhitelist);
+		const inLan = ipInAnySubnet(clientIp, liveConfig.lanSubnets);
 		requiresAuth = !inWhitelist && !inLan;
 	}
 	if (!requiresAuth) {
@@ -1762,11 +1890,11 @@ app.use((req, res, next) => {
 			return;
 		}
 		authenticatedUser = user;
-	} else if (AUTH_COOKIE_KEY && AUTH_COOKIE_NAME) {
-		const cookieUser = getAuthCookieUser(req, users, AUTH_COOKIE_KEY);
+	} else if (liveConfig.authCookieKey && liveConfig.authCookieName) {
+		const cookieUser = getAuthCookieUser(req, users, liveConfig.authCookieKey);
 		if (cookieUser) {
 			authenticatedUser = cookieUser;
-		} else if (getCookieValue(req, AUTH_COOKIE_NAME)) {
+		} else if (getCookieValue(req, liveConfig.authCookieName)) {
 			clearAuthCookie(res);
 		}
 	}
@@ -1794,11 +1922,11 @@ app.use(compression());
 app.get('/config.js', (req, res) => {
 	res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	const clientConfig = CLIENT_CONFIG && typeof CLIENT_CONFIG === 'object' ? CLIENT_CONFIG : {};
+	const clientConfig = liveConfig.clientConfig && typeof liveConfig.clientConfig === 'object' ? liveConfig.clientConfig : {};
 	res.send(`window.__OH_CONFIG__=${JSON.stringify({
-		iconVersion: ICON_VERSION,
+		iconVersion: liveConfig.iconVersion,
 		server: {
-			lanSubnets: Array.isArray(SERVER_CONFIG.lanSubnets) ? SERVER_CONFIG.lanSubnets : [],
+			lanSubnets: Array.isArray(liveConfig.lanSubnets) ? liveConfig.lanSubnets : [],
 		},
 		client: clientConfig,
 	})};`);
@@ -1931,31 +2059,32 @@ app.get(/^\/styles\.v[\w.-]+\.css$/i, (req, res) => {
 	sendVersionedAsset(res, STYLE_BUNDLE_PATH, 'text/css; charset=utf-8');
 });
 
-// --- Proxy FIRST (so bodies aren’t eaten by any parsers) ---
+// --- Proxy FIRST (so bodies aren't eaten by any parsers) ---
 const proxyCommon = {
 	target: OH_TARGET,
+	router: () => liveConfig.ohTarget,
 	changeOrigin: true,
 	ws: true,
 	logLevel: PROXY_LOG_LEVEL,
 	onProxyReq(proxyReq) {
-		proxyReq.setHeader('User-Agent', USER_AGENT);
+		proxyReq.setHeader('User-Agent', liveConfig.userAgent);
 		const ah = authHeader();
 		if (ah) proxyReq.setHeader('Authorization', ah);
 	},
 };
 
 purgeOldIconCache();
-ensureDir(ICON_CACHE_DIR);
+ensureDir(getIconCacheDir());
 
 app.get(/^\/(?:openhab\.app\/)?images\/(v\d+)\/(.+)$/i, async (req, res, next) => {
 	const match = req.path.match(/^\/(?:openhab\.app\/)?images\/(v\d+)\/(.+)$/i);
 	if (!match) return next();
 	const version = match[1];
-	if (version !== ICON_VERSION) return next();
+	if (version !== liveConfig.iconVersion) return next();
 	const rawRel = match[2];
 	const parsed = path.parse(rawRel);
 	const cacheRel = path.join(parsed.dir, `${parsed.name}.png`);
-	const cachePath = path.join(ICON_CACHE_DIR, cacheRel);
+	const cachePath = path.join(getIconCacheDir(), cacheRel);
 	const sourcePath = `/openhab.app/images/${rawRel}`;
 	const sourceExt = parsed.ext || '.png';
 
@@ -2084,7 +2213,7 @@ app.get('/proxy', async (req, res, next) => {
 		if (!['http:', 'https:'].includes(target.protocol)) {
 			return res.status(400).send('Invalid proxy target');
 		}
-		if (!isProxyTargetAllowed(target, PROXY_ALLOWLIST)) {
+		if (!isProxyTargetAllowed(target, liveConfig.proxyAllowlist)) {
 			return res.status(403).send('Proxy target not allowed');
 		}
 
