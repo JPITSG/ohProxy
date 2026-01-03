@@ -2859,8 +2859,12 @@ function armIdleTimer() {
 	if (state.idleTimer) clearTimeout(state.idleTimer);
 	state.idleTimer = setTimeout(() => {
 		if (state.isPaused) return;
-		const next = idleInterval();
-		if (state.pollInterval !== next) setPollInterval(next);
+		state.isIdle = true;
+		// Don't change polling if WebSocket is connected
+		if (!wsConnected) {
+			const next = idleInterval();
+			if (state.pollInterval !== next) setPollInterval(next);
+		}
 	}, IDLE_AFTER_MS);
 }
 
@@ -2870,9 +2874,130 @@ function noteActivity() {
 	const throttle = state.isSlim ? 1000 : ACTIVITY_THROTTLE_MS;
 	if (now - state.lastActivity < throttle) return;
 	state.lastActivity = now;
-	const next = activeInterval();
-	if (state.pollInterval !== next) setPollInterval(next);
+	state.isIdle = false;
+	// Don't speed up polling if WebSocket is connected
+	if (!wsConnected) {
+		const next = activeInterval();
+		if (state.pollInterval !== next) setPollInterval(next);
+	}
 	armIdleTimer();
+}
+
+// --- WebSocket Push ---
+let wsConnection = null;
+let wsConnected = false;
+let wsReconnectTimer = null;
+let wsFailCount = 0;
+const WS_RECONNECT_MS = 5000;
+const WS_FALLBACK_POLL_MS = 30000;
+const WS_MAX_FAILURES = 5; // Stop trying WebSocket after this many consecutive failures
+
+function applyWsUpdate(data) {
+	if (!data || data.type !== 'items' || !Array.isArray(data.changes)) return;
+	const deltaChanges = data.changes.map(item => ({
+		itemName: item.name,
+		state: item.state,
+	}));
+	if (applyDeltaChanges(deltaChanges)) {
+		render();
+	}
+}
+
+function getWsUrl() {
+	const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+	return `${proto}//${window.location.host}/ws`;
+}
+
+function connectWs() {
+	if (wsConnection) return;
+	if (state.isPaused) return;
+	if (wsFailCount >= WS_MAX_FAILURES) return;
+
+	try {
+		wsConnection = new WebSocket(getWsUrl());
+
+		wsConnection.onopen = () => {
+			wsConnected = true;
+			wsFailCount = 0;
+			if (wsReconnectTimer) {
+				clearTimeout(wsReconnectTimer);
+				wsReconnectTimer = null;
+			}
+			if (state.pollTimer && state.pollInterval < WS_FALLBACK_POLL_MS) {
+				setPollInterval(WS_FALLBACK_POLL_MS);
+			}
+		};
+
+		wsConnection.onmessage = (event) => {
+			try {
+				const msg = JSON.parse(event.data);
+				if (msg.event === 'update' && msg.data) {
+					applyWsUpdate(msg.data);
+				}
+			} catch {}
+		};
+
+		wsConnection.onclose = (event) => {
+			const wasConnected = wsConnected;
+			wsConnected = false;
+			wsConnection = null;
+			if (!wasConnected || event.code === 1002 || event.code === 1006) {
+				wsFailCount++;
+				if (wsFailCount >= WS_MAX_FAILURES) {
+					restoreNormalPolling();
+					return;
+				}
+			}
+			scheduleWsReconnect();
+		};
+
+		wsConnection.onerror = () => {
+			wsConnected = false;
+			closeWs();
+			wsFailCount++;
+			if (wsFailCount >= WS_MAX_FAILURES) {
+				restoreNormalPolling();
+				return;
+			}
+			scheduleWsReconnect();
+		};
+	} catch {
+		wsConnected = false;
+		wsFailCount++;
+		scheduleWsReconnect();
+	}
+}
+
+function closeWs() {
+	if (wsConnection) {
+		try { wsConnection.close(); } catch {}
+		wsConnection = null;
+	}
+	wsConnected = false;
+}
+
+function scheduleWsReconnect() {
+	if (wsReconnectTimer) return;
+	wsReconnectTimer = setTimeout(() => {
+		wsReconnectTimer = null;
+		if (!state.isPaused) connectWs();
+	}, WS_RECONNECT_MS);
+}
+
+function stopWs() {
+	if (wsReconnectTimer) {
+		clearTimeout(wsReconnectTimer);
+		wsReconnectTimer = null;
+	}
+	closeWs();
+}
+
+function restoreNormalPolling() {
+	// Restore normal polling interval since WebSocket isn't working
+	const normalInterval = state.isIdle ? cfg.pollIntervalsMs.idle : cfg.pollIntervalsMs.active;
+	if (state.pollInterval !== normalInterval) {
+		setPollInterval(normalInterval);
+	}
 }
 
 // --- Boot ---
@@ -2915,6 +3040,8 @@ function noteActivity() {
 			if (!state.isPaused) {
 				noteActivity();
 				refresh(false);
+				// Reconnect WebSocket if needed
+				if (!wsConnection) connectWs();
 			}
 		});
 	window.addEventListener('popstate', (event) => {
@@ -2978,6 +3105,7 @@ function noteActivity() {
 		state.isPaused = !state.isPaused;
 		if (state.isPaused) {
 			stopPolling();
+			stopWs();
 			clearImageTimers();
 			clearImageViewerTimer();
 		} else {
@@ -2986,6 +3114,7 @@ function noteActivity() {
 				setImageViewerSource(imageViewerUrl, imageViewerRefreshMs);
 			}
 			startPolling();
+			connectWs();
 		}
 		updatePauseButton();
 	});
@@ -3018,6 +3147,7 @@ function noteActivity() {
 		await refresh(true);
 		if (!state.isSlim) buildSearchIndex();
 		startPolling();
+		connectWs();
 	} catch (e) {
 		console.error(e);
 		const snapshot = loadHomeSnapshot();
@@ -3026,6 +3156,7 @@ function noteActivity() {
 			setConnectionStatus(false, e.message);
 			render();
 			startPolling();
+			connectWs();
 		} else {
 			setStatus(`Init failed: ${e.message}`);
 			setConnectionStatus(false, e.message);

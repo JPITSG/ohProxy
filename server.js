@@ -13,6 +13,7 @@ const https = require('https');
 const spdy = require('spdy');
 const crypto = require('crypto');
 const { createProxyMiddleware } = require('http-proxy-middleware');
+const WebSocket = require('ws');
 
 const CONFIG_PATH = path.join(__dirname, 'config.js');
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
@@ -1207,6 +1208,329 @@ const backgroundState = {
 
 const DEFAULT_PAGE_TITLE = 'openHAB';
 
+// --- WebSocket Push Infrastructure ---
+const wss = new WebSocket.Server({
+	noServer: true,
+	perMessageDeflate: false,
+	skipUTF8Validation: false,
+	clientTracking: true,
+});
+
+// Strip any compression extension from response headers (safety measure)
+wss.on('headers', (headers) => {
+	for (let i = headers.length - 1; i >= 0; i--) {
+		if (headers[i].toLowerCase().startsWith('sec-websocket-extensions')) {
+			headers.splice(i, 1);
+		}
+	}
+});
+
+function handleWsConnection(ws, req) {
+	const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+	logMessage(`[WS] Client connected from ${clientIp}, total: ${wss.clients.size}`);
+
+	ws.isAlive = true;
+
+	// Send welcome message
+	try {
+		ws.send(JSON.stringify({ event: 'connected', data: { time: Date.now() } }));
+	} catch (e) {
+		logMessage(`[WS] Send error for ${clientIp}: ${e.message}`);
+	}
+
+	startAtmosphereIfNeeded();
+
+	ws.on('pong', () => { ws.isAlive = true; });
+
+	ws.on('close', (code, reason) => {
+		logMessage(`[WS] Client disconnected from ${clientIp}, code: ${code}, reason: ${reason || 'none'}, remaining: ${wss.clients.size}`);
+		stopAtmosphereIfUnneeded();
+	});
+
+	ws.on('error', (err) => {
+		logMessage(`[WS] Client error from ${clientIp}: ${err.message || err}`);
+		stopAtmosphereIfUnneeded();
+	});
+}
+
+// Attach connection handler
+wss.on('connection', handleWsConnection);
+const ATMOSPHERE_RECONNECT_MS = 5000;
+const WS_PING_INTERVAL_MS = 30000;
+
+function wsBroadcast(event, data) {
+	const payload = JSON.stringify({ event, data });
+	let sent = 0;
+	for (const client of wss.clients) {
+		if (client.readyState === WebSocket.OPEN) {
+			try {
+				client.send(payload, { compress: false });
+				sent++;
+			} catch {}
+		}
+	}
+	logMessage(`[WS] Broadcast '${event}' to ${sent}/${wss.clients.size} clients, payload: ${payload.length} bytes`);
+}
+
+function parseAtmosphereUpdate(body) {
+	try {
+		const data = JSON.parse(body);
+		if (!data || !data.widget) return null;
+		const changes = [];
+		function extractItems(widget) {
+			if (widget.item && widget.item.name && widget.item.state !== undefined) {
+				changes.push({ name: widget.item.name, state: widget.item.state });
+			}
+			if (Array.isArray(widget.widget)) {
+				widget.widget.forEach(extractItems);
+			} else if (widget.widget) {
+				extractItems(widget.widget);
+			}
+		}
+		if (Array.isArray(data.widget)) {
+			data.widget.forEach(extractItems);
+		} else if (data.widget) {
+			extractItems(data.widget);
+		}
+		if (changes.length === 0) return null;
+		return { type: 'items', changes };
+	} catch {
+		return null;
+	}
+}
+
+// Track multiple page subscriptions
+const atmospherePages = new Map(); // pageId -> { connection, trackingId, reconnectTimer }
+
+// Track item states to detect actual changes (not just openHAB reporting unchanged items)
+const itemStates = new Map(); // itemName -> state
+
+function filterChangedItems(changes) {
+	const actualChanges = [];
+	for (const item of changes) {
+		const prevState = itemStates.get(item.name);
+		if (prevState !== item.state) {
+			itemStates.set(item.name, item.state);
+			actualChanges.push(item);
+		}
+	}
+	return actualChanges;
+}
+
+function connectAtmospherePage(pageId) {
+	const existing = atmospherePages.get(pageId);
+	if (existing) {
+		if (existing.connection) {
+			try { existing.connection.destroy(); } catch {}
+		}
+		if (existing.reconnectTimer) {
+			clearTimeout(existing.reconnectTimer);
+		}
+	}
+
+	const sitemapName = backgroundState.sitemap.name || 'default';
+	const target = new URL(liveConfig.ohTarget);
+	const isHttps = target.protocol === 'https:';
+	const client = isHttps ? https : http;
+	const basePath = target.pathname && target.pathname !== '/' ? target.pathname.replace(/\/$/, '') : '';
+	const reqPath = `${basePath}/rest/sitemaps/${sitemapName}/${pageId}?type=json`;
+
+	const pageState = atmospherePages.get(pageId) || { connection: null, trackingId: null, reconnectTimer: null };
+
+	const headers = {
+		Accept: 'application/json',
+		'User-Agent': liveConfig.userAgent,
+		'X-Atmosphere-Transport': 'long-polling',
+	};
+	if (pageState.trackingId) {
+		headers['X-Atmosphere-tracking-id'] = pageState.trackingId;
+	}
+	const ah = authHeader();
+	if (ah) headers.Authorization = ah;
+
+	const req = client.request({
+		method: 'GET',
+		hostname: target.hostname,
+		port: target.port || (isHttps ? 443 : 80),
+		path: reqPath,
+		headers,
+		timeout: 120000,
+	}, (res) => {
+		const newTrackingId = res.headers['x-atmosphere-tracking-id'];
+		if (newTrackingId) pageState.trackingId = newTrackingId;
+
+		let body = '';
+		res.setEncoding('utf8');
+		res.on('data', (chunk) => { body += chunk; });
+		res.on('end', () => {
+			pageState.connection = null;
+			if (res.statusCode === 200 && body.trim()) {
+				const update = parseAtmosphereUpdate(body);
+				if (update && update.changes.length > 0) {
+					// Filter to only items that actually changed
+					const actualChanges = filterChangedItems(update.changes);
+					if (actualChanges.length > 0) {
+						logMessage(`[Atmosphere:${pageId}] ${actualChanges.length} items changed (${update.changes.length} reported)`);
+						if (wss.clients.size > 0) {
+							wsBroadcast('update', { type: 'items', changes: actualChanges });
+						}
+					}
+				}
+			}
+			// Reconnect for next update
+			if (wss.clients.size > 0) {
+				scheduleAtmospherePageReconnect(pageId, 100);
+			}
+		});
+	});
+
+	req.on('error', (err) => {
+		pageState.connection = null;
+		// socket hang up and ECONNRESET are expected for long-polling, silently reconnect
+		const msg = err.message || err;
+		if (msg !== 'socket hang up' && err.code !== 'ECONNRESET') {
+			logMessage(`[Atmosphere:${pageId}] Error: ${msg}`);
+		}
+		scheduleAtmospherePageReconnect(pageId, ATMOSPHERE_RECONNECT_MS);
+	});
+
+	req.on('timeout', () => {
+		req.destroy();
+		pageState.connection = null;
+		scheduleAtmospherePageReconnect(pageId, 0);
+	});
+
+	req.end();
+	pageState.connection = req;
+	atmospherePages.set(pageId, pageState);
+}
+
+function scheduleAtmospherePageReconnect(pageId, delay) {
+	const pageState = atmospherePages.get(pageId);
+	if (!pageState) return;
+	if (pageState.reconnectTimer) clearTimeout(pageState.reconnectTimer);
+	pageState.reconnectTimer = setTimeout(() => {
+		pageState.reconnectTimer = null;
+		if (wss.clients.size > 0) {
+			connectAtmospherePage(pageId);
+		}
+	}, delay);
+}
+
+// Extract all page IDs from sitemap data
+function extractPageIds(data, pages = new Set()) {
+	if (!data) return pages;
+	// Get this page's ID
+	if (data.id) pages.add(data.id);
+	// Check linkedPage for subpages
+	if (data.linkedPage && data.linkedPage.id) {
+		pages.add(data.linkedPage.id);
+		extractPageIds(data.linkedPage, pages);
+	}
+	// Recurse into widgets
+	const widgets = Array.isArray(data.widget) ? data.widget : (data.widget ? [data.widget] : []);
+	for (const w of widgets) {
+		extractPageIds(w, pages);
+	}
+	// Check homepage
+	if (data.homepage) {
+		extractPageIds(data.homepage, pages);
+	}
+	return pages;
+}
+
+async function fetchAllPages() {
+	const sitemapName = backgroundState.sitemap.name || 'default';
+	try {
+		const result = await fetchOpenhab(`/rest/sitemaps/${sitemapName}?type=json`);
+		if (!result.ok) {
+			throw new Error(`HTTP ${result.status}`);
+		}
+		const data = JSON.parse(result.body);
+		const pages = extractPageIds(data);
+		return Array.from(pages);
+	} catch (e) {
+		logMessage(`[Atmosphere] Failed to fetch pages: ${e.message}`);
+		return [sitemapName]; // fallback to just the sitemap name
+	}
+}
+
+async function connectAtmosphere() {
+	// Stop all existing connections
+	stopAllAtmosphereConnections();
+
+	// Fetch all pages and subscribe to each
+	const pages = await fetchAllPages();
+	logMessage(`[Atmosphere] Subscribing to ${pages.length} pages: ${pages.join(', ')}`);
+
+	for (const pageId of pages) {
+		connectAtmospherePage(pageId);
+	}
+}
+
+function stopAllAtmosphereConnections() {
+	for (const [pageId, state] of atmospherePages) {
+		if (state.connection) {
+			try { state.connection.destroy(); } catch {}
+		}
+		if (state.reconnectTimer) {
+			clearTimeout(state.reconnectTimer);
+		}
+	}
+	atmospherePages.clear();
+}
+
+function startAtmosphereIfNeeded() {
+	if (wss.clients.size > 0 && atmospherePages.size === 0) {
+		connectAtmosphere();
+	}
+}
+
+function stopAtmosphereIfUnneeded() {
+	if (wss.clients.size === 0) {
+		stopAllAtmosphereConnections();
+	}
+}
+
+// Native WebSocket ping for connection health monitoring
+setInterval(() => {
+	for (const ws of wss.clients) {
+		if (ws.isAlive === false) {
+			ws.terminate();
+			continue;
+		}
+		ws.isAlive = false;
+		ws.ping();
+	}
+}, WS_PING_INTERVAL_MS);
+
+function handleWsUpgrade(req, socket, head) {
+	const pathname = new URL(req.url, 'http://localhost').pathname;
+	const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+	const clientExts = req.headers['sec-websocket-extensions'] || 'none';
+	logMessage(`[WS] Upgrade request from ${clientIp} for ${pathname}, extensions: ${clientExts}`);
+
+	if (pathname !== '/ws') {
+		logMessage(`[WS] Rejected upgrade for ${pathname} from ${clientIp}`);
+		socket.destroy();
+		return;
+	}
+
+	// Create a new headers object without extensions
+	// This ensures ws library doesn't see the extension request
+	const cleanHeaders = {};
+	for (const [key, value] of Object.entries(req.headers)) {
+		if (key.toLowerCase() !== 'sec-websocket-extensions') {
+			cleanHeaders[key] = value;
+		}
+	}
+	req.headers = cleanHeaders;
+
+	wss.handleUpgrade(req, socket, head, (ws) => {
+		wss.emit('connection', ws, req);
+	});
+}
+
 function getInitialPageTitle() {
 	const cached = safeText(backgroundState.sitemap.title);
 	return cached || DEFAULT_PAGE_TITLE;
@@ -2064,7 +2388,7 @@ const proxyCommon = {
 	target: OH_TARGET,
 	router: () => liveConfig.ohTarget,
 	changeOrigin: true,
-	ws: true,
+	ws: false, // Disabled - we handle WebSocket ourselves via wss
 	logLevel: PROXY_LOG_LEVEL,
 	onProxyReq(proxyReq) {
 		proxyReq.setHeader('User-Agent', liveConfig.userAgent);
@@ -2287,6 +2611,7 @@ function startHttpServer() {
 		logMessage(`HTTP server error: ${err.message || err}`);
 		process.exit(1);
 	});
+	server.on('upgrade', handleWsUpgrade);
 	server.listen(HTTP_PORT, HTTP_HOST || undefined, () => {
 		const host = HTTP_HOST || '0.0.0.0';
 		logMessage(`ohProxy listening (HTTP): http://${host}:${HTTP_PORT}`);
@@ -2311,6 +2636,7 @@ function startHttpsServer() {
 		logMessage(`HTTPS server error: ${err.message || err}`);
 		process.exit(1);
 	});
+	server.on('upgrade', handleWsUpgrade);
 	server.listen(HTTPS_PORT, HTTPS_HOST || undefined, () => {
 		const host = HTTPS_HOST || '0.0.0.0';
 		const proto = HTTPS_HTTP2 ? 'h2' : 'https';
