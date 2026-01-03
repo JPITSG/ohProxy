@@ -783,6 +783,7 @@ function maybeNotifyAuthFailure(ip) {
 	try {
 		const child = execFile('/bin/sh', ['-c', command], { detached: true, stdio: 'ignore' });
 		child.unref();
+		logMessage(`Auth failure notify command executed for ${safeIp}`);
 	} catch (err) {
 		logMessage(`Failed to run auth failure notify command: ${err.message || err}`);
 	}
