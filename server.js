@@ -938,7 +938,7 @@ const backgroundState = {
 	},
 };
 
-const DEFAULT_PAGE_TITLE = 'OpenHAB';
+const DEFAULT_PAGE_TITLE = 'openHAB';
 const LAN_SUBNETS = Array.isArray(SERVER_CONFIG.lanSubnets) ? SERVER_CONFIG.lanSubnets : [];
 
 function getInitialPageTitle() {

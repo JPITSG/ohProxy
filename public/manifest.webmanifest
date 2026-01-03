@@ -1,6 +1,6 @@
 {
-	"name": "OpenHAB",
-	"short_name": "OpenHAB",
+	"name": "openHAB",
+	"short_name": "openHAB",
 	"start_url": "./",
 	"scope": "./",
 	"display": "standalone",
