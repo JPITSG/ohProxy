@@ -121,6 +121,15 @@ module.exports = {
 			// Sitemap refresh interval (ms; >=1000).
 			sitemapRefreshMs: 60000,
 		},
+		// WebSocket push configuration.
+		websocket: {
+			// WebSocket update mode ('polling' or 'atmosphere').
+			// polling: Polls openHAB REST API at interval, compares states, sends only changes.
+			// atmosphere: Uses openHAB Atmosphere long-polling for real-time updates.
+			mode: 'polling',
+			// Polling interval in ms (only used when mode is 'polling'; >=100).
+			pollingIntervalMs: 500,
+		},
 	},
 
 	// Client-visible settings.

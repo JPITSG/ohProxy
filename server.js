@@ -224,6 +224,9 @@ const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(
 	process.env.SITEMAP_REFRESH_MS || TASK_CONFIG.sitemapRefreshMs
 );
+const WEBSOCKET_CONFIG = SERVER_CONFIG.websocket || {};
+const WS_MODE = (WEBSOCKET_CONFIG.mode === 'atmosphere') ? 'atmosphere' : 'polling';
+const WS_POLLING_INTERVAL_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalMs) || 500;
 let lastAuthFailNotifyAt = 0;
 const authLockouts = new Map();
 
@@ -1019,6 +1022,8 @@ const liveConfig = {
 	securityReferrerPolicy: SECURITY_REFERRER_POLICY,
 	sitemapRefreshMs: SITEMAP_REFRESH_MS,
 	clientConfig: CLIENT_CONFIG,
+	wsMode: WS_MODE,
+	wsPollingIntervalMs: WS_POLLING_INTERVAL_MS,
 };
 
 // Values that require restart if changed
@@ -1074,6 +1079,7 @@ function reloadLiveConfig() {
 	const newSecurityHeaders = newServer.securityHeaders || {};
 	const newAssets = newServer.assets || {};
 	const newTasks = newServer.backgroundTasks || {};
+	const newWsConfig = newServer.websocket || {};
 
 	liveConfig.allowSubnets = newServer.allowSubnets;
 	liveConfig.lanSubnets = Array.isArray(newServer.lanSubnets) ? newServer.lanSubnets : [];
@@ -1110,6 +1116,22 @@ function reloadLiveConfig() {
 	liveConfig.securityReferrerPolicy = safeText(newSecurityHeaders.referrerPolicy || '');
 	liveConfig.sitemapRefreshMs = configNumber(newTasks.sitemapRefreshMs);
 	liveConfig.clientConfig = newConfig.client || {};
+
+	// WebSocket config - handle mode changes
+	const oldWsMode = liveConfig.wsMode;
+	liveConfig.wsMode = (newWsConfig.mode === 'atmosphere') ? 'atmosphere' : 'polling';
+	liveConfig.wsPollingIntervalMs = configNumber(newWsConfig.pollingIntervalMs) || 500;
+
+	// If mode changed and clients are connected, switch modes
+	if (oldWsMode !== liveConfig.wsMode && wss.clients.size > 0) {
+		logMessage(`[WS] Mode changed from ${oldWsMode} to ${liveConfig.wsMode}, switching...`);
+		if (oldWsMode === 'atmosphere') {
+			stopAllAtmosphereConnections();
+		} else {
+			stopPolling();
+		}
+		startWsPushIfNeeded();
+	}
 
 	logMessage('Config hot-reloaded successfully');
 	return false; // No restart required
@@ -1238,18 +1260,18 @@ function handleWsConnection(ws, req) {
 		logMessage(`[WS] Send error for ${clientIp}: ${e.message}`);
 	}
 
-	startAtmosphereIfNeeded();
+	startWsPushIfNeeded();
 
 	ws.on('pong', () => { ws.isAlive = true; });
 
 	ws.on('close', (code, reason) => {
 		logMessage(`[WS] Client disconnected from ${clientIp}, code: ${code}, reason: ${reason || 'none'}, remaining: ${wss.clients.size}`);
-		stopAtmosphereIfUnneeded();
+		stopWsPushIfUnneeded();
 	});
 
 	ws.on('error', (err) => {
 		logMessage(`[WS] Client error from ${clientIp}: ${err.message || err}`);
-		stopAtmosphereIfUnneeded();
+		stopWsPushIfUnneeded();
 	});
 }
 
@@ -1489,6 +1511,93 @@ function startAtmosphereIfNeeded() {
 function stopAtmosphereIfUnneeded() {
 	if (wss.clients.size === 0) {
 		stopAllAtmosphereConnections();
+	}
+}
+
+// --- Polling Mode ---
+let pollingTimer = null;
+let pollingActive = false;
+
+async function fetchAllItems() {
+	try {
+		const result = await fetchOpenhab('/rest/items?type=json');
+		if (!result.ok) {
+			throw new Error(`HTTP ${result.status}`);
+		}
+		const data = JSON.parse(result.body);
+		// openHAB 1.x returns {"item":[...]}, openHAB 2.x+ returns [...]
+		const items = Array.isArray(data) ? data : (data.item || []);
+		if (!Array.isArray(items)) return [];
+		return items.map(item => ({ name: item.name, state: item.state }));
+	} catch (e) {
+		logMessage(`[Polling] Failed to fetch items: ${e.message}`);
+		return [];
+	}
+}
+
+async function pollItems() {
+	if (!pollingActive || wss.clients.size === 0) return;
+
+	const startTime = Date.now();
+	const items = await fetchAllItems();
+	const elapsed = Date.now() - startTime;
+
+	// Log slow polling requests
+	if (liveConfig.slowQueryMs > 0 && elapsed > liveConfig.slowQueryMs) {
+		logMessage(`[Polling] Slow request: ${elapsed}ms (threshold: ${liveConfig.slowQueryMs}ms)`);
+	}
+
+	if (items.length > 0) {
+		const actualChanges = filterChangedItems(items);
+		if (actualChanges.length > 0) {
+			logMessage(`[Polling] ${actualChanges.length} items changed (${items.length} total)`);
+			wsBroadcast('update', { type: 'items', changes: actualChanges });
+		}
+	}
+
+	// Schedule next poll
+	if (pollingActive && wss.clients.size > 0) {
+		pollingTimer = setTimeout(pollItems, liveConfig.wsPollingIntervalMs);
+	}
+}
+
+function startPolling() {
+	if (pollingActive) return;
+	pollingActive = true;
+	logMessage(`[Polling] Starting item polling (interval: ${liveConfig.wsPollingIntervalMs}ms)`);
+	pollItems();
+}
+
+function stopPolling() {
+	pollingActive = false;
+	if (pollingTimer) {
+		clearTimeout(pollingTimer);
+		pollingTimer = null;
+	}
+}
+
+// --- Generic WS Push Control ---
+function startWsPushIfNeeded() {
+	if (wss.clients.size === 0) return;
+
+	if (liveConfig.wsMode === 'atmosphere') {
+		if (atmospherePages.size === 0) {
+			connectAtmosphere();
+		}
+	} else {
+		if (!pollingActive) {
+			startPolling();
+		}
+	}
+}
+
+function stopWsPushIfUnneeded() {
+	if (wss.clients.size > 0) return;
+
+	if (liveConfig.wsMode === 'atmosphere') {
+		stopAllAtmosphereConnections();
+	} else {
+		stopPolling();
 	}
 }
 
