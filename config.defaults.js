@@ -21,9 +21,9 @@ module.exports = {
 		// Asset version strings.
 		assets: {
 			// App JS version.
-			jsVersion: 'v149',
+			jsVersion: 'v1',
 			// App CSS version.
-			cssVersion: 'v146',
+			cssVersion: 'v1',
 			// Apple touch icon version.
 			appleTouchIconVersion: 'v1',
 		},
