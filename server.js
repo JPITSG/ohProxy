@@ -190,6 +190,9 @@ const ACCESS_LOG = safeText(process.env.ACCESS_LOG || SERVER_CONFIG.accessLog);
 const AUTH_USERS_FILE = safeText(SERVER_AUTH.usersFile);
 const AUTH_WHITELIST = SERVER_AUTH.whitelistSubnets;
 const AUTH_REALM = safeText(SERVER_AUTH.realm || 'openHAB Proxy');
+const AUTH_COOKIE_NAME = safeText(SERVER_AUTH.cookieName || 'AuthStore');
+const AUTH_COOKIE_DAYS = configNumber(SERVER_AUTH.cookieDays, 0);
+const AUTH_COOKIE_KEY = safeText(SERVER_AUTH.cookieKey || '');
 const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(
 	process.env.SITEMAP_REFRESH_MS || TASK_CONFIG.sitemapRefreshMs
@@ -416,6 +419,17 @@ function validateConfig() {
 		ensureReadableFile(SERVER_AUTH.usersFile, 'server.auth.usersFile', errors);
 		ensureCidrList(SERVER_AUTH.whitelistSubnets, 'server.auth.whitelistSubnets', { allowEmpty: true }, errors);
 		ensureString(AUTH_REALM, 'server.auth.realm', { allowEmpty: false }, errors);
+		ensureString(AUTH_COOKIE_NAME, 'server.auth.cookieName', { allowEmpty: true }, errors);
+		ensureNumber(AUTH_COOKIE_DAYS, 'server.auth.cookieDays', { min: 0 }, errors);
+		ensureString(AUTH_COOKIE_KEY, 'server.auth.cookieKey', { allowEmpty: true }, errors);
+		if (AUTH_COOKIE_KEY) {
+			if (!AUTH_COOKIE_NAME) {
+				errors.push(`server.auth.cookieName is required when cookieKey is set but currently is ${describeValue(AUTH_COOKIE_NAME)}`);
+			}
+			if (!Number.isFinite(AUTH_COOKIE_DAYS) || AUTH_COOKIE_DAYS <= 0) {
+				errors.push(`server.auth.cookieDays must be > 0 when cookieKey is set but currently is ${describeValue(AUTH_COOKIE_DAYS)}`);
+			}
+		}
 	}
 
 	if (ensureObject(SERVER_CONFIG.backgroundTasks, 'server.backgroundTasks', errors)) {
@@ -578,6 +592,124 @@ function loadAuthUsers(pathname) {
 	authUsersCache = users;
 	authUsersMtime = mtime;
 	return users;
+}
+
+function base64UrlEncode(value) {
+	return Buffer.from(String(value), 'utf8')
+		.toString('base64')
+		.replace(/\+/g, '-')
+		.replace(/\//g, '_')
+		.replace(/=+$/g, '');
+}
+
+function base64UrlDecode(value) {
+	const raw = safeText(value).replace(/-/g, '+').replace(/_/g, '/');
+	if (!raw) return null;
+	const pad = raw.length % 4;
+	const padded = pad ? raw + '='.repeat(4 - pad) : raw;
+	try {
+		return Buffer.from(padded, 'base64').toString('utf8');
+	} catch {
+		return null;
+	}
+}
+
+function getCookieValue(req, name) {
+	const header = safeText(req?.headers?.cookie || '').trim();
+	if (!header || !name) return '';
+	for (const part of header.split(';')) {
+		const trimmed = part.trim();
+		if (!trimmed) continue;
+		const eq = trimmed.indexOf('=');
+		if (eq === -1) continue;
+		const key = trimmed.slice(0, eq).trim();
+		if (key !== name) continue;
+		return trimmed.slice(eq + 1).trim();
+	}
+	return '';
+}
+
+function isSecureRequest(req) {
+	if (req?.secure) return true;
+	const proto = safeText(req?.headers?.['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+	return proto === 'https';
+}
+
+function appendSetCookie(res, value) {
+	if (!value) return;
+	const existing = res.getHeader('Set-Cookie');
+	if (!existing) {
+		res.setHeader('Set-Cookie', value);
+		return;
+	}
+	if (Array.isArray(existing)) {
+		res.setHeader('Set-Cookie', existing.concat(value));
+		return;
+	}
+	res.setHeader('Set-Cookie', [existing, value]);
+}
+
+function buildAuthCookieValue(user, pass, key, expiry) {
+	const userEncoded = base64UrlEncode(user);
+	const payload = `${userEncoded}|${expiry}`;
+	const sig = crypto.createHmac('sha256', key).update(`${payload}|${pass}`).digest('hex');
+	return base64UrlEncode(`${payload}|${sig}`);
+}
+
+function getAuthCookieUser(req, users, key) {
+	if (!key) return null;
+	const raw = getCookieValue(req, AUTH_COOKIE_NAME);
+	if (!raw) return null;
+	const decoded = base64UrlDecode(raw);
+	if (!decoded) return null;
+	const parts = decoded.split('|');
+	if (parts.length !== 3) return null;
+	const [userEncoded, expiryRaw, sig] = parts;
+	if (!/^\d+$/.test(expiryRaw)) return null;
+	const expiry = Number(expiryRaw);
+	if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
+	const user = base64UrlDecode(userEncoded);
+	if (!user || !Object.prototype.hasOwnProperty.call(users, user)) return null;
+	const expected = crypto.createHmac('sha256', key).update(`${userEncoded}|${expiryRaw}|${users[user]}`).digest('hex');
+	const sigBuf = Buffer.from(sig, 'hex');
+	const expectedBuf = Buffer.from(expected, 'hex');
+	if (sigBuf.length !== expectedBuf.length) return null;
+	if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
+	return user;
+}
+
+function setAuthCookie(res, user, pass) {
+	if (!AUTH_COOKIE_KEY || !AUTH_COOKIE_NAME || AUTH_COOKIE_DAYS <= 0) return;
+	const expiry = Math.floor(Date.now() / 1000) + Math.round(AUTH_COOKIE_DAYS * 86400);
+	const value = buildAuthCookieValue(user, pass, AUTH_COOKIE_KEY, expiry);
+	const expires = new Date(expiry * 1000).toUTCString();
+	const maxAge = Math.round(AUTH_COOKIE_DAYS * 86400);
+	const secure = isSecureRequest(res.req);
+	const parts = [
+		`${AUTH_COOKIE_NAME}=${value}`,
+		'Path=/',
+		`Expires=${expires}`,
+		`Max-Age=${maxAge}`,
+		'HttpOnly',
+		'SameSite=Lax',
+	];
+	if (secure) parts.push('Secure');
+	appendSetCookie(res, parts.join('; '));
+}
+
+function clearAuthCookie(res) {
+	if (!AUTH_COOKIE_NAME) return;
+	const secure = isSecureRequest(res.req);
+	const parts = [
+		`${AUTH_COOKIE_NAME}=`,
+		'Path=/',
+		'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+		'Max-Age=0',
+		'HttpOnly',
+		'SameSite=Lax',
+	];
+	if (secure) parts.push('Secure');
+	appendSetCookie(res, parts.join('; '));
 }
 
 function getClientIps(req) {
@@ -1409,14 +1541,30 @@ app.use((req, res, next) => {
 		return;
 	}
 	const [user, pass] = getBasicAuthCredentials(req);
-	if (!user || !Object.prototype.hasOwnProperty.call(users, user) || users[user] !== pass) {
+	let authenticatedUser = null;
+	if (user) {
+		if (!Object.prototype.hasOwnProperty.call(users, user) || users[user] !== pass) {
+			sendAuthRequired(res);
+			return;
+		}
+		authenticatedUser = user;
+	} else if (AUTH_COOKIE_KEY && AUTH_COOKIE_NAME) {
+		const cookieUser = getAuthCookieUser(req, users, AUTH_COOKIE_KEY);
+		if (cookieUser) {
+			authenticatedUser = cookieUser;
+		} else if (getCookieValue(req, AUTH_COOKIE_NAME)) {
+			clearAuthCookie(res);
+		}
+	}
+	if (!authenticatedUser) {
 		sendAuthRequired(res);
 		return;
 	}
+	setAuthCookie(res, authenticatedUser, users[authenticatedUser]);
 	res.setHeader('X-OhProxy-Auth', 'authenticated');
 	req.ohProxyAuth = 'authenticated';
-	req.ohProxyUser = user;
-	res.setHeader('X-OhProxy-User', safeText(user).replace(/[\r\n]/g, ''));
+	req.ohProxyUser = authenticatedUser;
+	res.setHeader('X-OhProxy-User', safeText(authenticatedUser).replace(/[\r\n]/g, ''));
 	next();
 });
 app.use(compression());

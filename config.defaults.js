@@ -67,6 +67,12 @@ module.exports = {
 			whitelistSubnets: [],
 			// Basic auth realm label.
 			realm: 'openHAB Proxy',
+			// Auth cookie name.
+			cookieName: 'AuthStore',
+			// Auth cookie lifetime days.
+			cookieDays: 365,
+			// Auth cookie HMAC key.
+			cookieKey: '',
 		},
 		// Background worker timing.
 		backgroundTasks: {
