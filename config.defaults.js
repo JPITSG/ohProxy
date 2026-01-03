@@ -53,12 +53,14 @@ module.exports = {
 		iconSize: 64,
 		// Max delta cache size.
 		deltaCacheLimit: 50,
-		// Proxy logging level.
-		proxyLogLevel: 'warn',
+		// Proxy middleware logging level.
+		proxyMiddlewareLogLevel: 'warn',
 		// Log file path.
 		logFile: '',
 		// Access log file path.
 		accessLog: '',
+		// Access log verbosity.
+		accessLogLevel: 'all',
 		// Allowlist for /proxy?url=.
 		proxyAllowlist: [],
 		// LAN subnets for status UI.

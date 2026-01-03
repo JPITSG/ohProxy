@@ -433,7 +433,7 @@ body.theme-light .image-viewer {
 	cursor: pointer;
 	padding: 0;
 }
-.image-viewer-close img,
+.image-viewer-close img {
 	width: 100%;
 	height: 100%;
 	display: block;

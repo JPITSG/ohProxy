@@ -57,6 +57,17 @@ function writeLogLine(filePath, message) {
 	}
 }
 
+function writeLogLineFileOnly(filePath, message) {
+	const line = formatLogLine(message);
+	if (!line || !filePath) return;
+	try {
+		fs.appendFileSync(filePath, line);
+	} catch (err) {
+		const fallback = formatLogLine(`Failed to write log file ${filePath}: ${err.message || err}`);
+		if (fallback) process.stdout.write(fallback);
+	}
+}
+
 function describeValue(value) {
 	if (value === undefined) return '<undefined>';
 	if (value === null) return '<null>';
@@ -184,9 +195,12 @@ const APPLE_TOUCH_VERSION = APPLE_TOUCH_VERSION_RAW
 	: '';
 const ICON_SIZE = configNumber(SERVER_CONFIG.iconSize);
 const DELTA_CACHE_LIMIT = configNumber(SERVER_CONFIG.deltaCacheLimit);
-const PROXY_LOG_LEVEL = safeText(process.env.PROXY_LOG_LEVEL || SERVER_CONFIG.proxyLogLevel);
+const PROXY_LOG_LEVEL = safeText(process.env.PROXY_LOG_LEVEL || SERVER_CONFIG.proxyMiddlewareLogLevel);
 const LOG_FILE = safeText(process.env.LOG_FILE || SERVER_CONFIG.logFile);
 const ACCESS_LOG = safeText(process.env.ACCESS_LOG || SERVER_CONFIG.accessLog);
+const ACCESS_LOG_LEVEL = safeText(process.env.ACCESS_LOG_LEVEL || SERVER_CONFIG.accessLogLevel || 'all')
+	.trim()
+	.toLowerCase();
 const AUTH_USERS_FILE = safeText(SERVER_AUTH.usersFile);
 const AUTH_WHITELIST = SERVER_AUTH.whitelistSubnets;
 const AUTH_REALM = safeText(SERVER_AUTH.realm || 'openHAB Proxy');
@@ -204,7 +218,18 @@ function logMessage(message) {
 }
 
 function logAccess(message) {
-	writeLogLine(ACCESS_LOG, message);
+	if (ACCESS_LOG_LEVEL === '400+') {
+		const match = safeText(message).match(/\s(\d{3})\s/);
+		const status = match ? Number(match[1]) : NaN;
+		if (Number.isFinite(status) && status < 400) return;
+	}
+	writeLogLineFileOnly(ACCESS_LOG, message);
+}
+
+function shouldSkipAccessLog(res) {
+	if (ACCESS_LOG_LEVEL === 'all') return false;
+	if (ACCESS_LOG_LEVEL === '400+') return (res?.statusCode || 0) < 400;
+	return false;
 }
 
 function isPlainObject(value) {
@@ -412,9 +437,13 @@ function validateConfig() {
 	ensureString(USER_AGENT, 'server.userAgent', { allowEmpty: false }, errors);
 	ensureNumber(ICON_SIZE, 'server.iconSize', { min: 1 }, errors);
 	ensureNumber(DELTA_CACHE_LIMIT, 'server.deltaCacheLimit', { min: 1 }, errors);
-	ensureString(PROXY_LOG_LEVEL, 'server.proxyLogLevel', { allowEmpty: false }, errors);
+	ensureString(PROXY_LOG_LEVEL, 'server.proxyMiddlewareLogLevel', { allowEmpty: false }, errors);
 	ensureLogPath(LOG_FILE, 'server.logFile', errors);
 	ensureLogPath(ACCESS_LOG, 'server.accessLog', errors);
+	ensureString(ACCESS_LOG_LEVEL, 'server.accessLogLevel', { allowEmpty: false }, errors);
+	if (ACCESS_LOG_LEVEL !== 'all' && ACCESS_LOG_LEVEL !== '400+') {
+		errors.push(`server.accessLogLevel must be "all" or "400+" but currently is ${describeValue(ACCESS_LOG_LEVEL)}`);
+	}
 
 	if (ensureObject(SERVER_CONFIG.auth, 'server.auth', errors)) {
 		ensureReadableFile(SERVER_AUTH.usersFile, 'server.auth.usersFile', errors);
@@ -1470,6 +1499,7 @@ async function getCachedIcon(cachePath, sourcePath, sourceExt) {
 const app = express();
 app.disable('x-powered-by');
 app.use(morgan('combined', {
+	skip: (req, res) => shouldSkipAccessLog(res),
 	stream: {
 		write: (line) => logAccess(line),
 	},
