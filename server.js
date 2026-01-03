@@ -199,7 +199,6 @@ const ACCESS_LOG_LEVEL = safeText(process.env.ACCESS_LOG_LEVEL || SERVER_CONFIG.
 const AUTH_USERS_FILE = safeText(SERVER_AUTH.usersFile);
 const AUTH_WHITELIST = SERVER_AUTH.whitelistSubnets;
 const AUTH_REALM = safeText(SERVER_AUTH.realm || 'openHAB Proxy');
-const AUTH_TRUST_FORWARDED = SERVER_AUTH.trustForwardedIps === true;
 const AUTH_COOKIE_NAME = safeText(SERVER_AUTH.cookieName || 'AuthStore');
 const AUTH_COOKIE_DAYS = configNumber(SERVER_AUTH.cookieDays, 0);
 const AUTH_COOKIE_KEY = safeText(SERVER_AUTH.cookieKey || '');
@@ -455,7 +454,6 @@ function validateConfig() {
 		ensureReadableFile(SERVER_AUTH.usersFile, 'server.auth.usersFile', errors);
 		ensureCidrList(SERVER_AUTH.whitelistSubnets, 'server.auth.whitelistSubnets', { allowEmpty: true }, errors);
 		ensureString(AUTH_REALM, 'server.auth.realm', { allowEmpty: false }, errors);
-		ensureBoolean(SERVER_AUTH.trustForwardedIps, 'server.auth.trustForwardedIps', errors);
 		ensureString(AUTH_COOKIE_NAME, 'server.auth.cookieName', { allowEmpty: true }, errors);
 		ensureNumber(AUTH_COOKIE_DAYS, 'server.auth.cookieDays', { min: 0 }, errors);
 		ensureString(AUTH_COOKIE_KEY, 'server.auth.cookieKey', { allowEmpty: true }, errors);
@@ -540,6 +538,10 @@ function normalizeRemoteIp(value) {
 	if (raw.startsWith('::ffff:')) return raw.slice(7);
 	if (raw.includes(':')) return '';
 	return raw;
+}
+
+function getRemoteIp(req) {
+	return normalizeRemoteIp(req?.socket?.remoteAddress || '');
 }
 
 function ipToLong(ip) {
@@ -668,8 +670,7 @@ function getCookieValue(req, name) {
 
 function isSecureRequest(req) {
 	if (req?.secure) return true;
-	const proto = safeText(req?.headers?.['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
-	return proto === 'https';
+	return false;
 }
 
 function appendSetCookie(res, value) {
@@ -747,28 +748,6 @@ function clearAuthCookie(res) {
 	];
 	if (secure) parts.push('Secure');
 	appendSetCookie(res, parts.join('; '));
-}
-
-function getClientIps(req) {
-	const ips = [];
-	if (AUTH_TRUST_FORWARDED) {
-		const forwarded = safeText(req?.headers?.['x-forwarded-for'] || '').trim();
-		if (forwarded) {
-			for (const part of forwarded.split(',')) {
-				const ip = part.trim();
-				if (ip) ips.push(ip);
-			}
-		}
-		const real = safeText(req?.headers?.['x-real-ip'] || '').trim();
-		if (real) ips.push(real);
-	}
-	const remote = normalizeRemoteIp(req?.socket?.remoteAddress || '');
-	if (remote) ips.push(remote);
-	const unique = [];
-	for (const ip of ips) {
-		if (!unique.includes(ip)) unique.push(ip);
-	}
-	return unique;
 }
 
 function normalizeNotifyIp(value) {
@@ -1553,7 +1532,7 @@ app.use((req, res, next) => {
 });
 app.use((req, res, next) => {
 	if (Array.isArray(ALLOW_SUBNETS) && ALLOW_SUBNETS.some((entry) => isAllowAllSubnet(entry))) return next();
-	const ip = normalizeRemoteIp(req.ip || req.socket?.remoteAddress || '');
+	const ip = getRemoteIp(req);
 	if (!ip || !ipInAnySubnet(ip, ALLOW_SUBNETS)) {
 		logMessage(`Blocked request from ${ip || 'unknown'} for ${req.method} ${req.originalUrl}`);
 		res.status(403).type('text/plain').send('Forbidden');
@@ -1562,24 +1541,18 @@ app.use((req, res, next) => {
 	next();
 });
 app.use((req, res, next) => {
-	const clientIps = getClientIps(req);
-	const clientIpHeader = clientIps[0] || normalizeRemoteIp(req.ip || req.socket?.remoteAddress || '');
-	if (clientIpHeader) {
-		req.ohProxyClientIp = clientIpHeader;
-	}
+	const clientIp = getRemoteIp(req);
+	if (clientIp) req.ohProxyClientIp = clientIp;
 	if (isAuthExemptPath(req) && hasMatchingReferrer(req)) {
 		req.ohProxyAuth = 'unauthenticated';
 		req.ohProxyUser = '';
 		return next();
 	}
-	let requiresAuth = clientIps.length === 0;
-	for (const ip of clientIps) {
-		const inWhitelist = ipInAnySubnet(ip, AUTH_WHITELIST);
-		const inLan = ipInAnySubnet(ip, LAN_SUBNETS);
-		if (!inWhitelist && !inLan) {
-			requiresAuth = true;
-			break;
-		}
+	let requiresAuth = !clientIp;
+	if (clientIp) {
+		const inWhitelist = ipInAnySubnet(clientIp, AUTH_WHITELIST);
+		const inLan = ipInAnySubnet(clientIp, LAN_SUBNETS);
+		requiresAuth = !inWhitelist && !inLan;
 	}
 	if (!requiresAuth) {
 		req.ohProxyAuth = 'unauthenticated';
@@ -1595,7 +1568,7 @@ app.use((req, res, next) => {
 	let authenticatedUser = null;
 	if (user) {
 		if (!Object.prototype.hasOwnProperty.call(users, user) || users[user] !== pass) {
-			const notifyIp = clientIpHeader || normalizeRemoteIp(req.ip || req.socket?.remoteAddress || '');
+			const notifyIp = clientIp || '';
 			maybeNotifyAuthFailure(notifyIp);
 			sendAuthRequired(res);
 			return;
