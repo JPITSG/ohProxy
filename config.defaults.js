@@ -23,6 +23,8 @@ module.exports = {
 			certFile: '',
 			// TLS key file (absolute path).
 			keyFile: '',
+			// Enable HTTP/2 via ALPN (true/false).
+			http2: false,
 		},
 		// Upstream openHAB connection.
 		openhab: {

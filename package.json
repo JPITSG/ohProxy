@@ -14,7 +14,8 @@
     "compression": "^1.8.1",
     "express": "^5.2.1",
     "http-proxy-middleware": "^3.0.5",
-    "morgan": "^1.10.1"
+    "morgan": "^1.10.1",
+    "spdy": "^4.0.2"
   },
   "devDependencies": {
     "tailwindcss": "^3.4.17"

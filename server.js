@@ -10,6 +10,7 @@ const zlib = require('zlib');
 const { execFile } = require('child_process');
 const http = require('http');
 const https = require('https');
+const spdy = require('spdy');
 const crypto = require('crypto');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
@@ -178,6 +179,7 @@ const HTTPS_HOST = safeText(HTTPS_CONFIG.host);
 const HTTPS_PORT = configNumber(HTTPS_CONFIG.port);
 const HTTPS_CERT_FILE = safeText(HTTPS_CONFIG.certFile);
 const HTTPS_KEY_FILE = safeText(HTTPS_CONFIG.keyFile);
+const HTTPS_HTTP2 = typeof HTTPS_CONFIG.http2 === 'boolean' ? HTTPS_CONFIG.http2 : false;
 const ALLOW_SUBNETS = SERVER_CONFIG.allowSubnets;
 const OH_TARGET = safeText(process.env.OH_TARGET || SERVER_CONFIG.openhab?.target);
 const OH_USER = safeText(process.env.OH_USER || SERVER_CONFIG.openhab?.user || '');
@@ -2042,50 +2044,64 @@ app.use('/images', createProxyMiddleware({
 }));
 app.get('/proxy', async (req, res, next) => {
 	const raw = req.query?.url;
-	if (!raw) return next();
-	const candidate = Array.isArray(raw) ? raw[0] : raw;
-	const text = safeText(candidate).trim();
-	if (!text) return res.status(400).send('Invalid proxy target');
 
-	let target;
-	try {
-		target = new URL(text);
-	} catch {
-		let decoded = text;
-		try { decoded = decodeURIComponent(text); } catch {}
+	// External URL proxy (url= parameter)
+	if (raw) {
+		const candidate = Array.isArray(raw) ? raw[0] : raw;
+		const text = safeText(candidate).trim();
+		if (!text) return res.status(400).send('Invalid proxy target');
+
+		let target;
 		try {
-			target = new URL(decoded);
+			target = new URL(text);
 		} catch {
+			let decoded = text;
+			try { decoded = decodeURIComponent(text); } catch {}
+			try {
+				target = new URL(decoded);
+			} catch {
+				return res.status(400).send('Invalid proxy target');
+			}
+		}
+
+		if (!['http:', 'https:'].includes(target.protocol)) {
 			return res.status(400).send('Invalid proxy target');
 		}
+		if (!isProxyTargetAllowed(target, PROXY_ALLOWLIST)) {
+			return res.status(403).send('Proxy target not allowed');
+		}
+
+		const headers = {};
+		const accept = safeText(req.headers.accept);
+		if (accept) headers.Accept = accept;
+
+		try {
+			const result = await fetchBinaryFromUrl(target.toString(), headers);
+			res.status(result.status || 502);
+			if (result.contentType) res.setHeader('Content-Type', result.contentType);
+			res.setHeader('Cache-Control', 'no-store');
+			res.send(result.body);
+		} catch (err) {
+			logMessage(`Direct proxy failed for ${target.toString()}: ${err.message || err}`);
+			res.status(502).send('Proxy error');
+		}
+		return;
 	}
 
-	if (!['http:', 'https:'].includes(target.protocol)) {
-		return res.status(400).send('Invalid proxy target');
-	}
-	if (!isProxyTargetAllowed(target, PROXY_ALLOWLIST)) {
-		return res.status(403).send('Proxy target not allowed');
-	}
-
-	const headers = {};
-	const accept = safeText(req.headers.accept);
-	if (accept) headers.Accept = accept;
-
+	// openHAB internal proxy (sitemap/widgetId images, etc.)
+	// Use buffered fetch to avoid HTTP/2 streaming cutoff issues with spdy
+	const proxyPath = `/proxy${req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''}`;
 	try {
-		const result = await fetchBinaryFromUrl(target.toString(), headers);
+		const result = await fetchOpenhabBinary(proxyPath);
 		res.status(result.status || 502);
 		if (result.contentType) res.setHeader('Content-Type', result.contentType);
 		res.setHeader('Cache-Control', 'no-store');
 		res.send(result.body);
 	} catch (err) {
-		logMessage(`Direct proxy failed for ${target.toString()}: ${err.message || err}`);
+		logMessage(`openHAB proxy failed for ${proxyPath}: ${err.message || err}`);
 		res.status(502).send('Proxy error');
 	}
 });
-app.use('/proxy', createProxyMiddleware({
-	...proxyCommon,
-	pathRewrite: (path) => `/proxy${path}`,
-}));
 
 // --- Static modern UI ---
 app.use(express.static(PUBLIC_DIR, {
@@ -2142,14 +2158,17 @@ function startHttpsServer() {
 		logMessage(`Failed to read HTTPS credentials: ${err.message || err}`);
 		process.exit(1);
 	}
-	const server = https.createServer(tlsOptions, app);
+	const server = HTTPS_HTTP2
+		? spdy.createServer(tlsOptions, app)
+		: https.createServer(tlsOptions, app);
 	server.on('error', (err) => {
 		logMessage(`HTTPS server error: ${err.message || err}`);
 		process.exit(1);
 	});
 	server.listen(HTTPS_PORT, HTTPS_HOST || undefined, () => {
 		const host = HTTPS_HOST || '0.0.0.0';
-		logMessage(`ohProxy listening (HTTPS): https://${host}:${HTTPS_PORT}`);
+		const proto = HTTPS_HTTP2 ? 'h2' : 'https';
+		logMessage(`ohProxy listening (HTTPS${HTTPS_HTTP2 ? '+HTTP/2' : ''}): ${proto}://${host}:${HTTPS_PORT}`);
 	});
 }
 
