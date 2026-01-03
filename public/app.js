@@ -515,24 +515,13 @@ function connectionStatusInfo() {
 	const headerIp = safeText(state.proxyClientIp).trim();
 	const headerAuth = safeText(state.proxyAuth).trim().toLowerCase();
 	const headerUser = safeText(state.proxyUser).trim();
-	if (headerIp) {
-		if (ipv4ToLong(headerIp) === null) {
-			return { label: 'Connected · Unauthenticated', isError: true };
-		}
-		if (ipInAnySubnet(headerIp, LAN_SUBNETS)) {
-			return { label: 'Connected · LAN', isError: false };
-		}
-		if (headerAuth === 'authenticated') {
-			return { label: headerUser ? `Connected · ${headerUser}` : 'Connected', isError: false };
-		}
-		return { label: 'Connected · Unauthenticated', isError: true };
+	if (headerAuth === 'authenticated' && headerUser) {
+		return { label: `Connected · ${headerUser}`, isError: false };
 	}
-
-	const host = safeText(window.location.hostname).trim();
-	if (ipInAnySubnet(host, LAN_SUBNETS)) {
+	if (headerIp && ipInAnySubnet(headerIp, LAN_SUBNETS)) {
 		return { label: 'Connected · LAN', isError: false };
 	}
-	return { label: 'Connected · Unauthenticated', isError: true };
+	return { label: 'Connected · LAN', isError: false };
 }
 
 function updateProxyInfoFromResponse(res) {

@@ -41,6 +41,15 @@ module.exports = {
 		logFile: '',
 		// Access log file path.
 		accessLog: '',
+		// Basic auth settings.
+		auth: {
+			// Basic auth users file.
+			usersFile: '',
+			// Subnets that bypass auth.
+			whitelistSubnets: [],
+			// Basic auth realm label.
+			realm: 'openHAB Proxy',
+		},
 		// Background worker timing.
 		backgroundTasks: {
 			// Sitemap refresh interval.

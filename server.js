@@ -154,6 +154,7 @@ function hashString(value) {
 
 const USER_CONFIG = loadUserConfig();
 const SERVER_CONFIG = USER_CONFIG.server || {};
+const SERVER_AUTH = SERVER_CONFIG.auth || {};
 const CLIENT_CONFIG = USER_CONFIG.client || {};
 const RELAY_CONFIG = USER_CONFIG.relay || {};
 const PROXY_ALLOWLIST = normalizeProxyAllowlist(USER_CONFIG.proxyAllowlist);
@@ -179,6 +180,9 @@ const DELTA_CACHE_LIMIT = configNumber(SERVER_CONFIG.deltaCacheLimit);
 const PROXY_LOG_LEVEL = safeText(process.env.PROXY_LOG_LEVEL || SERVER_CONFIG.proxyLogLevel);
 const LOG_FILE = safeText(process.env.LOG_FILE || SERVER_CONFIG.logFile);
 const ACCESS_LOG = safeText(process.env.ACCESS_LOG || SERVER_CONFIG.accessLog);
+const AUTH_USERS_FILE = safeText(SERVER_AUTH.usersFile);
+const AUTH_WHITELIST = SERVER_AUTH.whitelistSubnets;
+const AUTH_REALM = safeText(SERVER_AUTH.realm || 'openHAB Proxy');
 const RELAY_VERSION = safeText(RELAY_CONFIG.version);
 const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(
@@ -376,6 +380,12 @@ function validateConfig() {
 	ensureLogPath(LOG_FILE, 'server.logFile', errors);
 	ensureLogPath(ACCESS_LOG, 'server.accessLog', errors);
 
+	if (ensureObject(SERVER_CONFIG.auth, 'server.auth', errors)) {
+		ensureReadableFile(SERVER_AUTH.usersFile, 'server.auth.usersFile', errors);
+		ensureCidrList(SERVER_AUTH.whitelistSubnets, 'server.auth.whitelistSubnets', { allowEmpty: true }, errors);
+		ensureString(AUTH_REALM, 'server.auth.realm', { allowEmpty: false }, errors);
+	}
+
 	if (ensureObject(SERVER_CONFIG.backgroundTasks, 'server.backgroundTasks', errors)) {
 		ensureNumber(SITEMAP_REFRESH_MS, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
 	}
@@ -489,6 +499,93 @@ function ipInAnySubnet(ip, subnets) {
 		if (ipInSubnet(ip, cidr)) return true;
 	}
 	return false;
+}
+
+function parseBasicAuthHeader(value) {
+	if (!value) return [null, null];
+	if (!/^basic /i.test(value)) return [null, null];
+	const encoded = value.slice(6).trim();
+	if (!encoded) return [null, null];
+	let decoded = '';
+	try {
+		decoded = Buffer.from(encoded, 'base64').toString('utf8');
+	} catch {
+		return [null, null];
+	}
+	const idx = decoded.indexOf(':');
+	if (idx === -1) return [decoded, ''];
+	return [decoded.slice(0, idx), decoded.slice(idx + 1)];
+}
+
+function getBasicAuthCredentials(req) {
+	if (!req || !req.headers) return [null, null];
+	const header = req.headers.authorization || req.headers.Authorization;
+	return parseBasicAuthHeader(header);
+}
+
+let authUsersCache = null;
+let authUsersMtime = 0;
+
+function loadAuthUsers(pathname) {
+	const filePath = safeText(pathname).trim();
+	if (!filePath) return null;
+	let stat;
+	try {
+		stat = fs.statSync(filePath);
+	} catch {
+		return null;
+	}
+	const mtime = stat.mtimeMs || stat.mtime.getTime();
+	if (authUsersCache && authUsersMtime === mtime) return authUsersCache;
+	let content = '';
+	try {
+		content = fs.readFileSync(filePath, 'utf8');
+	} catch {
+		return null;
+	}
+	const users = {};
+	const lines = content.split(/\r?\n/);
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
+		let pos = trimmed.indexOf(':');
+		if (pos === -1) pos = trimmed.indexOf('=');
+		if (pos === -1) continue;
+		const user = trimmed.slice(0, pos).trim();
+		const passPart = trimmed.slice(pos + 1).trim();
+		const comma = passPart.indexOf(',');
+		const pass = comma === -1 ? passPart : passPart.slice(0, comma).trim();
+		if (!user) continue;
+		users[user] = pass;
+	}
+	authUsersCache = users;
+	authUsersMtime = mtime;
+	return users;
+}
+
+function getClientIps(req) {
+	const ips = [];
+	const forwarded = safeText(req?.headers?.['x-forwarded-for'] || '').trim();
+	if (forwarded) {
+		for (const part of forwarded.split(',')) {
+			const ip = part.trim();
+			if (ip) ips.push(ip);
+		}
+	}
+	const real = safeText(req?.headers?.['x-real-ip'] || '').trim();
+	if (real) ips.push(real);
+	const remote = normalizeRemoteIp(req?.socket?.remoteAddress || '');
+	if (remote) ips.push(remote);
+	const unique = [];
+	for (const ip of ips) {
+		if (!unique.includes(ip)) unique.push(ip);
+	}
+	return unique;
+}
+
+function sendAuthRequired(res) {
+	res.setHeader('WWW-Authenticate', `Basic realm="${AUTH_REALM}"`);
+	res.status(401).type('text/plain').send('Unauthorized');
 }
 
 const configErrors = validateConfig();
@@ -675,26 +772,19 @@ function extractHostIp(host) {
 }
 
 function getInitialStatusLabel(req) {
-	const headerIp = normalizeRequestIp(req?.headers?.['x-ohproxy-clientip'] || '');
-	const headerAuth = safeText(req?.headers?.['x-ohproxy-auth'] || '').trim().toLowerCase();
-	const headerUser = safeText(req?.headers?.['x-ohproxy-user'] || '').trim();
-
-	if (headerIp) {
-		if (ipv4ToLong(headerIp) === null) return 'Connected · Unauthenticated';
-		if (ipInAnySubnet(headerIp, LAN_SUBNETS)) return 'Connected · LAN';
-		if (headerAuth === 'authenticated') {
-			return headerUser ? `Connected · ${headerUser}` : 'Connected';
-		}
-		return 'Connected · Unauthenticated';
+	const authState = safeText(req?.ohProxyAuth || '').trim().toLowerCase();
+	const authUser = safeText(req?.ohProxyUser || '').trim();
+	if (authState === 'authenticated' && authUser) {
+		return `Connected · ${authUser}`;
 	}
 
-	const hostIp = extractHostIp(req?.headers?.host || '') || safeText(req?.hostname || '');
-	if (hostIp && ipInAnySubnet(hostIp, LAN_SUBNETS)) return 'Connected · LAN';
-	if (headerAuth === 'authenticated') return headerUser ? `Connected · ${headerUser}` : 'Connected';
+	const clientIp = normalizeRequestIp(req?.ohProxyClientIp || '');
+	if (clientIp && ipInAnySubnet(clientIp, LAN_SUBNETS)) return 'Connected · LAN';
 
 	const remote = normalizeRequestIp(req?.socket?.remoteAddress || '');
 	if (remote && ipInAnySubnet(remote, LAN_SUBNETS)) return 'Connected · LAN';
-	return 'Connected · Unauthenticated';
+
+	return 'Connected · LAN';
 }
 
 function getInitialStatusInfo(req) {
@@ -1239,6 +1329,42 @@ app.use((req, res, next) => {
 		res.status(403).type('text/plain').send('Forbidden');
 		return;
 	}
+	next();
+});
+app.use((req, res, next) => {
+	const clientIps = getClientIps(req);
+	const clientIpHeader = clientIps[0] || normalizeRemoteIp(req.ip || req.socket?.remoteAddress || '');
+	if (clientIpHeader) {
+		res.setHeader('X-OhProxy-ClientIP', clientIpHeader);
+		req.ohProxyClientIp = clientIpHeader;
+	}
+	let requiresAuth = clientIps.length === 0;
+	for (const ip of clientIps) {
+		if (!ipInAnySubnet(ip, AUTH_WHITELIST)) {
+			requiresAuth = true;
+			break;
+		}
+	}
+	if (!requiresAuth) {
+		res.setHeader('X-OhProxy-Auth', 'unauthenticated');
+		req.ohProxyAuth = 'unauthenticated';
+		req.ohProxyUser = '';
+		return next();
+	}
+	const users = loadAuthUsers(AUTH_USERS_FILE);
+	if (!users || Object.keys(users).length === 0) {
+		res.status(500).type('text/plain').send('Auth config unavailable');
+		return;
+	}
+	const [user, pass] = getBasicAuthCredentials(req);
+	if (!user || !Object.prototype.hasOwnProperty.call(users, user) || users[user] !== pass) {
+		sendAuthRequired(res);
+		return;
+	}
+	res.setHeader('X-OhProxy-Auth', 'authenticated');
+	req.ohProxyAuth = 'authenticated';
+	req.ohProxyUser = user;
+	res.setHeader('X-OhProxy-User', safeText(user).replace(/[\r\n]/g, ''));
 	next();
 });
 app.use(compression());
