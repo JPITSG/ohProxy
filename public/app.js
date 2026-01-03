@@ -2911,6 +2911,11 @@ function noteActivity() {
 			}
 			resumeReloadArmed = false;
 			setResumeResetUi(false);
+			// Immediately refresh and reset to active polling when returning
+			if (!state.isPaused) {
+				noteActivity();
+				refresh(false);
+			}
 		});
 	window.addEventListener('popstate', (event) => {
 		const next = event.state;

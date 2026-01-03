@@ -203,6 +203,7 @@ const ACCESS_LOG = safeText(process.env.ACCESS_LOG || SERVER_CONFIG.accessLog);
 const ACCESS_LOG_LEVEL = safeText(process.env.ACCESS_LOG_LEVEL || SERVER_CONFIG.accessLogLevel || 'all')
 	.trim()
 	.toLowerCase();
+const SLOW_QUERY_MS = configNumber(SERVER_CONFIG.slowQueryMs, 0);
 const AUTH_USERS_FILE = safeText(SERVER_AUTH.usersFile);
 const AUTH_WHITELIST = SERVER_AUTH.whitelistSubnets;
 const AUTH_REALM = safeText(SERVER_AUTH.realm || 'openHAB Proxy');
@@ -503,6 +504,7 @@ function validateConfig() {
 	if (ACCESS_LOG_LEVEL !== 'all' && ACCESS_LOG_LEVEL !== '400+') {
 		errors.push(`server.accessLogLevel must be "all" or "400+" but currently is ${describeValue(ACCESS_LOG_LEVEL)}`);
 	}
+	ensureNumber(SLOW_QUERY_MS, 'server.slowQueryMs', { min: 0 }, errors);
 
 	if (ensureObject(SERVER_CONFIG.auth, 'server.auth', errors)) {
 		ensureReadableFile(SERVER_AUTH.usersFile, 'server.auth.usersFile', errors);
@@ -1675,6 +1677,21 @@ app.use(morgan('combined', {
 		write: (line) => logAccess(line),
 	},
 }));
+
+// Slow query logging middleware
+if (SLOW_QUERY_MS > 0) {
+	app.use((req, res, next) => {
+		const start = Date.now();
+		res.once('finish', () => {
+			const duration = Date.now() - start;
+			if (duration >= SLOW_QUERY_MS) {
+				logMessage(`Slow request (${duration}ms): ${req.method} ${req.originalUrl}`);
+			}
+		});
+		next();
+	});
+}
+
 app.use((req, res, next) => {
 	if (!configRestartScheduled) {
 		const currentMtime = readConfigLocalMtime();

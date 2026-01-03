@@ -114,6 +114,8 @@ module.exports = {
 		accessLog: '',
 		// Access log verbosity (all or 400+).
 		accessLogLevel: 'all',
+		// Slow query threshold (ms; 0 disables; logs requests exceeding this duration).
+		slowQueryMs: 0,
 		// Background worker timing.
 		backgroundTasks: {
 			// Sitemap refresh interval (ms; >=1000).
