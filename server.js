@@ -172,7 +172,7 @@ const ALLOW_SUBNETS = SERVER_CONFIG.allowSubnets;
 const OH_TARGET = safeText(process.env.OH_TARGET || SERVER_CONFIG.openhab?.target);
 const OH_USER = safeText(process.env.OH_USER || SERVER_CONFIG.openhab?.user || '');
 const OH_PASS = safeText(process.env.OH_PASS || SERVER_CONFIG.openhab?.pass || '');
-const ICON_VERSION = safeText(process.env.ICON_VERSION || SERVER_CONFIG.iconVersion);
+const ICON_VERSION = safeText(process.env.ICON_VERSION || SERVER_CONFIG.assets?.iconVersion);
 const USER_AGENT = safeText(process.env.USER_AGENT || SERVER_CONFIG.userAgent);
 const ASSET_JS_VERSION = safeText(SERVER_CONFIG.assets?.jsVersion);
 const ASSET_CSS_VERSION = safeText(SERVER_CONFIG.assets?.cssVersion);
@@ -428,9 +428,9 @@ function validateConfig() {
 		} else if (!/^(v\d+|\d+)$/i.test(appleRaw.trim())) {
 			errors.push(`server.assets.appleTouchIconVersion must be digits or v123 but currently is ${describeValue(APPLE_TOUCH_VERSION_RAW)}`);
 		}
+		ensureVersion(ICON_VERSION, 'server.assets.iconVersion', errors);
 	}
 
-	ensureVersion(ICON_VERSION, 'server.iconVersion', errors);
 	ensureString(USER_AGENT, 'server.userAgent', { allowEmpty: false }, errors);
 	ensureNumber(ICON_SIZE, 'server.iconSize', { min: 1 }, errors);
 	ensureNumber(DELTA_CACHE_LIMIT, 'server.deltaCacheLimit', { min: 1 }, errors);
