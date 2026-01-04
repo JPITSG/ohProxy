@@ -267,11 +267,16 @@ function runPageFadeIn(token) {
 	if (!els.grid || state.isSlim) return;
 	if (token !== pageFadeToken) return;
 	els.grid.classList.remove('page-fade-out');
-	void els.grid.offsetWidth;
-	els.grid.classList.add('page-fade-in');
-	setTimeout(() => {
-		if (token === pageFadeToken) els.grid.classList.remove('page-fade-in');
-	}, PAGE_FADE_IN_MS);
+	// Double rAF ensures browser has painted before starting fade-in
+	requestAnimationFrame(() => {
+		requestAnimationFrame(() => {
+			if (token !== pageFadeToken) return;
+			els.grid.classList.add('page-fade-in');
+			setTimeout(() => {
+				if (token === pageFadeToken) els.grid.classList.remove('page-fade-in');
+			}, PAGE_FADE_IN_MS);
+		});
+	});
 }
 
 function setStatus(msg) {

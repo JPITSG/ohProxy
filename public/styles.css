@@ -448,16 +448,16 @@ body.image-viewer-open {
 #grid .glass {
 	border-radius: 0 !important;
 }
-#grid.page-fade-out,
-#grid.page-fade-in {
-	transition: opacity .25s ease;
-	will-change: opacity;
+#grid {
+	opacity: 1;
 }
 #grid.page-fade-out {
 	opacity: 0;
+	transition: opacity .25s ease;
 }
 #grid.page-fade-in {
 	opacity: 1;
+	transition: opacity .25s ease;
 }
 html.error-state #grid {
 	pointer-events: none;
