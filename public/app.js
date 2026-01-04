@@ -206,6 +206,7 @@ function isTouchDevice() {
 function showResumeSpinner(show) {
 	if (!els.resumeSpinner) return;
 	els.resumeSpinner.classList.toggle('active', show);
+	document.body.classList.toggle('resume-spinner-active', show);
 }
 
 function waitForConnection(timeoutMs = 0) {
@@ -3318,6 +3319,9 @@ function restoreNormalPolling() {
 		// Show spinner on touch devices while resuming
 		const isTouch = isTouchDevice();
 		if (isTouch) {
+			// Clear any stale loading status
+			clearLoadingStatusTimer();
+			setStatus('');
 			// Load and render cached home page under the spinner
 			const snapshot = loadHomeSnapshot();
 			if (snapshot) {

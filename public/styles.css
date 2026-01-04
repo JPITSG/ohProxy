@@ -852,3 +852,7 @@ body.theme-light .resume-spinner-ring {
 	border-color: rgba(0, 0, 0, 0.1);
 	border-top-color: rgba(99, 102, 241, 0.9);
 }
+/* Hide status text when spinner is active */
+body.resume-spinner-active #status {
+	display: none !important;
+}
