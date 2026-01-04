@@ -343,6 +343,7 @@ function releaseBounce() {
 }
 
 function handleBounceTouchStart(e) {
+	if (state.isSlim) return;
 	if (!shouldHandleBounce(e.target)) return;
 	const touch = e.touches && e.touches[0];
 	if (!touch) return;
@@ -352,6 +353,7 @@ function handleBounceTouchStart(e) {
 }
 
 function handleBounceTouchMove(e) {
+	if (state.isSlim) return;
 	if (!bounceTouch.active) return;
 	const touch = e.touches && e.touches[0];
 	if (!touch) return;
@@ -371,6 +373,7 @@ function handleBounceTouchMove(e) {
 }
 
 function handleBounceTouchEnd() {
+	if (state.isSlim) return;
 	if (!bounceTouch.active) return;
 	bounceTouch.active = false;
 	bounceTouch.startY = 0;
