@@ -1255,7 +1255,7 @@ function handleWsConnection(ws, req) {
 	logMessage(`[WS] Client connected from ${clientIp}, total: ${wss.clients.size}`);
 
 	ws.isAlive = true;
-	ws.clientState = { focused: null };  // null = uninitialized
+	ws.clientState = { focused: true };  // Assume focused on connect; client will send actual state
 
 	// Send welcome message
 	try {
@@ -1274,11 +1274,13 @@ function handleWsConnection(ws, req) {
 			if (msg.event === 'clientState' && msg.data) {
 				if (typeof msg.data.focused === 'boolean') {
 					const prevState = ws.clientState.focused;
-					ws.clientState.focused = msg.data.focused;
-					const prevLabel = prevState === null ? 'uninitialized' : (prevState ? 'focused' : 'unfocused');
-					const newLabel = msg.data.focused ? 'focused' : 'unfocused';
-					logMessage(`[WS] Client ${clientIp} focus: ${prevLabel} -> ${newLabel}`);
-					adjustPollingForFocus();
+					if (prevState !== msg.data.focused) {
+						ws.clientState.focused = msg.data.focused;
+						const prevLabel = prevState === null ? 'uninitialized' : (prevState ? 'focused' : 'unfocused');
+						const newLabel = msg.data.focused ? 'focused' : 'unfocused';
+						logMessage(`[WS] Client ${clientIp} focus: ${prevLabel} -> ${newLabel}`);
+						adjustPollingForFocus();
+					}
 				}
 			}
 		} catch {}
@@ -1286,6 +1288,8 @@ function handleWsConnection(ws, req) {
 
 	ws.on('close', (code, reason) => {
 		logMessage(`[WS] Client disconnected from ${clientIp}, code: ${code}, reason: ${reason || 'none'}, remaining: ${wss.clients.size}`);
+		// Clear focus state before adjusting (ensures not counted if still in wss.clients)
+		ws.clientState.focused = null;
 		stopWsPushIfUnneeded();
 		adjustPollingForFocus();
 	});
@@ -1560,6 +1564,11 @@ function adjustPollingForFocus() {
 		const oldInterval = currentPollingIntervalMs;
 		currentPollingIntervalMs = newInterval;
 		logMessage(`[Polling] Interval changed: ${oldInterval}ms -> ${newInterval}ms (${countFocusedClients()} focused clients)`);
+		// Reschedule immediately with new interval
+		if (pollingTimer) {
+			clearTimeout(pollingTimer);
+			pollingTimer = setTimeout(pollItems, newInterval);
+		}
 	}
 }
 
