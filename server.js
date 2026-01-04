@@ -656,8 +656,9 @@ function validateConfig() {
 function normalizeRemoteIp(value) {
 	const raw = safeText(value).trim();
 	if (!raw) return '';
+	// Convert IPv4-mapped IPv6 (::ffff:192.168.1.1) to plain IPv4
 	if (raw.startsWith('::ffff:')) return raw.slice(7);
-	if (raw.includes(':')) return '';
+	// Preserve IPv6 addresses (subnet checks will fail but lockouts will be per-IP)
 	return raw;
 }
 
@@ -1285,7 +1286,12 @@ function handleWsConnection(ws, req) {
 					adjustPollingForFocus();
 				}
 			}
-		} catch {}
+		} catch (err) {
+			// Only log non-parse errors (parse errors are expected for invalid/malformed messages)
+			if (!(err instanceof SyntaxError)) {
+				logMessage(`[WS] Message handler error from ${clientIp}: ${err.message || err}`);
+			}
+		}
 	});
 
 	ws.on('close', (code, reason) => {
@@ -1573,6 +1579,7 @@ function stopAtmosphereIfUnneeded() {
 // --- Polling Mode ---
 let pollingTimer = null;
 let pollingActive = false;
+let pollingGeneration = 0;  // Incremented on each start to detect stale poll callbacks
 let currentPollingIntervalMs = null;
 
 function countFocusedClients() {
@@ -1623,9 +1630,15 @@ async function fetchAllItems() {
 async function pollItems() {
 	if (!pollingActive || wss.clients.size === 0) return;
 
+	// Capture generation to detect if polling was stopped/restarted during await
+	const gen = pollingGeneration;
+
 	const startTime = Date.now();
 	const items = await fetchAllItems();
 	const elapsed = Date.now() - startTime;
+
+	// If polling was stopped/restarted during fetch, abort to prevent duplicate chains
+	if (gen !== pollingGeneration) return;
 
 	// Log slow polling requests
 	if (liveConfig.slowQueryMs > 0 && elapsed > liveConfig.slowQueryMs) {
@@ -1651,6 +1664,7 @@ async function pollItems() {
 function startPolling() {
 	if (pollingActive) return;
 	pollingActive = true;
+	pollingGeneration++;  // Invalidate any in-flight poll callbacks
 	const newInterval = getEffectivePollingInterval();
 	if (currentPollingIntervalMs !== null && currentPollingIntervalMs !== newInterval) {
 		logMessage(`[Polling] Interval changed: ${currentPollingIntervalMs}ms -> ${newInterval}ms (${countFocusedClients()} focused clients)`);
@@ -1669,6 +1683,9 @@ function stopPolling() {
 		pollingTimer = null;
 	}
 	stopItemStateCleanup();
+	// Clear state maps to free memory when no clients connected
+	itemStates.clear();
+	lastSeenItems.clear();
 }
 
 // --- Generic WS Push Control ---
