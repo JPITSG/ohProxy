@@ -860,9 +860,28 @@ function normalizeMediaUrl(url) {
 	return stripLeadingSlash(url);
 }
 
-function imageWidgetUrl(widget) {
+function parseMjpegUrl(raw) {
+	const text = safeText(raw).trim();
+	if (!text) return { url: '', isMjpeg: false };
+	const prefix = 'mjpeg://';
+	if (text.toLowerCase().startsWith(prefix)) {
+		return { url: text.slice(prefix.length), isMjpeg: true };
+	}
+	return { url: text, isMjpeg: false };
+}
+
+function getImageSourceInfo(widget) {
 	const labelUrl = safeText(widget?.label || '').trim();
-	return labelUrl ? proxyImageUrl(labelUrl) : (widget?.url || widget?.link);
+	if (labelUrl) {
+		const parsed = parseMjpegUrl(labelUrl);
+		const url = parsed.isMjpeg ? parsed.url : proxyImageUrl(parsed.url);
+		return { url, isMjpeg: parsed.isMjpeg };
+	}
+	return { url: widget?.url || widget?.link || '', isMjpeg: false };
+}
+
+function imageWidgetUrl(widget) {
+	return getImageSourceInfo(widget).url;
 }
 
 function proxyImageUrl(url) {
@@ -1008,7 +1027,9 @@ function processImageQueue() {
 	imgEl._ohLoading = true;
 	const url = entry.url;
 	const refreshMs = entry.refreshMs;
+	const isMjpeg = imgEl.dataset.mjpeg === 'true';
 	let ms = Number(refreshMs);
+	if (isMjpeg) ms = 0;
 	if (state.isSlim && Number.isFinite(ms) && ms > 0 && ms < MIN_IMAGE_REFRESH_MS) {
 		ms = MIN_IMAGE_REFRESH_MS;
 	}
@@ -1027,7 +1048,7 @@ function processImageQueue() {
 		if (Number.isFinite(ms) && ms > 0) {
 			const update = () => {
 				const freshUrl = resolveImageUrl(imgEl, url);
-				imgEl.src = withCacheBust(freshUrl);
+				imgEl.src = isMjpeg ? freshUrl : withCacheBust(freshUrl);
 				if (imageResizeEpoch) imgEl.dataset.resizeEpoch = String(imageResizeEpoch);
 			};
 			const timer = setInterval(update, ms);
@@ -1050,7 +1071,7 @@ function processImageQueue() {
 	if (IMAGE_LOAD_TIMEOUT_MS > 0) {
 		timeoutId = setTimeout(finish, IMAGE_LOAD_TIMEOUT_MS);
 	}
-	imgEl.src = withCacheBust(resolved);
+	imgEl.src = isMjpeg ? resolved : withCacheBust(resolved);
 	if (imageResizeEpoch) imgEl.dataset.resizeEpoch = String(imageResizeEpoch);
 }
 
@@ -1087,6 +1108,7 @@ let imageViewerUrl = '';
 let imageViewerRefreshMs = null;
 let imageViewerInitialLoadPending = false;
 let imageViewerFitMode = 'real';
+let imageViewerIsMjpeg = false;
 let imageResizeEpoch = 0;
 let imageResizeTimer = null;
 let imageScrollTimer = null;
@@ -1106,7 +1128,7 @@ function snapshotHistoryState() {
 	};
 }
 
-function pushImageViewerHistory(url, refreshMs) {
+function pushImageViewerHistory(url, refreshMs, isMjpeg) {
 	if (!window.history) return;
 	const pageUrl = state.pageUrl;
 	if (!pageUrl) return;
@@ -1118,6 +1140,7 @@ function pushImageViewerHistory(url, refreshMs) {
 		imageViewer: {
 			url: nextUrl,
 			refreshMs: Number.isFinite(Number(refreshMs)) ? Number(refreshMs) : null,
+			mjpeg: !!isMjpeg,
 		},
 	};
 	history.pushState(payload, '', window.location.pathname);
@@ -1191,6 +1214,7 @@ function openImageViewer(url, refreshMs, options = {}) {
 	ensureImageViewer();
 	if (!imageViewer || !imageViewerImg) return;
 	imageViewerFitMode = 'real';
+	imageViewerIsMjpeg = !!options.mjpeg;
 	setImageViewerZoom(false);
 	imageViewerInitialLoadPending = true;
 	imageViewer.classList.add('loading');
@@ -1199,7 +1223,7 @@ function openImageViewer(url, refreshMs, options = {}) {
 	updateImageViewerFrameSize();
 	setImageViewerSource(target, refreshMs);
 	if (!options.skipHistory) {
-		pushImageViewerHistory(target, refreshMs);
+		pushImageViewerHistory(target, refreshMs, imageViewerIsMjpeg);
 	}
 }
 
@@ -1213,6 +1237,7 @@ function closeImageViewer() {
 	clearImageViewerTimer();
 	imageViewerUrl = '';
 	imageViewerRefreshMs = null;
+	imageViewerIsMjpeg = false;
 	if (imageViewerImg) {
 		imageViewerImg.removeAttribute('src');
 	}
@@ -1239,13 +1264,14 @@ function setImageViewerSource(url, refreshMs) {
 	imageViewerUrl = url;
 	imageViewerRefreshMs = refreshMs;
 	let ms = Number(refreshMs);
+	if (imageViewerIsMjpeg) ms = 0;
 	if (state.isSlim && Number.isFinite(ms) && ms > 0 && ms < MIN_IMAGE_REFRESH_MS) {
 		ms = MIN_IMAGE_REFRESH_MS;
 	}
 	const update = () => {
 		if (!imageViewerImg) return;
 		const resolved = resolveImageUrl(imageViewerImg, url);
-		imageViewerImg.src = withCacheBust(resolved);
+		imageViewerImg.src = imageViewerIsMjpeg ? resolved : withCacheBust(resolved);
 	};
 	const start = () => {
 		update();
@@ -1861,7 +1887,9 @@ function getWidgetRenderInfo(w, afterImage) {
 	const mapping = normalizeMapping(w?.mapping);
 	const pageLink = widgetPageLink(w);
 	const labelParts = splitLabelState(label);
-	const mediaUrl = isImage ? normalizeMediaUrl(imageWidgetUrl(w)) : '';
+	const imageInfo = isImage ? getImageSourceInfo(w) : { url: '', isMjpeg: false };
+	const mediaUrl = isImage ? normalizeMediaUrl(imageInfo.url) : '';
+	const mediaIsMjpeg = isImage ? imageInfo.isMjpeg : false;
 	const mappingSig = mapping.map((m) => `${m.command}:${m.label}`).join('|');
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
@@ -1876,6 +1904,7 @@ function getWidgetRenderInfo(w, afterImage) {
 		pageLink || '',
 		mappingSig,
 		mediaUrl,
+		mediaIsMjpeg ? 'mjpeg' : '',
 		safeText(w?.refresh ?? ''),
 		afterImage ? 'after' : '',
 		state.isSlim ? 'slim' : '',
@@ -1899,6 +1928,7 @@ function getWidgetRenderInfo(w, afterImage) {
 		pageLink,
 		labelParts,
 		mediaUrl,
+		mediaIsMjpeg,
 		signature,
 	};
 }
@@ -1935,6 +1965,7 @@ function updateCard(card, w, afterImage, info) {
 		pageLink,
 		labelParts,
 		mediaUrl,
+		mediaIsMjpeg,
 		signature,
 	} = data;
 
@@ -2046,10 +2077,14 @@ function updateCard(card, w, afterImage, info) {
 		imgEl.onclick = state.isSlim ? null : (e) => {
 			e.preventDefault();
 			e.stopPropagation();
-			openImageViewer(imgEl.dataset.mediaUrl || mediaUrl, w?.refresh);
+			openImageViewer(
+				imgEl.dataset.mediaUrl || mediaUrl,
+				mediaIsMjpeg ? 0 : w?.refresh,
+				{ mjpeg: mediaIsMjpeg }
+			);
 		};
 
-		const refreshKey = safeText(w?.refresh ?? '');
+		const refreshKey = mediaIsMjpeg ? 'mjpeg' : safeText(w?.refresh ?? '');
 		const refreshChanged = imgEl.dataset.refreshMs !== refreshKey;
 		if (refreshChanged) imgEl.dataset.refreshMs = refreshKey;
 
@@ -2063,8 +2098,13 @@ function updateCard(card, w, afterImage, info) {
 		} else {
 			card.classList.remove('image-loading');
 		}
+		if (mediaIsMjpeg) {
+			imgEl.dataset.mjpeg = 'true';
+		} else {
+			delete imgEl.dataset.mjpeg;
+		}
 		if (urlChanged || refreshChanged || imgEl.dataset.loaded !== 'true') {
-			setupImage(imgEl, mediaUrl, w?.refresh);
+			setupImage(imgEl, mediaUrl, mediaIsMjpeg ? 0 : w?.refresh);
 		}
 		return true;
 	}
@@ -3249,7 +3289,7 @@ function restoreNormalPolling() {
 			openImageViewer(
 				next.imageViewer.url,
 				next.imageViewer.refreshMs,
-				{ skipHistory: true }
+				{ skipHistory: true, mjpeg: !!next.imageViewer.mjpeg }
 			);
 			return;
 		}
