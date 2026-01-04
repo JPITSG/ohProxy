@@ -284,6 +284,100 @@ function scrollToTop() {
 	}
 }
 
+const BOUNCE_MAX_PX = 36;
+const BOUNCE_SCALE = 0.35;
+const BOUNCE_RETURN_MS = 180;
+const BOUNCE_HOLD_MS = 40;
+let bounceResetTimer = null;
+let bounceClearTimer = null;
+const bounceTouch = {
+	active: false,
+	startY: 0,
+	lastY: 0,
+};
+
+function getScrollState() {
+	const scroller = document.scrollingElement || document.documentElement;
+	if (!scroller) return { top: 0, max: 0, atTop: true, atBottom: true };
+	const top = scroller.scrollTop || 0;
+	const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+	return {
+		top,
+		max,
+		atTop: top <= 0,
+		atBottom: top >= max - 1,
+	};
+}
+
+function shouldHandleBounce(target) {
+	if (!target || typeof target.closest !== 'function') return false;
+	if (imageViewer && !imageViewer.classList.contains('hidden')) return false;
+	if (target.closest('input, textarea, select, button, a')) return false;
+	if (target.closest('.inline-slider, .oh-select, .fake-select')) return false;
+	return true;
+}
+
+function applyBounceOffset(offset, { instant = false } = {}) {
+	if (!els.grid) return;
+	const clamped = Math.max(-BOUNCE_MAX_PX, Math.min(BOUNCE_MAX_PX, offset));
+	if (instant) {
+		els.grid.style.transition = 'none';
+	} else {
+		els.grid.style.transition = `transform ${BOUNCE_RETURN_MS}ms ease-out`;
+	}
+	els.grid.style.transform = clamped ? `translateY(${clamped}px)` : '';
+	if (bounceClearTimer) clearTimeout(bounceClearTimer);
+	if (!instant && clamped === 0) {
+		bounceClearTimer = setTimeout(() => {
+			if (!els.grid) return;
+			els.grid.style.transition = '';
+		}, BOUNCE_RETURN_MS);
+	}
+}
+
+function releaseBounce() {
+	if (bounceResetTimer) clearTimeout(bounceResetTimer);
+	bounceResetTimer = setTimeout(() => {
+		applyBounceOffset(0);
+	}, BOUNCE_HOLD_MS);
+}
+
+function handleBounceTouchStart(e) {
+	if (!shouldHandleBounce(e.target)) return;
+	const touch = e.touches && e.touches[0];
+	if (!touch) return;
+	bounceTouch.active = true;
+	bounceTouch.startY = touch.clientY;
+	bounceTouch.lastY = touch.clientY;
+}
+
+function handleBounceTouchMove(e) {
+	if (!bounceTouch.active) return;
+	const touch = e.touches && e.touches[0];
+	if (!touch) return;
+	bounceTouch.lastY = touch.clientY;
+	const delta = bounceTouch.lastY - bounceTouch.startY;
+	const { atTop, atBottom } = getScrollState();
+	if (delta > 0 && atTop) {
+		e.preventDefault();
+		applyBounceOffset(delta * BOUNCE_SCALE, { instant: true });
+		return;
+	}
+	if (delta < 0 && atBottom) {
+		e.preventDefault();
+		applyBounceOffset(delta * BOUNCE_SCALE, { instant: true });
+		return;
+	}
+}
+
+function handleBounceTouchEnd() {
+	if (!bounceTouch.active) return;
+	bounceTouch.active = false;
+	bounceTouch.startY = 0;
+	bounceTouch.lastY = 0;
+	releaseBounce();
+}
+
 function queueScrollTop() {
 	if (state.isSlim) {
 		scrollToTop();
@@ -3026,6 +3120,10 @@ function restoreNormalPolling() {
 		window.addEventListener('scroll', noteActivity, { passive: true });
 		window.addEventListener('scroll', scheduleImageScrollRefresh, { passive: true });
 		window.addEventListener('touchstart', noteActivity, { passive: true });
+		window.addEventListener('touchstart', handleBounceTouchStart, { passive: true });
+		window.addEventListener('touchmove', handleBounceTouchMove, { passive: false });
+		window.addEventListener('touchend', handleBounceTouchEnd, { passive: true });
+		window.addEventListener('touchcancel', handleBounceTouchEnd, { passive: true });
 	window.addEventListener('click', noteActivity, { passive: true });
 	window.addEventListener('keydown', noteActivity, { passive: true });
 		window.addEventListener('resize', scheduleImageResizeRefresh, { passive: true });
