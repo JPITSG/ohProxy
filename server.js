@@ -190,6 +190,7 @@ const ICON_VERSION = safeText(process.env.ICON_VERSION || SERVER_CONFIG.assets?.
 const USER_AGENT = safeText(process.env.USER_AGENT || SERVER_CONFIG.userAgent);
 const ASSET_JS_VERSION = safeText(SERVER_CONFIG.assets?.jsVersion);
 const ASSET_CSS_VERSION = safeText(SERVER_CONFIG.assets?.cssVersion);
+const ASSET_SW_VERSION = safeText(SERVER_CONFIG.assets?.swVersion);
 const APPLE_TOUCH_VERSION_RAW = safeText(SERVER_CONFIG.assets?.appleTouchIconVersion);
 const APPLE_TOUCH_VERSION = APPLE_TOUCH_VERSION_RAW
 	? (APPLE_TOUCH_VERSION_RAW.startsWith('v')
@@ -1007,6 +1008,7 @@ const liveConfig = {
 	userAgent: USER_AGENT,
 	assetJsVersion: ASSET_JS_VERSION,
 	assetCssVersion: ASSET_CSS_VERSION,
+	assetSwVersion: ASSET_SW_VERSION,
 	appleTouchVersion: APPLE_TOUCH_VERSION,
 	iconSize: ICON_SIZE,
 	iconCacheConcurrency: ICON_CACHE_CONCURRENCY,
@@ -1099,6 +1101,7 @@ function reloadLiveConfig() {
 	liveConfig.userAgent = safeText(newServer.userAgent);
 	liveConfig.assetJsVersion = safeText(newAssets.jsVersion);
 	liveConfig.assetCssVersion = safeText(newAssets.cssVersion);
+	liveConfig.assetSwVersion = safeText(newAssets.swVersion);
 	const appleTouchRaw = safeText(newAssets.appleTouchIconVersion);
 	liveConfig.appleTouchVersion = appleTouchRaw
 		? (appleTouchRaw.startsWith('v') ? appleTouchRaw : `v${appleTouchRaw}`)
@@ -1896,6 +1899,7 @@ function renderIndexHtml(options) {
 	let html = indexTemplate;
 	html = html.replace(/__CSS_VERSION__/g, liveConfig.assetCssVersion);
 	html = html.replace(/__JS_VERSION__/g, liveConfig.assetJsVersion);
+	html = html.replace(/__SW_VERSION__/g, liveConfig.assetSwVersion);
 	html = html.replace(/__APPLE_TOUCH_VERSION__/g, liveConfig.appleTouchVersion);
 	html = html.replace(/__PAGE_TITLE__/g, getInitialPageTitleHtml());
 	html = html.replace(/__DOC_TITLE__/g, escapeHtml(getInitialDocumentTitle()));
@@ -1910,6 +1914,7 @@ function renderServiceWorker() {
 	let script = serviceWorkerTemplate;
 	script = script.replace(/__CSS_VERSION__/g, liveConfig.assetCssVersion);
 	script = script.replace(/__JS_VERSION__/g, liveConfig.assetJsVersion);
+	script = script.replace(/__SW_VERSION__/g, liveConfig.assetSwVersion);
 	script = script.replace(/__APPLE_TOUCH_VERSION__/g, liveConfig.appleTouchVersion);
 	return script;
 }

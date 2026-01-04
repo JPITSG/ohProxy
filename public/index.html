@@ -143,7 +143,7 @@
 	<script>
 		if ('serviceWorker' in navigator && window.isSecureContext) {
 			window.addEventListener('load', () => {
-				navigator.serviceWorker.register('sw.js').catch(() => {});
+				navigator.serviceWorker.register('sw.js?v=__SW_VERSION__').catch(() => {});
 			});
 		}
 	</script>
