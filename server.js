@@ -1274,11 +1274,12 @@ function handleWsConnection(ws, req) {
 			if (msg.event === 'clientState' && msg.data) {
 				if (typeof msg.data.focused === 'boolean') {
 					const prevState = ws.clientState.focused;
-					if (prevState !== msg.data.focused) {
+					const prevLabel = prevState === null ? 'uninitialized' : (prevState ? 'focused' : 'unfocused');
+					const newLabel = msg.data.focused ? 'focused' : 'unfocused';
+					const changed = prevState !== msg.data.focused;
+					logMessage(`[WS] Client ${clientIp} focus: ${prevLabel} -> ${newLabel}${changed ? '' : ' (no change)'}`);
+					if (changed) {
 						ws.clientState.focused = msg.data.focused;
-						const prevLabel = prevState === null ? 'uninitialized' : (prevState ? 'focused' : 'unfocused');
-						const newLabel = msg.data.focused ? 'focused' : 'unfocused';
-						logMessage(`[WS] Client ${clientIp} focus: ${prevLabel} -> ${newLabel}`);
 						adjustPollingForFocus();
 					}
 				}
@@ -1635,7 +1636,7 @@ async function pollItems() {
 		lastSeenItems = new Set(items.map(i => i.name));
 		const actualChanges = filterChangedItems(items);
 		if (actualChanges.length > 0) {
-			logMessage(`[Polling] ${actualChanges.length} items changed (${items.length} total)`);
+			logMessage(`[Polling] ${actualChanges.length} items changed (${items.length} total, ${currentPollingIntervalMs}ms)`);
 			wsBroadcast('update', { type: 'items', changes: actualChanges });
 		}
 	}
@@ -1649,7 +1650,11 @@ async function pollItems() {
 function startPolling() {
 	if (pollingActive) return;
 	pollingActive = true;
-	currentPollingIntervalMs = getEffectivePollingInterval();
+	const newInterval = getEffectivePollingInterval();
+	if (currentPollingIntervalMs !== null && currentPollingIntervalMs !== newInterval) {
+		logMessage(`[Polling] Interval changed: ${currentPollingIntervalMs}ms -> ${newInterval}ms (${countFocusedClients()} focused clients)`);
+	}
+	currentPollingIntervalMs = newInterval;
 	logMessage(`[Polling] Starting item polling (interval: ${currentPollingIntervalMs}ms)`);
 	startItemStateCleanup();
 	pollItems();
@@ -1657,7 +1662,7 @@ function startPolling() {
 
 function stopPolling() {
 	pollingActive = false;
-	currentPollingIntervalMs = null;
+	// Don't reset currentPollingIntervalMs - keep it for change detection on restart
 	if (pollingTimer) {
 		clearTimeout(pollingTimer);
 		pollingTimer = null;
