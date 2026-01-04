@@ -644,16 +644,6 @@ body.theme-dark #grid .navHint svg {
 }
 .header-small #navWrap {
 	flex: 0 0 auto;
-	gap: 0;
-}
-.header-small #navWrap > * {
-	margin-left: .5rem;
-}
-.header-small #navWrap > *:first-child {
-	margin-left: 0;
-}
-.header-small #navWrap > * + * {
-	margin-left: .5rem;
 }
 .header-none header {
 	display: none !important;
@@ -667,15 +657,6 @@ body.theme-dark #grid .navHint svg {
 	padding-right: 0 !important;
 }
 .slim #navWrap > * {
-	margin-left: 0 !important;
-}
-.header-small #navWrap {
-	gap: .35rem !important;
-}
-.header-small #navWrap > * {
-	margin-left: 0 !important;
-}
-.header-small #navWrap > * + * {
 	margin-left: 0 !important;
 }
 .switch-card .labelStack {
