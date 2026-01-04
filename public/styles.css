@@ -227,6 +227,7 @@ html:not(.slim) .has-meta .labelStack {
 	position: relative;
 	z-index: 1;
 	cursor: pointer;
+	-webkit-appearance: none;
 	appearance: none;
 }
 .selection-card .inline-controls .fake-select:hover {
@@ -574,10 +575,7 @@ body.theme-dark #grid .navHint svg {
 .slim .bg-grid {
 	display: none !important;
 }
-.slim #grid .glass:hover,
-.slim #grid .glass:active {
-	background: var(--color-slim-glass-hover) !important;
-}
+/* Slim hover moved to hover-device rules at end of file */
 .slim #headerBottom.gap-3 {
 	gap: .5rem !important;
 }
@@ -607,9 +605,7 @@ body.theme-dark #grid .navHint svg {
 	backdrop-filter: none !important;
 	-webkit-backdrop-filter: none !important;
 }
-.slim .glass:hover {
-	background: inherit !important;
-}
+/* Slim glass hover handled by hover-device rules at end of file */
 .header-small #headerTop {
 	padding-top: .5rem;
 	padding-bottom: .5rem;
@@ -826,9 +822,9 @@ body.theme-light .theme-overlay {
 
 /* Card hover effect for non-touch devices only */
 html.hover-device #grid .glass:hover {
-	background-color: rgba(255,255,255,.1);
+	background-color: rgba(255,255,255,.1) !important;
 	transition: background-color .15s ease;
 }
 html.hover-device.slim #grid .glass:hover {
-	background: var(--color-slim-glass-hover);
+	background: var(--color-slim-glass-hover) !important;
 }

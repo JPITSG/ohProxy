@@ -39,6 +39,7 @@ const state = {
 	filter: '',
 	pollTimer: null,
 	idleTimer: null,
+	isIdle: false,
 	lastActivity: 0,
 	pollInterval: 0,
 	isPaused: false,
@@ -3043,9 +3044,11 @@ function initFocusTracking() {
 	focusListenersInitialized = true;
 	document.addEventListener('visibilitychange', sendFocusState);
 	// Listen for external focus control via postMessage (e.g., from WebView2 container)
+	// Send ohProxyFocus: true/false to override, or ohProxyFocus: null to clear and use visibilityState
 	window.addEventListener('message', (e) => {
-		if (e.data && typeof e.data.ohProxyFocus === 'boolean') {
-			externalFocusOverride = e.data.ohProxyFocus;
+		if (e.data && 'ohProxyFocus' in e.data) {
+			const val = e.data.ohProxyFocus;
+			externalFocusOverride = (val === true || val === false) ? val : null;
 			sendFocusState();
 		}
 	});
@@ -3146,7 +3149,7 @@ function stopWs() {
 
 function restoreNormalPolling() {
 	// Restore normal polling interval since WebSocket isn't working
-	const normalInterval = state.isIdle ? cfg.pollIntervalsMs.idle : cfg.pollIntervalsMs.active;
+	const normalInterval = state.isIdle ? idleInterval() : activeInterval();
 	if (state.pollInterval !== normalInterval) {
 		setPollInterval(normalInterval);
 	}
@@ -3174,35 +3177,35 @@ function restoreNormalPolling() {
 		els.search.setAttribute('name', `oh-search-${Date.now()}`);
 	}
 	if (state.headerMode === 'small') applyHeaderSmallLayout();
-		window.addEventListener('mousemove', noteActivity, { passive: true });
-		window.addEventListener('scroll', noteActivity, { passive: true });
-		window.addEventListener('scroll', scheduleImageScrollRefresh, { passive: true });
-		window.addEventListener('touchstart', noteActivity, { passive: true });
-		window.addEventListener('touchstart', handleBounceTouchStart, { passive: true });
-		window.addEventListener('touchmove', handleBounceTouchMove, { passive: false });
-		window.addEventListener('touchend', handleBounceTouchEnd, { passive: true });
-		window.addEventListener('touchcancel', handleBounceTouchEnd, { passive: true });
+	window.addEventListener('mousemove', noteActivity, { passive: true });
+	window.addEventListener('scroll', noteActivity, { passive: true });
+	window.addEventListener('scroll', scheduleImageScrollRefresh, { passive: true });
+	window.addEventListener('touchstart', noteActivity, { passive: true });
+	window.addEventListener('touchstart', handleBounceTouchStart, { passive: true });
+	window.addEventListener('touchmove', handleBounceTouchMove, { passive: false });
+	window.addEventListener('touchend', handleBounceTouchEnd, { passive: true });
+	window.addEventListener('touchcancel', handleBounceTouchEnd, { passive: true });
 	window.addEventListener('click', noteActivity, { passive: true });
 	window.addEventListener('keydown', noteActivity, { passive: true });
-		window.addEventListener('resize', scheduleImageResizeRefresh, { passive: true });
-		window.addEventListener('orientationchange', scheduleImageResizeRefresh, { passive: true });
-		document.addEventListener('visibilitychange', () => {
-			if (document.visibilityState === 'hidden') {
-				if (resumeReloadArmed) return;
-				resumeReloadArmed = true;
-				setResumeResetUi(true);
-				return;
-			}
-			resumeReloadArmed = false;
-			setResumeResetUi(false);
-			// Immediately refresh and reset to active polling when returning
-			if (!state.isPaused) {
-				noteActivity();
-				refresh(false);
-				// Reconnect WebSocket if needed
-				if (!wsConnection) connectWs();
-			}
-		});
+	window.addEventListener('resize', scheduleImageResizeRefresh, { passive: true });
+	window.addEventListener('orientationchange', scheduleImageResizeRefresh, { passive: true });
+	document.addEventListener('visibilitychange', () => {
+		if (document.visibilityState === 'hidden') {
+			if (resumeReloadArmed) return;
+			resumeReloadArmed = true;
+			setResumeResetUi(true);
+			return;
+		}
+		resumeReloadArmed = false;
+		setResumeResetUi(false);
+		// Immediately refresh and reset to active polling when returning
+		if (!state.isPaused) {
+			noteActivity();
+			refresh(false);
+			// Reconnect WebSocket if needed
+			if (!wsConnection) connectWs();
+		}
+	});
 	window.addEventListener('popstate', (event) => {
 		const next = event.state;
 		if (!next) {
