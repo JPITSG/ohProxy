@@ -3034,6 +3034,13 @@ function initFocusTracking() {
 	if (focusListenersInitialized) return;
 	focusListenersInitialized = true;
 	document.addEventListener('visibilitychange', sendFocusState);
+	// Listen for external focus control via postMessage (e.g., from WebView2 container)
+	window.addEventListener('message', (e) => {
+		if (e.data && typeof e.data.ohProxyFocus === 'boolean') {
+			lastFocusState = e.data.ohProxyFocus;
+			sendClientState({ focused: e.data.ohProxyFocus });
+		}
+	});
 }
 
 function getWsUrl() {
