@@ -203,6 +203,10 @@ function isTouchDevice() {
 	return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
 
+function haptic(ms = 15) {
+	if (navigator.vibrate) navigator.vibrate(ms);
+}
+
 function showResumeSpinner(show) {
 	if (!els.resumeSpinner) return;
 	els.resumeSpinner.classList.toggle('active', show);
@@ -1269,6 +1273,7 @@ function openImageViewer(url, refreshMs, options = {}) {
 	if (state.isSlim) return;
 	const target = safeText(url).trim();
 	if (!target) return;
+	haptic();
 	ensureImageViewer();
 	if (!imageViewer || !imageViewerImg) return;
 	imageViewerFitMode = 'real';
@@ -1287,6 +1292,7 @@ function openImageViewer(url, refreshMs, options = {}) {
 
 function closeImageViewer() {
 	if (!imageViewer) return;
+	haptic();
 	imageViewer.classList.add('hidden');
 	document.body.classList.remove('image-viewer-open');
 	setImageViewerZoom(false);
@@ -1378,6 +1384,7 @@ function setImageViewerZoom(zoomed) {
 }
 
 function toggleImageViewerZoom() {
+	haptic();
 	setImageViewerZoom(!imageViewerZoomed);
 }
 
@@ -2104,7 +2111,7 @@ function updateCard(card, w, afterImage, info) {
 		controls.classList.add('hidden');
 		card.setAttribute('role', 'button');
 		card.setAttribute('tabindex', '0');
-		const go = () => pushPage(target, labelParts.title || label);
+		const go = () => { haptic(); pushPage(target, labelParts.title || label); };
 		card.onclick = (e) => {
 			if (e.target.closest('button, a, input, select, textarea')) return;
 			go();
@@ -2220,6 +2227,7 @@ function updateCard(card, w, afterImage, info) {
 			};
 
 			const openNativeSelect = () => {
+				haptic();
 				select.focus();
 				if (typeof select.showPicker === 'function') {
 					try { select.showPicker(); } catch {}
@@ -2254,7 +2262,9 @@ function updateCard(card, w, afterImage, info) {
 				syncFake();
 				select.onfocus = () => { state.suppressRefreshCount += 1; };
 				select.onblur = () => releaseRefresh();
+				select.onclick = () => haptic();
 				select.onchange = async () => {
+					haptic();
 					syncFake();
 					await sendSelection(select.value, select);
 				};
@@ -2268,7 +2278,9 @@ function updateCard(card, w, afterImage, info) {
 			} else if (supportsPicker) {
 				select.onfocus = () => { state.suppressRefreshCount += 1; };
 				select.onblur = () => releaseRefresh();
+				select.onclick = () => haptic();
 				select.onchange = async () => {
+					haptic();
 					await sendSelection(select.value, select);
 				};
 				selectWrap.appendChild(select);
@@ -2338,6 +2350,7 @@ function updateCard(card, w, afterImage, info) {
 				};
 
 				const toggleMenu = () => {
+					haptic();
 					if (menuOpen) closeMenu();
 					else openMenu();
 				};
@@ -2381,6 +2394,7 @@ function updateCard(card, w, afterImage, info) {
 				b.dataset.command = m.command;
 				if (safeText(m.command) === currentState) b.classList.add('is-active');
 				b.onclick = async () => {
+					haptic();
 					b.disabled = true;
 					try { await sendCommand(itemName, m.command); await refresh(false); }
 					catch (e) { alert(e.message); }
@@ -2395,6 +2409,7 @@ function updateCard(card, w, afterImage, info) {
 			btn.textContent = isOn ? 'Turn OFF' : 'Turn ON';
 			if (isOn) btn.classList.add('is-active');
 			btn.onclick = async () => {
+				haptic();
 				btn.disabled = true;
 				try { await sendCommand(itemName, isOn ? 'OFF' : 'ON'); await refresh(false); }
 				catch (e) { alert(e.message); }
@@ -2534,6 +2549,7 @@ function updateCard(card, w, afterImage, info) {
 				activationPendingValue = value;
 				return;
 			}
+			haptic();
 			activationPending = true;
 			activationValue = value;
 			activationPendingValue = value;
@@ -2555,6 +2571,8 @@ function updateCard(card, w, afterImage, info) {
 				beginActivation(value);
 				return;
 			}
+			// Haptic when turning off (going to 0 from non-zero)
+			if (value === 0 && lastSentValue > 0) haptic();
 			queueSend(value, false);
 		});
 		input.addEventListener('change', () => {
@@ -2580,6 +2598,7 @@ function updateCard(card, w, afterImage, info) {
 		inlineSlider.appendChild(input);
 
 		const toggleSlider = async () => {
+			haptic();
 			const next = current > 0 ? 0 : 100;
 			try { await sendCommand(itemName, String(next)); await refresh(false); }
 			catch (e) { alert(e.message); }
@@ -2599,6 +2618,7 @@ function updateCard(card, w, afterImage, info) {
 				b.className = 'px-3 py-2 rounded-xl border transition bg-emerald-500/15 border-emerald-400/30 hover:bg-emerald-500/20';
 				b.textContent = txt;
 				b.onclick = async () => {
+					haptic();
 					b.disabled = true;
 					try { await sendCommand(itemName, cmd); await refresh(false); }
 					catch (e) { alert(e.message); }
@@ -3419,10 +3439,12 @@ function restoreNormalPolling() {
 	});
 
 	els.back.addEventListener('click', () => {
+		haptic();
 		if (clearSearchFilter()) return;
 		popPage();
 	});
 	els.pause.addEventListener('click', () => {
+		haptic();
 		state.isPaused = !state.isPaused;
 		if (state.isPaused) {
 			stopPolling();
@@ -3440,6 +3462,7 @@ function restoreNormalPolling() {
 		updatePauseButton();
 	});
 	els.home.addEventListener('click', () => {
+		haptic();
 		if (!state.rootPageUrl) return;
 		els.search.value = '';
 		state.filter = '';
@@ -3451,7 +3474,7 @@ function restoreNormalPolling() {
 		queueScrollTop();
 		refresh(true);
 	});
-	if (els.themeToggle) els.themeToggle.addEventListener('click', toggleTheme);
+	if (els.themeToggle) els.themeToggle.addEventListener('click', () => { haptic(); toggleTheme(); });
 	if (els.lightMode) els.lightMode.addEventListener('click', () => setTheme('light'));
 	if (els.darkMode) els.darkMode.addEventListener('click', () => setTheme('dark'));
 	initTheme(state.forcedMode);
