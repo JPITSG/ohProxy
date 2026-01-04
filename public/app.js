@@ -324,14 +324,16 @@ function scrollToTop() {
 	}
 }
 
-const BOUNCE_MAX_PX = 36;
-const BOUNCE_SCALE = 0.35;
+const BOUNCE_MAX_PX = 52;
+const BOUNCE_SCALE = 0.4;
 const BOUNCE_RETURN_MS = 180;
 const BOUNCE_HOLD_MS = 40;
+const BOUNCE_REFRESH_THRESHOLD = 0.9;
 let bounceResetTimer = null;
 let bounceClearTimer = null;
 const bounceTouch = {
 	active: false,
+	hitMaxAtTop: false,
 	startY: 0,
 	lastY: 0,
 };
@@ -388,6 +390,7 @@ function handleBounceTouchStart(e) {
 	const touch = e.touches && e.touches[0];
 	if (!touch) return;
 	bounceTouch.active = true;
+	bounceTouch.hitMaxAtTop = false;
 	bounceTouch.startY = touch.clientY;
 	bounceTouch.lastY = touch.clientY;
 }
@@ -402,7 +405,12 @@ function handleBounceTouchMove(e) {
 	const { atTop, atBottom } = getScrollState();
 	if (delta > 0 && atTop) {
 		e.preventDefault();
-		applyBounceOffset(delta * BOUNCE_SCALE, { instant: true });
+		const offset = delta * BOUNCE_SCALE;
+		applyBounceOffset(offset, { instant: true });
+		// Track if user pulled past threshold at top (pull-to-refresh)
+		if (offset >= BOUNCE_MAX_PX * BOUNCE_REFRESH_THRESHOLD) {
+			bounceTouch.hitMaxAtTop = true;
+		}
 		return;
 	}
 	if (delta < 0 && atBottom) {
@@ -412,13 +420,23 @@ function handleBounceTouchMove(e) {
 	}
 }
 
-function handleBounceTouchEnd() {
+async function handleBounceTouchEnd() {
 	if (state.isSlim) return;
 	if (!bounceTouch.active) return;
+	const shouldRefresh = bounceTouch.hitMaxAtTop;
 	bounceTouch.active = false;
+	bounceTouch.hitMaxAtTop = false;
 	bounceTouch.startY = 0;
 	bounceTouch.lastY = 0;
 	releaseBounce();
+
+	// Pull-to-refresh: show spinner, force full refresh, hide after 1s
+	if (shouldRefresh) {
+		showResumeSpinner(true);
+		refresh(true);
+		await new Promise(r => setTimeout(r, 1000));
+		showResumeSpinner(false);
+	}
 }
 
 function queueScrollTop() {
