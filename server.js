@@ -1280,8 +1280,9 @@ function handleWsConnection(ws, req) {
 					logMessage(`[WS] Client ${clientIp} focus: ${prevLabel} -> ${newLabel}${changed ? '' : ' (no change)'}`);
 					if (changed) {
 						ws.clientState.focused = msg.data.focused;
-						adjustPollingForFocus();
 					}
+					// Always verify interval is correct (handles edge cases where interval doesn't match state)
+					adjustPollingForFocus();
 				}
 			}
 		} catch {}
