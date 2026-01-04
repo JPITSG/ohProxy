@@ -43,7 +43,7 @@ const state = {
 	pollInterval: 0,
 	isPaused: false,
 	isSlim: false,
-	isTablet: false,
+	headerMode: 'full',
 	forcedMode: null,
 	connectionOk: true,
 	connectionReady: false,
@@ -459,7 +459,7 @@ function initTheme(forcedMode) {
 	setTheme(mode);
 }
 
-function applyTabletLayout() {
+function applyHeaderSmallLayout() {
 	const headerTop = document.getElementById('headerTop');
 	const headerBottom = document.getElementById('headerBottom');
 	const searchWrap = document.getElementById('searchWrap');
@@ -1743,7 +1743,8 @@ function getWidgetRenderInfo(w, afterImage) {
 		safeText(w?.refresh ?? ''),
 		afterImage ? 'after' : '',
 		state.isSlim ? 'slim' : '',
-		state.isTablet ? 'tablet' : '',
+		state.headerMode === 'small' ? 'header-small' : '',
+		state.headerMode === 'none' ? 'header-none' : '',
 		path,
 		frame,
 	].join('||');
@@ -1946,7 +1947,7 @@ function updateCard(card, w, afterImage, info) {
 			controls.classList.add('mt-3');
 			controls.innerHTML = `<div class="text-sm text-slate-400">No selection options available</div>`;
 		} else {
-			const useOverlay = state.isSlim || state.isTablet;
+			const useOverlay = state.isSlim || state.headerMode === 'small';
 			const supportsPicker = typeof HTMLSelectElement !== 'undefined' &&
 				typeof HTMLSelectElement.prototype.showPicker === 'function';
 			const inlineControls = document.createElement('div');
@@ -3005,20 +3006,22 @@ function restoreNormalPolling() {
 	try {
 		const params = new URLSearchParams(window.location.search);
 		state.isSlim = params.get('slim') === 'true';
-		state.isTablet = params.get('tablet') === 'true';
+		const headerParam = (params.get('header') || '').toLowerCase();
+		state.headerMode = (headerParam === 'small' || headerParam === 'none') ? headerParam : 'full';
 		const pauseParam = params.get('pause');
 		const showPause = pauseParam === 'true';
 		const modeParam = params.get('mode');
 		state.forcedMode = (modeParam === 'dark' || modeParam === 'light') ? modeParam : null;
 		if (state.isSlim) document.documentElement.classList.add('slim');
-		if (state.isTablet) document.documentElement.classList.add('tablet');
+		if (state.headerMode === 'small') document.documentElement.classList.add('header-small');
+		if (state.headerMode === 'none') document.documentElement.classList.add('header-none');
 		if (els.pause) els.pause.classList.toggle('pause-hidden', !showPause);
 	} catch {}
 	if (els.search) {
 		els.search.setAttribute('autocomplete', 'off');
 		els.search.setAttribute('name', `oh-search-${Date.now()}`);
 	}
-	if (state.isTablet) applyTabletLayout();
+	if (state.headerMode === 'small') applyHeaderSmallLayout();
 		window.addEventListener('mousemove', noteActivity, { passive: true });
 		window.addEventListener('scroll', noteActivity, { passive: true });
 		window.addEventListener('scroll', scheduleImageScrollRefresh, { passive: true });

@@ -17,7 +17,9 @@
 			try {
 				const params = new URLSearchParams(window.location.search);
 				if (params.get('slim') === 'true') document.documentElement.classList.add('slim');
-				if (params.get('tablet') === 'true') document.documentElement.classList.add('tablet');
+				const headerParam = (params.get('header') || '').toLowerCase();
+				if (headerParam === 'small') document.documentElement.classList.add('header-small');
+				if (headerParam === 'none') document.documentElement.classList.add('header-none');
 				const modeParam = params.get('mode');
 				let stored = null;
 				try { stored = localStorage.getItem('ohTheme'); } catch {}

@@ -610,54 +610,57 @@ body.theme-dark #grid .navHint svg {
 .slim .glass:hover {
 	background: inherit !important;
 }
-.tablet #headerTop {
+.header-small #headerTop {
 	padding-top: .5rem;
 	padding-bottom: .5rem;
 	gap: 0;
 }
-.tablet #headerTop > * {
+.header-small #headerTop > * {
 	margin-left: .5rem;
 }
-.tablet #headerTop > *:first-child {
+.header-small #headerTop > *:first-child {
 	margin-left: 0;
 }
-.tablet #headerTop > * + * {
+.header-small #headerTop > * + * {
 	margin-left: .5rem;
 }
-.tablet #headerBottom {
+.header-small #headerBottom {
 	display: none !important;
 }
-.tablet #brandWrap {
+.header-small #brandWrap {
 	flex: 0 0 auto;
 }
-.tablet #brandWrap .text-sm {
+.header-small #brandWrap .text-sm {
 	white-space: nowrap;
 }
-.tablet #pageTitle {
+.header-small #pageTitle {
 	display: none !important;
 }
-.tablet #auxWrap {
+.header-small #auxWrap {
 	display: none !important;
 }
-.tablet #pauseBtn {
+.header-small #pauseBtn {
 	display: none !important;
 }
-.tablet #searchWrap {
+.header-small #searchWrap {
 	flex: 1 1 auto;
 	min-width: 0;
 }
-.tablet #navWrap {
+.header-small #navWrap {
 	flex: 0 0 auto;
 	gap: 0;
 }
-.tablet #navWrap > * {
+.header-small #navWrap > * {
 	margin-left: .5rem;
 }
-.tablet #navWrap > *:first-child {
+.header-small #navWrap > *:first-child {
 	margin-left: 0;
 }
-.tablet #navWrap > * + * {
+.header-small #navWrap > * + * {
 	margin-left: .5rem;
+}
+.header-none header {
+	display: none !important;
 }
 
 #navWrap {
@@ -670,13 +673,13 @@ body.theme-dark #grid .navHint svg {
 .slim #navWrap > * {
 	margin-left: 0 !important;
 }
-.tablet #navWrap {
+.header-small #navWrap {
 	gap: .35rem !important;
 }
-.tablet #navWrap > * {
+.header-small #navWrap > * {
 	margin-left: 0 !important;
 }
-.tablet #navWrap > * + * {
+.header-small #navWrap > * + * {
 	margin-left: 0 !important;
 }
 .switch-card .labelStack {
@@ -795,7 +798,7 @@ body.theme-dark #grid .navHint svg {
 	background: var(--color-status-error);
 	box-shadow: 0 0 8px var(--color-status-error);
 }
-.tablet .status-bar {
+.header-small .status-bar {
 	display: none !important;
 }
 body.theme-light .bg-grid {
