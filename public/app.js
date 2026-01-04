@@ -1086,6 +1086,7 @@ let imageViewerTimer = null;
 let imageViewerUrl = '';
 let imageViewerRefreshMs = null;
 let imageViewerInitialLoadPending = false;
+let imageViewerFitMode = 'real';
 let imageResizeEpoch = 0;
 let imageResizeTimer = null;
 let imageScrollTimer = null;
@@ -1147,6 +1148,7 @@ function ensureImageViewer() {
 	}
 	if (imageViewerImg) {
 		imageViewerImg.addEventListener('load', () => {
+			updateImageViewerFrameSize();
 			const finalize = () => {
 				if (!imageViewerInitialLoadPending || !imageViewer) return;
 				imageViewer.classList.remove('loading');
@@ -1188,11 +1190,13 @@ function openImageViewer(url, refreshMs, options = {}) {
 	if (!target) return;
 	ensureImageViewer();
 	if (!imageViewer || !imageViewerImg) return;
+	imageViewerFitMode = 'real';
 	setImageViewerZoom(false);
 	imageViewerInitialLoadPending = true;
 	imageViewer.classList.add('loading');
 	imageViewer.classList.remove('hidden');
 	document.body.classList.add('image-viewer-open');
+	updateImageViewerFrameSize();
 	setImageViewerSource(target, refreshMs);
 	if (!options.skipHistory) {
 		pushImageViewerHistory(target, refreshMs);
@@ -1254,6 +1258,29 @@ function setImageViewerSource(url, refreshMs) {
 	} else {
 		start();
 	}
+}
+
+function updateImageViewerFrameSize() {
+	if (!imageViewerFrame || !imageViewerImg) return;
+	const maxW = Math.max(0, Math.round((window.innerWidth || 0) * IMAGE_VIEWER_MAX_VIEWPORT));
+	const maxH = Math.max(0, Math.round((window.innerHeight || 0) * IMAGE_VIEWER_MAX_VIEWPORT));
+	if (!maxW || !maxH) return;
+	const naturalW = imageViewerImg.naturalWidth;
+	const naturalH = imageViewerImg.naturalHeight;
+	if (!Number.isFinite(naturalW) || !Number.isFinite(naturalH) || naturalW <= 0 || naturalH <= 0) {
+		imageViewerFrame.style.width = `${maxW}px`;
+		imageViewerFrame.style.height = `${maxH}px`;
+		return;
+	}
+	const ratio = naturalW / naturalH;
+	let width = maxW;
+	let height = Math.round(width / ratio);
+	if (height > maxH) {
+		height = maxH;
+		width = Math.round(height * ratio);
+	}
+	imageViewerFrame.style.width = `${width}px`;
+	imageViewerFrame.style.height = `${height}px`;
 }
 
 function setImageViewerZoom(zoomed) {

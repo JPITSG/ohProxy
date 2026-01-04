@@ -379,6 +379,8 @@ body.theme-light .image-viewer {
 .image-viewer-frame {
 	width: 90vw;
 	height: 90vh;
+	max-width: 90vw;
+	max-height: 90vh;
 	position: relative;
 	border-radius: 0;
 	padding: 0;
@@ -394,7 +396,7 @@ body.theme-light .image-viewer {
 .image-viewer-img {
 	width: 100%;
 	height: 100%;
-	object-fit: fill;
+	object-fit: contain;
 	display: block;
 	transform: scale(1);
 	transform-origin: 50% 50%;
