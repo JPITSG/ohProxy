@@ -823,3 +823,12 @@ body.theme-light .theme-overlay {
 	background: radial-gradient(circle at 15% 0%, var(--color-theme-overlay-radial), transparent 55%),
 				linear-gradient(var(--color-theme-overlay-start), var(--color-theme-overlay-end));
 }
+
+/* Card hover effect for non-touch devices only */
+html.hover-device #grid .glass:hover {
+	background-color: rgba(255,255,255,.1);
+	transition: background-color .15s ease;
+}
+html.hover-device.slim #grid .glass:hover {
+	background: var(--color-slim-glass-hover);
+}

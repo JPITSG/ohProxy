@@ -1747,7 +1747,7 @@ async function sendCommand(itemName, command, options = {}) {
 
 // --- Rendering ---
 const CARD_TEMPLATE_HTML = `
-	<div class="glass rounded-2xl p-4 hover:bg-white/10 transition group">
+	<div class="glass rounded-2xl p-4 group">
 		<div class="cardRow flex items-start gap-3">
 			<div class="iconWrap h-12 w-12 rounded-xl flex items-center justify-center shrink-0 overflow-hidden">
 				<img class="h-9 w-9 opacity-90 object-contain object-center block" />
@@ -3163,6 +3163,7 @@ function restoreNormalPolling() {
 		if (state.isSlim) document.documentElement.classList.add('slim');
 		if (state.headerMode === 'small') document.documentElement.classList.add('header-small');
 		if (state.headerMode === 'none') document.documentElement.classList.add('header-none');
+		if (!('ontouchstart' in window) && navigator.maxTouchPoints === 0) document.documentElement.classList.add('hover-device');
 		if (els.pause) els.pause.classList.toggle('pause-hidden', !showPause);
 	} catch {}
 	if (els.search) {
