@@ -811,3 +811,43 @@ html.hover-device #grid .glass:hover {
 html.hover-device.slim #grid .glass:hover {
 	background: var(--color-slim-glass-hover) !important;
 }
+
+/* Resume spinner - shown when returning to app on touch devices */
+.resume-spinner {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 35; /* Below header (z-40) so header stays visible */
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	transition: opacity .2s ease, visibility .2s ease;
+	background: rgba(15, 23, 42, 0.85);
+	backdrop-filter: blur(2px);
+	-webkit-backdrop-filter: blur(2px);
+}
+.resume-spinner.active {
+	opacity: 1;
+	visibility: visible;
+	pointer-events: auto;
+}
+.resume-spinner-ring {
+	width: 48px;
+	height: 48px;
+	border: 3px solid rgba(255, 255, 255, 0.15);
+	border-top-color: rgba(129, 140, 248, 0.9);
+	border-radius: 50%;
+	animation: resume-spin 0.8s linear infinite;
+}
+@keyframes resume-spin {
+	to { transform: rotate(360deg); }
+}
+body.theme-light .resume-spinner {
+	background: rgba(248, 250, 252, 0.9);
+}
+body.theme-light .resume-spinner-ring {
+	border-color: rgba(0, 0, 0, 0.1);
+	border-top-color: rgba(99, 102, 241, 0.9);
+}

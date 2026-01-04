@@ -14,6 +14,7 @@ const els = {
 	themeToggle: document.getElementById('themeToggleBtn'),
 	lightMode: document.getElementById('lightModeBtn'),
 	darkMode: document.getElementById('darkModeBtn'),
+	resumeSpinner: document.getElementById('resumeSpinner'),
 };
 
 const state = {
@@ -196,6 +197,33 @@ function setResumeResetUi(active) {
 		state.pageTitle = state.rootPageTitle || state.pageTitle;
 		window.scrollTo(0, 0);
 	}
+}
+
+function isTouchDevice() {
+	return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+}
+
+function showResumeSpinner(show) {
+	if (!els.resumeSpinner) return;
+	els.resumeSpinner.classList.toggle('active', show);
+}
+
+function waitForConnection(timeoutMs = 5000) {
+	return new Promise((resolve) => {
+		const startTime = Date.now();
+		const check = () => {
+			if (wsConnected || state.connectionOk) {
+				resolve(true);
+				return;
+			}
+			if (Date.now() - startTime > timeoutMs) {
+				resolve(false);
+				return;
+			}
+			setTimeout(check, 50);
+		};
+		check();
+	});
 }
 
 function isHomePage() {
@@ -3256,7 +3284,7 @@ function restoreNormalPolling() {
 	window.addEventListener('keydown', noteActivity, { passive: true });
 	window.addEventListener('resize', scheduleImageResizeRefresh, { passive: true });
 	window.addEventListener('orientationchange', scheduleImageResizeRefresh, { passive: true });
-	document.addEventListener('visibilitychange', () => {
+	document.addEventListener('visibilitychange', async () => {
 		if (document.visibilityState === 'hidden') {
 			if (resumeReloadArmed) return;
 			resumeReloadArmed = true;
@@ -3264,13 +3292,37 @@ function restoreNormalPolling() {
 			return;
 		}
 		resumeReloadArmed = false;
-		setResumeResetUi(false);
-		// Immediately refresh and reset to active polling when returning
-		if (!state.isPaused) {
-			noteActivity();
-			refresh(false);
-			// Reconnect WebSocket if needed
-			if (!wsConnection) connectWs();
+
+		// Show spinner on touch devices while resuming
+		const isTouch = isTouchDevice();
+		if (isTouch) {
+			// Load and render cached home page under the spinner
+			const snapshot = loadHomeSnapshot();
+			if (snapshot) {
+				applyHomeSnapshot(snapshot);
+				render();
+			}
+			// Remove resume-reset so grid is visible (blurred by spinner overlay)
+			setResumeResetUi(false);
+			showResumeSpinner(true);
+
+			// Start reconnection immediately
+			if (!state.isPaused) {
+				noteActivity();
+				refresh(false);
+				if (!wsConnection) connectWs();
+			}
+
+			// Wait for connection to be established, then hide spinner
+			await waitForConnection(5000);
+			showResumeSpinner(false);
+		} else {
+			setResumeResetUi(false);
+			if (!state.isPaused) {
+				noteActivity();
+				refresh(false);
+				if (!wsConnection) connectWs();
+			}
 		}
 	});
 	window.addEventListener('popstate', (event) => {
