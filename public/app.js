@@ -208,7 +208,7 @@ function showResumeSpinner(show) {
 	els.resumeSpinner.classList.toggle('active', show);
 }
 
-function waitForConnection(timeoutMs = 5000) {
+function waitForConnection(timeoutMs = 0) {
 	return new Promise((resolve) => {
 		const startTime = Date.now();
 		const check = () => {
@@ -216,7 +216,7 @@ function waitForConnection(timeoutMs = 5000) {
 				resolve(true);
 				return;
 			}
-			if (Date.now() - startTime > timeoutMs) {
+			if (timeoutMs > 0 && Date.now() - startTime > timeoutMs) {
 				resolve(false);
 				return;
 			}
@@ -3306,6 +3306,10 @@ function restoreNormalPolling() {
 			setResumeResetUi(false);
 			showResumeSpinner(true);
 
+			// Reset connection state so we wait for a FRESH connection
+			state.connectionOk = false;
+			wsConnected = false;
+
 			// Start reconnection immediately
 			if (!state.isPaused) {
 				noteActivity();
@@ -3313,8 +3317,8 @@ function restoreNormalPolling() {
 				if (!wsConnection) connectWs();
 			}
 
-			// Wait for connection to be established, then hide spinner
-			await waitForConnection(5000);
+			// Wait for connection to be established, then hide spinner (no timeout)
+			await waitForConnection(0);
 			showResumeSpinner(false);
 		} else {
 			setResumeResetUi(false);
