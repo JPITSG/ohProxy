@@ -430,11 +430,15 @@ async function handleBounceTouchEnd() {
 	bounceTouch.lastY = 0;
 	releaseBounce();
 
-	// Pull-to-refresh: show spinner, force full refresh, hide after 1s
+	// Pull-to-refresh: show spinner, force full refresh, hide after 1s OR connection established (whichever is longer)
 	if (shouldRefresh) {
 		showResumeSpinner(true);
+		state.connectionOk = false;
 		refresh(true);
-		await new Promise(r => setTimeout(r, 1000));
+		await Promise.all([
+			new Promise(r => setTimeout(r, 1000)),
+			waitForConnection(0)
+		]);
 		showResumeSpinner(false);
 	}
 }
