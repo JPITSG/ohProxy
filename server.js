@@ -1725,16 +1725,100 @@ setInterval(() => {
 	}
 }, WS_PING_INTERVAL_MS);
 
+function sendWsUpgradeError(socket, statusCode, statusText) {
+	const body = statusText;
+	const response = [
+		`HTTP/1.1 ${statusCode} ${statusText}`,
+		'Content-Type: text/plain',
+		`Content-Length: ${Buffer.byteLength(body)}`,
+		'Connection: close',
+		'',
+		body,
+	].join('\r\n');
+	socket.write(response);
+	socket.destroy();
+}
+
 function handleWsUpgrade(req, socket, head) {
 	const pathname = new URL(req.url, 'http://localhost').pathname;
-	const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+	const clientIp = getRemoteIp(req);
 	const clientExts = req.headers['sec-websocket-extensions'] || 'none';
-	logMessage(`[WS] Upgrade request from ${clientIp} for ${pathname}, extensions: ${clientExts}`);
+	logMessage(`[WS] Upgrade request from ${clientIp || 'unknown'} for ${pathname}, extensions: ${clientExts}`);
 
 	if (pathname !== '/ws') {
-		logMessage(`[WS] Rejected upgrade for ${pathname} from ${clientIp}`);
+		logMessage(`[WS] Rejected upgrade for ${pathname} from ${clientIp || 'unknown'}`);
 		socket.destroy();
 		return;
+	}
+
+	// Check allowSubnets (unless allow-all configured)
+	const allowAll = Array.isArray(liveConfig.allowSubnets) && liveConfig.allowSubnets.some((entry) => isAllowAllSubnet(entry));
+	if (!allowAll && (!clientIp || !ipInAnySubnet(clientIp, liveConfig.allowSubnets))) {
+		logMessage(`[WS] Blocked upgrade from ${clientIp || 'unknown'} - not in allowSubnets`);
+		sendWsUpgradeError(socket, 403, 'Forbidden');
+		return;
+	}
+
+	// Check if auth is required
+	let requiresAuth = !clientIp;
+	if (clientIp) {
+		const inWhitelist = ipInAnySubnet(clientIp, liveConfig.authWhitelist);
+		const inLan = ipInAnySubnet(clientIp, liveConfig.lanSubnets);
+		requiresAuth = !inWhitelist && !inLan;
+	}
+
+	if (requiresAuth) {
+		// Check lockout
+		const lockKey = getLockoutKey(clientIp);
+		const lockout = getAuthLockout(lockKey);
+		if (lockout && lockout.lockUntil) {
+			const remaining = Math.max(0, Math.ceil((lockout.lockUntil - Date.now()) / 1000));
+			logMessage(`[WS] Auth lockout active for ${lockKey} (${remaining}s remaining)`);
+			sendWsUpgradeError(socket, 429, 'Too many authentication attempts');
+			return;
+		}
+
+		// Load users
+		const users = loadAuthUsers(AUTH_USERS_FILE);
+		if (!users || Object.keys(users).length === 0) {
+			logMessage('[WS] Auth config unavailable');
+			sendWsUpgradeError(socket, 500, 'Auth config unavailable');
+			return;
+		}
+
+		// Try Basic auth
+		let authenticatedUser = null;
+		const [user, pass] = getBasicAuthCredentials(req);
+		if (user) {
+			if (!Object.prototype.hasOwnProperty.call(users, user) || users[user] !== pass) {
+				maybeNotifyAuthFailure(clientIp || '');
+				const entry = recordAuthFailure(lockKey);
+				if (entry && entry.lockUntil) {
+					logMessage(`[WS] Auth lockout triggered for ${lockKey} after ${entry.count} failures`);
+					sendWsUpgradeError(socket, 429, 'Too many authentication attempts');
+					return;
+				}
+				logMessage(`[WS] Invalid credentials from ${clientIp || 'unknown'}`);
+				sendWsUpgradeError(socket, 401, 'Unauthorized');
+				return;
+			}
+			authenticatedUser = user;
+		} else if (liveConfig.authCookieKey && liveConfig.authCookieName) {
+			// Try cookie auth
+			const cookieUser = getAuthCookieUser(req, users, liveConfig.authCookieKey);
+			if (cookieUser) {
+				authenticatedUser = cookieUser;
+			}
+		}
+
+		if (!authenticatedUser) {
+			logMessage(`[WS] No valid auth from ${clientIp || 'unknown'}`);
+			sendWsUpgradeError(socket, 401, 'Unauthorized');
+			return;
+		}
+
+		clearAuthFailures(lockKey);
+		logMessage(`[WS] Authenticated user ${authenticatedUser} from ${clientIp || 'unknown'}`);
 	}
 
 	// Create a new headers object without extensions
