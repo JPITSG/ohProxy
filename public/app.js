@@ -510,6 +510,13 @@ function setConnectionStatus(ok, message) {
 	clearConnectionPending();
 	if (ok) {
 		state.lastError = '';
+		// Reset WS fail count and try reconnecting if not connected
+		if (wsFailCount > 0) {
+			wsFailCount = 0;
+			if (!wsConnection && !wsConnected) {
+				connectWs();
+			}
+		}
 	} else {
 		state.lastError = message || 'Connection issue';
 	}
@@ -3195,6 +3202,9 @@ function connectWs() {
 			if (state.pollTimer && state.pollInterval < WS_FALLBACK_POLL_MS) {
 				setPollInterval(WS_FALLBACK_POLL_MS);
 			}
+			// Update connection status and refresh data
+			setConnectionStatus(true);
+			refresh(false);
 			// Initialize focus tracking and send initial state
 			initFocusTracking();
 			lastFocusState = null;  // Reset to ensure initial state is sent
