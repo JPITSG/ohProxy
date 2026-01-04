@@ -3031,8 +3031,11 @@ function applyWsUpdate(data) {
 // --- Client Focus Tracking ---
 let lastFocusState = null;
 let focusListenersInitialized = false;
+let externalFocusOverride = null;  // Set by postMessage from WebView2 container
 
 function isClientFocused() {
+	// Use external override if set, otherwise use visibilityState
+	if (externalFocusOverride !== null) return externalFocusOverride;
 	return document.visibilityState === 'visible';
 }
 
@@ -3058,8 +3061,8 @@ function initFocusTracking() {
 	// Listen for external focus control via postMessage (e.g., from WebView2 container)
 	window.addEventListener('message', (e) => {
 		if (e.data && typeof e.data.ohProxyFocus === 'boolean') {
-			lastFocusState = e.data.ohProxyFocus;
-			sendClientState({ focused: e.data.ohProxyFocus });
+			externalFocusOverride = e.data.ohProxyFocus;
+			sendFocusState();
 		}
 	});
 }
