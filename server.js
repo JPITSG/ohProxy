@@ -1351,6 +1351,35 @@ const atmospherePages = new Map(); // pageId -> { connection, trackingId, reconn
 
 // Track item states to detect actual changes (not just openHAB reporting unchanged items)
 const itemStates = new Map(); // itemName -> state
+let lastSeenItems = new Set(); // Item names from most recent full poll
+let itemStateCleanupTimer = null;
+const ITEM_STATE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
+function cleanupStaleItemStates() {
+	if (lastSeenItems.size === 0) return; // No poll data yet
+	let removed = 0;
+	for (const name of itemStates.keys()) {
+		if (!lastSeenItems.has(name)) {
+			itemStates.delete(name);
+			removed++;
+		}
+	}
+	if (removed > 0) {
+		logMessage(`[Polling] Cleaned up ${removed} stale item states (${itemStates.size} remaining)`);
+	}
+}
+
+function startItemStateCleanup() {
+	if (itemStateCleanupTimer) return;
+	itemStateCleanupTimer = setInterval(cleanupStaleItemStates, ITEM_STATE_CLEANUP_INTERVAL_MS);
+}
+
+function stopItemStateCleanup() {
+	if (itemStateCleanupTimer) {
+		clearInterval(itemStateCleanupTimer);
+		itemStateCleanupTimer = null;
+	}
+}
 
 function filterChangedItems(changes) {
 	const actualChanges = [];
@@ -1602,6 +1631,8 @@ async function pollItems() {
 	}
 
 	if (items.length > 0) {
+		// Track seen items for stale state cleanup
+		lastSeenItems = new Set(items.map(i => i.name));
 		const actualChanges = filterChangedItems(items);
 		if (actualChanges.length > 0) {
 			logMessage(`[Polling] ${actualChanges.length} items changed (${items.length} total)`);
@@ -1620,6 +1651,7 @@ function startPolling() {
 	pollingActive = true;
 	currentPollingIntervalMs = getEffectivePollingInterval();
 	logMessage(`[Polling] Starting item polling (interval: ${currentPollingIntervalMs}ms)`);
+	startItemStateCleanup();
 	pollItems();
 }
 
@@ -1630,6 +1662,7 @@ function stopPolling() {
 		clearTimeout(pollingTimer);
 		pollingTimer = null;
 	}
+	stopItemStateCleanup();
 }
 
 // --- Generic WS Push Control ---
