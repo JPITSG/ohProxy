@@ -392,22 +392,6 @@ function handleBounceTouchEnd() {
 	releaseBounce();
 }
 
-// Touch highlight for touch devices (CSS :hover doesn't work reliably)
-let touchHighlightEl = null;
-function handleTouchHighlightStart(e) {
-	if (document.documentElement.classList.contains('hover-device')) return;
-	const el = e.target.closest('#grid .glass');
-	if (!el) return;
-	touchHighlightEl = el;
-	el.classList.add('touch-highlight');
-}
-function handleTouchHighlightEnd() {
-	if (touchHighlightEl) {
-		touchHighlightEl.classList.remove('touch-highlight');
-		touchHighlightEl = null;
-	}
-}
-
 function queueScrollTop() {
 	if (state.isSlim) {
 		scrollToTop();
@@ -3195,12 +3179,9 @@ function restoreNormalPolling() {
 		window.addEventListener('scroll', scheduleImageScrollRefresh, { passive: true });
 		window.addEventListener('touchstart', noteActivity, { passive: true });
 		window.addEventListener('touchstart', handleBounceTouchStart, { passive: true });
-		window.addEventListener('touchstart', handleTouchHighlightStart, { passive: true });
 		window.addEventListener('touchmove', handleBounceTouchMove, { passive: false });
 		window.addEventListener('touchend', handleBounceTouchEnd, { passive: true });
-		window.addEventListener('touchend', handleTouchHighlightEnd, { passive: true });
 		window.addEventListener('touchcancel', handleBounceTouchEnd, { passive: true });
-		window.addEventListener('touchcancel', handleTouchHighlightEnd, { passive: true });
 	window.addEventListener('click', noteActivity, { passive: true });
 	window.addEventListener('keydown', noteActivity, { passive: true });
 		window.addEventListener('resize', scheduleImageResizeRefresh, { passive: true });
