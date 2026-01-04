@@ -141,6 +141,7 @@ body.theme-light {
 html,
 body {
 	scrollbar-gutter: stable;
+	background-color: var(--color-body-bg);
 }
 
 /* Subtle animated background */
