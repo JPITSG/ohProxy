@@ -127,8 +127,10 @@ module.exports = {
 			// polling: Polls openHAB REST API at interval, compares states, sends only changes.
 			// atmosphere: Uses openHAB Atmosphere long-polling for real-time updates.
 			mode: 'polling',
-			// Polling interval in ms (only used when mode is 'polling'; >=100).
+			// Polling interval in ms when clients are focused (>=100).
 			pollingIntervalMs: 500,
+			// Polling interval in ms when all clients are unfocused/background (>=100).
+			pollingIntervalBgMs: 2000,
 		},
 	},
 

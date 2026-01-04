@@ -227,6 +227,7 @@ const SITEMAP_REFRESH_MS = configNumber(
 const WEBSOCKET_CONFIG = SERVER_CONFIG.websocket || {};
 const WS_MODE = (WEBSOCKET_CONFIG.mode === 'atmosphere') ? 'atmosphere' : 'polling';
 const WS_POLLING_INTERVAL_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalMs) || 500;
+const WS_POLLING_INTERVAL_BG_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalBgMs) || 2000;
 let lastAuthFailNotifyAt = 0;
 const authLockouts = new Map();
 
@@ -1024,6 +1025,7 @@ const liveConfig = {
 	clientConfig: CLIENT_CONFIG,
 	wsMode: WS_MODE,
 	wsPollingIntervalMs: WS_POLLING_INTERVAL_MS,
+	wsPollingIntervalBgMs: WS_POLLING_INTERVAL_BG_MS,
 };
 
 // Values that require restart if changed
@@ -1121,6 +1123,7 @@ function reloadLiveConfig() {
 	const oldWsMode = liveConfig.wsMode;
 	liveConfig.wsMode = (newWsConfig.mode === 'atmosphere') ? 'atmosphere' : 'polling';
 	liveConfig.wsPollingIntervalMs = configNumber(newWsConfig.pollingIntervalMs) || 500;
+	liveConfig.wsPollingIntervalBgMs = configNumber(newWsConfig.pollingIntervalBgMs) || 2000;
 
 	// If mode changed and clients are connected, switch modes
 	if (oldWsMode !== liveConfig.wsMode && wss.clients.size > 0) {
@@ -1252,6 +1255,7 @@ function handleWsConnection(ws, req) {
 	logMessage(`[WS] Client connected from ${clientIp}, total: ${wss.clients.size}`);
 
 	ws.isAlive = true;
+	ws.clientState = { focused: null };  // null = uninitialized
 
 	// Send welcome message
 	try {
@@ -1264,9 +1268,26 @@ function handleWsConnection(ws, req) {
 
 	ws.on('pong', () => { ws.isAlive = true; });
 
+	ws.on('message', (data) => {
+		try {
+			const msg = JSON.parse(data);
+			if (msg.event === 'clientState' && msg.data) {
+				if (typeof msg.data.focused === 'boolean') {
+					const prevState = ws.clientState.focused;
+					ws.clientState.focused = msg.data.focused;
+					const prevLabel = prevState === null ? 'uninitialized' : (prevState ? 'focused' : 'unfocused');
+					const newLabel = msg.data.focused ? 'focused' : 'unfocused';
+					logMessage(`[WS] Client ${clientIp} focus: ${prevLabel} -> ${newLabel}`);
+					adjustPollingForFocus();
+				}
+			}
+		} catch {}
+	});
+
 	ws.on('close', (code, reason) => {
 		logMessage(`[WS] Client disconnected from ${clientIp}, code: ${code}, reason: ${reason || 'none'}, remaining: ${wss.clients.size}`);
 		stopWsPushIfUnneeded();
+		adjustPollingForFocus();
 	});
 
 	ws.on('error', (err) => {
@@ -1517,6 +1538,30 @@ function stopAtmosphereIfUnneeded() {
 // --- Polling Mode ---
 let pollingTimer = null;
 let pollingActive = false;
+let currentPollingIntervalMs = null;
+
+function countFocusedClients() {
+	let count = 0;
+	for (const client of wss.clients) {
+		if (client.clientState?.focused === true) count++;
+	}
+	return count;
+}
+
+function getEffectivePollingInterval() {
+	const focused = countFocusedClients();
+	return focused > 0 ? liveConfig.wsPollingIntervalMs : liveConfig.wsPollingIntervalBgMs;
+}
+
+function adjustPollingForFocus() {
+	if (liveConfig.wsMode !== 'polling' || !pollingActive) return;
+	const newInterval = getEffectivePollingInterval();
+	if (newInterval !== currentPollingIntervalMs) {
+		const oldInterval = currentPollingIntervalMs;
+		currentPollingIntervalMs = newInterval;
+		logMessage(`[Polling] Interval changed: ${oldInterval}ms -> ${newInterval}ms (${countFocusedClients()} focused clients)`);
+	}
+}
 
 async function fetchAllItems() {
 	try {
@@ -1555,21 +1600,23 @@ async function pollItems() {
 		}
 	}
 
-	// Schedule next poll
+	// Schedule next poll with dynamic interval
 	if (pollingActive && wss.clients.size > 0) {
-		pollingTimer = setTimeout(pollItems, liveConfig.wsPollingIntervalMs);
+		pollingTimer = setTimeout(pollItems, currentPollingIntervalMs || getEffectivePollingInterval());
 	}
 }
 
 function startPolling() {
 	if (pollingActive) return;
 	pollingActive = true;
-	logMessage(`[Polling] Starting item polling (interval: ${liveConfig.wsPollingIntervalMs}ms)`);
+	currentPollingIntervalMs = getEffectivePollingInterval();
+	logMessage(`[Polling] Starting item polling (interval: ${currentPollingIntervalMs}ms)`);
 	pollItems();
 }
 
 function stopPolling() {
 	pollingActive = false;
+	currentPollingIntervalMs = null;
 	if (pollingTimer) {
 		clearTimeout(pollingTimer);
 		pollingTimer = null;

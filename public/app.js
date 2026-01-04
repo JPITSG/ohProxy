@@ -3007,6 +3007,35 @@ function applyWsUpdate(data) {
 	}
 }
 
+// --- Client Focus Tracking ---
+let lastFocusState = null;
+let focusListenersInitialized = false;
+
+function isClientFocused() {
+	return document.visibilityState === 'visible';
+}
+
+function sendClientState(stateData) {
+	if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) return;
+	try {
+		wsConnection.send(JSON.stringify({ event: 'clientState', data: stateData }));
+	} catch {}
+}
+
+function sendFocusState() {
+	const focused = isClientFocused();
+	if (focused !== lastFocusState) {
+		lastFocusState = focused;
+		sendClientState({ focused });
+	}
+}
+
+function initFocusTracking() {
+	if (focusListenersInitialized) return;
+	focusListenersInitialized = true;
+	document.addEventListener('visibilitychange', sendFocusState);
+}
+
 function getWsUrl() {
 	const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 	return `${proto}//${window.location.host}/ws`;
@@ -3030,6 +3059,10 @@ function connectWs() {
 			if (state.pollTimer && state.pollInterval < WS_FALLBACK_POLL_MS) {
 				setPollInterval(WS_FALLBACK_POLL_MS);
 			}
+			// Initialize focus tracking and send initial state
+			initFocusTracking();
+			lastFocusState = null;  // Reset to ensure initial state is sent
+			sendFocusState();
 		};
 
 		wsConnection.onmessage = (event) => {
