@@ -186,8 +186,14 @@ function cancelSearchStateRequests() {
 
 function setResumeResetUi(active) {
 	document.documentElement.classList.toggle('resume-reset', active);
-	if (active) {
-		window.location.reload();
+	if (active && state.rootPageUrl) {
+		// Navigate to home without reload (keeps WS connected for focus tracking)
+		if (els.search) els.search.value = '';
+		state.filter = '';
+		state.stack = [];
+		state.pageUrl = state.rootPageUrl;
+		state.pageTitle = state.rootPageTitle || state.pageTitle;
+		window.scrollTo(0, 0);
 	}
 }
 
