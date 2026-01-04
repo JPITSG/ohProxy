@@ -82,8 +82,9 @@ module.exports = {
 				// CSP policy string (empty disables).
 				policy: "default-src 'self'; img-src 'self' data: https: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https:; font-src 'self' data:;",
 			},
-			// Referrer-Policy value (no-referrer|no-referrer-when-downgrade|origin|origin-when-cross-origin|same-origin|strict-origin|strict-origin-when-cross-origin|unsafe-url|empty).
-			referrerPolicy: 'no-referrer',
+			// Referrer-Policy value (same-origin|no-referrer|strict-origin-when-cross-origin|etc).
+			// Note: 'same-origin' is required for auth-exempt assets to work correctly.
+			referrerPolicy: 'same-origin',
 		},
 		// Asset version strings.
 		assets: {
@@ -95,8 +96,6 @@ module.exports = {
 			appleTouchIconVersion: 'v1',
 			// Icon cache version (v### or ###).
 			iconVersion: 'v1',
-			// Language bundle version (v### or ###).
-			langVersion: 'v1',
 		},
 		// Proxy user-agent (string; non-empty).
 		userAgent: 'ohProxy/1.0',
