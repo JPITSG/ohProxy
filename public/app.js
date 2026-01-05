@@ -768,15 +768,15 @@ function colorToRgba(color, alpha) {
 	if (!c) return '';
 	let rgb = resolveColorToRgb(c);
 	if (!rgb) return c;
-	// Use consistent glow colors: green like switch buttons, neon red/yellow
+	// Use specific glow colors
 	if (isGreenishRgb(rgb)) {
-		rgb = { r: 118, g: 214, b: 152 }; // Same green as switch buttons
-	} else if (rgb.r > 150 && rgb.g > 150 && rgb.b < 100) {
-		// Yellowish - pure neon yellow
-		rgb = { r: 255, g: 245, b: 0 };
+		rgb = { r: 154, g: 240, b: 0 }; // #9af000
+	} else if (rgb.r > 150 && rgb.g > 100 && rgb.g < 200 && rgb.b < 100) {
+		// Orange/yellow
+		rgb = { r: 255, g: 130, b: 42 }; // #ff822a
 	} else if (rgb.r > rgb.g && rgb.r > rgb.b) {
-		// Reddish - pure neon red
-		rgb = { r: 255, g: 40, b: 60 };
+		// Red
+		rgb = { r: 234, g: 0, b: 52 }; // #ea0034
 	}
 	return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 }

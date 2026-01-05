@@ -26,7 +26,7 @@
 	--glass-tint: rgba(28, 29, 33, 0.18);
 	--glass-blur: blur(10px) saturate(1.2);
 	--glass-border-width: 0.5px;
-	--glass-border-color: rgba(234, 235, 238, 0.18);
+	--glass-border-color: rgba(234, 235, 238, 0.28);
 	--glass-border-radius: 18px;
 	--glass-box-shadow: 0 12px 20px rgba(0, 0, 0, 0.28);
 	--glass-inset-shadow:
@@ -108,7 +108,7 @@
 	/* Header */
 	--header-bg: rgba(30, 30, 30, 0.01);
 	--header-blur: blur(8px) saturate(1.1);
-	--header-border: rgba(234, 235, 238, 0.1);
+	--header-border: var(--glass-border-color);
 }
 
 
@@ -204,7 +204,7 @@ body.theme-light {
 
 	/* Header */
 	--header-bg: rgba(234, 235, 238, 0.1);
-	--header-border: rgba(255, 255, 255, 0.3);
+	--header-border: rgba(150, 150, 150, 0.3);
 
 	background-color: var(--color-body-bg);
 	color: var(--color-body-text);
@@ -965,7 +965,10 @@ body.theme-light.hover-device #grid .glass:hover {
 /* Resume spinner - shown when returning to app on touch devices */
 .resume-spinner {
 	position: fixed;
-	inset: 0;
+	top: var(--header-height, 60px);
+	left: 0;
+	right: 0;
+	bottom: 0;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -974,9 +977,9 @@ body.theme-light.hover-device #grid .glass:hover {
 	visibility: hidden;
 	pointer-events: none;
 	transition: opacity .2s ease, visibility .2s ease;
-	background: rgba(30, 30, 30, 0.85);
-	backdrop-filter: blur(8px);
-	-webkit-backdrop-filter: blur(8px);
+	background: transparent;
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
 }
 .resume-spinner.active {
 	opacity: 1;
@@ -995,7 +998,7 @@ body.theme-light.hover-device #grid .glass:hover {
 	to { transform: rotate(360deg); }
 }
 body.theme-light .resume-spinner {
-	background: rgba(254, 244, 242, 0.9);
+	background: transparent;
 }
 body.theme-light .resume-spinner-ring {
 	border-color: rgba(0, 0, 0, 0.1);
