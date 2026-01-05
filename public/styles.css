@@ -604,6 +604,9 @@ html:not(.slim) #grid {
 	border: 1px solid var(--glass-border-color) !important;
 	box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.09) !important;
 }
+#searchWrap input::placeholder {
+	color: rgba(255, 255, 255, 0.35);
+}
 body.theme-light #searchWrap input {
 	background: rgba(255, 255, 255, 0.7) !important;
 	box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05) !important;
