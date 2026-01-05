@@ -2145,7 +2145,8 @@ function updateCard(card, w, afterImage, info) {
 		'cursor-pointer',
 		'title-hidden',
 		'has-meta',
-		'switch-many'
+		'switch-many',
+		'switch-single'
 	);
 	card.classList.toggle('sm:col-span-2', isImage || (afterImage && isText));
 	card.classList.toggle('lg:col-span-3', isImage || (afterImage && isText));
@@ -2460,6 +2461,7 @@ function updateCard(card, w, afterImage, info) {
 		const currentState = safeText(st);
 		const switchButtonCount = mapping.length ? mapping.length : 1;
 		if (switchButtonCount >= 3) card.classList.add('switch-many');
+		if (switchButtonCount === 1) card.classList.add('switch-single');
 
 		// Check if we can reuse existing switch controls for smooth transitions
 		const existingButtons = existingSwitchControls ? existingSwitchControls.querySelectorAll('.switch-btn') : null;

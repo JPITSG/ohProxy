@@ -272,6 +272,20 @@ header {
 	box-shadow: var(--glass-box-shadow), var(--glass-inset-shadow);
 }
 
+/* Button hover effect when hovering anywhere on click-anywhere cards */
+@media (hover: hover) and (pointer: fine) {
+	.switch-card.switch-single:hover .switch-btn {
+		background-color: var(--color-switch-active-bg) !important;
+		border-color: var(--color-switch-active-border) !important;
+		box-shadow: 0 0 10px var(--color-switch-active-shadow);
+	}
+	.selection-card:hover .inline-controls .fake-select {
+		background-color: var(--color-switch-active-bg) !important;
+		border-color: var(--color-switch-active-border) !important;
+		box-shadow: 0 0 10px var(--color-switch-active-shadow);
+	}
+}
+
 .labelRow {
 	min-height: 3rem;
 }
