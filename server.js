@@ -219,6 +219,7 @@ const AUTH_FAIL_NOTIFY_INTERVAL_MS = 15 * 60 * 1000;
 const AUTH_LOCKOUT_THRESHOLD = 3;
 const SESSION_COOKIE_NAME = 'ohSession';
 const SESSION_COOKIE_DAYS = 3650; // 10 years
+const SESSION_MAX_AGE_DAYS = configNumber(SERVER_CONFIG.sessionMaxAgeDays, 14);
 const AUTH_LOCKOUT_MS = 15 * 60 * 1000;
 const SECURITY_HEADERS_ENABLED = SECURITY_HEADERS.enabled !== false;
 const SECURITY_HSTS = SECURITY_HEADERS.hsts || {};
@@ -3020,8 +3021,9 @@ if (SITEMAP_REFRESH_MS > 0) {
 
 // Initialize sessions database
 try {
+	sessions.setMaxAgeDays(SESSION_MAX_AGE_DAYS);
 	sessions.initDb();
-	logMessage('Sessions database initialized');
+	logMessage(`Sessions database initialized (max age: ${SESSION_MAX_AGE_DAYS} days)`);
 } catch (err) {
 	logMessage(`Failed to initialize sessions database: ${err.message || err}`);
 }

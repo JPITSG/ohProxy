@@ -5,8 +5,9 @@ const path = require('path');
 const crypto = require('crypto');
 
 const DB_PATH = path.join(__dirname, 'sessions.db');
-const SESSION_MAX_AGE_DAYS = 365;
 const DEFAULT_SETTINGS = { darkMode: true };
+
+let sessionMaxAgeDays = 14; // Default, can be overridden via setMaxAgeDays()
 
 let db = null;
 
@@ -157,12 +158,22 @@ function touchSession(clientId, ip = null) {
 }
 
 /**
- * Delete sessions older than SESSION_MAX_AGE_DAYS.
+ * Set the session max age in days.
+ * @param {number} days - Max age in days (must be >= 1)
+ */
+function setMaxAgeDays(days) {
+	if (typeof days === 'number' && days >= 1) {
+		sessionMaxAgeDays = days;
+	}
+}
+
+/**
+ * Delete sessions older than sessionMaxAgeDays.
  * @returns {number} - Number of sessions deleted
  */
 function cleanupSessions() {
 	if (!db) initDb();
-	const cutoff = Math.floor(Date.now() / 1000) - (SESSION_MAX_AGE_DAYS * 24 * 60 * 60);
+	const cutoff = Math.floor(Date.now() / 1000) - (sessionMaxAgeDays * 24 * 60 * 60);
 
 	const result = db.prepare(`
 		DELETE FROM sessions WHERE last_seen < ?
@@ -203,4 +214,5 @@ module.exports = {
 	cleanupSessions,
 	closeDb,
 	getDefaultSettings,
+	setMaxAgeDays,
 };

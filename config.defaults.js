@@ -120,6 +120,8 @@ module.exports = {
 			// Sitemap refresh interval (ms; >=1000).
 			sitemapRefreshMs: 60000,
 		},
+		// Session max age in days before cleanup (integer; >=1).
+		sessionMaxAgeDays: 14,
 		// WebSocket push configuration.
 		websocket: {
 			// WebSocket update mode ('polling' or 'atmosphere').
