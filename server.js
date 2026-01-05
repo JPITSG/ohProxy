@@ -953,6 +953,9 @@ function maybeNotifyAuthFailure(ip) {
 }
 
 function sendAuthRequired(res) {
+	// Set auth headers so client can update status (user is not on LAN if auth is required)
+	res.setHeader('X-OhProxy-Authenticated', 'false');
+	res.setHeader('X-OhProxy-Lan', 'false');
 	res.setHeader('WWW-Authenticate', `Basic realm="${liveConfig.authRealm}"`);
 	res.status(401).type('text/plain').send('Unauthorized');
 }
