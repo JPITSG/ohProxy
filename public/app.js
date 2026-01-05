@@ -213,7 +213,7 @@ function showResumeSpinner(show) {
 	document.body.classList.toggle('resume-spinner-active', show);
 }
 
-function waitForConnection(timeoutMs = 0) {
+function waitForConnection(timeoutMs = 10000) {
 	return new Promise((resolve) => {
 		const startTime = Date.now();
 		const check = () => {
@@ -3245,25 +3245,22 @@ function connectWs() {
 			const wasConnected = wsConnected;
 			wsConnected = false;
 			wsConnection = null;
-			if (!wasConnected || event.code === 1002 || event.code === 1006) {
+			// Don't count as failure if paused (intentional stop) or clean close
+			if (!state.isPaused && (!wasConnected || event.code === 1002 || event.code === 1006)) {
 				wsFailCount++;
 				if (wsFailCount >= WS_MAX_FAILURES) {
 					restoreNormalPolling();
 					return;
 				}
 			}
-			scheduleWsReconnect();
+			if (!state.isPaused) {
+				scheduleWsReconnect();
+			}
 		};
 
-		wsConnection.onerror = () => {
-			wsConnected = false;
-			closeWs();
-			wsFailCount++;
-			if (wsFailCount >= WS_MAX_FAILURES) {
-				restoreNormalPolling();
-				return;
-			}
-			scheduleWsReconnect();
+		wsConnection.onerror = (err) => {
+			// Only log here - onclose will handle fail count and reconnection
+			console.warn('WebSocket error:', err);
 		};
 	} catch {
 		wsConnected = false;
@@ -3374,8 +3371,8 @@ function restoreNormalPolling() {
 				if (!wsConnection) connectWs();
 			}
 
-			// Wait for connection to be established, then hide spinner (no timeout)
-			await waitForConnection(0);
+			// Wait for connection to be established (max 10s), then hide spinner
+			await waitForConnection();
 			showResumeSpinner(false);
 		} else {
 			setResumeResetUi(false);
