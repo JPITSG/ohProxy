@@ -26,7 +26,7 @@
 	--glass-tint: rgba(28, 29, 33, 0.18);
 	--glass-blur: blur(10px) saturate(1.2);
 	--glass-border-width: 0.5px;
-	--glass-border-color: rgba(234, 235, 238, 0.28);
+	--glass-border-color: rgba(234, 235, 238, 0.38);
 	--glass-border-radius: 18px;
 	--glass-box-shadow: 0 12px 20px rgba(0, 0, 0, 0.28);
 	--glass-inset-shadow:
@@ -111,7 +111,7 @@
 	--color-divider: rgba(84, 84, 98, 0.28);
 
 	/* Header */
-	--header-bg: rgba(30, 30, 30, 0.01);
+	--header-bg: rgba(18, 20, 28, 0.8);
 	--header-blur: blur(8px) saturate(1.1);
 	--header-border: var(--glass-border-color);
 }
@@ -127,10 +127,10 @@ body.theme-light {
 	--color-text-muted-strong: rgba(19, 21, 54, 0.6);
 
 	/* Background colors */
-	--color-bg-base: rgb(254, 244, 242);
+	--color-bg-base: rgb(245, 246, 250);
 	--color-bg-secondary: rgba(245, 245, 245, 0.5);
 	--color-bg-card: rgba(255, 255, 255, 0.85);
-	--color-body-bg: rgb(254, 244, 242);
+	--color-body-bg: rgb(245, 246, 250);
 	--color-body-text: rgba(19, 21, 54, 0.98);
 
 	/* Glass effect - lighter for light mode */
@@ -200,11 +200,11 @@ body.theme-light {
 
 	/* Theme overlay */
 	--color-theme-overlay-radial: rgba(106, 116, 211, 0.08);
-	--color-theme-overlay-start: rgb(254, 244, 242);
-	--color-theme-overlay-end: rgb(254, 244, 242);
+	--color-theme-overlay-start: rgb(245, 246, 250);
+	--color-theme-overlay-end: rgb(245, 246, 250);
 
 	/* Slim mode */
-	--color-slim-header-bg: rgb(254, 244, 242);
+	--color-slim-header-bg: rgb(245, 246, 250);
 	--color-slim-glass-bg: rgba(255, 255, 255, 0.9);
 	--color-slim-glass-border: rgba(255, 255, 255, 0.3);
 	--color-slim-glass-hover: rgba(19, 21, 54, 0.04);
@@ -213,7 +213,7 @@ body.theme-light {
 	--color-divider: rgba(224, 224, 224, 0.3);
 
 	/* Header */
-	--header-bg: rgba(234, 235, 238, 0.1);
+	--header-bg: rgba(210, 215, 225, 0.75);
 	--header-border: rgba(150, 150, 150, 0.3);
 
 	background-color: var(--color-body-bg);
@@ -473,7 +473,7 @@ html:not(.slim) .has-meta .labelStack {
 	-webkit-backdrop-filter: blur(8px);
 }
 body.theme-light .image-viewer {
-	background: rgba(254, 244, 242, 0.9);
+	background: rgba(245, 246, 250, 0.9);
 }
 .image-viewer.hidden {
 	display: none;
@@ -597,7 +597,7 @@ html:not(.slim) #grid {
 	background: rgba(30, 33, 54, 0.7) !important;
 	backdrop-filter: blur(6px) !important;
 	-webkit-backdrop-filter: blur(6px) !important;
-	border: none !important;
+	border: 1px solid var(--glass-border-color) !important;
 	box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.09) !important;
 }
 body.theme-light #searchWrap input {
@@ -687,9 +687,12 @@ body.theme-dark #themeToggleBtn svg {
 	margin-left: 0;
 }
 .slim header {
-	background-color: var(--color-slim-header-bg) !important;
+	background-color: var(--color-body-bg) !important;
 	backdrop-filter: none !important;
 	-webkit-backdrop-filter: none !important;
+}
+.slim #searchWrap input {
+	border: var(--glass-border-width) solid var(--color-slim-glass-border) !important;
 }
 .slim .glass {
 	background: var(--color-slim-glass-bg) !important;
@@ -896,7 +899,7 @@ body.theme-light .bg-slate-950 {
 	background-color: var(--color-bg-base);
 }
 body.theme-light .bg-slate-950\/40 {
-	background-color: rgba(254, 244, 242, 0.8);
+	background-color: rgba(245, 246, 250, 0.8);
 }
 body.theme-light .text-slate-100 { color: var(--color-text-primary); }
 body.theme-light .text-slate-200 { color: var(--color-text-primary); }
