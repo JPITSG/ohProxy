@@ -2095,7 +2095,14 @@ function updateCard(card, w, afterImage, info) {
 	const previousSliderValue = existingSliderInput ? Number(existingSliderInput.value) : null;
 	// If user is actively dragging the slider, preserve it entirely (don't interrupt drag)
 	const sliderIsDragging = existingSliderWrap && existingSliderWrap.dataset.dragging === 'true';
-	resetLabelRow(labelRow, labelStack, navHint, sliderIsDragging ? existingSliderWrap : null);
+	// Capture switch controls for smooth state transitions
+	const isSwitchType = t.includes('switch') || t === 'switch';
+	const existingSwitchControls = isSwitchType ? labelRow.querySelector('.inline-controls') : null;
+	// Determine what to preserve
+	let preserveElement = null;
+	if (sliderIsDragging) preserveElement = existingSliderWrap;
+	else if (existingSwitchControls) preserveElement = existingSwitchControls;
+	resetLabelRow(labelRow, labelStack, navHint, preserveElement);
 	removeOverlaySelects(card);
 
 	if (!isImage) {
@@ -2404,12 +2411,45 @@ function updateCard(card, w, afterImage, info) {
 			}
 		}
 	} else if (t.includes('switch') || t === 'switch') {
-		const inlineControls = document.createElement('div');
-		inlineControls.className = 'inline-controls flex items-center gap-2 flex-1 min-w-0';
 		card.classList.add('switch-card');
 		const currentState = safeText(st);
 		const switchButtonCount = mapping.length ? mapping.length : 1;
 		if (switchButtonCount >= 3) card.classList.add('switch-many');
+
+		// Check if we can reuse existing switch controls for smooth transitions
+		const existingButtons = existingSwitchControls ? existingSwitchControls.querySelectorAll('.switch-btn') : null;
+		const canReuse = existingButtons && existingButtons.length === switchButtonCount;
+
+		if (canReuse) {
+			// Reuse existing controls - just update is-active class for smooth CSS transition
+			if (mapping.length) {
+				for (const btn of existingButtons) {
+					const cmd = btn.dataset.command;
+					btn.classList.toggle('is-active', safeText(cmd) === currentState);
+				}
+			} else {
+				// Single ON/OFF switch - update class, text, and click handler
+				const isOn = st.toUpperCase() === 'ON';
+				const btn = existingButtons[0];
+				btn.classList.toggle('is-active', isOn);
+				btn.textContent = isOn ? 'Turn OFF' : 'Turn ON';
+				// Update onclick with current state (closure would have stale value)
+				btn.onclick = async () => {
+					haptic();
+					btn.disabled = true;
+					try { await sendCommand(itemName, isOn ? 'OFF' : 'ON'); await refresh(false); }
+					catch (e) { alert(e.message); }
+					finally { btn.disabled = false; }
+				};
+			}
+			return true;
+		}
+
+		// No existing controls or count mismatch - create new
+		if (existingSwitchControls) existingSwitchControls.remove();
+
+		const inlineControls = document.createElement('div');
+		inlineControls.className = 'inline-controls flex items-center gap-2 flex-1 min-w-0';
 		if (navHint && navHint.parentElement === labelRow) {
 			labelRow.insertBefore(inlineControls, navHint);
 		} else {
