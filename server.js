@@ -14,6 +14,7 @@ const spdy = require('spdy');
 const crypto = require('crypto');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const WebSocket = require('ws');
+const sessions = require('./sessions');
 
 const CONFIG_PATH = path.join(__dirname, 'config.js');
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
@@ -216,6 +217,8 @@ const AUTH_COOKIE_KEY = safeText(SERVER_AUTH.cookieKey || '');
 const AUTH_FAIL_NOTIFY_CMD = safeText(SERVER_AUTH.authFailNotifyCmd || '');
 const AUTH_FAIL_NOTIFY_INTERVAL_MS = 15 * 60 * 1000;
 const AUTH_LOCKOUT_THRESHOLD = 3;
+const SESSION_COOKIE_NAME = 'ohSession';
+const SESSION_COOKIE_DAYS = 3650; // 10 years
 const AUTH_LOCKOUT_MS = 15 * 60 * 1000;
 const SECURITY_HEADERS_ENABLED = SECURITY_HEADERS.enabled !== false;
 const SECURITY_HSTS = SECURITY_HEADERS.hsts || {};
@@ -902,6 +905,27 @@ function clearAuthCookie(res) {
 	];
 	if (secure) parts.push('Secure');
 	appendSetCookie(res, parts.join('; '));
+}
+
+function setSessionCookie(res, sessionId) {
+	const expiry = Math.floor(Date.now() / 1000) + Math.round(SESSION_COOKIE_DAYS * 86400);
+	const expires = new Date(expiry * 1000).toUTCString();
+	const maxAge = Math.round(SESSION_COOKIE_DAYS * 86400);
+	const secure = isSecureRequest(res.req);
+	const parts = [
+		`${SESSION_COOKIE_NAME}=${sessionId}`,
+		'Path=/',
+		`Expires=${expires}`,
+		`Max-Age=${maxAge}`,
+		'HttpOnly',
+		'SameSite=Lax',
+	];
+	if (secure) parts.push('Secure');
+	appendSetCookie(res, parts.join('; '));
+}
+
+function getSessionCookie(req) {
+	return getCookieValue(req, SESSION_COOKIE_NAME);
 }
 
 function normalizeNotifyIp(value) {
@@ -1906,6 +1930,9 @@ function renderIndexHtml(options) {
 	html = html.replace(/__STATUS_TEXT__/g, escapeHtml(opts.statusText || 'Connected'));
 	html = html.replace(/__STATUS_CLASS__/g, escapeHtml(opts.statusClass || 'status-pending'));
 	html = html.replace(/__AUTH_INFO__/g, inlineJson(opts.authInfo || {}));
+	html = html.replace(/__SESSION_SETTINGS__/g, inlineJson(opts.sessionSettings || {}));
+	const themeClass = opts.sessionSettings?.darkMode === false ? 'theme-light' : 'theme-dark';
+	html = html.replace(/__THEME_CLASS__/g, themeClass);
 	return html;
 }
 
@@ -1924,6 +1951,7 @@ function sendIndex(req, res) {
 	res.setHeader('Content-Type', 'text/html; charset=utf-8');
 	const status = getInitialStatusInfo(req);
 	status.authInfo = getAuthInfo(req);
+	status.sessionSettings = req.ohProxySession?.settings || sessions.getDefaultSettings();
 	res.send(renderIndexHtml(status));
 }
 
@@ -2542,6 +2570,44 @@ app.use((req, res, next) => {
 	req.ohProxyUser = authenticatedUser;
 	next();
 });
+// Session middleware - runs after auth, assigns/loads session for all authorized users
+app.use((req, res, next) => {
+	try {
+		const sessionId = getSessionCookie(req);
+		const username = req.ohProxyUser || null;
+		const clientIp = req.ohProxyClientIp || null;
+
+		if (sessionId) {
+			// Existing session cookie
+			const session = sessions.getSession(sessionId);
+			if (session) {
+				// Valid session found - touch it and attach to request
+				sessions.touchSession(sessionId, clientIp);
+				req.ohProxySession = session;
+				req.ohProxySession.lastIp = clientIp || session.lastIp;
+				// Username upgrade: LAN user now authenticated
+				if (!session.username && username) {
+					sessions.updateUsername(sessionId, username);
+					req.ohProxySession.username = username;
+				}
+			} else {
+				// Session cookie exists but not in DB (DB was reset) - create new session
+				const newSession = sessions.createSession(sessionId, username, sessions.getDefaultSettings(), clientIp);
+				req.ohProxySession = newSession;
+			}
+		} else {
+			// No session cookie - create new session
+			const newSessionId = sessions.generateSessionId();
+			const newSession = sessions.createSession(newSessionId, username, sessions.getDefaultSettings(), clientIp);
+			setSessionCookie(res, newSessionId);
+			req.ohProxySession = newSession;
+		}
+	} catch (err) {
+		logMessage(`Session error: ${err.message}`);
+		// Continue without session on error
+	}
+	next();
+});
 app.use((req, res, next) => {
 	const info = getAuthInfo(req);
 	setAuthResponseHeaders(res, info);
@@ -2564,6 +2630,41 @@ app.get('/config.js', (req, res) => {
 		},
 		client: clientConfig,
 	})};`);
+});
+
+// Session settings API
+app.get('/api/settings', (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+	const session = req.ohProxySession;
+	if (!session) {
+		res.json(sessions.getDefaultSettings());
+		return;
+	}
+	res.json(session.settings || sessions.getDefaultSettings());
+});
+
+app.post('/api/settings', express.json(), (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+	const session = req.ohProxySession;
+	if (!session) {
+		res.status(400).json({ error: 'No session' });
+		return;
+	}
+	const newSettings = req.body;
+	if (!newSettings || typeof newSettings !== 'object') {
+		res.status(400).json({ error: 'Invalid settings' });
+		return;
+	}
+	// Merge with existing settings
+	const merged = { ...session.settings, ...newSettings };
+	const updated = sessions.updateSettings(session.clientId, merged);
+	if (!updated) {
+		res.status(500).json({ error: 'Failed to update settings' });
+		return;
+	}
+	res.json({ ok: true, settings: merged });
 });
 
 app.get('/sw.js', (req, res) => {
@@ -2913,6 +3014,25 @@ app.use((req, res) => {
 if (SITEMAP_REFRESH_MS > 0) {
 	registerBackgroundTask('sitemap-cache', SITEMAP_REFRESH_MS, refreshSitemapCache);
 }
+
+// Initialize sessions database
+try {
+	sessions.initDb();
+	logMessage('Sessions database initialized');
+} catch (err) {
+	logMessage(`Failed to initialize sessions database: ${err.message || err}`);
+}
+
+// Daily session cleanup (24 hours)
+const SESSION_CLEANUP_MS = 24 * 60 * 60 * 1000;
+registerBackgroundTask('session-cleanup', SESSION_CLEANUP_MS, () => {
+	try {
+		sessions.cleanupSessions();
+	} catch (err) {
+		logMessage(`Session cleanup failed: ${err.message || err}`);
+	}
+});
+
 startBackgroundTasks();
 
 function startHttpServer() {

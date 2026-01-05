@@ -593,7 +593,9 @@ function updateThemeMeta() {
 	}
 }
 
-function setTheme(mode) {
+let serverSettingsLoaded = false;
+
+function setTheme(mode, syncToServer = true) {
 	const isLight = mode === 'light';
 	document.body.classList.toggle('theme-light', isLight);
 	document.body.classList.toggle('theme-dark', !isLight);
@@ -606,6 +608,10 @@ function setTheme(mode) {
 	}
 	try { localStorage.setItem('ohTheme', isLight ? 'light' : 'dark'); }
 	catch {}
+	// Sync to server if settings have been loaded and this isn't the initial load
+	if (syncToServer && serverSettingsLoaded) {
+		saveSettingsToServer({ darkMode: !isLight });
+	}
 }
 
 function toggleTheme() {
@@ -614,16 +620,32 @@ function toggleTheme() {
 }
 
 function initTheme(forcedMode) {
-	let mode = 'light';
+	// Priority: forcedMode (URL param) > injected session > localStorage
+	let mode = 'dark'; // default
 	try {
 		if (forcedMode === 'dark' || forcedMode === 'light') {
 			mode = forcedMode;
+		} else if (window.__OH_SESSION__ && typeof window.__OH_SESSION__.darkMode === 'boolean') {
+			mode = window.__OH_SESSION__.darkMode ? 'dark' : 'light';
 		} else {
 			const saved = localStorage.getItem('ohTheme');
 			if (saved === 'dark' || saved === 'light') mode = saved;
 		}
 	} catch {}
-	setTheme(mode);
+	setTheme(mode, false); // Don't sync to server on init
+	serverSettingsLoaded = true; // Settings already loaded from server via injection
+}
+
+async function saveSettingsToServer(settings) {
+	try {
+		await fetch('/api/settings', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(settings),
+		});
+	} catch {
+		// Ignore errors - settings will be local only
+	}
 }
 
 function applyHeaderSmallLayout() {

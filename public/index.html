@@ -13,6 +13,7 @@
 	<meta name="apple-mobile-web-app-title" content="openHAB" />
 
 	<script>
+		window.__OH_SESSION__ = __SESSION_SETTINGS__;
 		(() => {
 			try {
 				const params = new URLSearchParams(window.location.search);
@@ -21,20 +22,25 @@
 				if (headerParam === 'small') document.documentElement.classList.add('header-small');
 				if (headerParam === 'none') document.documentElement.classList.add('header-none');
 				const modeParam = params.get('mode');
+				// Priority: URL param > server session > localStorage
+				const serverMode = window.__OH_SESSION__?.darkMode === true ? 'dark'
+					: window.__OH_SESSION__?.darkMode === false ? 'light' : null;
 				let stored = null;
 				try { stored = localStorage.getItem('ohTheme'); } catch {}
 				const mode = (modeParam === 'dark' || modeParam === 'light')
 					? modeParam
-					: (stored === 'dark' || stored === 'light') ? stored : null;
-				if (mode) {
-					const themeColor = mode === 'light' ? '#fef4f2' : '#1e1e1e';
-					const metaTheme = document.querySelector('meta[name="theme-color"]');
-					if (metaTheme) metaTheme.setAttribute('content', themeColor);
-					const metaApple = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
-					if (metaApple) metaApple.setAttribute('content', mode === 'light' ? 'default' : 'black');
-					const manifest = document.querySelector('link[rel="manifest"]');
-					if (manifest) manifest.setAttribute('href', `manifest.webmanifest?theme=${mode}`);
-				}
+					: serverMode
+						? serverMode
+						: (stored === 'dark' || stored === 'light') ? stored : 'dark';
+				const themeColor = mode === 'light' ? '#fef4f2' : '#1e1e1e';
+				const metaTheme = document.querySelector('meta[name="theme-color"]');
+				if (metaTheme) metaTheme.setAttribute('content', themeColor);
+				const metaApple = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+				if (metaApple) metaApple.setAttribute('content', mode === 'light' ? 'default' : 'black');
+				const manifest = document.querySelector('link[rel="manifest"]');
+				if (manifest) manifest.setAttribute('href', `manifest.webmanifest?theme=${mode}`);
+				// Sync localStorage with server setting
+				if (serverMode) try { localStorage.setItem('ohTheme', serverMode); } catch {}
 			} catch {}
 		})();
 	</script>
@@ -43,7 +49,7 @@
 	<link rel="stylesheet" href="styles.__CSS_VERSION__.css" />
 </head>
 
-<body class="min-h-screen bg-slate-950 text-slate-100 theme-light">
+<body class="min-h-screen bg-slate-950 text-slate-100 __THEME_CLASS__">
 	<div class="fixed inset-0 bg-grid opacity-60"></div>
 	<div class="fixed inset-0 bg-gradient-to-b from-indigo-950/60 via-slate-950 to-slate-950 theme-overlay"></div>
 
