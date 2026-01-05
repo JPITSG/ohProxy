@@ -2441,6 +2441,12 @@ function updateCard(card, w, afterImage, info) {
 					catch (e) { alert(e.message); }
 					finally { btn.disabled = false; }
 				};
+				// Ensure card click handler is set for single switch
+				card.classList.add('cursor-pointer');
+				card.onclick = (e) => {
+					if (e.target.closest('button, a, input, select, textarea')) return;
+					if (btn && !btn.disabled) btn.click();
+				};
 			}
 			return true;
 		}
