@@ -19,12 +19,16 @@ Commands:
   set <session_id> <key=value> Update session setting (e.g., darkMode=true)
   delete <session_id>          Delete a session
   cleanup                      Run cleanup of expired sessions
+  purge <time>                 Delete sessions older than <time>
+                               Time format: Nsecs, Nmins, Nhours, Ndays
+                               (e.g., 10secs, 30mins, 2hours, 7days)
 
 Examples:
   node session-cli.js list
   node session-cli.js show abc-123-def
   node session-cli.js set abc-123-def darkMode=false
   node session-cli.js delete abc-123-def
+  node session-cli.js purge 7days
 `);
 }
 
@@ -148,6 +152,39 @@ function runCleanup() {
 	console.log(`Cleanup complete. Deleted ${deleted} expired session(s).`);
 }
 
+function parseTimeString(timeStr) {
+	if (!timeStr || typeof timeStr !== 'string') return null;
+	const match = timeStr.match(/^(\d+)(secs?|mins?|hours?|days?)$/i);
+	if (!match) return null;
+	const value = parseInt(match[1], 10);
+	const unit = match[2].toLowerCase();
+	if (unit.startsWith('sec')) return value;
+	if (unit.startsWith('min')) return value * 60;
+	if (unit.startsWith('hour')) return value * 60 * 60;
+	if (unit.startsWith('day')) return value * 24 * 60 * 60;
+	return null;
+}
+
+function purgeSessions(timeStr) {
+	if (!timeStr) {
+		console.error('Error: Time parameter required (e.g., 10secs, 30mins, 2hours, 7days)');
+		process.exit(1);
+	}
+
+	const seconds = parseTimeString(timeStr);
+	if (seconds === null) {
+		console.error(`Error: Invalid time format: ${timeStr}`);
+		console.error('Valid formats: Nsecs, Nmins, Nhours, Ndays (e.g., 10secs, 30mins, 2hours, 7days)');
+		process.exit(1);
+	}
+
+	const db = sessions.initDb();
+	const cutoff = Math.floor(Date.now() / 1000) - seconds;
+	const result = db.prepare('DELETE FROM sessions WHERE last_seen < ?').run(cutoff);
+
+	console.log(`Purged ${result.changes} session(s) older than ${timeStr}.`);
+}
+
 // Initialize DB
 sessions.initDb();
 
@@ -167,6 +204,9 @@ switch (command) {
 		break;
 	case 'cleanup':
 		runCleanup();
+		break;
+	case 'purge':
+		purgeSessions(args[1]);
 		break;
 	case 'help':
 	case '--help':
