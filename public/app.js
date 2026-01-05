@@ -2298,9 +2298,10 @@ function updateCard(card, w, afterImage, info) {
 			controls.classList.add('mt-3');
 			controls.innerHTML = `<div class="text-sm text-slate-400">No selection options available</div>`;
 		} else {
-			// Slim/small-header use overlay; all others use custom dropdown
-			const useOverlay = state.isSlim || state.headerMode === 'small';
-			const supportsPicker = false;
+			// Slim/small-header/small-touch use native overlay; all others use custom dropdown
+			const isSmallTouch = window.matchMedia('(max-width: 768px)').matches &&
+				('ontouchstart' in window || navigator.maxTouchPoints > 0);
+			const useOverlay = state.isSlim || state.headerMode === 'small' || isSmallTouch;
 			const inlineControls = document.createElement('div');
 			inlineControls.className = 'inline-controls flex items-center gap-2 flex-1 min-w-0';
 			card.classList.add('selection-card');
@@ -2333,16 +2334,6 @@ function updateCard(card, w, afterImage, info) {
 				if (state.pendingRefresh) {
 					state.pendingRefresh = false;
 					refresh(false);
-				}
-			};
-
-			const openNativeSelect = () => {
-				haptic();
-				select.focus();
-				if (typeof select.showPicker === 'function') {
-					try { select.showPicker(); } catch {}
-				} else {
-					try { select.click(); } catch {}
 				}
 			};
 
@@ -2381,19 +2372,6 @@ function updateCard(card, w, afterImage, info) {
 				selectWrap.appendChild(fakeSelect);
 				select.classList.add('select-overlay');
 				card.appendChild(select);
-			} else if (supportsPicker) {
-				select.onfocus = () => { state.suppressRefreshCount += 1; };
-				select.onblur = () => releaseRefresh();
-				select.onclick = () => haptic();
-				select.onchange = async () => {
-					haptic();
-					await sendSelection(select.value, select);
-				};
-				selectWrap.appendChild(select);
-				card.onclick = (e) => {
-					if (e.target.closest('button, a, input, select, textarea')) return;
-					openNativeSelect();
-				};
 			} else {
 				const fakeSelect = document.createElement('button');
 				fakeSelect.type = 'button';

@@ -59,7 +59,7 @@
 	--color-select-fake-bg: rgba(255, 255, 255, 0.05);
 	--color-select-fake-text: rgba(234, 235, 238, 0.98);
 	--color-select-fake-border: rgba(234, 235, 238, 0.1);
-	--color-select-menu-bg: rgba(30, 30, 30, 0.98);
+	--color-select-menu-bg: rgb(2, 6, 23);
 	--color-select-menu-border: rgba(234, 235, 238, 0.22);
 	--color-select-menu-shadow: rgba(0, 0, 0, 0.35);
 	--color-select-option-bg-card: rgb(33, 35, 61);
@@ -326,8 +326,7 @@ html:not(.slim) .has-meta .labelStack {
 	min-width: 50%;
 	margin-left: auto;
 }
-.selection-card .select-wrap > .fake-select,
-.selection-card .select-wrap > .oh-select {
+.selection-card .select-wrap > .fake-select {
 	width: 100%;
 	cursor: pointer;
 }
@@ -396,16 +395,6 @@ html:not(.slim) .has-meta .labelStack {
 }
 .oh-select option:disabled {
 	color: var(--color-select-option-disabled);
-}
-.selection-card .oh-select {
-	font-size: .75rem;
-	padding: .375rem .625rem;
-	border-radius: 10px;
-}
-.selection-card .oh-select:hover {
-	background-color: var(--color-control-off-hover) !important;
-	border-color: var(--color-control-off-border-hover) !important;
-	box-shadow: 0 0 10px var(--color-control-off-shadow-hover) !important;
 }
 .selection-card.menu-open {
 	z-index: 20;
