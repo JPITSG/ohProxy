@@ -1919,12 +1919,36 @@ function resetCardInteractions(card) {
 	card.onpointerleave = null;
 }
 
-function resetLabelRow(labelRow, labelStack, navHint) {
+function resetLabelRow(labelRow, labelStack, navHint, preserve = null) {
 	if (!labelRow) return;
 	for (const child of Array.from(labelRow.children)) {
 		if (child === labelStack || child === navHint) continue;
+		if (preserve && child === preserve) continue;
 		child.remove();
 	}
+}
+
+function animateSliderValue(input, targetValue, durationMs = 200) {
+	if (!input) return;
+	const startValue = Number(input.value);
+	const endValue = Number(targetValue);
+	if (startValue === endValue || !Number.isFinite(startValue) || !Number.isFinite(endValue)) {
+		input.value = targetValue;
+		return;
+	}
+	const startTime = performance.now();
+	const animate = (now) => {
+		const elapsed = now - startTime;
+		const progress = Math.min(elapsed / durationMs, 1);
+		// Ease-out cubic for smooth deceleration
+		const eased = 1 - Math.pow(1 - progress, 3);
+		const currentValue = Math.round(startValue + (endValue - startValue) * eased);
+		input.value = currentValue;
+		if (progress < 1) {
+			requestAnimationFrame(animate);
+		}
+	};
+	requestAnimationFrame(animate);
 }
 
 function removeOverlaySelects(card) {
@@ -2064,7 +2088,14 @@ function updateCard(card, w, afterImage, info) {
 	controls.classList.remove('hidden', 'mt-3');
 	labelRow.classList.remove('hidden');
 	navHint.classList.add('hidden');
-	resetLabelRow(labelRow, labelStack, navHint);
+	// Capture slider state before removal for smooth transition animation
+	const isSliderType = t.includes('dimmer') || t.includes('roller') || t.includes('slider');
+	const existingSliderWrap = isSliderType ? labelRow.querySelector('.inline-slider') : null;
+	const existingSliderInput = existingSliderWrap ? existingSliderWrap.querySelector('input[type="range"]') : null;
+	const previousSliderValue = existingSliderInput ? Number(existingSliderInput.value) : null;
+	// If user is actively dragging the slider, preserve it entirely (don't interrupt drag)
+	const sliderIsDragging = existingSliderWrap && existingSliderWrap.dataset.dragging === 'true';
+	resetLabelRow(labelRow, labelStack, navHint, sliderIsDragging ? existingSliderWrap : null);
 	removeOverlaySelects(card);
 
 	if (!isImage) {
@@ -2431,6 +2462,12 @@ function updateCard(card, w, afterImage, info) {
 			};
 		}
 	} else if (t.includes('dimmer') || t.includes('roller') || t.includes('slider')) {
+		// If user is actively dragging, skip recreation entirely to preserve drag
+		if (sliderIsDragging) {
+			card.classList.add('slider-card');
+			return true;
+		}
+
 		const val = parseInt(st, 10);
 		const current = Number.isFinite(val) ? Math.max(0, Math.min(100, val)) : 0;
 
@@ -2447,7 +2484,10 @@ function updateCard(card, w, afterImage, info) {
 		input.type = 'range';
 		input.min = '0';
 		input.max = '100';
-		input.value = String(current);
+		// Start at previous value if available (for smooth animation), otherwise use current
+		const startValue = (previousSliderValue !== null && Number.isFinite(previousSliderValue))
+			? previousSliderValue : current;
+		input.value = String(startValue);
 		input.className = 'w-full';
 
 		const releaseSliderRefresh = () => {
@@ -2579,12 +2619,16 @@ function updateCard(card, w, afterImage, info) {
 		input.addEventListener('change', () => {
 			flushSend();
 			releaseSliderRefresh();
+			// Refresh after slider change to pick up visibility changes in sitemap
+			setTimeout(() => refresh(false), 150);
 		});
 		const startDrag = () => {
 			holdSliderRefresh();
+			inlineSlider.dataset.dragging = 'true';
 		};
 		const endDrag = () => {
 			releaseSliderRefresh();
+			delete inlineSlider.dataset.dragging;
 		};
 		input.addEventListener('pointerdown', startDrag);
 		input.addEventListener('pointerup', endDrag);
@@ -2597,6 +2641,11 @@ function updateCard(card, w, afterImage, info) {
 		input.addEventListener('blur', endDrag);
 
 		inlineSlider.appendChild(input);
+
+		// Animate slider from previous value to current value
+		if (startValue !== current) {
+			animateSliderValue(input, current);
+		}
 
 		const toggleSlider = async () => {
 			haptic();
@@ -3159,6 +3208,9 @@ function clearWsConnectTimer() {
 	}
 }
 
+let wsRefreshTimer = null;
+const WS_REFRESH_DEBOUNCE_MS = 300;
+
 function applyWsUpdate(data) {
 	if (!data || data.type !== 'items' || !Array.isArray(data.changes)) return;
 	const deltaChanges = data.changes.map(item => ({
@@ -3167,6 +3219,12 @@ function applyWsUpdate(data) {
 	}));
 	if (applyDeltaChanges(deltaChanges)) {
 		render();
+		// Debounced refresh to catch visibility-triggered sitemap changes
+		if (wsRefreshTimer) clearTimeout(wsRefreshTimer);
+		wsRefreshTimer = setTimeout(() => {
+			wsRefreshTimer = null;
+			refresh(false);
+		}, WS_REFRESH_DEBOUNCE_MS);
 	}
 }
 
