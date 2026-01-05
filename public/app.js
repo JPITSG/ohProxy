@@ -1928,7 +1928,7 @@ function resetLabelRow(labelRow, labelStack, navHint, preserve = null) {
 	}
 }
 
-function animateSliderValue(input, targetValue, durationMs = 200) {
+function animateSliderValue(input, targetValue, durationMs = 400) {
 	if (!input) return;
 	const startValue = Number(input.value);
 	const endValue = Number(targetValue);
@@ -2004,6 +2004,7 @@ function getWidgetRenderInfo(w, afterImage) {
 	const t = type.toLowerCase();
 	const isImage = t.includes('image');
 	const isText = t.includes('text');
+	const isGroup = t.includes('group');
 	const label = isImage ? safeText(w?.label || '') : widgetLabel(w);
 	const st = widgetState(w);
 	const icon = widgetIconName(w);
@@ -2050,6 +2051,7 @@ function getWidgetRenderInfo(w, afterImage) {
 		t,
 		isImage,
 		isText,
+		isGroup,
 		label,
 		st,
 		icon,
@@ -2087,6 +2089,7 @@ function updateCard(card, w, afterImage, info) {
 		t,
 		isImage,
 		isText,
+		isGroup,
 		label,
 		st,
 		icon,
@@ -2163,7 +2166,7 @@ function updateCard(card, w, afterImage, info) {
 	} else {
 		titleEl.textContent = labelParts.title;
 	}
-	if (isText) {
+	if (isText || isGroup) {
 		crossfadeText(metaEl, labelParts.state);
 	} else {
 		metaEl.textContent = labelParts.state;
