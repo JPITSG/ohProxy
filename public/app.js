@@ -768,12 +768,15 @@ function colorToRgba(color, alpha) {
 	if (!c) return '';
 	let rgb = resolveColorToRgb(c);
 	if (!rgb) return c;
+	// Use consistent glow colors: green like switch buttons, neon red/yellow
 	if (isGreenishRgb(rgb)) {
-		rgb = {
-			r: Math.min(255, rgb.r + 24),
-			g: Math.min(255, rgb.g + 36),
-			b: Math.min(255, rgb.b + 20),
-		};
+		rgb = { r: 118, g: 214, b: 152 }; // Same green as switch buttons
+	} else if (rgb.r > 150 && rgb.g > 150 && rgb.b < 100) {
+		// Yellowish - pure neon yellow
+		rgb = { r: 255, g: 245, b: 0 };
+	} else if (rgb.r > rgb.g && rgb.r > rgb.b) {
+		// Reddish - pure neon red
+		rgb = { r: 255, g: 40, b: 60 };
 	}
 	return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 }
@@ -853,12 +856,14 @@ function getStateGlowColor(widget, stateValue) {
 }
 
 function applyGlowStyle(card, color) {
-	const edge = colorToRgba(color, 0.45) || color;
-	const glow = colorToRgba(color, 0.28) || color;
+	const edge = colorToRgba(color, 0.5) || color;
+	const glow = colorToRgba(color, 0.4) || color;
+	const bg = colorToRgba(color, 0.15) || color;
 	if (!edge || !glow) return;
 	card.classList.add('glow-card');
 	card.style.setProperty('--glow-edge', edge);
 	card.style.setProperty('--glow-color', glow);
+	card.style.setProperty('--glow-bg', bg);
 }
 
 function applyGlow(card, color, widget) {
