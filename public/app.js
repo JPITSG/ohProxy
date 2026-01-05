@@ -2470,7 +2470,8 @@ function updateCard(card, w, afterImage, info) {
 			if (mapping.length) {
 				for (const btn of existingButtons) {
 					const cmd = btn.dataset.command;
-					btn.classList.toggle('is-active', safeText(cmd) === currentState);
+					const shouldBeActive = safeText(cmd) === currentState;
+					btn.classList.toggle('is-active', shouldBeActive);
 				}
 			} else {
 				// Single ON/OFF switch - update class, text, and click handler

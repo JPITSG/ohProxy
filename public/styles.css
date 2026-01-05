@@ -348,10 +348,12 @@ html:not(.slim) .has-meta .labelStack {
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
 	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
 }
-.selection-card .inline-controls .fake-select:hover {
-	background-color: var(--color-control-off-hover);
-	border-color: var(--color-control-off-border-hover);
-	box-shadow: 0 0 10px var(--color-control-off-shadow-hover);
+@media (hover: hover) and (pointer: fine) {
+	.selection-card .inline-controls .fake-select:hover {
+		background-color: var(--color-control-off-hover);
+		border-color: var(--color-control-off-border-hover);
+		box-shadow: 0 0 10px var(--color-control-off-shadow-hover);
+	}
 }
 .selection-card .select-overlay {
 	position: absolute;
@@ -435,10 +437,12 @@ html:not(.slim) .has-meta .labelStack {
 .selection-card .select-option + .select-option {
 	margin-top: .25rem;
 }
-.selection-card .select-option:hover {
-	background: var(--color-select-option-hover-bg);
-	border-color: var(--color-select-option-hover-border);
-	box-shadow: 0 0 10px var(--color-select-option-hover-shadow);
+@media (hover: hover) and (pointer: fine) {
+	.selection-card .select-option:hover {
+		background: var(--color-select-option-hover-bg);
+		border-color: var(--color-select-option-hover-border);
+		box-shadow: 0 0 10px var(--color-select-option-hover-shadow);
+	}
 }
 .selection-card .select-option.active {
 	background: var(--color-select-option-active-bg);
@@ -815,10 +819,12 @@ body.theme-dark #themeToggleBtn svg {
 	color: var(--color-control-off-text) !important;
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
 }
-.switch-card .inline-controls .switch-btn:hover {
-	background-color: var(--color-control-off-hover) !important;
-	border-color: var(--color-control-off-border-hover) !important;
-	box-shadow: 0 0 10px var(--color-control-off-shadow-hover);
+@media (hover: hover) and (pointer: fine) {
+	.switch-card .inline-controls .switch-btn:hover {
+		background-color: var(--color-control-off-hover) !important;
+		border-color: var(--color-control-off-border-hover) !important;
+		box-shadow: 0 0 10px var(--color-control-off-shadow-hover);
+	}
 }
 .switch-card .inline-controls .switch-btn.is-active {
 	background-color: var(--color-switch-active-bg) !important;
@@ -827,9 +833,11 @@ body.theme-dark #themeToggleBtn svg {
 	color: var(--color-text-base) !important;
 	font-weight: 600;
 }
-.switch-card .inline-controls .switch-btn.is-active:hover {
-	background-color: var(--color-switch-active-bg-hover) !important;
-	box-shadow: 0 0 10px var(--color-switch-active-shadow-hover);
+@media (hover: hover) and (pointer: fine) {
+	.switch-card .inline-controls .switch-btn.is-active:hover {
+		background-color: var(--color-switch-active-bg-hover) !important;
+		box-shadow: 0 0 10px var(--color-switch-active-shadow-hover);
+	}
 }
 .switch-card.switch-many .labelStack {
 	flex: 1 1 15%;
