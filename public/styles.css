@@ -63,12 +63,16 @@
 	--color-select-menu-border: rgba(234, 235, 238, 0.22);
 	--color-select-menu-shadow: rgba(0, 0, 0, 0.35);
 	--color-select-option-bg-card: rgba(255, 255, 255, 0.03);
+	--color-select-option-border-card: rgba(234, 235, 238, 0.1);
 	--color-select-option-text-card: rgba(234, 235, 238, 0.98);
+	--color-select-option-shadow-card: rgba(90, 70, 150, 0.25);
 	--color-select-option-hover-bg: rgba(255, 255, 255, 0.08);
 	--color-select-option-hover-border: rgba(234, 235, 238, 0.22);
-	--color-select-option-active-bg: rgba(106, 116, 211, 0.18);
-	--color-select-option-active-border: rgba(106, 116, 211, 0.45);
+	--color-select-option-hover-shadow: rgba(90, 70, 150, 0.35);
+	--color-select-option-active-bg: rgba(78, 183, 128, 0.15);
+	--color-select-option-active-border: rgba(78, 183, 128, 0.45);
 	--color-select-option-active-text: rgba(234, 235, 238, 0.98);
+	--color-select-option-active-shadow: rgba(78, 183, 128, 0.35);
 
 	/* Accent colors */
 	--color-accent: rgba(106, 116, 211, 0.5);
@@ -171,16 +175,20 @@ body.theme-light {
 	--color-select-fake-bg: rgba(19, 21, 54, 0.04);
 	--color-select-fake-text: rgba(19, 21, 54, 0.98);
 	--color-select-fake-border: rgba(255, 255, 255, 0.3);
-	--color-select-menu-bg: rgba(255, 255, 255, 0.98);
+	--color-select-menu-bg: rgb(245, 246, 250);
 	--color-select-menu-border: rgba(255, 255, 255, 0.3);
 	--color-select-menu-shadow: rgba(0, 0, 0, 0.15);
-	--color-select-option-bg-card: rgba(19, 21, 54, 0.04);
+	--color-select-option-bg-card: rgba(19, 21, 54, 0.08);
+	--color-select-option-border-card: rgba(19, 21, 54, 0.2);
 	--color-select-option-text-card: rgba(19, 21, 54, 0.98);
-	--color-select-option-hover-bg: rgba(19, 21, 54, 0.08);
-	--color-select-option-hover-border: rgba(255, 255, 255, 0.3);
-	--color-select-option-active-bg: rgba(106, 116, 211, 0.2);
-	--color-select-option-active-border: rgba(106, 116, 211, 0.5);
+	--color-select-option-shadow-card: rgba(19, 21, 54, 0.12);
+	--color-select-option-hover-bg: rgba(78, 183, 128, 0.12);
+	--color-select-option-hover-border: rgba(78, 183, 128, 0.45);
+	--color-select-option-hover-shadow: rgba(78, 183, 128, 0.35);
+	--color-select-option-active-bg: rgba(78, 183, 128, 0.12);
+	--color-select-option-active-border: rgba(78, 183, 128, 0.45);
 	--color-select-option-active-text: rgba(19, 21, 54, 0.98);
+	--color-select-option-active-shadow: rgba(78, 183, 128, 0.35);
 
 	/* Control colors */
 	--color-control-off-bg: rgba(19, 21, 54, 0.08);
@@ -421,15 +429,19 @@ html:not(.slim) .has-meta .labelStack {
 	display: block;
 }
 .selection-card .select-option {
+	display: block;
 	width: 100%;
 	background: var(--color-select-option-bg-card);
-	border: 1px solid transparent;
+	border: 1px solid var(--color-select-option-border-card);
 	color: var(--color-select-option-text-card);
 	font-size: .75rem;
 	padding: .45rem .75rem;
 	border-radius: 10px;
 	text-align: center;
 	cursor: pointer;
+	white-space: nowrap;
+	box-shadow: 0 0 8px var(--color-select-option-shadow-card);
+	transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
 .selection-card .select-option + .select-option {
 	margin-top: .25rem;
@@ -437,11 +449,13 @@ html:not(.slim) .has-meta .labelStack {
 .selection-card .select-option:hover {
 	background: var(--color-select-option-hover-bg);
 	border-color: var(--color-select-option-hover-border);
+	box-shadow: 0 0 10px var(--color-select-option-hover-shadow);
 }
 .selection-card .select-option.active {
 	background: var(--color-select-option-active-bg);
 	border-color: var(--color-select-option-active-border);
 	color: var(--color-select-option-active-text);
+	box-shadow: 0 0 10px var(--color-select-option-active-shadow);
 }
 
 /* Image card styles */

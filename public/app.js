@@ -2298,9 +2298,9 @@ function updateCard(card, w, afterImage, info) {
 			controls.classList.add('mt-3');
 			controls.innerHTML = `<div class="text-sm text-slate-400">No selection options available</div>`;
 		} else {
+			// Slim/small-header use overlay; all others use custom dropdown
 			const useOverlay = state.isSlim || state.headerMode === 'small';
-			const supportsPicker = typeof HTMLSelectElement !== 'undefined' &&
-				typeof HTMLSelectElement.prototype.showPicker === 'function';
+			const supportsPicker = false;
 			const inlineControls = document.createElement('div');
 			inlineControls.className = 'inline-controls flex items-center gap-2 flex-1 min-w-0';
 			card.classList.add('selection-card');
@@ -2381,10 +2381,6 @@ function updateCard(card, w, afterImage, info) {
 				selectWrap.appendChild(fakeSelect);
 				select.classList.add('select-overlay');
 				card.appendChild(select);
-				card.onclick = (e) => {
-					if (e.target.closest('button, a, input, textarea')) return;
-					openNativeSelect();
-				};
 			} else if (supportsPicker) {
 				select.onfocus = () => { state.suppressRefreshCount += 1; };
 				select.onblur = () => releaseRefresh();
