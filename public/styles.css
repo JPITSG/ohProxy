@@ -26,7 +26,7 @@
 	--glass-tint: rgba(28, 29, 33, 0.18);
 	--glass-blur: blur(10px) saturate(1.2);
 	--glass-border-width: 0.5px;
-	--glass-border-color: rgba(234, 235, 238, 0.1);
+	--glass-border-color: rgba(234, 235, 238, 0.18);
 	--glass-border-radius: 18px;
 	--glass-box-shadow: 0 12px 20px rgba(0, 0, 0, 0.28);
 	--glass-inset-shadow:
