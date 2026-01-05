@@ -3145,8 +3145,19 @@ let wsConnected = false;
 let wsReconnectTimer = null;
 let wsFailCount = 0;
 const WS_RECONNECT_MS = 5000;
+const WS_CONNECT_TIMEOUT_MS = 10000;
 const WS_FALLBACK_POLL_MS = 30000;
 const WS_MAX_FAILURES = 5; // Stop trying WebSocket after this many consecutive failures
+let wsConnectTimer = null;
+let wsConnectToken = 0;
+let wsTimedOutToken = 0;
+
+function clearWsConnectTimer() {
+	if (wsConnectTimer) {
+		clearTimeout(wsConnectTimer);
+		wsConnectTimer = null;
+	}
+}
 
 function applyWsUpdate(data) {
 	if (!data || data.type !== 'items' || !Array.isArray(data.changes)) return;
@@ -3212,8 +3223,26 @@ function connectWs() {
 
 	try {
 		wsConnection = new WebSocket(getWsUrl());
+		const connectToken = ++wsConnectToken;
+		wsConnection.__ohProxyToken = connectToken;
+		clearWsConnectTimer();
+		// Guard against sockets stuck in CONNECTING (no open/close events).
+		wsConnectTimer = setTimeout(() => {
+			if (!wsConnection || wsConnection.__ohProxyToken !== connectToken) return;
+			if (wsConnection.readyState !== WebSocket.CONNECTING) return;
+			wsTimedOutToken = connectToken;
+			wsFailCount++;
+			if (wsFailCount >= WS_MAX_FAILURES) {
+				restoreNormalPolling();
+				closeWs();
+				return;
+			}
+			closeWs();
+			scheduleWsReconnect();
+		}, WS_CONNECT_TIMEOUT_MS);
 
 		wsConnection.onopen = () => {
+			clearWsConnectTimer();
 			wsConnected = true;
 			wsFailCount = 0;
 			if (wsReconnectTimer) {
@@ -3242,18 +3271,22 @@ function connectWs() {
 		};
 
 		wsConnection.onclose = (event) => {
+			clearWsConnectTimer();
 			const wasConnected = wsConnected;
+			const token = event?.target?.__ohProxyToken;
+			const timedOut = token && token === wsTimedOutToken;
+			if (timedOut) wsTimedOutToken = 0;
 			wsConnected = false;
 			wsConnection = null;
 			// Don't count as failure if paused (intentional stop) or clean close
-			if (!state.isPaused && (!wasConnected || event.code === 1002 || event.code === 1006)) {
+			if (!state.isPaused && !timedOut && (!wasConnected || event.code === 1002 || event.code === 1006)) {
 				wsFailCount++;
 				if (wsFailCount >= WS_MAX_FAILURES) {
 					restoreNormalPolling();
 					return;
 				}
 			}
-			if (!state.isPaused) {
+			if (!state.isPaused && !timedOut) {
 				scheduleWsReconnect();
 			}
 		};
@@ -3270,6 +3303,7 @@ function connectWs() {
 }
 
 function closeWs() {
+	clearWsConnectTimer();
 	if (wsConnection) {
 		try { wsConnection.close(); } catch {}
 		wsConnection = null;
