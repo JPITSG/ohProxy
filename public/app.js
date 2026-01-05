@@ -1951,6 +1951,48 @@ function animateSliderValue(input, targetValue, durationMs = 200) {
 	requestAnimationFrame(animate);
 }
 
+function crossfadeText(element, newText, fadeOutMs = 200, fadeInMs = 200) {
+	if (!element) return;
+	const oldText = element.textContent;
+	if (oldText === newText) return;
+	// If empty, just set directly (no animation needed for initial render)
+	if (!oldText) {
+		element.textContent = newText;
+		return;
+	}
+
+	// Create old text span for fading out
+	const oldSpan = document.createElement('span');
+	oldSpan.textContent = oldText;
+	oldSpan.style.cssText = 'transition:opacity ' + fadeOutMs + 'ms ease;';
+
+	// Setup container
+	const originalPosition = getComputedStyle(element).position;
+	if (originalPosition === 'static') element.style.position = 'relative';
+	element.textContent = '';
+	element.appendChild(oldSpan);
+
+	// Phase 1: Fade out old text
+	requestAnimationFrame(() => {
+		oldSpan.style.opacity = '0';
+		setTimeout(() => {
+			// Phase 2: Replace with new text and fade in
+			oldSpan.remove();
+			const newSpan = document.createElement('span');
+			newSpan.textContent = newText;
+			newSpan.style.cssText = 'opacity:0;transition:opacity ' + fadeInMs + 'ms ease;';
+			element.appendChild(newSpan);
+			requestAnimationFrame(() => {
+				newSpan.style.opacity = '1';
+				setTimeout(() => {
+					element.textContent = newText;
+					if (originalPosition === 'static') element.style.position = '';
+				}, fadeInMs);
+			});
+		}, fadeOutMs);
+	});
+}
+
 function removeOverlaySelects(card) {
 	for (const el of card.querySelectorAll('select.select-overlay')) {
 		el.remove();
@@ -2121,7 +2163,11 @@ function updateCard(card, w, afterImage, info) {
 	} else {
 		titleEl.textContent = labelParts.title;
 	}
-	metaEl.textContent = labelParts.state;
+	if (isText) {
+		crossfadeText(metaEl, labelParts.state);
+	} else {
+		metaEl.textContent = labelParts.state;
+	}
 	if (labelParts.state) card.classList.add('has-meta');
 	const stateGlowColor = getStateGlowColor(w, labelParts.state || st);
 	if (stateGlowColor) applyGlowStyle(card, stateGlowColor);
