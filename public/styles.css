@@ -1,139 +1,211 @@
+/* Frosted Glass Theme for ohProxy */
+/* Based on: https://github.com/wessamlauf/homeassistant-frosted-glass-themes */
+
 :root {
-	--color-grid-dot: rgba(255,255,255,.06);
-	--color-surface-glass: rgba(255,255,255,.06);
-	--color-border-soft: rgba(255,255,255,.10);
-	--color-border-strong: rgba(255,255,255,.12);
-	--color-surface-muted: rgba(255,255,255,.05);
-	--color-surface-muted-2: rgba(255,255,255,.03);
-	--color-surface-hover: rgba(255,255,255,.08);
-	--color-text-base: #e2e8f0;
-	--color-text-muted: #94a3b8;
-	--color-text-muted-strong: #64748b;
-	--color-bg-dark: #0f172a;
-	--color-bg-light: #f8fafc;
-	--color-bg-light-strong: #ffffff;
-	--color-bg-light-muted: #eef2f7;
-	--color-bg-light-overlay: rgba(248,250,252,.8);
-	--color-select-base-bg: rgba(15,23,42,.6);
-	--color-select-base-text: #e2e8f0;
-	--color-select-base-border: rgba(255,255,255,.12);
-	--color-select-option-bg: #0f172a;
-	--color-select-option-text: #e2e8f0;
-	--color-select-option-disabled: #64748b;
-	--color-select-card-bg: rgba(255,255,255,.05);
-	--color-select-card-text: #e2e8f0;
-	--color-select-card-border: rgba(255,255,255,.10);
-	--color-select-fake-bg: rgba(255,255,255,.05);
-	--color-select-fake-text: #e2e8f0;
-	--color-select-fake-border: rgba(255,255,255,.10);
-	--color-select-menu-bg: rgba(15,23,42,.98);
-	--color-select-menu-border: rgba(255,255,255,.12);
-	--color-select-menu-shadow: rgba(0,0,0,.35);
-	--color-select-option-bg-card: rgba(255,255,255,.03);
-	--color-select-option-text-card: #e2e8f0;
-	--color-select-option-hover-bg: rgba(255,255,255,.08);
-	--color-select-option-hover-border: rgba(255,255,255,.12);
-	--color-select-option-active-bg: rgba(16,185,129,.18);
-	--color-select-option-active-border: rgba(16,185,129,.45);
-	--color-select-option-active-text: #e2e8f0;
-	--color-accent: rgba(99,102,241,.5);
-	--color-accent-glow: rgba(99,102,241,.35);
-	--color-accent-soft: rgba(99,102,241,.25);
-	--color-accent-strong: rgba(99,102,241,.6);
-	--color-mode-active-text: #e2e8f0;
-	--color-theme-overlay-radial: rgba(99,102,241,.18);
-	--color-theme-overlay-start: #f8fafc;
-	--color-theme-overlay-end: #eef2f7;
-	--color-slim-header-bg: #0f172a;
-	--color-slim-glass-bg: #0f172a;
-	--color-slim-glass-border: rgba(255,255,255,.12);
-	--color-slim-glass-hover: rgba(255,255,255,.06);
-	--color-body-bg: #0f172a;
-	--color-body-text: #e2e8f0;
-	--color-bg-slate-950: #0f172a;
-	--color-bg-slate-950-40: rgba(15,23,42,.4);
-	--color-text-slate-100: #f1f5f9;
-	--color-text-slate-200: #e2e8f0;
-	--color-text-slate-300: #cbd5e1;
-	--color-text-slate-400: #94a3b8;
-	--color-text-slate-500: #64748b;
-	--color-border-weak: rgba(255,255,255,.12);
-	--color-bg-white-5: rgba(255,255,255,.05);
-	--color-bg-white-10: rgba(255,255,255,.10);
-	--color-control-bg: rgba(16,185,129,.15);
-	--color-control-border: rgba(52,211,153,.30);
-	--color-control-hover: rgba(16,185,129,.20);
-	--color-control-off-bg: rgba(255,255,255,.08);
-	--color-control-off-border: rgba(255,255,255,.14);
-	--color-control-off-hover: rgba(255,255,255,.12);
-	--color-control-off-text: #e2e8f0;
-	--color-status-bg: rgba(15,23,42,.75);
-	--color-status-border: rgba(255,255,255,.12);
-	--color-status-ok: #22c55e;
-	--color-status-error: #ef4444;
-	--color-status-pending: #f59e0b;
+	/* Primary color - Frosted Glass indigo */
+	--color-primary: rgb(106, 116, 211);
+	--color-primary-light: rgb(167, 182, 199);
+	--color-primary-rgb: 106, 116, 211;
+
+	/* Text colors */
+	--color-text-primary: rgba(234, 235, 238, 0.98);
+	--color-text-secondary: rgba(234, 235, 238, 0.8);
+	--color-text-disabled: rgba(234, 235, 238, 0.45);
+	--color-text-base: rgba(234, 235, 238, 0.98);
+	--color-text-muted: rgba(234, 235, 238, 0.8);
+	--color-text-muted-strong: rgba(234, 235, 238, 0.6);
+
+	/* Background colors */
+	--color-bg-base: rgb(30, 30, 30);
+	--color-bg-secondary: rgba(30, 33, 54, 0.7);
+	--color-bg-card: rgba(28, 29, 33, 0.85);
+	--color-body-bg: rgb(30, 30, 30);
+	--color-body-text: rgba(234, 235, 238, 0.98);
+
+	/* Glass effect */
+	--glass-tint: rgba(28, 29, 33, 0.18);
+	--glass-blur: blur(10px) saturate(1.2);
+	--glass-border-width: 0.5px;
+	--glass-border-color: rgba(234, 235, 238, 0.1);
+	--glass-border-radius: 18px;
+	--glass-box-shadow: 0 12px 20px rgba(0, 0, 0, 0.28);
+	--glass-inset-shadow:
+		3px 3px 0.5px -3.5px rgba(255, 255, 255, 0.15) inset,
+		-2px -2px 0.5px -2px rgba(255, 255, 255, 0.1) inset,
+		0 0 8px 1px rgba(255, 255, 255, 0.06) inset,
+		0 0 2px 0 rgba(0, 0, 0, 0.18);
+
+	/* Surface colors */
+	--color-surface-glass: var(--glass-tint);
+	--color-border-soft: var(--glass-border-color);
+	--color-border-strong: rgba(234, 235, 238, 0.22);
+	--color-surface-muted: rgba(255, 255, 255, 0.05);
+	--color-surface-muted-2: rgba(255, 255, 255, 0.03);
+	--color-surface-hover: rgba(255, 255, 255, 0.08);
+
+	/* Grid dots */
+	--color-grid-dot: rgba(255, 255, 255, 0.04);
+
+	/* Select/dropdown colors */
+	--color-select-base-bg: rgba(30, 33, 54, 0.7);
+	--color-select-base-text: rgba(234, 235, 238, 0.98);
+	--color-select-base-border: rgba(234, 235, 238, 0.22);
+	--color-select-option-bg: rgb(30, 30, 30);
+	--color-select-option-text: rgba(234, 235, 238, 0.98);
+	--color-select-option-disabled: rgba(234, 235, 238, 0.45);
+	--color-select-card-bg: rgba(255, 255, 255, 0.05);
+	--color-select-card-text: rgba(234, 235, 238, 0.98);
+	--color-select-card-border: rgba(234, 235, 238, 0.1);
+	--color-select-fake-bg: rgba(255, 255, 255, 0.05);
+	--color-select-fake-text: rgba(234, 235, 238, 0.98);
+	--color-select-fake-border: rgba(234, 235, 238, 0.1);
+	--color-select-menu-bg: rgba(30, 30, 30, 0.98);
+	--color-select-menu-border: rgba(234, 235, 238, 0.22);
+	--color-select-menu-shadow: rgba(0, 0, 0, 0.35);
+	--color-select-option-bg-card: rgba(255, 255, 255, 0.03);
+	--color-select-option-text-card: rgba(234, 235, 238, 0.98);
+	--color-select-option-hover-bg: rgba(255, 255, 255, 0.08);
+	--color-select-option-hover-border: rgba(234, 235, 238, 0.22);
+	--color-select-option-active-bg: rgba(106, 116, 211, 0.18);
+	--color-select-option-active-border: rgba(106, 116, 211, 0.45);
+	--color-select-option-active-text: rgba(234, 235, 238, 0.98);
+
+	/* Accent colors */
+	--color-accent: rgba(106, 116, 211, 0.5);
+	--color-accent-glow: rgba(106, 116, 211, 0.35);
+	--color-accent-soft: rgba(106, 116, 211, 0.25);
+	--color-accent-strong: rgba(106, 116, 211, 0.6);
+	--color-mode-active-text: rgba(234, 235, 238, 0.98);
+
+	/* Control colors - using primary indigo */
+	--color-control-bg: rgba(106, 116, 211, 0.18);
+	--color-control-border: rgba(106, 116, 211, 0.45);
+	--color-control-hover: rgba(106, 116, 211, 0.25);
+	--color-control-off-bg: rgba(255, 255, 255, 0.08);
+	--color-control-off-border: rgba(234, 235, 238, 0.14);
+	--color-control-off-hover: rgba(255, 255, 255, 0.12);
+	--color-control-off-text: rgba(234, 235, 238, 0.98);
+
+	/* Status colors */
+	--color-status-bg: rgba(30, 30, 30, 0.75);
+	--color-status-border: rgba(234, 235, 238, 0.22);
+	--color-status-ok: rgb(118, 214, 152);
+	--color-status-error: rgb(234, 114, 135);
+	--color-status-pending: rgb(255, 219, 117);
+
+	/* Theme overlay */
+	--color-theme-overlay-radial: rgba(106, 116, 211, 0.12);
+
+	/* Slim mode */
+	--color-slim-header-bg: rgb(30, 30, 30);
+	--color-slim-glass-bg: rgb(30, 30, 30);
+	--color-slim-glass-border: rgba(234, 235, 238, 0.12);
+	--color-slim-glass-hover: rgba(255, 255, 255, 0.06);
+
+	/* Divider */
+	--color-divider: rgba(84, 84, 98, 0.28);
+
+	/* Header */
+	--header-bg: rgba(30, 30, 30, 0.01);
+	--header-blur: blur(8px) saturate(1.1);
+	--header-border: rgba(234, 235, 238, 0.1);
 }
 
 
 body.theme-light {
-	--color-grid-dot: rgba(15,23,42,.08);
-	--color-surface-glass: rgba(15,23,42,.04);
-	--color-border-soft: rgba(15,23,42,.12);
-	--color-border-strong: rgba(15,23,42,.12);
-	--color-surface-muted: rgba(15,23,42,.04);
-	--color-surface-muted-2: rgba(15,23,42,.04);
-	--color-surface-hover: rgba(15,23,42,.08);
-	--color-text-base: #0f172a;
-	--color-text-muted: #64748b;
-	--color-text-muted-strong: #64748b;
-	--color-select-base-bg: rgba(255,255,255,.9);
-	--color-select-base-text: #0f172a;
-	--color-select-base-border: rgba(15,23,42,.15);
+	/* Text colors */
+	--color-text-primary: rgba(19, 21, 54, 0.98);
+	--color-text-secondary: rgba(19, 21, 54, 0.8);
+	--color-text-disabled: rgba(19, 21, 54, 0.45);
+	--color-text-base: rgba(19, 21, 54, 0.98);
+	--color-text-muted: rgba(19, 21, 54, 0.8);
+	--color-text-muted-strong: rgba(19, 21, 54, 0.6);
+
+	/* Background colors */
+	--color-bg-base: rgb(254, 244, 242);
+	--color-bg-secondary: rgba(245, 245, 245, 0.5);
+	--color-bg-card: rgba(255, 255, 255, 0.85);
+	--color-body-bg: rgb(254, 244, 242);
+	--color-body-text: rgba(19, 21, 54, 0.98);
+
+	/* Glass effect - lighter for light mode */
+	--glass-tint: rgba(255, 255, 255, 0.08);
+	--glass-blur: blur(8px) saturate(1.2);
+	--glass-border-color: rgba(255, 255, 255, 0.3);
+	--glass-box-shadow: 0 12px 20px rgba(0, 0, 0, 0.15);
+	--glass-inset-shadow:
+		3px 3px 0.5px -3.5px rgba(255, 255, 255, 0.30) inset,
+		-2px -2px 0.5px -2px rgba(255, 255, 255, 0.30) inset,
+		0 0 8px 1px rgba(255, 255, 255, 0.10) inset,
+		0 0 2px 0 rgba(0, 0, 0, 0.10);
+
+	/* Surface colors */
+	--color-surface-glass: var(--glass-tint);
+	--color-border-soft: var(--glass-border-color);
+	--color-border-strong: rgba(255, 255, 255, 0.3);
+	--color-surface-muted: rgba(19, 21, 54, 0.04);
+	--color-surface-muted-2: rgba(19, 21, 54, 0.04);
+	--color-surface-hover: rgba(19, 21, 54, 0.08);
+
+	/* Grid dots */
+	--color-grid-dot: rgba(19, 21, 54, 0.06);
+
+	/* Select/dropdown colors */
+	--color-select-base-bg: rgba(255, 255, 255, 0.9);
+	--color-select-base-text: rgba(19, 21, 54, 0.98);
+	--color-select-base-border: rgba(255, 255, 255, 0.3);
 	--color-select-option-bg: #ffffff;
-	--color-select-option-text: #0f172a;
-	--color-select-option-disabled: #94a3b8;
-	--color-select-card-bg: rgba(15,23,42,.04);
-	--color-select-card-text: #0f172a;
-	--color-select-card-border: rgba(15,23,42,.12);
-	--color-select-fake-bg: rgba(15,23,42,.04);
-	--color-select-fake-text: #0f172a;
-	--color-select-fake-border: rgba(15,23,42,.12);
-	--color-select-menu-bg: #ffffff;
-	--color-select-menu-border: rgba(15,23,42,.12);
-	--color-select-menu-shadow: rgba(15,23,42,.15);
-	--color-select-option-bg-card: rgba(15,23,42,.04);
-	--color-select-option-text-card: #0f172a;
-	--color-select-option-hover-bg: rgba(15,23,42,.08);
-	--color-select-option-hover-border: rgba(15,23,42,.15);
-	--color-select-option-active-bg: rgba(16,185,129,.2);
-	--color-select-option-active-border: rgba(16,185,129,.5);
-	--color-select-option-active-text: #0f172a;
-	--color-mode-active-text: #0f172a;
-	--color-slim-header-bg: #f8fafc;
-	--color-slim-glass-bg: #ffffff;
-	--color-slim-glass-border: #e2e8f0;
-	--color-slim-glass-hover: rgba(15,23,42,.04);
-	--color-body-bg: #f8fafc;
-	--color-body-text: #0f172a;
-	--color-bg-slate-950: #f8fafc;
-	--color-bg-slate-950-40: rgba(248,250,252,.8);
-	--color-text-slate-100: #0f172a;
-	--color-text-slate-200: #1e293b;
-	--color-text-slate-300: #334155;
-	--color-text-slate-400: #475569;
-	--color-text-slate-500: #64748b;
-	--color-border-weak: rgba(15,23,42,.12);
-	--color-bg-white-5: rgba(15,23,42,.04);
-	--color-bg-white-10: rgba(15,23,42,.08);
-	--color-status-bg: rgba(255,255,255,.9);
-	--color-status-border: rgba(15,23,42,.12);
-	--color-status-ok: #16a34a;
-	--color-status-error: #dc2626;
-	--color-status-pending: #d97706;
-	--color-control-off-bg: rgba(15,23,42,.08);
-	--color-control-off-border: rgba(15,23,42,.15);
-	--color-control-off-hover: rgba(15,23,42,.12);
-	--color-control-off-text: #0f172a;
+	--color-select-option-text: rgba(19, 21, 54, 0.98);
+	--color-select-option-disabled: rgba(19, 21, 54, 0.45);
+	--color-select-card-bg: rgba(19, 21, 54, 0.04);
+	--color-select-card-text: rgba(19, 21, 54, 0.98);
+	--color-select-card-border: rgba(255, 255, 255, 0.3);
+	--color-select-fake-bg: rgba(19, 21, 54, 0.04);
+	--color-select-fake-text: rgba(19, 21, 54, 0.98);
+	--color-select-fake-border: rgba(255, 255, 255, 0.3);
+	--color-select-menu-bg: rgba(255, 255, 255, 0.98);
+	--color-select-menu-border: rgba(255, 255, 255, 0.3);
+	--color-select-menu-shadow: rgba(0, 0, 0, 0.15);
+	--color-select-option-bg-card: rgba(19, 21, 54, 0.04);
+	--color-select-option-text-card: rgba(19, 21, 54, 0.98);
+	--color-select-option-hover-bg: rgba(19, 21, 54, 0.08);
+	--color-select-option-hover-border: rgba(255, 255, 255, 0.3);
+	--color-select-option-active-bg: rgba(106, 116, 211, 0.2);
+	--color-select-option-active-border: rgba(106, 116, 211, 0.5);
+	--color-select-option-active-text: rgba(19, 21, 54, 0.98);
+
+	/* Control colors */
+	--color-control-off-bg: rgba(19, 21, 54, 0.08);
+	--color-control-off-border: rgba(255, 255, 255, 0.3);
+	--color-control-off-hover: rgba(19, 21, 54, 0.12);
+	--color-control-off-text: rgba(19, 21, 54, 0.98);
+	--color-mode-active-text: rgba(19, 21, 54, 0.98);
+
+	/* Status colors */
+	--color-status-bg: rgba(255, 255, 255, 0.9);
+	--color-status-border: rgba(255, 255, 255, 0.3);
+	--color-status-ok: rgb(78, 183, 128);
+	--color-status-error: rgb(234, 114, 135);
+	--color-status-pending: rgb(255, 193, 7);
+
+	/* Theme overlay */
+	--color-theme-overlay-radial: rgba(106, 116, 211, 0.08);
+	--color-theme-overlay-start: rgb(254, 244, 242);
+	--color-theme-overlay-end: rgb(254, 244, 242);
+
+	/* Slim mode */
+	--color-slim-header-bg: rgb(254, 244, 242);
+	--color-slim-glass-bg: rgba(255, 255, 255, 0.9);
+	--color-slim-glass-border: rgba(255, 255, 255, 0.3);
+	--color-slim-glass-hover: rgba(19, 21, 54, 0.04);
+
+	/* Divider */
+	--color-divider: rgba(224, 224, 224, 0.3);
+
+	/* Header */
+	--header-bg: rgba(234, 235, 238, 0.1);
+	--header-border: rgba(255, 255, 255, 0.3);
+
 	background-color: var(--color-body-bg);
 	color: var(--color-body-text);
 }
@@ -142,6 +214,9 @@ html,
 body {
 	scrollbar-gutter: stable;
 	background-color: var(--color-body-bg);
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
 }
 
 /* Subtle animated background */
@@ -150,15 +225,29 @@ body {
 		radial-gradient(circle at 1px 1px, var(--color-grid-dot) 1px, transparent 0);
 	background-size: 28px 28px;
 }
+
+/* Header with frosted glass effect */
+header {
+	background: var(--header-bg) !important;
+	backdrop-filter: var(--header-blur) !important;
+	-webkit-backdrop-filter: var(--header-blur) !important;
+	border-color: var(--header-border) !important;
+}
+
 #headerBottom.gap-3 {
 	gap: .5rem !important;
 }
+
+/* Glass card styling - the signature frosted glass look */
 .glass {
-	background: var(--color-surface-glass);
-	backdrop-filter: blur(10px);
-	-webkit-backdrop-filter: blur(10px);
-	border: 1px solid var(--color-border-soft);
+	background: var(--glass-tint);
+	backdrop-filter: var(--glass-blur);
+	-webkit-backdrop-filter: var(--glass-blur);
+	border: var(--glass-border-width) solid var(--glass-border-color);
+	border-radius: var(--glass-border-radius);
+	box-shadow: var(--glass-box-shadow), var(--glass-inset-shadow);
 }
+
 .labelRow {
 	min-height: 3rem;
 }
@@ -174,14 +263,20 @@ html:not(.slim) .has-meta .labelStack {
 .iconWrap img.icon-ready {
 	opacity: .9;
 }
+
+/* Glow effect for special cards */
 .glow-card {
 	border-color: var(--glow-edge) !important;
 	box-shadow:
+		var(--glass-box-shadow),
+		var(--glass-inset-shadow),
 		inset 0 0 0 1px var(--glow-edge),
 		inset 0 0 10px var(--glow-edge),
 		inset 0 0 22px var(--glow-color),
 		inset 0 0 34px var(--glow-color);
 }
+
+/* Selection card styles */
 .selection-card .labelRow {
 	justify-content: flex-start;
 }
@@ -220,7 +315,7 @@ html:not(.slim) .has-meta .labelStack {
 	border: 1px solid var(--color-control-off-border);
 	font-size: .75rem;
 	padding: .375rem .625rem;
-	border-radius: .5rem;
+	border-radius: 10px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -265,7 +360,7 @@ html:not(.slim) .has-meta .labelStack {
 	text-align-last: center;
 }
 .oh-select:focus {
-	border-color: var(--color-accent) !important;
+	border-color: var(--color-primary) !important;
 	box-shadow: 0 0 0 2px var(--color-accent-glow) !important;
 }
 .oh-select option {
@@ -282,14 +377,14 @@ html:not(.slim) .has-meta .labelStack {
 	border-color: var(--color-control-off-border) !important;
 	font-size: .75rem;
 	padding: .375rem .625rem;
-	border-radius: .5rem;
+	border-radius: 10px;
 }
 .selection-card .oh-select:hover {
 	background-color: var(--color-control-off-hover) !important;
 }
 .selection-card .oh-select:focus {
-	border-color: var(--color-control-border) !important;
-	box-shadow: 0 0 0 2px var(--color-control-hover) !important;
+	border-color: var(--color-primary) !important;
+	box-shadow: 0 0 0 2px var(--color-accent-glow) !important;
 }
 .selection-card.menu-open {
 	z-index: 20;
@@ -301,10 +396,12 @@ html:not(.slim) .has-meta .labelStack {
 	top: calc(100% + 6px);
 	min-width: 100%;
 	background: var(--color-select-menu-bg);
-	border: 1px solid var(--color-select-menu-border);
-	border-radius: .75rem;
+	backdrop-filter: var(--glass-blur);
+	-webkit-backdrop-filter: var(--glass-blur);
+	border: var(--glass-border-width) solid var(--color-select-menu-border);
+	border-radius: 14px;
 	padding: .25rem;
-	box-shadow: 0 10px 20px var(--color-select-menu-shadow);
+	box-shadow: var(--glass-box-shadow), var(--glass-inset-shadow);
 	display: none;
 }
 .selection-card.menu-open .select-menu {
@@ -317,7 +414,7 @@ html:not(.slim) .has-meta .labelStack {
 	color: var(--color-select-option-text-card);
 	font-size: .75rem;
 	padding: .45rem .75rem;
-	border-radius: .5rem;
+	border-radius: 10px;
 	text-align: center;
 	cursor: pointer;
 }
@@ -333,6 +430,8 @@ html:not(.slim) .has-meta .labelStack {
 	border-color: var(--color-select-option-active-border);
 	color: var(--color-select-option-active-text);
 }
+
+/* Image card styles */
 .image-card {
 	padding: 0 !important;
 	overflow: hidden;
@@ -369,10 +468,12 @@ html:not(.slim) .has-meta .labelStack {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: rgba(15,23,42,.78);
+	background: rgba(30, 30, 30, 0.85);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
 }
 body.theme-light .image-viewer {
-	background: rgba(248,250,252,.88);
+	background: rgba(254, 244, 242, 0.9);
 }
 .image-viewer.hidden {
 	display: none;
@@ -449,8 +550,10 @@ body.theme-light .image-viewer {
 body.image-viewer-open {
 	overflow: hidden;
 }
+
+/* Grid styling */
 #grid .glass {
-	border-radius: 0 !important;
+	border-radius: var(--glass-border-radius) !important;
 }
 #grid {
 	opacity: 1;
@@ -477,11 +580,13 @@ html.resume-reset #grid {
 html:not(.slim) #grid {
 	margin-top: -7px;
 }
+
+/* Header buttons */
 #headerBottom button,
 #headerBottom input,
 #headerTop input,
 #headerTop button {
-	border-radius: 0 !important;
+	border-radius: 10px !important;
 }
 #headerBottom {
 	flex-wrap: nowrap !important;
@@ -492,6 +597,15 @@ html:not(.slim) #grid {
 }
 #searchWrap input {
 	min-width: 0;
+	background: rgba(30, 33, 54, 0.7) !important;
+	backdrop-filter: blur(6px) !important;
+	-webkit-backdrop-filter: blur(6px) !important;
+	border: none !important;
+	box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.09) !important;
+}
+body.theme-light #searchWrap input {
+	background: rgba(255, 255, 255, 0.7) !important;
+	box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05) !important;
 }
 #navWrap {
 	flex: 0 0 auto;
@@ -571,6 +685,8 @@ body.theme-dark #grid .navHint svg {
 #pauseBtn.pause-hidden {
 	display: none !important;
 }
+
+/* Slim mode */
 .slim * {
 	animation: none !important;
 	transition: none !important;
@@ -578,7 +694,6 @@ body.theme-dark #grid .navHint svg {
 .slim .bg-grid {
 	display: none !important;
 }
-/* Slim hover moved to hover-device rules at end of file */
 .slim #headerBottom.gap-3 {
 	gap: .5rem !important;
 }
@@ -607,8 +722,13 @@ body.theme-dark #grid .navHint svg {
 	border-color: var(--color-slim-glass-border) !important;
 	backdrop-filter: none !important;
 	-webkit-backdrop-filter: none !important;
+	box-shadow: none !important;
 }
-/* Slim glass hover handled by hover-device rules at end of file */
+.slim #grid .glass {
+	border-radius: 14px !important;
+}
+
+/* Header modes */
 .header-small #headerTop {
 	padding-top: .5rem;
 	padding-bottom: .5rem;
@@ -662,6 +782,8 @@ body.theme-dark #grid .navHint svg {
 .slim #navWrap > * {
 	margin-left: 0 !important;
 }
+
+/* Switch card styles */
 .switch-card .labelStack {
 	flex: 0 1 40%;
 	min-width: 0;
@@ -687,7 +809,7 @@ body.theme-dark #grid .navHint svg {
 }
 .switch-card .inline-controls .switch-btn {
 	padding: .375rem .625rem;
-	border-radius: .5rem;
+	border-radius: 10px;
 	border-width: 1px;
 	font-size: .75rem;
 	white-space: nowrap;
@@ -716,6 +838,8 @@ body.theme-dark #grid .navHint svg {
 	flex: 0 1 85%;
 	max-width: 85%;
 }
+
+/* Slider card styles */
 .slider-card .labelRow {
 	justify-content: flex-start;
 }
@@ -731,6 +855,13 @@ body.theme-dark #grid .navHint svg {
 	max-width: 50%;
 	min-width: 0;
 }
+
+/* Slider styling - using primary color */
+input[type="range"] {
+	accent-color: var(--color-primary);
+}
+
+/* Mode button styles */
 .mode-btn.active {
 	background: var(--color-accent-soft);
 	border-color: var(--color-accent-strong);
@@ -742,6 +873,8 @@ body.theme-dark #grid .navHint svg {
 	display: inline-flex;
 	align-items: center;
 }
+
+/* Status bar */
 .status-bar {
 	display: inline-flex;
 	align-items: center;
@@ -781,24 +914,26 @@ body.theme-dark #grid .navHint svg {
 .header-small .status-bar {
 	display: none !important;
 }
+
+/* Light theme overrides */
 body.theme-light .bg-grid {
 	opacity: .25;
 }
 body.theme-light .bg-slate-950 {
-	background-color: var(--color-bg-slate-950);
+	background-color: var(--color-bg-base);
 }
 body.theme-light .bg-slate-950\/40 {
-	background-color: var(--color-bg-slate-950-40);
+	background-color: rgba(254, 244, 242, 0.8);
 }
-body.theme-light .text-slate-100 { color: var(--color-text-slate-100); }
-body.theme-light .text-slate-200 { color: var(--color-text-slate-200); }
-body.theme-light .text-slate-300 { color: var(--color-text-slate-300); }
-body.theme-light .text-slate-400 { color: var(--color-text-slate-400); }
-body.theme-light .text-slate-500 { color: var(--color-text-slate-500); }
-body.theme-light .border-white\/10 { border-color: var(--color-border-weak); }
-body.theme-light .bg-white\/5 { background-color: var(--color-bg-white-5); }
-body.theme-light .bg-white\/10 { background-color: var(--color-bg-white-10); }
-body.theme-light .hover\:bg-white\/10:hover { background-color: var(--color-bg-white-10); }
+body.theme-light .text-slate-100 { color: var(--color-text-primary); }
+body.theme-light .text-slate-200 { color: var(--color-text-primary); }
+body.theme-light .text-slate-300 { color: var(--color-text-secondary); }
+body.theme-light .text-slate-400 { color: var(--color-text-muted); }
+body.theme-light .text-slate-500 { color: var(--color-text-muted-strong); }
+body.theme-light .border-white\/10 { border-color: var(--glass-border-color); }
+body.theme-light .bg-white\/5 { background-color: var(--color-surface-muted); }
+body.theme-light .bg-white\/10 { background-color: var(--color-surface-hover); }
+body.theme-light .hover\:bg-white\/10:hover { background-color: var(--color-surface-hover); }
 body.theme-light .theme-overlay {
 	background: radial-gradient(circle at 15% 0%, var(--color-theme-overlay-radial), transparent 55%),
 				linear-gradient(var(--color-theme-overlay-start), var(--color-theme-overlay-end));
@@ -806,11 +941,15 @@ body.theme-light .theme-overlay {
 
 /* Card hover effect for non-touch devices only */
 html.hover-device #grid .glass:hover {
-	background-color: rgba(255,255,255,.1) !important;
+	background-color: rgba(255, 255, 255, 0.12) !important;
+	box-shadow: var(--glass-box-shadow), var(--glass-inset-shadow);
 	transition: background-color .15s ease;
 }
 html.hover-device.slim #grid .glass:hover {
 	background: var(--color-slim-glass-hover) !important;
+}
+body.theme-light.hover-device #grid .glass:hover {
+	background-color: rgba(255, 255, 255, 0.15) !important;
 }
 
 /* Resume spinner - shown when returning to app on touch devices */
@@ -820,14 +959,14 @@ html.hover-device.slim #grid .glass:hover {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	z-index: 35; /* Below header (z-40) so header stays visible */
+	z-index: 35;
 	opacity: 0;
 	visibility: hidden;
 	pointer-events: none;
 	transition: opacity .2s ease, visibility .2s ease;
-	background: rgba(15, 23, 42, 0.85);
-	backdrop-filter: blur(2px);
-	-webkit-backdrop-filter: blur(2px);
+	background: rgba(30, 30, 30, 0.85);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
 }
 .resume-spinner.active {
 	opacity: 1;
@@ -838,7 +977,7 @@ html.hover-device.slim #grid .glass:hover {
 	width: 48px;
 	height: 48px;
 	border: 3px solid rgba(255, 255, 255, 0.15);
-	border-top-color: rgba(129, 140, 248, 0.9);
+	border-top-color: rgb(106, 116, 211);
 	border-radius: 50%;
 	animation: resume-spin 0.8s linear infinite;
 }
@@ -846,11 +985,11 @@ html.hover-device.slim #grid .glass:hover {
 	to { transform: rotate(360deg); }
 }
 body.theme-light .resume-spinner {
-	background: rgba(248, 250, 252, 0.9);
+	background: rgba(254, 244, 242, 0.9);
 }
 body.theme-light .resume-spinner-ring {
 	border-color: rgba(0, 0, 0, 0.1);
-	border-top-color: rgba(99, 102, 241, 0.9);
+	border-top-color: rgb(106, 116, 211);
 }
 /* Hide status text when spinner is active */
 body.resume-spinner-active #status {

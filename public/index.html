@@ -7,7 +7,7 @@
 	<link rel="manifest" href="manifest.webmanifest" />
 	<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png" />
 	<link rel="apple-touch-icon" href="icons/apple-touch-icon.__APPLE_TOUCH_VERSION__.png" />
-	<meta name="theme-color" content="#0f172a" />
+	<meta name="theme-color" content="#1e1e1e" />
 	<meta name="apple-mobile-web-app-capable" content="yes" />
 	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	<meta name="apple-mobile-web-app-title" content="openHAB" />
@@ -27,7 +27,7 @@
 					? modeParam
 					: (stored === 'dark' || stored === 'light') ? stored : null;
 				if (mode) {
-					const themeColor = mode === 'light' ? '#f8fafc' : '#0f172a';
+					const themeColor = mode === 'light' ? '#fef4f2' : '#1e1e1e';
 					const metaTheme = document.querySelector('meta[name="theme-color"]');
 					if (metaTheme) metaTheme.setAttribute('content', themeColor);
 					const metaApple = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
