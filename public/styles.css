@@ -23,10 +23,10 @@
 	--color-body-text: rgba(234, 235, 238, 0.98);
 
 	/* Glass effect */
-	--glass-tint: rgba(8, 15, 35, 0.9);
+	--glass-tint: transparent;
 	--glass-blur: blur(10px) saturate(1.2);
 	--glass-border-width: 0.5px;
-	--glass-border-color: rgba(234, 235, 238, 0.38);
+	--glass-border-color: rgba(234, 235, 238, 0.30);
 	--glass-border-radius: 18px;
 	--glass-box-shadow: 0 12px 20px rgba(0, 0, 0, 0.28);
 	--glass-inset-shadow:
@@ -62,13 +62,13 @@
 	--color-select-menu-bg: rgba(30, 30, 30, 0.98);
 	--color-select-menu-border: rgba(234, 235, 238, 0.22);
 	--color-select-menu-shadow: rgba(0, 0, 0, 0.35);
-	--color-select-option-bg-card: rgba(255, 255, 255, 0.03);
-	--color-select-option-border-card: rgba(234, 235, 238, 0.1);
+	--color-select-option-bg-card: rgb(33, 35, 61);
+	--color-select-option-border-card: var(--glass-border-color);
 	--color-select-option-text-card: rgba(234, 235, 238, 0.98);
-	--color-select-option-shadow-card: rgba(90, 70, 150, 0.25);
-	--color-select-option-hover-bg: rgba(255, 255, 255, 0.08);
-	--color-select-option-hover-border: rgba(234, 235, 238, 0.22);
-	--color-select-option-hover-shadow: rgba(90, 70, 150, 0.35);
+	--color-select-option-shadow-card: rgba(33, 35, 61, 0.6);
+	--color-select-option-hover-bg: rgba(118, 214, 152, 0.15);
+	--color-select-option-hover-border: rgba(118, 214, 152, 0.5);
+	--color-select-option-hover-shadow: rgba(118, 214, 152, 0.4);
 	--color-select-option-active-bg: rgba(78, 183, 128, 0.15);
 	--color-select-option-active-border: rgba(78, 183, 128, 0.45);
 	--color-select-option-active-text: rgba(234, 235, 238, 0.98);
@@ -85,12 +85,12 @@
 	--color-control-bg: rgba(106, 116, 211, 0.18);
 	--color-control-border: rgba(106, 116, 211, 0.45);
 	--color-control-hover: rgba(106, 116, 211, 0.25);
-	--color-control-off-bg: rgba(90, 70, 150, 0.15);
-	--color-control-off-border: rgba(90, 70, 150, 0.5);
+	--color-control-off-bg: rgb(33, 35, 61);
+	--color-control-off-border: var(--glass-border-color);
 	--color-control-off-hover: rgba(118, 214, 152, 0.15);
 	--color-control-off-border-hover: rgba(118, 214, 152, 0.5);
 	--color-control-off-text: rgba(234, 235, 238, 0.98);
-	--color-control-off-shadow: rgba(90, 70, 150, 0.4);
+	--color-control-off-shadow: rgba(33, 35, 61, 0.6);
 	--color-control-off-shadow-hover: rgba(118, 214, 152, 0.4);
 
 	/* Status colors */
@@ -118,7 +118,7 @@
 	--color-divider: rgba(84, 84, 98, 0.28);
 
 	/* Header */
-	--header-bg: rgba(8, 15, 35, 0.9);
+	--header-bg: rgb(19, 20, 33);
 	--header-blur: blur(8px) saturate(1.1);
 	--header-border: var(--glass-border-color);
 }
@@ -334,7 +334,7 @@ html:not(.slim) .has-meta .labelStack {
 .selection-card .inline-controls .fake-select {
 	background-color: var(--color-control-off-bg);
 	color: var(--color-control-off-text);
-	border: 1px solid var(--color-control-off-border);
+	border: var(--glass-border-width) solid var(--color-control-off-border);
 	font-size: .75rem;
 	padding: .375rem .625rem;
 	border-radius: 10px;
@@ -817,7 +817,7 @@ body.theme-dark #themeToggleBtn svg {
 .switch-card .inline-controls .switch-btn {
 	padding: .375rem .625rem;
 	border-radius: 10px;
-	border-width: 1px;
+	border-width: var(--glass-border-width);
 	font-size: .75rem;
 	white-space: nowrap;
 	transition: background-color .4s ease, border-color .4s ease, color .4s ease, box-shadow .4s ease;
