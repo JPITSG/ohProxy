@@ -309,22 +309,21 @@ html:not(.slim) .has-meta .labelStack {
 	position: relative;
 }
 .selection-card .labelStack {
-	flex: 1 1 0;
+	flex: 0 1 40%;
 	min-width: 0;
 }
 .selection-card .inline-controls {
-	flex: 0 0 auto;
+	flex: 0 1 60%;
 	min-width: 0;
 	display: flex;
 	justify-content: flex-end;
 }
 .selection-card .select-wrap {
 	position: relative;
-	display: inline-flex;
+	display: flex;
 	align-items: center;
 	justify-content: flex-end;
-	min-width: 50%;
-	margin-left: auto;
+	flex: 1 1 0;
 }
 .selection-card .select-wrap > .fake-select {
 	width: 100%;
