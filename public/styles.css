@@ -995,3 +995,30 @@ body.theme-light .resume-spinner-ring {
 body.resume-spinner-active #status {
 	display: none !important;
 }
+
+/* Navigation chevron badge - green pill */
+#grid .navHint {
+	padding: 0;
+	background: rgb(118, 214, 152);
+	border-radius: 12px;
+	width: 24px;
+	height: 24px;
+	align-items: center;
+	justify-content: center;
+}
+#grid .navHint:not(.hidden) {
+	display: flex;
+}
+#grid .navHint.hidden {
+	display: none !important;
+}
+#grid .navHint svg {
+	width: 10px;
+	height: 10px;
+}
+#grid .navHint svg path {
+	fill: rgba(255, 255, 255, 1) !important;
+}
+body.theme-light #grid .navHint {
+	background: rgb(78, 183, 128);
+}
