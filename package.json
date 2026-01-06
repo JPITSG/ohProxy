@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "build:tailwind": "tailwindcss -c tailwind.config.js -i ./tailwind.input.css -o ./public/tailwind.css --minify",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/**/*.test.js",
+    "test:unit": "node --test tests/unit/*.test.js",
+    "test:integration": "node --test tests/integration/*.test.js",
+    "test:security": "node --test tests/security/*.test.js"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +23,8 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "sinon": "^17.0.1",
+    "supertest": "^6.3.4",
     "tailwindcss": "^3.4.17"
   }
 }
