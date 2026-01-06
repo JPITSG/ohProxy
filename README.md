@@ -97,7 +97,8 @@ ohProxy sits between your users and openHAB, providing:
 ### Security
 
 #### Authentication
-- **HTTP Basic Auth** with simple user:password file
+- **Dual auth modes**: HTTP Basic Auth or HTML form-based login (configurable)
+- **CSRF protection**: Double-submit cookie pattern for HTML form auth
 - **Cookie-based sessions**: Persistent login with signed HMAC cookies (configurable lifetime)
 - **Auth lockout**: Automatic lockout after failed attempts (3 failures = 15-minute lockout)
 - **Auth notifications**: Execute commands on failed auth attempts (e.g., send alerts)
@@ -125,6 +126,13 @@ ohProxy sits between your users and openHAB, providing:
 - **Responsive sizing**: Automatic width calculation based on viewport
 - **Zoom viewer**: 90% viewport overlay with zoom toggle
 - **Auto-refresh**: Configurable refresh intervals per image
+
+### Session Management
+
+- **SQLite-based storage**: Persistent session data with settings sync
+- **Server-side settings**: User preferences synced across devices
+- **Automatic cleanup**: Configurable max age (default 14 days)
+- **CLI management tool**: List, inspect, modify, and purge sessions
 
 ### Logging & Diagnostics
 
@@ -195,6 +203,10 @@ ohProxy uses a layered configuration system:
 - `config.local.js`: Your local overrides (deep-merged with defaults)
 - Environment variables: Override sensitive values
 
+### Config Reload
+
+- Live config reload + auto-restart on `config.local.js` changes
+
 ### Server Configuration
 
 ```javascript
@@ -230,14 +242,16 @@ module.exports = {
 module.exports = {
   server: {
     auth: {
-      usersFile: '/path/to/users.cfg',  // htpasswd format
+      mode: 'basic',                     // 'basic' or 'html' (form login)
+      usersFile: '/path/to/users.cfg',   // username:password format
       whitelistSubnets: [],              // Skip auth for these subnets
-      realm: 'openHAB Proxy',
+      realm: 'openHAB Proxy',            // Basic auth realm (basic mode only)
       cookieName: 'AuthStore',
       cookieDays: 365,                   // >0 required when cookieKey is set
       cookieKey: 'your-secret-key-here', // HMAC signing key
       authFailNotifyCmd: '/path/to/notify.sh {IP}',  // Optional
     },
+    sessionMaxAgeDays: 14,               // Session cleanup threshold
   },
 };
 ```
@@ -393,6 +407,30 @@ echo "alice:secret" > /path/to/users.cfg
 echo "bob:password123" >> /path/to/users.cfg
 ```
 
+## Session CLI
+
+Manage sessions from the command line:
+
+```bash
+# List all sessions
+node session-cli.js list
+
+# Show session details
+node session-cli.js show <session_id>
+
+# Update a session setting
+node session-cli.js set <session_id> darkMode=true
+
+# Delete a specific session
+node session-cli.js delete <session_id>
+
+# Run cleanup of expired sessions (uses sessionMaxAgeDays)
+node session-cli.js cleanup
+
+# Purge sessions older than a specific time
+node session-cli.js purge 7days    # Also: Nsecs, Nmins, Nhours
+```
+
 ## Browser Support
 
 - Chrome/Edge 80+
@@ -409,52 +447,25 @@ echo "bob:password123" >> /path/to/users.cfg
 4. **Use service worker** (HTTPS required) for offline resilience
 5. **Configure delta cache** size based on number of pages browsed
 
-## Troubleshooting
+## Testing
 
-### Common Issues
+Run the test suite using Node.js built-in test runner:
 
-**"Connection error" status**
-- Verify openHAB is running and accessible
-- Check `openhab.target` configuration
-- Verify network/firewall allows connection
+```bash
+# Run all tests
+npm test
 
-**Icons not loading**
-- Ensure ImageMagick is installed (`convert` command available)
-- Check icon cache directory permissions
-- Verify openHAB icon URLs are accessible
-
-**Authentication not working**
-- Verify users file path and permissions
-- Check htpasswd format is correct
-- Ensure cookie key is set for persistent sessions
-
-**WebSocket not connecting**
-- Check browser console for connection errors
-- Verify WebSocket upgrade is not blocked by proxy/firewall
-- Try polling mode as fallback
-
-### Debug Mode
-
-Enable verbose proxy logging:
-```javascript
-proxyMiddlewareLogLevel: 'debug',
+# Run specific test category
+npm run test:unit
+npm run test:integration
+npm run test:security
 ```
 
-Enable slow query logging:
-```javascript
-slowQueryMs: 100,  // Log requests taking >100ms
-```
+Test categories:
+- **Unit tests**: Utility functions, parsing, configuration validation
+- **Integration tests**: Authentication flows, API endpoints, WebSocket handling
+- **Security tests**: XSS prevention, CSRF protection, injection attacks, access control
 
 ## License
 
 MIT License - See LICENSE file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
