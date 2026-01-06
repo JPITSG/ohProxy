@@ -24,7 +24,7 @@
 
 		.login-container {
 			width: 100%;
-			max-width: 360px;
+			max-width: 300px;
 		}
 
 		.login-card {
@@ -32,25 +32,25 @@
 			backdrop-filter: blur(8px) saturate(1.2);
 			-webkit-backdrop-filter: blur(8px) saturate(1.2);
 			border: 0.5px solid rgba(255, 255, 255, 0.3);
-			border-radius: 18px;
+			border-radius: 0;
 			box-shadow: 0 12px 20px rgba(0, 0, 0, 0.15);
-			padding: 32px 24px;
+			padding: 20px 18px;
 		}
 
 		.login-form {
 			display: flex;
 			flex-direction: column;
-			gap: 16px;
+			gap: 10px;
 		}
 
 		.form-input {
 			width: 100%;
-			padding: 14px 16px;
-			font-size: 16px;
+			padding: 10px 12px;
+			font-size: 14px;
 			color: rgba(19, 21, 54, 0.98);
 			background: rgba(255, 255, 255, 0.9);
 			border: 1px solid rgba(19, 21, 54, 0.2);
-			border-radius: 10px;
+			border-radius: 0;
 			outline: none;
 			transition: border-color 0.2s, box-shadow 0.2s;
 		}
@@ -66,16 +66,15 @@
 
 		.submit-btn {
 			width: 100%;
-			padding: 14px 16px;
-			font-size: 16px;
+			padding: 10px 12px;
+			font-size: 14px;
 			font-weight: 500;
 			color: rgba(19, 21, 54, 0.98);
 			background: rgba(106, 116, 211, 0.15);
-			border: 1px solid rgba(106, 116, 211, 0.4);
-			border-radius: 10px;
+			border: 1px solid rgba(19, 21, 54, 0.2);
+			border-radius: 0;
 			cursor: pointer;
 			transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
-			margin-top: 8px;
 		}
 
 		.submit-btn:hover {
@@ -90,25 +89,6 @@
 		.submit-btn:disabled {
 			opacity: 0.5;
 			cursor: not-allowed;
-		}
-
-		.form-message {
-			font-size: 14px;
-			text-align: center;
-			min-height: 20px;
-			transition: opacity 0.2s;
-		}
-
-		.form-message.hint {
-			color: rgb(78, 140, 100);
-		}
-
-		.form-message.error {
-			color: rgb(200, 80, 100);
-		}
-
-		.form-message.lockout {
-			color: rgb(180, 140, 60);
 		}
 
 		@keyframes shake {
@@ -135,7 +115,6 @@
 				<input type="text" name="username" class="form-input" placeholder="Username" autocomplete="username" required>
 				<input type="password" name="password" class="form-input" placeholder="Password" autocomplete="current-password" required>
 				<button type="submit" class="submit-btn">Login</button>
-				<div id="form-message" class="form-message hint">All fields are required</div>
 			</form>
 		</div>
 	</div>
