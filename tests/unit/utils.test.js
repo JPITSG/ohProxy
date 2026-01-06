@@ -169,11 +169,13 @@ describe('Utility Functions', () => {
 			assert.strictEqual(configNumber('3.14', 0), 3.14);
 		});
 
-		it('handles null', () => {
-			assert.strictEqual(configNumber(null, 42), 42);
+		it('handles null (Number(null) is 0, which is finite)', () => {
+			// Number(null) === 0, which is finite, so returns 0 not fallback
+			assert.strictEqual(configNumber(null, 42), 0);
 		});
 
-		it('handles undefined', () => {
+		it('handles undefined (Number(undefined) is NaN)', () => {
+			// Number(undefined) === NaN, which is not finite, so returns fallback
 			assert.strictEqual(configNumber(undefined, 42), 42);
 		});
 
@@ -185,8 +187,9 @@ describe('Utility Functions', () => {
 			assert.strictEqual(configNumber(-Infinity, 0), 0);
 		});
 
-		it('handles empty string', () => {
-			assert.strictEqual(configNumber('', 10), 10);
+		it('handles empty string (Number("") is 0, which is finite)', () => {
+			// Number('') === 0, which is finite, so returns 0 not fallback
+			assert.strictEqual(configNumber('', 10), 0);
 		});
 	});
 

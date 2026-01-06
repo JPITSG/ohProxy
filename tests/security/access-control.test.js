@@ -168,6 +168,12 @@ function createAccessControlApp(config = {}) {
 
 	// Whitelist/LAN/Auth check
 	app.use((req, res, next) => {
+		// Auth-exempt paths (manifest with referer)
+		if (req.path === '/manifest.webmanifest' && req.headers.referer) {
+			req.authInfo = { auth: 'exempt', user: null, lan: false };
+			return next();
+		}
+
 		// Check whitelist
 		if (ipInAnySubnet(req.clientIp, WHITELIST_SUBNETS)) {
 			req.authInfo = { auth: 'authenticated', user: 'whitelist', lan: true };

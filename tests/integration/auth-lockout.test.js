@@ -70,6 +70,23 @@ function createLockoutTestApp(config = {}) {
 		authLockouts.delete(key);
 	}
 
+	// Expose reset for testing - BEFORE auth middleware so it doesn't require auth
+	app.post('/test/reset-lockouts', (req, res) => {
+		authLockouts.clear();
+		res.json({ success: true });
+	});
+
+	// Expose lockout manipulation for time-based tests
+	app.post('/test/expire-lockout', express.json(), (req, res) => {
+		const { ip } = req.body;
+		const key = getLockoutKey(ip);
+		const entry = authLockouts.get(key);
+		if (entry) {
+			entry.lockUntil = Date.now() - 1000; // Set to past
+		}
+		res.json({ success: true });
+	});
+
 	function parseBasicAuthHeader(value) {
 		if (!value) return [null, null];
 		if (!/^basic /i.test(value)) return [null, null];
@@ -201,23 +218,6 @@ function createLockoutTestApp(config = {}) {
 		res.send('OK');
 	});
 
-	// Expose reset for testing
-	app.post('/test/reset-lockouts', (req, res) => {
-		authLockouts.clear();
-		res.json({ success: true });
-	});
-
-	// Expose lockout manipulation for time-based tests
-	app.post('/test/expire-lockout', express.json(), (req, res) => {
-		const { ip } = req.body;
-		const key = getLockoutKey(ip);
-		const entry = authLockouts.get(key);
-		if (entry) {
-			entry.lockUntil = Date.now() - 1000; // Set to past
-		}
-		res.json({ success: true });
-	});
-
 	return app;
 }
 
@@ -248,6 +248,9 @@ describe('Auth Lockout Integration', () => {
 	});
 
 	it('first failure is recorded (no lockout yet)', async () => {
+		// Ensure clean state
+		await fetch(`${baseUrl}/test/reset-lockouts`, { method: 'POST' });
+
 		const res = await fetch(`${baseUrl}/`, {
 			headers: {
 				'Authorization': basicAuthHeader('testuser', 'wrongpass'),
@@ -257,6 +260,9 @@ describe('Auth Lockout Integration', () => {
 	});
 
 	it('second failure is recorded (no lockout yet)', async () => {
+		// Ensure clean state
+		await fetch(`${baseUrl}/test/reset-lockouts`, { method: 'POST' });
+
 		// First failure
 		await fetch(`${baseUrl}/`, {
 			headers: { 'Authorization': basicAuthHeader('testuser', 'wrongpass') },
@@ -270,6 +276,9 @@ describe('Auth Lockout Integration', () => {
 	});
 
 	it('third failure triggers lockout', async () => {
+		// Ensure clean state
+		await fetch(`${baseUrl}/test/reset-lockouts`, { method: 'POST' });
+
 		// First two failures
 		await fetch(`${baseUrl}/`, {
 			headers: { 'Authorization': basicAuthHeader('testuser', 'wrongpass') },

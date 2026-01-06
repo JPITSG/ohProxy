@@ -143,8 +143,9 @@ describe('Parsing Functions', () => {
 
 		it('handles invalid base64', () => {
 			const [user, pass] = parseBasicAuthHeader('Basic !!!invalid!!!');
-			// Invalid base64 may throw or return garbage - should handle gracefully
-			// The actual behavior depends on implementation
+			// Invalid base64 should be handled gracefully - returns decoded garbage or nulls
+			// The function should not throw
+			assert.ok(true, 'Should not throw on invalid base64');
 		});
 
 		it('handles unicode in credentials', () => {
