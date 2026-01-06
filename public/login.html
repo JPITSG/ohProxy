@@ -68,7 +68,9 @@
 			width: 100%;
 			padding: 10px 12px;
 			font-size: 14px;
-			font-weight: 500;
+			font-weight: 700;
+			text-transform: uppercase;
+			letter-spacing: 0.5px;
 			color: rgba(19, 21, 54, 0.98);
 			background: rgba(106, 116, 211, 0.15);
 			border: 1px solid rgba(19, 21, 54, 0.2);
@@ -111,7 +113,7 @@
 <body>
 	<div class="login-container">
 		<div class="login-card">
-			<form id="login-form" class="login-form">
+			<form id="login-form" class="login-form" novalidate>
 				<input type="text" name="username" class="form-input" placeholder="Username" autocomplete="username" required>
 				<input type="password" name="password" class="form-input" placeholder="Password" autocomplete="current-password" required>
 				<button type="submit" class="submit-btn">Login</button>
