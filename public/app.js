@@ -1551,13 +1551,32 @@ function pageCacheKey(url) {
 async function fetchPage(url, options) {
 	const opts = options || {};
 	const key = pageCacheKey(url);
+	const since = opts.forceFull ? '' : (state.deltaTokens.get(key) || '');
+
+	// Try WebSocket first if connected
+	if (wsConnected && wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+		try {
+			const data = await fetchDeltaViaWs(url, since);
+			if (data && data.delta === true) {
+				if (data.hash) state.deltaTokens.set(key, data.hash);
+				return { delta: true, title: data.title || '', changes: data.changes || [] };
+			}
+			if (data && data.delta === false && data.page) {
+				if (data.hash) state.deltaTokens.set(key, data.hash);
+				return { delta: false, page: data.page };
+			}
+			// Fallback: unexpected format
+			return { delta: false, page: data.page || data };
+		} catch {
+			// WS failed, fall through to XHR
+		}
+	}
+
+	// XHR fallback
 	const deltaUrl = new URL(url, window.location.href);
 	deltaUrl.searchParams.set('delta', '1');
-	if (!opts.forceFull) {
-		const token = state.deltaTokens.get(key);
-		if (token) deltaUrl.searchParams.set('since', token);
-	} else {
-		deltaUrl.searchParams.delete('since');
+	if (since) {
+		deltaUrl.searchParams.set('since', since);
 	}
 
 	const res = await fetchWithAuth(deltaUrl.toString(), { headers: { 'Accept': 'application/json' } });
@@ -3301,6 +3320,52 @@ const WS_MAX_FAILURES = 5; // Stop trying WebSocket after this many consecutive 
 let wsConnectTimer = null;
 let wsConnectToken = 0;
 let wsTimedOutToken = 0;
+let wsDeltaRequestId = 0;
+const wsDeltaPending = new Map(); // requestId -> { resolve, reject, timer }
+const WS_DELTA_TIMEOUT_MS = 10000;
+
+function fetchDeltaViaWs(url, since) {
+	return new Promise((resolve, reject) => {
+		if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) {
+			reject(new Error('WebSocket not connected'));
+			return;
+		}
+		const requestId = ++wsDeltaRequestId;
+		const timer = setTimeout(() => {
+			const pending = wsDeltaPending.get(requestId);
+			if (pending) {
+				wsDeltaPending.delete(requestId);
+				pending.reject(new Error('WS delta timeout'));
+			}
+		}, WS_DELTA_TIMEOUT_MS);
+		wsDeltaPending.set(requestId, { resolve, reject, timer });
+		wsConnection.send(JSON.stringify({
+			event: 'fetchDelta',
+			data: { url, since, requestId },
+		}));
+	});
+}
+
+function handleWsDeltaResponse(data) {
+	const { requestId, error, ...result } = data;
+	const pending = wsDeltaPending.get(requestId);
+	if (!pending) return;
+	wsDeltaPending.delete(requestId);
+	clearTimeout(pending.timer);
+	if (error) {
+		pending.reject(new Error(error));
+	} else {
+		pending.resolve(result);
+	}
+}
+
+function clearPendingDeltaRequests() {
+	for (const [id, pending] of wsDeltaPending) {
+		clearTimeout(pending.timer);
+		pending.reject(new Error('WebSocket closed'));
+	}
+	wsDeltaPending.clear();
+}
 
 function clearWsConnectTimer() {
 	if (wsConnectTimer) {
@@ -3425,6 +3490,8 @@ function connectWs() {
 				const msg = JSON.parse(event.data);
 				if (msg.event === 'update' && msg.data) {
 					applyWsUpdate(msg.data);
+				} else if (msg.event === 'deltaResponse' && msg.data) {
+					handleWsDeltaResponse(msg.data);
 				}
 			} catch {}
 		};
@@ -3463,6 +3530,7 @@ function connectWs() {
 
 function closeWs() {
 	clearWsConnectTimer();
+	clearPendingDeltaRequests();
 	if (wsConnection) {
 		try { wsConnection.close(); } catch {}
 		wsConnection = null;

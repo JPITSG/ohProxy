@@ -1333,7 +1333,7 @@ function handleWsConnection(ws, req) {
 
 	ws.on('pong', () => { ws.isAlive = true; });
 
-	ws.on('message', (data) => {
+	ws.on('message', async (data) => {
 		try {
 			const msg = JSON.parse(data);
 			if (msg.event === 'clientState' && msg.data) {
@@ -1348,6 +1348,21 @@ function handleWsConnection(ws, req) {
 					}
 					// Always verify interval is correct (handles edge cases where interval doesn't match state)
 					adjustPollingForFocus();
+				}
+			} else if (msg.event === 'fetchDelta' && msg.data) {
+				// Handle delta fetch over WS instead of XHR
+				const { url, since, requestId } = msg.data;
+				try {
+					const result = await computeDeltaResponse(url, since || '');
+					ws.send(JSON.stringify({
+						event: 'deltaResponse',
+						data: { requestId, ...result },
+					}));
+				} catch (err) {
+					ws.send(JSON.stringify({
+						event: 'deltaResponse',
+						data: { requestId, error: err.message || 'Delta fetch failed' },
+					}));
 				}
 			}
 		} catch (err) {
@@ -2227,6 +2242,67 @@ function setDeltaCache(key, value) {
 	if (deltaCache.size <= DELTA_CACHE_LIMIT) return;
 	const oldestKey = deltaCache.keys().next().value;
 	if (oldestKey) deltaCache.delete(oldestKey);
+}
+
+// Compute delta response for a sitemap URL (used by both HTTP and WS)
+async function computeDeltaResponse(url, since) {
+	// Parse the URL to extract path and query params
+	// url format: /rest/sitemaps/home/0100?type=json or similar
+	const parsed = new URL(url, 'http://localhost');
+	const sitemapPath = parsed.pathname.replace(/^\/rest/, '');
+
+	if (!sitemapPath.startsWith('/sitemaps/')) {
+		throw new Error('Invalid sitemap path');
+	}
+
+	const params = parsed.searchParams;
+	params.delete('delta');
+	params.delete('since');
+	if (!params.has('type')) params.set('type', 'json');
+
+	const upstreamPath = `/rest${sitemapPath}${params.toString() ? `?${params.toString()}` : ''}`;
+
+	const body = await fetchOpenhab(upstreamPath);
+	if (!body.ok) {
+		throw new Error(`Upstream error: ${body.status}`);
+	}
+
+	let page;
+	try {
+		page = JSON.parse(body.body);
+	} catch {
+		throw new Error('Non-JSON response from openHAB');
+	}
+
+	const cacheKey = `${sitemapPath}?${params.toString()}`;
+	const snapshot = buildSnapshot(page);
+	const cached = deltaCache.get(cacheKey);
+	const canDelta = cached && since && since === cached.hash && cached.structureHash === snapshot.structureHash;
+
+	if (!canDelta) {
+		setDeltaCache(cacheKey, snapshot);
+		return { delta: false, hash: snapshot.hash, page };
+	}
+
+	const changes = [];
+	for (const [key, current] of snapshot.entryMap.entries()) {
+		const prev = cached.entryMap.get(key);
+		if (!prev) {
+			setDeltaCache(cacheKey, snapshot);
+			return { delta: false, hash: snapshot.hash, page };
+		}
+		if (
+			prev.label !== current.label ||
+			prev.state !== current.state ||
+			prev.valuecolor !== current.valuecolor ||
+			prev.icon !== current.icon
+		) {
+			changes.push(current);
+		}
+	}
+
+	setDeltaCache(cacheKey, snapshot);
+	return { delta: true, hash: snapshot.hash, title: snapshot.title, changes };
 }
 
 function ensureDir(dirPath) {
