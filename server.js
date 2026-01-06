@@ -215,6 +215,7 @@ const AUTH_COOKIE_NAME = safeText(SERVER_AUTH.cookieName || 'AuthStore');
 const AUTH_COOKIE_DAYS = configNumber(SERVER_AUTH.cookieDays, 0);
 const AUTH_COOKIE_KEY = safeText(SERVER_AUTH.cookieKey || '');
 const AUTH_FAIL_NOTIFY_CMD = safeText(SERVER_AUTH.authFailNotifyCmd || '');
+const AUTH_MODE = safeText(SERVER_AUTH.mode || 'basic');
 const AUTH_FAIL_NOTIFY_INTERVAL_MS = 15 * 60 * 1000;
 const AUTH_LOCKOUT_THRESHOLD = 3;
 const SESSION_COOKIE_NAME = 'ohSession';
@@ -929,6 +930,36 @@ function getSessionCookie(req) {
 	return getCookieValue(req, SESSION_COOKIE_NAME);
 }
 
+// CSRF protection for HTML auth mode
+const CSRF_COOKIE_NAME = 'ohCSRF';
+
+function generateCsrfToken() {
+	return crypto.randomBytes(32).toString('hex');
+}
+
+function setCsrfCookie(res, token) {
+	const secure = isSecureRequest(res.req);
+	const parts = [
+		`${CSRF_COOKIE_NAME}=${token}`,
+		'Path=/',
+		'SameSite=Strict',
+	];
+	// Not HttpOnly - JS needs to read it for the header
+	if (secure) parts.push('Secure');
+	appendSetCookie(res, parts.join('; '));
+}
+
+function validateCsrfToken(req) {
+	const cookieToken = getCookieValue(req, CSRF_COOKIE_NAME);
+	const headerToken = req.headers['x-csrf-token'];
+	if (!cookieToken || !headerToken) return false;
+	// Use timing-safe comparison
+	const cookieBuf = Buffer.from(cookieToken);
+	const headerBuf = Buffer.from(headerToken);
+	if (cookieBuf.length !== headerBuf.length) return false;
+	return crypto.timingSafeEqual(cookieBuf, headerBuf);
+}
+
 function normalizeNotifyIp(value) {
 	const raw = safeText(value).trim();
 	if (!raw) return 'unknown';
@@ -1048,6 +1079,7 @@ const liveConfig = {
 	authCookieDays: AUTH_COOKIE_DAYS,
 	authCookieKey: AUTH_COOKIE_KEY,
 	authFailNotifyCmd: AUTH_FAIL_NOTIFY_CMD,
+	authMode: AUTH_MODE,
 	securityHeadersEnabled: SECURITY_HEADERS_ENABLED,
 	securityHsts: SECURITY_HSTS,
 	securityCsp: SECURITY_CSP,
@@ -1144,6 +1176,7 @@ function reloadLiveConfig() {
 	liveConfig.authCookieDays = configNumber(newAuth.cookieDays, 0);
 	liveConfig.authCookieKey = safeText(newAuth.cookieKey || '');
 	liveConfig.authFailNotifyCmd = safeText(newAuth.authFailNotifyCmd || '');
+	liveConfig.authMode = safeText(newAuth.mode || 'basic');
 	liveConfig.securityHeadersEnabled = newSecurityHeaders.enabled !== false;
 	liveConfig.securityHsts = newSecurityHeaders.hsts || {};
 	liveConfig.securityCsp = newSecurityHeaders.csp || {};
@@ -2508,6 +2541,68 @@ app.use((req, res, next) => {
 	}
 	next();
 });
+
+// HTML auth login endpoint - must be before auth middleware
+app.post('/api/auth/login', express.json(), (req, res) => {
+	// Only available in HTML auth mode
+	if (liveConfig.authMode !== 'html') {
+		res.status(404).type('text/plain').send('Not found');
+		return;
+	}
+
+	// Validate CSRF token
+	if (!validateCsrfToken(req)) {
+		res.status(403).json({ error: 'Invalid CSRF token' });
+		return;
+	}
+
+	const { username, password } = req.body || {};
+	const clientIp = getRemoteIp(req);
+	const lockKey = getLockoutKey(clientIp);
+
+	// Check lockout
+	const lockout = getAuthLockout(lockKey);
+	if (lockout && lockout.lockUntil) {
+		const remaining = Math.max(0, Math.ceil((lockout.lockUntil - Date.now()) / 1000));
+		res.status(429).json({
+			error: 'Too many failed attempts',
+			lockedOut: true,
+			remainingSeconds: remaining,
+		});
+		return;
+	}
+
+	// Validate credentials
+	const users = loadAuthUsers(AUTH_USERS_FILE);
+	if (!users || Object.keys(users).length === 0) {
+		res.status(500).json({ error: 'Auth config unavailable' });
+		return;
+	}
+
+	if (!username || !password || !Object.prototype.hasOwnProperty.call(users, username) || users[username] !== password) {
+		const notifyIp = clientIp || '';
+		maybeNotifyAuthFailure(notifyIp);
+		const entry = recordAuthFailure(lockKey);
+		if (entry && entry.lockUntil) {
+			logMessage(`Auth lockout triggered for ${lockKey} after ${entry.count} failures (HTML login)`);
+			res.status(429).json({
+				error: 'Too many failed attempts',
+				lockedOut: true,
+				remainingSeconds: Math.max(0, Math.ceil((entry.lockUntil - Date.now()) / 1000)),
+			});
+			return;
+		}
+		res.status(401).json({ error: 'Invalid credentials' });
+		return;
+	}
+
+	// Success - clear failed attempts and set auth cookie
+	clearAuthFailures(lockKey);
+	setAuthCookie(res, username, users[username]);
+	logMessage(`HTML auth login success for user: ${username} from ${clientIp || 'unknown'}`);
+	res.json({ success: true });
+});
+
 app.use((req, res, next) => {
 	const clientIp = getRemoteIp(req);
 	if (clientIp) req.ohProxyClientIp = clientIp;
@@ -2527,17 +2622,73 @@ app.use((req, res, next) => {
 		req.ohProxyUser = '';
 		return next();
 	}
+
+	// Auth is required - handle based on auth mode
+	const users = loadAuthUsers(AUTH_USERS_FILE);
+	if (!users || Object.keys(users).length === 0) {
+		res.status(500).type('text/plain').send('Auth config unavailable');
+		return;
+	}
+
+	// HTML auth mode
+	if (liveConfig.authMode === 'html') {
+		// Check if already authenticated via cookie
+		if (liveConfig.authCookieKey && liveConfig.authCookieName) {
+			const cookieUser = getAuthCookieUser(req, users, liveConfig.authCookieKey);
+			if (cookieUser) {
+				req.ohProxyAuth = 'authenticated';
+				req.ohProxyUser = cookieUser;
+				return next();
+			}
+			// Clear invalid cookie if present
+			if (getCookieValue(req, liveConfig.authCookieName)) {
+				clearAuthCookie(res);
+			}
+		}
+
+		// Allow login.js to load (needed by login page)
+		if (req.path === '/login.js') {
+			req.ohProxyAuth = 'unauthenticated';
+			req.ohProxyUser = '';
+			return next();
+		}
+
+		// Not authenticated - check request type
+		const acceptHeader = req.headers.accept || '';
+		const reqPath = req.path.toLowerCase();
+
+		// Serve login page only for HTML page requests (not static assets)
+		// Browser page loads typically send Accept: text/html as first preference
+		const isHtmlPageRequest = acceptHeader.includes('text/html') &&
+			!reqPath.endsWith('.js') &&
+			!reqPath.endsWith('.css') &&
+			!reqPath.endsWith('.png') &&
+			!reqPath.endsWith('.jpg') &&
+			!reqPath.endsWith('.ico') &&
+			!reqPath.endsWith('.svg') &&
+			!reqPath.endsWith('.woff') &&
+			!reqPath.endsWith('.woff2');
+
+		if (isHtmlPageRequest) {
+			// Set CSRF cookie for login page
+			const csrfToken = generateCsrfToken();
+			setCsrfCookie(res, csrfToken);
+			res.sendFile(path.join(__dirname, 'public', 'login.html'));
+			return;
+		}
+
+		// Static assets and API requests without auth - return 401
+		res.status(401).json({ error: 'Authentication required' });
+		return;
+	}
+
+	// Basic auth mode (default)
 	const lockKey = getLockoutKey(clientIp);
 	const lockout = getAuthLockout(lockKey);
 	if (lockout && lockout.lockUntil) {
 		const remaining = Math.max(0, Math.ceil((lockout.lockUntil - Date.now()) / 1000));
 		logMessage(`Auth lockout active for ${lockKey} (${remaining}s remaining)`);
 		res.status(429).type('text/plain').send('Too many authentication attempts');
-		return;
-	}
-	const users = loadAuthUsers(AUTH_USERS_FILE);
-	if (!users || Object.keys(users).length === 0) {
-		res.status(500).type('text/plain').send('Auth config unavailable');
 		return;
 	}
 	const [user, pass] = getBasicAuthCredentials(req);

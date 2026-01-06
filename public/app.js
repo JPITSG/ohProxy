@@ -1433,6 +1433,13 @@ function syncAuthFromHeaders(res) {
 async function fetchWithAuth(url, options) {
 	const res = await fetch(url, options);
 	syncAuthFromHeaders(res);
+	// Detect 401 - user may have switched from LAN to WAN without auth cookie
+	// Reload page to show login prompt (or HTTP basic auth dialog)
+	if (res.status === 401) {
+		window.location.reload();
+		// Return a never-resolving promise to prevent further processing
+		return new Promise(() => {});
+	}
 	return res;
 }
 

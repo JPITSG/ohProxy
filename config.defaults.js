@@ -41,9 +41,11 @@ module.exports = {
 		proxyAllowlist: [],
 		// LAN subnets used for auth bypass + status labeling (IPv4 CIDR list; 0.0.0.0 for all; empty allowed).
 		lanSubnets: [],
-		// Basic auth settings.
+		// Authentication settings.
 		auth: {
-			// Basic auth users file (absolute path; required).
+			// Auth mode ('basic' for HTTP Basic Auth, 'html' for HTML form login).
+			mode: 'basic',
+			// Users file (absolute path; required).
 			usersFile: '',
 			// Subnets that bypass auth (IPv4 CIDR list; empty allowed).
 			whitelistSubnets: [],
