@@ -51,13 +51,13 @@ function createApiTestApp(config = {}) {
 		return '';
 	}
 
-	// Session middleware
+	// Session middleware (test harness uses simple cookie, real server embeds session in AuthStore)
 	app.use((req, res, next) => {
-		let sessionId = getCookieValue(req, 'ohSession');
+		let sessionId = getCookieValue(req, 'TestSession');
 		if (!sessionId || !sessions.has(sessionId)) {
 			sessionId = require('crypto').randomUUID();
 			sessions.set(sessionId, { darkMode: true });
-			res.setHeader('Set-Cookie', `ohSession=${sessionId}; Path=/; HttpOnly; SameSite=Lax`);
+			res.setHeader('Set-Cookie', `TestSession=${sessionId}; Path=/; HttpOnly; SameSite=Lax`);
 		}
 		req.session = sessions.get(sessionId);
 		req.sessionId = sessionId;
@@ -221,8 +221,8 @@ describe('API Endpoints Integration', () => {
 				headers: { 'Authorization': basicAuthHeader('testuser', 'testpassword') },
 			});
 			const cookie = res1.headers.get('set-cookie');
-			const sessionMatch = cookie?.match(/ohSession=([^;]+)/);
-			const sessionCookie = sessionMatch ? `ohSession=${sessionMatch[1]}` : '';
+			const sessionMatch = cookie?.match(/TestSession=([^;]+)/);
+			const sessionCookie = sessionMatch ? `TestSession=${sessionMatch[1]}` : '';
 
 			// Update settings
 			const res2 = await fetch(`${baseUrl}/api/settings`, {
@@ -257,8 +257,8 @@ describe('API Endpoints Integration', () => {
 				headers: { 'Authorization': basicAuthHeader('testuser', 'testpassword') },
 			});
 			const cookie = res1.headers.get('set-cookie');
-			const sessionMatch = cookie?.match(/ohSession=([^;]+)/);
-			const sessionCookie = sessionMatch ? `ohSession=${sessionMatch[1]}` : '';
+			const sessionMatch = cookie?.match(/TestSession=([^;]+)/);
+			const sessionCookie = sessionMatch ? `TestSession=${sessionMatch[1]}` : '';
 
 			// Add new setting
 			const res2 = await fetch(`${baseUrl}/api/settings`, {
@@ -380,13 +380,13 @@ describe('API Endpoints Integration', () => {
 	});
 
 	describe('Session Middleware', () => {
-		it('creates session and sets ohSession cookie', async () => {
+		it('creates session and sets session cookie', async () => {
 			const res = await fetch(`${baseUrl}/api/settings`, {
 				headers: { 'Authorization': basicAuthHeader('testuser', 'testpassword') },
 			});
 			const setCookie = res.headers.get('set-cookie');
 			assert.ok(setCookie);
-			assert.ok(setCookie.includes('ohSession='));
+			assert.ok(setCookie.includes('TestSession='));
 		});
 	});
 });
