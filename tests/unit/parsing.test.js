@@ -1,9 +1,7 @@
 'use strict';
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert');
-const path = require('path');
-const fs = require('fs');
 
 // Parsing functions replicated from server.js
 
@@ -33,33 +31,6 @@ function getBasicAuthCredentials(req) {
 	return parseBasicAuthHeader(header);
 }
 
-// Test users file parser
-function loadAuthUsers(filePath) {
-	if (!filePath) return null;
-	let content = '';
-	try {
-		content = fs.readFileSync(filePath, 'utf8');
-	} catch {
-		return null;
-	}
-	const users = {};
-	const lines = content.split(/\r?\n/);
-	for (const line of lines) {
-		const trimmed = line.trim();
-		if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
-		let pos = trimmed.indexOf(':');
-		if (pos === -1) pos = trimmed.indexOf('=');
-		if (pos === -1) continue;
-		const user = trimmed.slice(0, pos).trim();
-		const passPart = trimmed.slice(pos + 1).trim();
-		const comma = passPart.indexOf(',');
-		const pass = comma === -1 ? passPart : passPart.slice(0, comma).trim();
-		if (!user) continue;
-		users[user] = pass;
-	}
-	return users;
-}
-
 function parseTimeString(value) {
 	const raw = safeText(value).trim().toLowerCase();
 	if (!raw) return null;
@@ -80,9 +51,6 @@ function parseTimeString(value) {
 
 	return null;
 }
-
-const FIXTURES_DIR = path.join(__dirname, '..', 'fixtures');
-const TEST_USERS_FILE = path.join(FIXTURES_DIR, 'users.cfg');
 
 describe('Parsing Functions', () => {
 	describe('parseBasicAuthHeader', () => {
@@ -190,46 +158,6 @@ describe('Parsing Functions', () => {
 			const [user, pass] = getBasicAuthCredentials({});
 			assert.strictEqual(user, null);
 			assert.strictEqual(pass, null);
-		});
-	});
-
-	describe('loadAuthUsers', () => {
-		it('parses user:pass format', () => {
-			const users = loadAuthUsers(TEST_USERS_FILE);
-			assert.ok(users);
-			assert.strictEqual(users.testuser, 'testpassword');
-		});
-
-		it('parses multiple users', () => {
-			const users = loadAuthUsers(TEST_USERS_FILE);
-			assert.ok(users);
-			assert.ok('testuser' in users);
-			assert.ok('admin' in users);
-		});
-
-		it('ignores comment lines starting with #', () => {
-			// Our test file has a comment line
-			const users = loadAuthUsers(TEST_USERS_FILE);
-			// Should not have keys starting with #
-			for (const key of Object.keys(users)) {
-				assert.ok(!key.startsWith('#'));
-			}
-		});
-
-		it('returns null for missing file', () => {
-			const users = loadAuthUsers('/nonexistent/path/users.cfg');
-			assert.strictEqual(users, null);
-		});
-
-		it('returns null for empty path', () => {
-			const users = loadAuthUsers('');
-			assert.strictEqual(users, null);
-		});
-
-		it('handles user with colon in password', () => {
-			const users = loadAuthUsers(TEST_USERS_FILE);
-			assert.ok(users);
-			assert.strictEqual(users['user_with_colon'], 'pass:word:here');
 		});
 	});
 

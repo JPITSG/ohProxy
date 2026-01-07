@@ -43,8 +43,6 @@ module.exports = {
 		auth: {
 			// Auth mode ('basic' for HTTP Basic Auth, 'html' for HTML form login).
 			mode: 'basic',
-			// Users file (absolute path; required).
-			usersFile: '',
 			// Basic auth realm label (string; non-empty).
 			realm: 'openHAB Proxy',
 			// Auth cookie name (string; empty disables cookie auth).

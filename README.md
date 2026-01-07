@@ -243,8 +243,6 @@ module.exports = {
   server: {
     auth: {
       mode: 'basic',                     // 'basic' or 'html' (form login)
-      usersFile: '/path/to/users.cfg',   // username:password format
-      whitelistSubnets: [],              // Skip auth for these subnets
       realm: 'openHAB Proxy',            // Basic auth realm (basic mode only)
       cookieName: 'AuthStore',
       cookieDays: 365,                   // >0 required when cookieKey is set
@@ -255,6 +253,8 @@ module.exports = {
   },
 };
 ```
+
+> **Note:** Users are managed via the `users-cli.js` utility (see [User Management](#user-management) below), not via config files.
 
 ### Security Headers Configuration
 
@@ -398,14 +398,34 @@ For MJPEG camera streams, use the `mjpeg://` protocol in your openHAB sitemap:
 Image url="mjpeg://camera.local/stream"
 ```
 
-## User File Format
+## User Management
 
-The users file is a simple `username:password` (or `username=password`) format. Example:
+Users are managed via the `users-cli.js` command-line utility. User data is stored in the SQLite database (`sessions.db`).
 
 ```bash
-echo "alice:secret" > /path/to/users.cfg
-echo "bob:password123" >> /path/to/users.cfg
+# List all users
+node users-cli.js list
+
+# Add a new user (roles: admin, normal, readonly)
+node users-cli.js add alice mypassword normal
+
+# Add an admin user
+node users-cli.js add bob adminpass123 admin
+
+# Change a user's password
+node users-cli.js passwd alice newpassword
+
+# Change a user's role
+node users-cli.js role alice admin
+
+# Delete a user (also removes their sessions)
+node users-cli.js delete alice
 ```
+
+**User Roles:**
+- `admin` - Full access, can manage widget glow rules and visibility
+- `normal` - Standard access to all widgets
+- `readonly` - View-only access (cannot control items)
 
 ## Session CLI
 

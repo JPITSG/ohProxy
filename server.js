@@ -516,7 +516,6 @@ function validateConfig() {
 	ensureNumber(SLOW_QUERY_MS, 'server.slowQueryMs', { min: 0 }, errors);
 
 	if (ensureObject(SERVER_CONFIG.auth, 'server.auth', errors)) {
-		ensureReadableFile(SERVER_AUTH.usersFile, 'server.auth.usersFile', errors);
 		ensureString(AUTH_REALM, 'server.auth.realm', { allowEmpty: false }, errors);
 		ensureString(AUTH_COOKIE_NAME, 'server.auth.cookieName', { allowEmpty: true }, errors);
 		ensureNumber(AUTH_COOKIE_DAYS, 'server.auth.cookieDays', { min: 0 }, errors);
