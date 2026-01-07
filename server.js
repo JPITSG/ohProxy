@@ -1089,61 +1089,37 @@ const liveConfig = {
 	wsMode: WS_MODE,
 	wsPollingIntervalMs: WS_POLLING_INTERVAL_MS,
 	wsPollingIntervalBgMs: WS_POLLING_INTERVAL_BG_MS,
-	widgetGlowRules: [],
 };
 
-// Widget glow rules JSON file handling
-const GLOW_RULES_DEFAULTS_PATH = path.join(__dirname, 'widgetGlowRules.defaults.json');
+// Widget glow rules - migrate from JSON to SQLite on first run
 const GLOW_RULES_LOCAL_PATH = path.join(__dirname, 'widgetGlowRules.local.json');
-let lastGlowRulesMtime = 0;
+const GLOW_RULES_MIGRATED_PATH = GLOW_RULES_LOCAL_PATH + '.migrated';
 
-function readGlowRulesLocalMtime() {
-	try {
-		const stat = fs.statSync(GLOW_RULES_LOCAL_PATH);
-		const mtime = stat.mtimeMs || stat.mtime.getTime();
-		return Number.isFinite(mtime) ? mtime : 0;
-	} catch (err) {
-		if (err && err.code === 'ENOENT') return 0;
-		return 0;
-	}
-}
+function migrateGlowRulesToDb() {
+	// Skip if already migrated or no file exists
+	if (fs.existsSync(GLOW_RULES_MIGRATED_PATH) || !fs.existsSync(GLOW_RULES_LOCAL_PATH)) return;
 
-function loadWidgetGlowRules() {
-	let defaults = [];
-	let local = [];
-	try {
-		const raw = fs.readFileSync(GLOW_RULES_DEFAULTS_PATH, 'utf8');
-		defaults = JSON.parse(raw);
-		if (!Array.isArray(defaults)) defaults = [];
-	} catch {}
 	try {
 		const raw = fs.readFileSync(GLOW_RULES_LOCAL_PATH, 'utf8');
-		local = JSON.parse(raw);
-		if (!Array.isArray(local)) local = [];
-	} catch {}
+		const rules = JSON.parse(raw);
+		if (!Array.isArray(rules)) return;
 
-	// Merge: local overrides defaults by widgetId
-	const merged = new Map(defaults.map(r => [r.widgetId, r]));
-	for (const rule of local) {
-		if (rule && rule.widgetId) merged.set(rule.widgetId, rule);
-	}
-	return Array.from(merged.values());
-}
-
-function saveWidgetGlowRules(rules) {
-	try {
-		fs.writeFileSync(GLOW_RULES_LOCAL_PATH, JSON.stringify(rules, null, '\t'), 'utf8');
-		lastGlowRulesMtime = readGlowRulesLocalMtime();
-		return true;
+		let count = 0;
+		for (const entry of rules) {
+			if (entry && entry.widgetId && Array.isArray(entry.rules) && entry.rules.length > 0) {
+				sessions.setGlowRules(entry.widgetId, entry.rules);
+				count++;
+			}
+		}
+		fs.renameSync(GLOW_RULES_LOCAL_PATH, GLOW_RULES_MIGRATED_PATH);
+		logMessage(`Migrated ${count} widget glow rules to database`);
 	} catch (err) {
-		logMessage(`Failed to save widget glow rules: ${err.message || err}`);
-		return false;
+		logMessage(`Failed to migrate glow rules: ${err.message || err}`, 'error');
 	}
 }
 
-// Initialize glow rules
-liveConfig.widgetGlowRules = loadWidgetGlowRules();
-lastGlowRulesMtime = readGlowRulesLocalMtime();
+// Run migration on startup
+migrateGlowRulesToDb();
 
 // Values that require restart if changed
 const restartRequiredKeys = [
@@ -2659,13 +2635,6 @@ app.use((req, res, next) => {
 			}
 		}
 	}
-	// Hot reload widget glow rules
-	const glowMtime = readGlowRulesLocalMtime();
-	if (glowMtime !== lastGlowRulesMtime) {
-		lastGlowRulesMtime = glowMtime;
-		liveConfig.widgetGlowRules = loadWidgetGlowRules();
-		logMessage('Widget glow rules hot-reloaded');
-	}
 	next();
 });
 app.use((req, res, next) => {
@@ -2921,7 +2890,7 @@ app.get('/config.js', (req, res) => {
 			lanSubnets: Array.isArray(liveConfig.lanSubnets) ? liveConfig.lanSubnets : [],
 		},
 		client: clientConfig,
-		widgetGlowRules: Array.isArray(liveConfig.widgetGlowRules) ? liveConfig.widgetGlowRules : [],
+		widgetGlowRules: sessions.getAllGlowRules(),
 	})};`);
 });
 
@@ -2969,8 +2938,8 @@ app.get('/api/glow-rules/:widgetId', (req, res) => {
 		res.status(400).json({ error: 'Missing widgetId' });
 		return;
 	}
-	const entry = liveConfig.widgetGlowRules.find(r => r.widgetId === widgetId);
-	res.json({ widgetId, rules: entry ? entry.rules : [] });
+	const rules = sessions.getGlowRules(widgetId);
+	res.json({ widgetId, rules });
 });
 
 app.post('/api/glow-rules', express.json(), (req, res) => {
@@ -3009,40 +2978,14 @@ app.post('/api/glow-rules', express.json(), (req, res) => {
 		}
 	}
 
-	// Read current local rules
-	let localRules = [];
+	// Save to database (empty rules array deletes the entry)
 	try {
-		const raw = fs.readFileSync(GLOW_RULES_LOCAL_PATH, 'utf8');
-		localRules = JSON.parse(raw);
-		if (!Array.isArray(localRules)) localRules = [];
-	} catch {}
-
-	// Update or remove entry
-	const existingIdx = localRules.findIndex(r => r.widgetId === widgetId);
-	if (rules.length === 0) {
-		// Remove entry if rules array is empty
-		if (existingIdx >= 0) {
-			localRules.splice(existingIdx, 1);
-		}
-	} else {
-		// Update or add entry
-		if (existingIdx >= 0) {
-			localRules[existingIdx] = { widgetId, rules };
-		} else {
-			localRules.push({ widgetId, rules });
-		}
-	}
-
-	// Save to file
-	if (!saveWidgetGlowRules(localRules)) {
+		sessions.setGlowRules(widgetId, rules);
+		res.json({ ok: true, widgetId, rules });
+	} catch (err) {
+		logMessage(`Failed to save glow rules: ${err.message || err}`, 'error');
 		res.status(500).json({ error: 'Failed to save rules' });
-		return;
 	}
-
-	// Reload merged rules
-	liveConfig.widgetGlowRules = loadWidgetGlowRules();
-
-	res.json({ ok: true, widgetId, rules });
 });
 
 app.get('/sw.js', (req, res) => {

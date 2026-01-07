@@ -35,6 +35,15 @@ function initDb() {
 		CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen);
 	`);
 
+	// Create widget glow rules table
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS widget_glow_rules (
+			widget_id TEXT PRIMARY KEY,
+			rules TEXT NOT NULL,
+			updated_at INTEGER DEFAULT (strftime('%s','now'))
+		);
+	`);
+
 	// Migration: add IP columns if they don't exist
 	try {
 		db.exec(`ALTER TABLE sessions ADD COLUMN created_ip TEXT DEFAULT NULL`);
@@ -203,6 +212,67 @@ function getDefaultSettings() {
 	return { ...DEFAULT_SETTINGS };
 }
 
+// ============================================
+// Widget Glow Rules Functions
+// ============================================
+
+/**
+ * Get all glow rules.
+ * @returns {Array} - Array of {widgetId, rules} objects
+ */
+function getAllGlowRules() {
+	if (!db) initDb();
+	const rows = db.prepare('SELECT widget_id, rules FROM widget_glow_rules').all();
+	return rows.map(row => ({
+		widgetId: row.widget_id,
+		rules: JSON.parse(row.rules)
+	}));
+}
+
+/**
+ * Get rules for a specific widget.
+ * @param {string} widgetId - The widget ID
+ * @returns {Array} - Rules array or empty array if not found
+ */
+function getGlowRules(widgetId) {
+	if (!db) initDb();
+	const row = db.prepare('SELECT rules FROM widget_glow_rules WHERE widget_id = ?').get(widgetId);
+	return row ? JSON.parse(row.rules) : [];
+}
+
+/**
+ * Set rules for a widget. Empty rules array deletes the entry.
+ * @param {string} widgetId - The widget ID
+ * @param {Array} rules - Rules array
+ * @returns {boolean} - True if successful
+ */
+function setGlowRules(widgetId, rules) {
+	if (!db) initDb();
+	const now = Math.floor(Date.now() / 1000);
+
+	if (!Array.isArray(rules) || rules.length === 0) {
+		db.prepare('DELETE FROM widget_glow_rules WHERE widget_id = ?').run(widgetId);
+	} else {
+		db.prepare(`
+			INSERT INTO widget_glow_rules (widget_id, rules, updated_at)
+			VALUES (?, ?, ?)
+			ON CONFLICT(widget_id) DO UPDATE SET rules = excluded.rules, updated_at = excluded.updated_at
+		`).run(widgetId, JSON.stringify(rules), now);
+	}
+	return true;
+}
+
+/**
+ * Delete rules for a widget.
+ * @param {string} widgetId - The widget ID
+ * @returns {boolean} - True if deleted, false if not found
+ */
+function deleteGlowRules(widgetId) {
+	if (!db) initDb();
+	const result = db.prepare('DELETE FROM widget_glow_rules WHERE widget_id = ?').run(widgetId);
+	return result.changes > 0;
+}
+
 module.exports = {
 	initDb,
 	generateSessionId,
@@ -215,4 +285,9 @@ module.exports = {
 	closeDb,
 	getDefaultSettings,
 	setMaxAgeDays,
+	// Glow rules
+	getAllGlowRules,
+	getGlowRules,
+	setGlowRules,
+	deleteGlowRules,
 };
