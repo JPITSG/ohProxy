@@ -814,9 +814,9 @@ function appendSetCookie(res, value) {
 	res.setHeader('Set-Cookie', [existing, value]);
 }
 
-function buildAuthCookieValue(user, pass, key, expiry) {
+function buildAuthCookieValue(user, sessionId, pass, key, expiry) {
 	const userEncoded = base64UrlEncode(user);
-	const payload = `${userEncoded}|${expiry}`;
+	const payload = `${userEncoded}|${sessionId}|${expiry}`;
 	const sig = crypto.createHmac('sha256', key).update(`${payload}|${pass}`).digest('hex');
 	return base64UrlEncode(`${payload}|${sig}`);
 }
@@ -828,25 +828,45 @@ function getAuthCookieUser(req, users, key) {
 	const decoded = base64UrlDecode(raw);
 	if (!decoded) return null;
 	const parts = decoded.split('|');
-	if (parts.length !== 3) return null;
-	const [userEncoded, expiryRaw, sig] = parts;
-	if (!/^\d+$/.test(expiryRaw)) return null;
-	const expiry = Number(expiryRaw);
-	if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
-	const user = base64UrlDecode(userEncoded);
-	if (!user || !Object.prototype.hasOwnProperty.call(users, user)) return null;
-	const expected = crypto.createHmac('sha256', key).update(`${userEncoded}|${expiryRaw}|${users[user]}`).digest('hex');
-	const sigBuf = Buffer.from(sig, 'hex');
-	const expectedBuf = Buffer.from(expected, 'hex');
-	if (sigBuf.length !== expectedBuf.length) return null;
-	if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
-	return user;
+
+	// Handle both legacy (3-part) and new (4-part) formats
+	if (parts.length === 3) {
+		// Legacy format: userEncoded|expiry|sig
+		const [userEncoded, expiryRaw, sig] = parts;
+		if (!/^\d+$/.test(expiryRaw)) return null;
+		const expiry = Number(expiryRaw);
+		if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
+		const user = base64UrlDecode(userEncoded);
+		if (!user || !Object.prototype.hasOwnProperty.call(users, user)) return null;
+		const expected = crypto.createHmac('sha256', key).update(`${userEncoded}|${expiryRaw}|${users[user]}`).digest('hex');
+		const sigBuf = Buffer.from(sig, 'hex');
+		const expectedBuf = Buffer.from(expected, 'hex');
+		if (sigBuf.length !== expectedBuf.length) return null;
+		if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
+		return { user, sessionId: null, isLegacy: true };
+	} else if (parts.length === 4) {
+		// New format: userEncoded|sessionId|expiry|sig
+		const [userEncoded, sessionId, expiryRaw, sig] = parts;
+		if (!/^\d+$/.test(expiryRaw)) return null;
+		const expiry = Number(expiryRaw);
+		if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
+		const user = base64UrlDecode(userEncoded);
+		if (!user || !Object.prototype.hasOwnProperty.call(users, user)) return null;
+		const expected = crypto.createHmac('sha256', key).update(`${userEncoded}|${sessionId}|${expiryRaw}|${users[user]}`).digest('hex');
+		const sigBuf = Buffer.from(sig, 'hex');
+		const expectedBuf = Buffer.from(expected, 'hex');
+		if (sigBuf.length !== expectedBuf.length) return null;
+		if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
+		return { user, sessionId, isLegacy: false };
+	}
+
+	return null;
 }
 
-function setAuthCookie(res, user, pass) {
+function setAuthCookie(res, user, sessionId, pass) {
 	if (!liveConfig.authCookieKey || !liveConfig.authCookieName || liveConfig.authCookieDays <= 0) return;
 	const expiry = Math.floor(Date.now() / 1000) + Math.round(liveConfig.authCookieDays * 86400);
-	const value = buildAuthCookieValue(user, pass, liveConfig.authCookieKey, expiry);
+	const value = buildAuthCookieValue(user, sessionId, pass, liveConfig.authCookieKey, expiry);
 	const expires = new Date(expiry * 1000).toUTCString();
 	const maxAge = Math.round(liveConfig.authCookieDays * 86400);
 	const secure = isSecureRequest(res.req);
@@ -896,6 +916,20 @@ function setSessionCookie(res, sessionId) {
 
 function getSessionCookie(req) {
 	return getCookieValue(req, SESSION_COOKIE_NAME);
+}
+
+function clearSessionCookie(res) {
+	const secure = isSecureRequest(res.req);
+	const parts = [
+		`${SESSION_COOKIE_NAME}=`,
+		'Path=/',
+		'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+		'Max-Age=0',
+		'HttpOnly',
+		'SameSite=Lax',
+	];
+	if (secure) parts.push('Secure');
+	appendSetCookie(res, parts.join('; '));
 }
 
 // CSRF protection for HTML auth mode
@@ -1873,9 +1907,9 @@ function handleWsUpgrade(req, socket, head) {
 			authenticatedUser = user;
 		} else if (liveConfig.authCookieKey && liveConfig.authCookieName) {
 			// Try cookie auth
-			const cookieUser = getAuthCookieUser(req, users, liveConfig.authCookieKey);
-			if (cookieUser) {
-				authenticatedUser = cookieUser;
+			const cookieResult = getAuthCookieUser(req, users, liveConfig.authCookieKey);
+			if (cookieResult) {
+				authenticatedUser = cookieResult.user;
 			}
 		}
 
@@ -2675,7 +2709,16 @@ app.post('/api/auth/login', express.json(), (req, res) => {
 
 	// Success - clear failed attempts and set auth cookie
 	clearAuthFailures(lockKey);
-	setAuthCookie(res, username, users[username]);
+	// Create or reuse session
+	let sessionId = getSessionCookie(req);
+	if (!sessionId || !sessions.getSession(sessionId)) {
+		sessionId = sessions.generateSessionId();
+		sessions.createSession(sessionId, username, sessions.getDefaultSettings(), clientIp);
+	} else {
+		sessions.updateUsername(sessionId, username);
+	}
+	setAuthCookie(res, username, sessionId, users[username]);
+	clearSessionCookie(res); // Remove legacy ohSession cookie
 	logMessage(`HTML auth login success for user: ${username} from ${clientIp || 'unknown'}`);
 	res.json({ success: true });
 });
@@ -2700,10 +2743,25 @@ app.use((req, res, next) => {
 	if (liveConfig.authMode === 'html') {
 		// Check if already authenticated via cookie
 		if (liveConfig.authCookieKey && liveConfig.authCookieName) {
-			const cookieUser = getAuthCookieUser(req, users, liveConfig.authCookieKey);
-			if (cookieUser) {
+			const cookieResult = getAuthCookieUser(req, users, liveConfig.authCookieKey);
+			if (cookieResult) {
 				req.ohProxyAuth = 'authenticated';
-				req.ohProxyUser = cookieUser;
+				req.ohProxyUser = cookieResult.user;
+				// Handle legacy cookie upgrade
+				if (cookieResult.isLegacy) {
+					const clientIp = req.ohProxyClientIp || null;
+					const oldSessionId = getSessionCookie(req);
+					let sessionId;
+					if (oldSessionId && sessions.getSession(oldSessionId)) {
+						sessionId = oldSessionId;
+						sessions.updateUsername(sessionId, cookieResult.user);
+					} else {
+						sessionId = sessions.generateSessionId();
+						sessions.createSession(sessionId, cookieResult.user, sessions.getDefaultSettings(), clientIp);
+					}
+					setAuthCookie(res, cookieResult.user, sessionId, users[cookieResult.user]);
+					clearSessionCookie(res);
+				}
 				return next();
 			}
 			// Clear invalid cookie if present
@@ -2778,10 +2836,12 @@ app.use((req, res, next) => {
 			return;
 		}
 		authenticatedUser = user;
+		req._basicAuthUsed = true;
 	} else if (liveConfig.authCookieKey && liveConfig.authCookieName) {
-		const cookieUser = getAuthCookieUser(req, users, liveConfig.authCookieKey);
-		if (cookieUser) {
-			authenticatedUser = cookieUser;
+		const cookieResult = getAuthCookieUser(req, users, liveConfig.authCookieKey);
+		if (cookieResult) {
+			authenticatedUser = cookieResult.user;
+			req._cookieResult = cookieResult;
 		} else if (getCookieValue(req, liveConfig.authCookieName)) {
 			clearAuthCookie(res);
 		}
@@ -2791,7 +2851,26 @@ app.use((req, res, next) => {
 		return;
 	}
 	clearAuthFailures(lockKey);
-	setAuthCookie(res, authenticatedUser, users[authenticatedUser]);
+	// Create or reuse session
+	const cookieResult = req._cookieResult;
+	const oldSessionId = getSessionCookie(req);
+	let sessionId;
+	if (cookieResult && !cookieResult.isLegacy) {
+		// Already has new format cookie with embedded sessionId
+		sessionId = cookieResult.sessionId;
+	} else if (oldSessionId && sessions.getSession(oldSessionId)) {
+		// Reuse existing session
+		sessionId = oldSessionId;
+		sessions.updateUsername(sessionId, authenticatedUser);
+	} else {
+		// Create new session
+		sessionId = sessions.generateSessionId();
+		sessions.createSession(sessionId, authenticatedUser, sessions.getDefaultSettings(), clientIp);
+	}
+	setAuthCookie(res, authenticatedUser, sessionId, users[authenticatedUser]);
+	if (req._basicAuthUsed || (cookieResult && cookieResult.isLegacy)) {
+		clearSessionCookie(res);
+	}
 	req.ohProxyAuth = 'authenticated';
 	req.ohProxyUser = authenticatedUser;
 	next();
@@ -2823,34 +2902,26 @@ app.use((req, res, next) => {
 // Session middleware - runs after auth, assigns/loads session for all authorized users
 app.use((req, res, next) => {
 	try {
-		const sessionId = getSessionCookie(req);
-		const username = req.ohProxyUser || null;
 		const clientIp = req.ohProxyClientIp || null;
+		// Get sessionId from consolidated cookie (new format) or legacy ohSession cookie
+		const cookieResult = req._cookieResult;
+		let sessionId = (cookieResult && !cookieResult.isLegacy) ? cookieResult.sessionId : getSessionCookie(req);
 
 		if (sessionId) {
-			// Existing session cookie
 			const session = sessions.getSession(sessionId);
 			if (session) {
 				// Valid session found - touch it and attach to request
 				sessions.touchSession(sessionId, clientIp);
 				req.ohProxySession = session;
 				req.ohProxySession.lastIp = clientIp || session.lastIp;
-				// Username upgrade: LAN user now authenticated
-				if (!session.username && username) {
-					sessions.updateUsername(sessionId, username);
-					req.ohProxySession.username = username;
-				}
 			} else {
-				// Session cookie exists but not in DB (DB was reset) - create new session
-				const newSession = sessions.createSession(sessionId, username, sessions.getDefaultSettings(), clientIp);
-				req.ohProxySession = newSession;
+				// Session ID exists but not in DB (session was created in auth middleware but may have failed)
+				// This shouldn't normally happen, but handle gracefully
+				req.ohProxySession = null;
 			}
 		} else {
-			// No session cookie - create new session
-			const newSessionId = sessions.generateSessionId();
-			const newSession = sessions.createSession(newSessionId, username, sessions.getDefaultSettings(), clientIp);
-			setSessionCookie(res, newSessionId);
-			req.ohProxySession = newSession;
+			// No session available
+			req.ohProxySession = null;
 		}
 	} catch (err) {
 		logMessage(`Session error: ${err.message}`);
