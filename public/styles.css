@@ -397,7 +397,7 @@ html:not(.slim) .has-meta .labelStack {
 	border: var(--glass-border-width) solid var(--color-control-off-border);
 	font-size: .75rem;
 	line-height: 1;
-	padding: 8px 12px;
+	padding: 11px 12px;
 	border-radius: 10px;
 	display: inline-flex;
 	align-items: center;
@@ -878,7 +878,7 @@ body.theme-dark #themeToggleBtn svg {
 	text-overflow: ellipsis;
 }
 .switch-card .inline-controls .switch-btn {
-	padding: 8px 12px;
+	padding: 11px 12px;
 	border-radius: 10px;
 	border-width: var(--glass-border-width);
 	font-size: .75rem;
@@ -1153,7 +1153,7 @@ body.theme-light .glow-config-frame {
 	gap: 6px;
 }
 .glow-rule-row input {
-	padding: 8px 12px;
+	padding: 11px 12px;
 	font-size: .75rem;
 	line-height: 1;
 	color: var(--color-text-primary);
@@ -1199,7 +1199,7 @@ body.theme-light .glow-rule-row input:focus {
 }
 .glow-fake-select {
 	width: 100%;
-	padding: 8px 12px;
+	padding: 11px 12px;
 	font-size: .75rem;
 	line-height: 1;
 	color: var(--color-text-primary);
@@ -1235,7 +1235,7 @@ body.theme-light .glow-rule-row input:focus {
 	color: var(--color-select-option-text-card);
 	font-size: .75rem;
 	line-height: 1;
-	padding: 8px 12px;
+	padding: 11px 12px;
 	border-radius: 8px;
 	text-align: center;
 	cursor: pointer;
@@ -1309,7 +1309,7 @@ body.theme-light .glow-rule-row input:focus {
 	opacity: 1;
 }
 .glow-config-add {
-	padding: 8px 12px;
+	padding: 11px 12px;
 	font-size: .75rem;
 	line-height: 1;
 	font-weight: 500;
@@ -1338,7 +1338,7 @@ body.theme-light .glow-rule-row input:focus {
 }
 .glow-config-footer button {
 	flex: 1;
-	padding: 8px 12px;
+	padding: 11px 12px;
 	font-size: .75rem;
 	line-height: 1;
 	font-weight: 500;
@@ -1386,7 +1386,7 @@ body.glow-config-open {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	padding: 8px 12px;
+	padding: 11px 12px;
 	font-size: .75rem;
 	line-height: 1;
 	cursor: pointer;
