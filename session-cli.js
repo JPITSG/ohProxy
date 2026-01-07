@@ -52,7 +52,7 @@ function listSessions() {
 
 	for (const row of rows) {
 		const id = (row.client_id || '').substring(0, 36).padEnd(40);
-		const user = (row.username || '(LAN)').substring(0, 12).padEnd(15);
+		const user = (row.username || '-').substring(0, 12).padEnd(15);
 		const lastIp = (row.last_ip || '-').padEnd(18);
 		const lastSeen = formatDate(row.last_seen).padEnd(22);
 		const settings = row.settings || '{}';
@@ -77,7 +77,7 @@ function showSession(sessionId) {
 	console.log('\nSession Details:');
 	console.log('-'.repeat(50));
 	console.log(`  ID:          ${session.clientId}`);
-	console.log(`  Username:    ${session.username || '(LAN user)'}`);
+	console.log(`  Username:    ${session.username || '-'}`);
 	console.log(`  Created:     ${formatDate(session.createdAt)}`);
 	console.log(`  Created IP:  ${session.createdIp || '-'}`);
 	console.log(`  Last Seen:   ${formatDate(session.lastSeen)}`);

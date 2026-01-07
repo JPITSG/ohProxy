@@ -1118,9 +1118,6 @@ function migrateGlowRulesToDb() {
 // Run migration on startup
 migrateGlowRulesToDb();
 
-// Clean up any LAN user sessions (all users now require authentication)
-sessions.deleteLanSessions();
-
 // Values that require restart if changed
 const restartRequiredKeys = [
 	'http.enabled', 'http.host', 'http.port',
@@ -1982,7 +1979,6 @@ function getInitialStatusLabel(req) {
 	if (info.auth === 'authenticated' && info.user) {
 		return `Connected · ${info.user}`;
 	}
-	if (info.lan) return 'Connected · LAN';
 	return 'Connected';
 }
 

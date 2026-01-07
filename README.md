@@ -105,8 +105,6 @@ ohProxy sits between your users and openHAB, providing:
 
 #### Network Access Control
 - **IP allowlists**: Restrict access to specific subnets (CIDR notation)
-- **LAN bypass**: Skip authentication for local network requests
-- **Whitelist subnets**: Trusted networks that bypass auth
 
 #### Security Headers
 - **HSTS**: HTTP Strict Transport Security with configurable max-age
@@ -231,7 +229,6 @@ module.exports = {
       pass: '',  // or use OH_PASS env var
     },
     allowSubnets: ['192.168.1.0/24', '10.0.0.0/8'],
-    lanSubnets: ['192.168.1.0/24'],
   },
 };
 ```

@@ -115,7 +115,7 @@ function getSession(clientId) {
 /**
  * Create a new session.
  * @param {string} clientId - The session ID
- * @param {string|null} username - Username (null for LAN users)
+ * @param {string|null} username - Username
  * @param {object} settings - Initial settings (defaults to DEFAULT_SETTINGS)
  * @param {string|null} ip - Client IP address
  * @returns {object} - The created session
@@ -160,7 +160,7 @@ function updateSettings(clientId, settings) {
 }
 
 /**
- * Update session username (for LAN user who later authenticates).
+ * Update session username.
  * @param {string} clientId - The session ID
  * @param {string} username - The username to set
  * @returns {boolean} - True if updated, false if session not found
@@ -219,19 +219,6 @@ function cleanupSessions() {
 		console.log(`[sessions] Cleaned up ${result.changes} expired session(s)`);
 	}
 
-	return result.changes;
-}
-
-/**
- * Delete all sessions without a username (former LAN user sessions).
- * @returns {number} - Number of sessions deleted
- */
-function deleteLanSessions() {
-	if (!db) initDb();
-	const result = db.prepare('DELETE FROM sessions WHERE username IS NULL').run();
-	if (result.changes > 0) {
-		console.log(`[sessions] Deleted ${result.changes} LAN session(s)`);
-	}
 	return result.changes;
 }
 
@@ -478,7 +465,6 @@ module.exports = {
 	updateUsername,
 	touchSession,
 	cleanupSessions,
-	deleteLanSessions,
 	closeDb,
 	getDefaultSettings,
 	setMaxAgeDays,
