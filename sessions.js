@@ -44,6 +44,16 @@ function initDb() {
 		);
 	`);
 
+	// Create users table
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS users (
+			username TEXT PRIMARY KEY,
+			password TEXT NOT NULL,
+			role TEXT NOT NULL DEFAULT 'normal',
+			created_at INTEGER DEFAULT (strftime('%s','now'))
+		);
+	`);
+
 	// Migration: add IP columns if they don't exist
 	try {
 		db.exec(`ALTER TABLE sessions ADD COLUMN created_ip TEXT DEFAULT NULL`);
@@ -273,6 +283,119 @@ function deleteGlowRules(widgetId) {
 	return result.changes > 0;
 }
 
+// ============================================
+// User Management Functions
+// ============================================
+
+const VALID_ROLES = ['admin', 'normal', 'readonly'];
+const USERNAME_REGEX = /^[a-zA-Z0-9_-]+$/;
+
+/**
+ * Get all users.
+ * @returns {Array} - Array of {username, role, createdAt} (no passwords)
+ */
+function getAllUsers() {
+	if (!db) initDb();
+	const rows = db.prepare('SELECT username, role, created_at FROM users').all();
+	return rows.map(row => ({
+		username: row.username,
+		role: row.role,
+		createdAt: row.created_at
+	}));
+}
+
+/**
+ * Get a user by username.
+ * @param {string} username
+ * @returns {object|null} - {username, password, role, createdAt} or null
+ */
+function getUser(username) {
+	if (!db) initDb();
+	const row = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+	if (!row) return null;
+	return {
+		username: row.username,
+		password: row.password,
+		role: row.role,
+		createdAt: row.created_at
+	};
+}
+
+/**
+ * Validate username and password against database.
+ * @param {string} username
+ * @param {string} password
+ * @returns {object|null} - User object if valid, null otherwise
+ */
+function validateUser(username, password) {
+	const user = getUser(username);
+	if (!user || user.password !== password) return null;
+	return user;
+}
+
+/**
+ * Create a new user.
+ * @param {string} username
+ * @param {string} password
+ * @param {string} role - 'admin', 'normal', or 'readonly'
+ * @returns {boolean} - True if created
+ */
+function createUser(username, password, role = 'normal') {
+	if (!db) initDb();
+	if (!USERNAME_REGEX.test(username)) return false;
+	if (!VALID_ROLES.includes(role)) return false;
+
+	const now = Math.floor(Date.now() / 1000);
+	try {
+		db.prepare('INSERT INTO users (username, password, role, created_at) VALUES (?, ?, ?, ?)')
+			.run(username, password, role, now);
+		return true;
+	} catch (err) {
+		return false; // Duplicate username
+	}
+}
+
+/**
+ * Update user password.
+ * @param {string} username
+ * @param {string} newPassword
+ * @returns {boolean} - True if updated
+ */
+function updateUserPassword(username, newPassword) {
+	if (!db) initDb();
+	const result = db.prepare('UPDATE users SET password = ? WHERE username = ?')
+		.run(newPassword, username);
+	return result.changes > 0;
+}
+
+/**
+ * Update user role.
+ * @param {string} username
+ * @param {string} newRole
+ * @returns {boolean} - True if updated
+ */
+function updateUserRole(username, newRole) {
+	if (!db) initDb();
+	if (!VALID_ROLES.includes(newRole)) return false;
+	const result = db.prepare('UPDATE users SET role = ? WHERE username = ?')
+		.run(newRole, username);
+	return result.changes > 0;
+}
+
+/**
+ * Delete a user and their sessions.
+ * @param {string} username
+ * @returns {boolean} - True if deleted
+ */
+function deleteUser(username) {
+	if (!db) initDb();
+	// Delete sessions first
+	db.prepare('DELETE FROM sessions WHERE username = ?').run(username);
+	// Delete user
+	const result = db.prepare('DELETE FROM users WHERE username = ?').run(username);
+	return result.changes > 0;
+}
+
 module.exports = {
 	initDb,
 	generateSessionId,
@@ -290,4 +413,12 @@ module.exports = {
 	getGlowRules,
 	setGlowRules,
 	deleteGlowRules,
+	// User management
+	getAllUsers,
+	getUser,
+	validateUser,
+	createUser,
+	updateUserPassword,
+	updateUserRole,
+	deleteUser,
 };

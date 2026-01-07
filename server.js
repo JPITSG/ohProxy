@@ -208,7 +208,6 @@ const ACCESS_LOG_LEVEL = safeText(process.env.ACCESS_LOG_LEVEL || SERVER_CONFIG.
 	.trim()
 	.toLowerCase();
 const SLOW_QUERY_MS = configNumber(SERVER_CONFIG.slowQueryMs, 0);
-const AUTH_USERS_FILE = safeText(SERVER_AUTH.usersFile);
 const AUTH_WHITELIST = SERVER_AUTH.whitelistSubnets;
 const AUTH_REALM = safeText(SERVER_AUTH.realm || 'openHAB Proxy');
 const AUTH_COOKIE_NAME = safeText(SERVER_AUTH.cookieName || 'AuthStore');
@@ -721,43 +720,16 @@ function getBasicAuthCredentials(req) {
 	return parseBasicAuthHeader(header);
 }
 
-let authUsersCache = null;
-let authUsersMtime = 0;
-
-function loadAuthUsers(pathname) {
-	const filePath = safeText(pathname).trim();
-	if (!filePath) return null;
-	let stat;
-	try {
-		stat = fs.statSync(filePath);
-	} catch {
-		return null;
-	}
-	const mtime = stat.mtimeMs || stat.mtime.getTime();
-	if (authUsersCache && authUsersMtime === mtime) return authUsersCache;
-	let content = '';
-	try {
-		content = fs.readFileSync(filePath, 'utf8');
-	} catch {
-		return null;
-	}
+function loadAuthUsers() {
+	// Return users from database in same format as old file: {username: password}
+	const allUsers = sessions.getAllUsers();
 	const users = {};
-	const lines = content.split(/\r?\n/);
-	for (const line of lines) {
-		const trimmed = line.trim();
-		if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
-		let pos = trimmed.indexOf(':');
-		if (pos === -1) pos = trimmed.indexOf('=');
-		if (pos === -1) continue;
-		const user = trimmed.slice(0, pos).trim();
-		const passPart = trimmed.slice(pos + 1).trim();
-		const comma = passPart.indexOf(',');
-		const pass = comma === -1 ? passPart : passPart.slice(0, comma).trim();
-		if (!user) continue;
-		users[user] = pass;
+	for (const u of allUsers) {
+		const fullUser = sessions.getUser(u.username);
+		if (fullUser) {
+			users[u.username] = fullUser.password;
+		}
 	}
-	authUsersCache = users;
-	authUsersMtime = mtime;
 	return users;
 }
 
@@ -1888,7 +1860,7 @@ function handleWsUpgrade(req, socket, head) {
 		}
 
 		// Load users
-		const users = loadAuthUsers(AUTH_USERS_FILE);
+		const users = loadAuthUsers();
 		if (!users || Object.keys(users).length === 0) {
 			logMessage('[WS] Auth config unavailable');
 			sendWsUpgradeError(socket, 500, 'Auth config unavailable');
@@ -2679,7 +2651,7 @@ app.post('/api/auth/login', express.json(), (req, res) => {
 	}
 
 	// Validate credentials
-	const users = loadAuthUsers(AUTH_USERS_FILE);
+	const users = loadAuthUsers();
 	if (!users || Object.keys(users).length === 0) {
 		res.status(500).json({ error: 'Auth config unavailable' });
 		return;
@@ -2730,7 +2702,7 @@ app.use((req, res, next) => {
 	}
 
 	// Auth is required - handle based on auth mode
-	const users = loadAuthUsers(AUTH_USERS_FILE);
+	const users = loadAuthUsers();
 	if (!users || Object.keys(users).length === 0) {
 		res.status(500).type('text/plain').send('Auth config unavailable');
 		return;
