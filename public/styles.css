@@ -1362,6 +1362,13 @@ body.glow-config-open {
 	color: var(--color-text-muted);
 }
 
+/* Glow Rules Section */
+.glow-rules-section {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
 /* Visibility Radio Buttons */
 .item-config-visibility {
 	display: flex;

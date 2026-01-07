@@ -1367,9 +1367,11 @@ function ensureGlowConfigModal() {
 						<span>Admin</span>
 					</label>
 				</div>
-				<div class="item-config-section-header">GLOW RULES</div>
-				<div class="glow-config-rules"></div>
-				<button type="button" class="glow-config-add">+ Add Rule</button>
+				<div class="glow-rules-section">
+					<div class="item-config-section-header">GLOW RULES</div>
+					<div class="glow-config-rules"></div>
+					<button type="button" class="glow-config-add">+ Add Rule</button>
+				</div>
 				<div class="glow-config-footer">
 					<button type="button" class="glow-config-cancel">Close</button>
 					<button type="button" class="glow-config-save">Save</button>
@@ -1548,6 +1550,14 @@ function openGlowConfigModal(widget, card) {
 	const visibility = widgetVisibilityMap.get(wKey) || 'all';
 	const visRadio = glowConfigModal.querySelector(`input[name="visibility"][value="${visibility}"]`);
 	if (visRadio) visRadio.checked = true;
+
+	// Check if widget has subtext (state) - glow rules only apply to widgets with subtext
+	const labelParts = splitLabelState(widget?.label || '');
+	const hasSubtext = !!labelParts.state;
+	const glowRulesSection = glowConfigModal.querySelector('.glow-rules-section');
+	if (glowRulesSection) {
+		glowRulesSection.style.display = hasSubtext ? '' : 'none';
+	}
 
 	// Load existing rules
 	const rulesContainer = glowConfigModal.querySelector('.glow-config-rules');
