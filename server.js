@@ -897,23 +897,6 @@ function clearAuthCookie(res) {
 	appendSetCookie(res, parts.join('; '));
 }
 
-function setSessionCookie(res, sessionId) {
-	const expiry = Math.floor(Date.now() / 1000) + Math.round(SESSION_COOKIE_DAYS * 86400);
-	const expires = new Date(expiry * 1000).toUTCString();
-	const maxAge = Math.round(SESSION_COOKIE_DAYS * 86400);
-	const secure = isSecureRequest(res.req);
-	const parts = [
-		`${SESSION_COOKIE_NAME}=${sessionId}`,
-		'Path=/',
-		`Expires=${expires}`,
-		`Max-Age=${maxAge}`,
-		'HttpOnly',
-		'SameSite=Lax',
-	];
-	if (secure) parts.push('Secure');
-	appendSetCookie(res, parts.join('; '));
-}
-
 function getSessionCookie(req) {
 	return getCookieValue(req, SESSION_COOKIE_NAME);
 }
@@ -1955,23 +1938,6 @@ function getInitialPageTitleHtml() {
 	const home = 'Home';
 	return `<span class="font-semibold">${site}</span>` +
 		`<span class="font-extralight text-slate-300"> · ${escapeHtml(home)}</span>`;
-}
-
-function normalizeRequestIp(raw) {
-	const text = safeText(raw).trim();
-	if (!text) return '';
-	if (text.startsWith('::ffff:')) return text.slice(7);
-	return text;
-}
-
-function extractHostIp(host) {
-	const text = safeText(host).trim();
-	if (!text) return '';
-	if (text[0] === '[') {
-		const end = text.indexOf(']');
-		if (end > 0) return text.slice(1, end);
-	}
-	return text.split(':')[0];
 }
 
 function getInitialStatusLabel(req) {
