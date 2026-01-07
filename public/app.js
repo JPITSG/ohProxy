@@ -1552,11 +1552,13 @@ function openGlowConfigModal(widget, card) {
 	if (visRadio) visRadio.checked = true;
 
 	// Check if widget has subtext (state) - glow rules only apply to widgets with subtext
+	// Sections don't have glow rules either
+	const isSection = !!widget?.__section;
 	const labelParts = splitLabelState(widget?.label || '');
 	const hasSubtext = !!labelParts.state;
 	const glowRulesSection = glowConfigModal.querySelector('.glow-rules-section');
 	if (glowRulesSection) {
-		glowRulesSection.style.display = hasSubtext ? '' : 'none';
+		glowRulesSection.style.display = (hasSubtext && !isSection) ? '' : 'none';
 	}
 
 	// Load existing rules
@@ -3287,11 +3289,18 @@ function render() {
 	const q = state.filter.trim().toLowerCase();
 	const rawSource = q ? (state.searchWidgets || state.rawWidgets) : state.rawWidgets;
 
-	// Filter by visibility (sections always show, widgets filtered by user role)
-	const source = rawSource.filter(w => {
-		if (w?.__section) return true;
-		return isWidgetVisible(w);
-	});
+	// Filter by visibility - sections can be hidden, and their children follow
+	const source = [];
+	let currentSectionHidden = false;
+	for (const w of rawSource) {
+		if (w?.__section) {
+			const visible = isWidgetVisible(w);
+			currentSectionHidden = !visible;
+			if (visible) source.push(w);
+		} else {
+			if (!currentSectionHidden && isWidgetVisible(w)) source.push(w);
+		}
+	}
 
 	const matches = source.filter(w => {
 		if (!q) return true;
@@ -3393,9 +3402,15 @@ function render() {
 		for (const w of widgets) {
 			if (w?.__section) {
 				const header = document.createElement('div');
-				header.className = 'sm:col-span-2 lg:col-span-3 mt-0 text-xs uppercase tracking-widest text-slate-400';
+				header.className = 'sm:col-span-2 lg:col-span-3 mt-0 text-xs uppercase tracking-widest text-slate-400 section-header';
 				header.textContent = w.label;
 				header.dataset.section = w.label;
+				header.addEventListener('click', (e) => {
+					if (e.ctrlKey || e.metaKey) {
+						e.preventDefault();
+						openGlowConfigModal(w, header);
+					}
+				});
 				fragment.appendChild(header);
 				afterImage = false;
 				continue;
