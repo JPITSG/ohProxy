@@ -40,7 +40,7 @@ ohProxy sits between your users and openHAB, providing:
 | Widget Type | Features |
 |-------------|----------|
 | **Switch** | Single toggle or multi-option buttons with active state highlighting |
-| **Selection** | Native dropdown on desktop, custom touch menu on mobile, overlay in slim mode |
+| **Selection** | Custom dropdown on desktop; native overlay picker on small/touch and slim layouts |
 | **Slider/Dimmer** | Real-time value display, debounced updates, smart activation detection |
 | **Roller Shutter** | UP/STOP/DOWN button controls |
 | **Image** | Auto-refresh, MJPEG streaming, zoomable overlay viewer |
@@ -56,7 +56,7 @@ ohProxy sits between your users and openHAB, providing:
 #### Smart Polling
 - **Active/Idle intervals**: Faster polling when user is active (default: 2s active, 10s idle)
 - **Background detection**: Reduced polling when app is not focused
-- **Manual pause/resume**: User-controlled polling suspension
+- **Manual pause/resume**: User-controlled polling suspension (enable with `?pause=true`)
 - **Delta updates**: Only transmit changed fields to minimize bandwidth
 
 #### WebSocket Support
@@ -68,23 +68,25 @@ ohProxy sits between your users and openHAB, providing:
 
 #### Glow Effects
 - **Value color glow**: Items with openHAB valueColor display colored glow
+- **Per-widget glow rules**: Admin-configurable rules stored in SQLite (Ctrl/Cmd+click a widget)
 - **State-based glow**: Configure different colors based on item state
   - Example: Door sensors glow green when closed, red when open
 - **Section targeting**: Apply glow effects only to specific sitemap sections
 
+#### Visibility & Roles
+- **Widget visibility rules**: Admins can set per-widget visibility (all/normal/admin), applied to UI and search
+- **Roles**: `admin` can edit glow/visibility rules; `normal` and `readonly` are filtered by visibility rules (roles do not block item commands)
+
 #### Animations
 - Smooth page transitions with configurable fade timing
 - Status indicator with connection state
-- Pull-to-refresh with bounce animation (touch devices, non-slim mode)
 - Resume spinner when returning from background
 
 ### Touch Device Features
 
 - **Haptic feedback**: Vibration on button presses and interactions
-- **Pull-to-refresh**: Pull down gesture to refresh current page (non-slim mode)
-- **Resume spinner**: Loading indicator when app resumes from background
-- **Touch-optimized menus**: Full-screen selection overlays in slim mode
-- **Bounce-back animation**: Visual feedback during pull gestures
+- **Pull-to-refresh**: Pull down gesture with bounce (non-slim mode)
+- **Touch-optimized menus**: Native selection overlays on small/touch and slim layouts
 
 ### Progressive Web App (PWA)
 
@@ -120,7 +122,7 @@ ohProxy sits between your users and openHAB, providing:
 
 - **Proxy endpoint**: Secure image proxying with domain allowlist
 - **Icon caching**: PNG conversion and caching with ImageMagick
-- **MJPEG streaming**: Support for `mjpeg://` protocol URLs
+- **MJPEG streaming**: HTTP MJPEG streams proxied via `/proxy?url=` (allowlisted)
 - **Responsive sizing**: Automatic width calculation based on viewport
 - **Zoom viewer**: 90% viewport overlay with zoom toggle
 - **Auto-refresh**: Configurable refresh intervals per image
@@ -229,6 +231,7 @@ module.exports = {
       pass: '',  // or use OH_PASS env var
     },
     allowSubnets: ['192.168.1.0/24', '10.0.0.0/8'],
+    proxyAllowlist: ['camera.local:8080', 'example.com'],
   },
 };
 ```
@@ -245,6 +248,7 @@ module.exports = {
       cookieDays: 365,                   // >0 required when cookieKey is set
       cookieKey: 'your-secret-key-here', // HMAC signing key
       authFailNotifyCmd: '/path/to/notify.sh {IP}',  // Optional
+      authFailNotifyIntervalMins: 15,    // Optional rate limit
     },
     sessionMaxAgeDays: 14,               // Session cleanup threshold
   },
@@ -353,6 +357,13 @@ module.exports = {
 | `OH_TARGET` | openHAB target URL |
 | `OH_USER` | openHAB basic auth username |
 | `OH_PASS` | openHAB basic auth password |
+| `ICON_VERSION` | override icon cache version |
+| `USER_AGENT` | override proxy User-Agent |
+| `PROXY_LOG_LEVEL` | override proxy middleware log level |
+| `LOG_FILE` | override server log file path |
+| `ACCESS_LOG` | override access log file path |
+| `ACCESS_LOG_LEVEL` | override access log verbosity (`all` or `400+`) |
+| `SITEMAP_REFRESH_MS` | override sitemap refresh interval (ms) |
 
 ## Usage
 
@@ -363,17 +374,19 @@ module.exports = {
 | `mode` | `dark`, `light` | Force theme mode |
 | `slim` | `true` | Enable slim mode for minimal UI |
 | `header` | `full`, `small`, `none` | Header display mode |
+| `pause` | `true` | Show Pause/Resume button for polling |
 
 Examples:
 ```
 https://your-proxy.com/?mode=dark
 https://your-proxy.com/?slim=true&header=none
 https://your-proxy.com/?mode=light&header=small
+https://your-proxy.com/?pause=true
 ```
 
 ### Proxy Endpoint
 
-Proxy external images through ohProxy (with domain allowlist):
+Proxy external images through ohProxy (http/https only, with domain allowlist):
 
 ```
 /proxy?url=https://allowed-domain.com/image.jpg
@@ -389,11 +402,15 @@ proxyAllowlist: [
 
 ### MJPEG Streams
 
-For MJPEG camera streams, use the `mjpeg://` protocol in your openHAB sitemap:
+For MJPEG camera streams, use a normal http/https URL in your openHAB sitemap (ohProxy will stream it via `/proxy?url=`). Ensure the host is in `proxyAllowlist`.
 
 ```
-Image url="mjpeg://camera.local/stream"
+Image url="http://camera.local/stream"
 ```
+
+### Classic UI
+
+Legacy openHAB Classic UI is proxied at `/openhab.app`, with a convenience redirect at `/classic`.
 
 ## User Management
 
@@ -416,13 +433,15 @@ node users-cli.js passwd alice newpassword
 node users-cli.js role alice admin
 
 # Delete a user (also removes their sessions)
-node users-cli.js delete alice
+node users-cli.js remove alice
 ```
+
+Note: If the server is running, `users-cli.js` notifies it to disconnect active sessions on delete/password change.
 
 **User Roles:**
 - `admin` - Full access, can manage widget glow rules and visibility
-- `normal` - Standard access to all widgets
-- `readonly` - View-only access (cannot control items)
+- `normal` - Standard access; visibility rules apply
+- `readonly` - Same visibility filtering as `normal` (role does not block item commands)
 
 ## Session CLI
 
@@ -458,7 +477,7 @@ node session-cli.js purge 7days    # Also: Nsecs, Nmins, Nhours
 
 ## Performance Tips
 
-1. **Use WebSocket mode** when openHAB supports Atmosphere for lower latency
+1. **Use Atmosphere mode** when openHAB supports it for lower latency (`server.websocket.mode = 'atmosphere'`)
 2. **Enable slim mode** for embedded displays or low-power devices
 3. **Tune polling intervals** based on your network and use case
 4. **Use service worker** (HTTPS required) for offline resilience
