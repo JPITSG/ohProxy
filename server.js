@@ -2922,10 +2922,16 @@ app.post('/api/settings', express.json(), (req, res) => {
 	res.json({ ok: true, settings: merged });
 });
 
-// Widget glow rules API
+// Widget glow rules API (admin only)
 app.get('/api/glow-rules/:widgetId', (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
+	// Admin only
+	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
+	if (user?.role !== 'admin') {
+		res.status(403).json({ error: 'Admin access required' });
+		return;
+	}
 	const widgetId = safeText(req.params.widgetId);
 	if (!widgetId) {
 		res.status(400).json({ error: 'Missing widgetId' });
@@ -2938,6 +2944,12 @@ app.get('/api/glow-rules/:widgetId', (req, res) => {
 app.post('/api/glow-rules', express.json(), (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
+	// Admin only
+	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
+	if (user?.role !== 'admin') {
+		res.status(403).json({ error: 'Admin access required' });
+		return;
+	}
 
 	const { widgetId, rules, visibility } = req.body || {};
 	if (!widgetId || typeof widgetId !== 'string') {

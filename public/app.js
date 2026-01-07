@@ -1540,6 +1540,7 @@ function addGlowRuleRow() {
 
 function openGlowConfigModal(widget, card) {
 	if (state.isSlim) return;
+	if (getUserRole() !== 'admin') return;
 	haptic();
 	ensureGlowConfigModal();
 	const wKey = widgetKey(widget);
