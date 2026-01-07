@@ -2182,6 +2182,17 @@ function deltaKey(widget) {
 	return `label:${label}|${type}|${link}`;
 }
 
+function serverWidgetKey(widget) {
+	if (widget?.__section) return `section:${safeText(widget.label)}`;
+	const item = safeText(widget?.item?.name || '');
+	const fullLabel = safeText(widget?.label || '');
+	const { title } = splitLabelState(fullLabel);
+	const label = title || fullLabel;
+	const type = widgetType(widget);
+	const link = safeText(widgetPageLink(widget) || '');
+	return `widget:${item}|${label}|${type}|${link}`;
+}
+
 function widgetSnapshot(widget) {
 	return {
 		key: deltaKey(widget),
@@ -2856,6 +2867,14 @@ app.get('/config.js', (req, res) => {
 	res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
 	const clientConfig = liveConfig.clientConfig && typeof liveConfig.clientConfig === 'object' ? liveConfig.clientConfig : {};
+
+	// Get user role if authenticated
+	let userRole = null;
+	if (req.ohProxyUser) {
+		const user = sessions.getUser(req.ohProxyUser);
+		userRole = user?.role || null;
+	}
+
 	res.send(`window.__OH_CONFIG__=${JSON.stringify({
 		iconVersion: liveConfig.iconVersion,
 		server: {
@@ -2863,6 +2882,8 @@ app.get('/config.js', (req, res) => {
 		},
 		client: clientConfig,
 		widgetGlowRules: sessions.getAllGlowRules(),
+		widgetVisibilityRules: sessions.getAllVisibilityRules(),
+		userRole: userRole,
 	})};`);
 });
 
@@ -2918,42 +2939,59 @@ app.post('/api/glow-rules', express.json(), (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
 
-	const { widgetId, rules } = req.body || {};
+	const { widgetId, rules, visibility } = req.body || {};
 	if (!widgetId || typeof widgetId !== 'string') {
 		res.status(400).json({ error: 'Missing or invalid widgetId' });
 		return;
 	}
-	if (!Array.isArray(rules)) {
-		res.status(400).json({ error: 'Rules must be an array' });
-		return;
+
+	// Validate rules if provided
+	if (rules !== undefined) {
+		if (!Array.isArray(rules)) {
+			res.status(400).json({ error: 'Rules must be an array' });
+			return;
+		}
+
+		const validOperators = ['=', '!=', '>', '<', '>=', '<=', 'contains', '!contains', 'startsWith', 'endsWith', '*'];
+		const validColors = ['green', 'orange', 'red'];
+		for (const rule of rules) {
+			if (!rule || typeof rule !== 'object') {
+				res.status(400).json({ error: 'Each rule must be an object' });
+				return;
+			}
+			if (!validOperators.includes(rule.operator)) {
+				res.status(400).json({ error: `Invalid operator: ${rule.operator}` });
+				return;
+			}
+			if (!validColors.includes(rule.color)) {
+				res.status(400).json({ error: `Invalid color: ${rule.color}` });
+				return;
+			}
+			if (rule.operator !== '*' && (rule.value === undefined || rule.value === null)) {
+				res.status(400).json({ error: 'Value required for non-wildcard operator' });
+				return;
+			}
+		}
 	}
 
-	// Validate rules
-	const validOperators = ['=', '!=', '>', '<', '>=', '<=', 'contains', '!contains', 'startsWith', 'endsWith', '*'];
-	const validColors = ['green', 'orange', 'red'];
-	for (const rule of rules) {
-		if (!rule || typeof rule !== 'object') {
-			res.status(400).json({ error: 'Each rule must be an object' });
-			return;
-		}
-		if (!validOperators.includes(rule.operator)) {
-			res.status(400).json({ error: `Invalid operator: ${rule.operator}` });
-			return;
-		}
-		if (!validColors.includes(rule.color)) {
-			res.status(400).json({ error: `Invalid color: ${rule.color}` });
-			return;
-		}
-		if (rule.operator !== '*' && (rule.value === undefined || rule.value === null)) {
-			res.status(400).json({ error: 'Value required for non-wildcard operator' });
+	// Validate visibility if provided
+	if (visibility !== undefined) {
+		const validVisibilities = ['all', 'normal', 'admin'];
+		if (!validVisibilities.includes(visibility)) {
+			res.status(400).json({ error: `Invalid visibility: ${visibility}` });
 			return;
 		}
 	}
 
-	// Save to database (empty rules array deletes the entry)
+	// Save to database
 	try {
-		sessions.setGlowRules(widgetId, rules);
-		res.json({ ok: true, widgetId, rules });
+		if (rules !== undefined) {
+			sessions.setGlowRules(widgetId, rules);
+		}
+		if (visibility !== undefined) {
+			sessions.setVisibility(widgetId, visibility);
+		}
+		res.json({ ok: true, widgetId, rules, visibility });
 	} catch (err) {
 		logMessage(`Failed to save glow rules: ${err.message || err}`, 'error');
 		res.status(500).json({ error: 'Failed to save rules' });
@@ -3060,8 +3098,29 @@ app.get('/search-index', async (req, res) => {
 		}
 	}
 
+	// Get user role for visibility filtering
+	let userRole = null;
+	if (req.ohProxyUser) {
+		const user = sessions.getUser(req.ohProxyUser);
+		userRole = user?.role || null;
+	}
+
+	// Filter widgets by visibility (admins see everything)
+	const visibilityRules = sessions.getAllVisibilityRules();
+	const visibilityMap = new Map(visibilityRules.map(r => [r.widgetId, r.visibility]));
+
+	const filteredWidgets = widgets.filter(w => {
+		if (userRole === 'admin') return true;
+		const wKey = serverWidgetKey(w);
+		const vis = visibilityMap.get(wKey) || 'all';
+		if (vis === 'all') return true;
+		if (vis === 'admin') return false;
+		if (vis === 'normal') return userRole === 'normal' || userRole === 'readonly';
+		return true;
+	});
+
 	res.setHeader('Cache-Control', 'no-store');
-	return res.json({ widgets, frames });
+	return res.json({ widgets: filteredWidgets, frames });
 });
 
 app.get(/^\/icons\/apple-touch-icon\.v[\w.-]+\.png$/i, (req, res) => {

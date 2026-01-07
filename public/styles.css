@@ -1353,3 +1353,45 @@ body.theme-light .glow-rule-row input:focus {
 body.glow-config-open {
 	overflow: hidden;
 }
+
+/* Item Config Section Headers */
+.item-config-section-header {
+	font-size: .75rem;
+	text-transform: uppercase;
+	letter-spacing: .1em;
+	color: var(--color-text-muted);
+}
+
+/* Visibility Radio Buttons */
+.item-config-visibility {
+	display: flex;
+	gap: 8px;
+}
+.item-config-radio {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 8px 12px;
+	font-size: .75rem;
+	cursor: pointer;
+	background: var(--color-control-off-bg);
+	border: var(--glass-border-width) solid var(--color-control-off-border);
+	border-radius: 10px;
+	transition: background-color .2s, border-color .2s, box-shadow .2s;
+}
+.item-config-radio input {
+	display: none;
+}
+.item-config-radio:has(input:checked) {
+	background: var(--color-switch-active-bg);
+	border-color: var(--color-switch-active-border);
+	box-shadow: 0 0 8px var(--color-switch-active-shadow);
+}
+@media (hover: hover) and (pointer: fine) {
+	.item-config-radio:hover {
+		background-color: var(--color-control-off-hover);
+		border-color: var(--color-control-off-border-hover);
+		box-shadow: 0 0 10px var(--color-control-off-shadow-hover);
+	}
+}

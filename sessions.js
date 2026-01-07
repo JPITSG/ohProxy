@@ -54,6 +54,15 @@ function initDb() {
 		);
 	`);
 
+	// Create widget visibility table
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS widget_visibility (
+			widget_id TEXT PRIMARY KEY,
+			visibility TEXT NOT NULL DEFAULT 'all',
+			updated_at INTEGER DEFAULT (strftime('%s','now'))
+		);
+	`);
+
 	// Migration: add IP columns if they don't exist
 	try {
 		db.exec(`ALTER TABLE sessions ADD COLUMN created_ip TEXT DEFAULT NULL`);
@@ -284,6 +293,69 @@ function deleteGlowRules(widgetId) {
 }
 
 // ============================================
+// Widget Visibility Functions
+// ============================================
+
+const VALID_VISIBILITIES = ['all', 'normal', 'admin'];
+
+/**
+ * Get all visibility rules.
+ * @returns {Array} - Array of {widgetId, visibility} objects
+ */
+function getAllVisibilityRules() {
+	if (!db) initDb();
+	const rows = db.prepare('SELECT widget_id, visibility FROM widget_visibility').all();
+	return rows.map(row => ({
+		widgetId: row.widget_id,
+		visibility: row.visibility
+	}));
+}
+
+/**
+ * Get visibility for a specific widget.
+ * @param {string} widgetId - The widget ID
+ * @returns {string} - Visibility ('all', 'normal', 'admin') or 'all' if not set
+ */
+function getVisibility(widgetId) {
+	if (!db) initDb();
+	const row = db.prepare('SELECT visibility FROM widget_visibility WHERE widget_id = ?').get(widgetId);
+	return row ? row.visibility : 'all';
+}
+
+/**
+ * Set visibility for a widget. 'all' deletes the entry (default).
+ * @param {string} widgetId - The widget ID
+ * @param {string} visibility - 'all', 'normal', or 'admin'
+ * @returns {boolean} - True if successful
+ */
+function setVisibility(widgetId, visibility) {
+	if (!db) initDb();
+	if (!VALID_VISIBILITIES.includes(visibility)) return false;
+	const now = Math.floor(Date.now() / 1000);
+
+	if (visibility === 'all') {
+		db.prepare('DELETE FROM widget_visibility WHERE widget_id = ?').run(widgetId);
+	} else {
+		db.prepare(`
+			INSERT INTO widget_visibility (widget_id, visibility, updated_at) VALUES (?, ?, ?)
+			ON CONFLICT(widget_id) DO UPDATE SET visibility = excluded.visibility, updated_at = excluded.updated_at
+		`).run(widgetId, visibility, now);
+	}
+	return true;
+}
+
+/**
+ * Delete visibility rule for a widget.
+ * @param {string} widgetId - The widget ID
+ * @returns {boolean} - True if deleted
+ */
+function deleteVisibility(widgetId) {
+	if (!db) initDb();
+	const result = db.prepare('DELETE FROM widget_visibility WHERE widget_id = ?').run(widgetId);
+	return result.changes > 0;
+}
+
+// ============================================
 // User Management Functions
 // ============================================
 
@@ -413,6 +485,11 @@ module.exports = {
 	getGlowRules,
 	setGlowRules,
 	deleteGlowRules,
+	// Visibility
+	getAllVisibilityRules,
+	getVisibility,
+	setVisibility,
+	deleteVisibility,
 	// User management
 	getAllUsers,
 	getUser,

@@ -99,6 +99,37 @@ const widgetGlowRulesMap = new Map();
 	}
 })();
 
+// Widget visibility rules: Map from widgetId to visibility ('all', 'normal', 'admin')
+const widgetVisibilityMap = new Map();
+(function initWidgetVisibility() {
+	const rules = Array.isArray(OH_CONFIG.widgetVisibilityRules) ? OH_CONFIG.widgetVisibilityRules : [];
+	for (const entry of rules) {
+		if (entry.widgetId && entry.visibility) {
+			widgetVisibilityMap.set(entry.widgetId, entry.visibility);
+		}
+	}
+})();
+
+// Get current user role from config
+function getUserRole() {
+	return OH_CONFIG.userRole || null;
+}
+
+// Check if widget should be visible to current user
+function isWidgetVisible(widget) {
+	const userRole = getUserRole();
+	// Admins see everything
+	if (userRole === 'admin') return true;
+
+	const wKey = widgetKey(widget);
+	const vis = widgetVisibilityMap.get(wKey) || 'all';
+
+	if (vis === 'all') return true;
+	if (vis === 'admin') return false;
+	if (vis === 'normal') return userRole === 'normal' || userRole === 'readonly';
+	return true;
+}
+
 let connectionPendingTimer = null;
 
 function scheduleConnectionPending() {
@@ -1321,6 +1352,22 @@ function ensureGlowConfigModal() {
 	wrap.innerHTML = `
 		<div class="glow-config-frame glass">
 			<div class="glow-config-body">
+				<div class="item-config-section-header">VISIBILITY</div>
+				<div class="item-config-visibility">
+					<label class="item-config-radio">
+						<input type="radio" name="visibility" value="all" checked>
+						<span>All</span>
+					</label>
+					<label class="item-config-radio">
+						<input type="radio" name="visibility" value="normal">
+						<span>Normal</span>
+					</label>
+					<label class="item-config-radio">
+						<input type="radio" name="visibility" value="admin">
+						<span>Admin</span>
+					</label>
+				</div>
+				<div class="item-config-section-header">GLOW RULES</div>
 				<div class="glow-config-rules"></div>
 				<button type="button" class="glow-config-add">+ Add Rule</button>
 				<div class="glow-config-footer">
@@ -1497,6 +1544,11 @@ function openGlowConfigModal(widget, card) {
 	glowConfigWidgetKey = wKey;
 	glowConfigWidgetLabel = widget?.label || widget?.item?.label || widget?.item?.name || wKey;
 
+	// Load existing visibility
+	const visibility = widgetVisibilityMap.get(wKey) || 'all';
+	const visRadio = glowConfigModal.querySelector(`input[name="visibility"][value="${visibility}"]`);
+	if (visRadio) visRadio.checked = true;
+
 	// Load existing rules
 	const rulesContainer = glowConfigModal.querySelector('.glow-config-rules');
 	rulesContainer.innerHTML = '';
@@ -1527,6 +1579,12 @@ function closeGlowConfigModal() {
 
 async function saveGlowConfigRules() {
 	if (!glowConfigModal || !glowConfigWidgetKey) return;
+
+	// Get visibility
+	const visRadio = glowConfigModal.querySelector('input[name="visibility"]:checked');
+	const visibility = visRadio?.value || 'all';
+
+	// Get glow rules
 	const rows = glowConfigModal.querySelectorAll('.glow-rule-row');
 	const rules = [];
 	for (const row of rows) {
@@ -1545,15 +1603,24 @@ async function saveGlowConfigRules() {
 		const resp = await fetch('/api/glow-rules', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ widgetId: glowConfigWidgetKey, rules }),
+			body: JSON.stringify({ widgetId: glowConfigWidgetKey, rules, visibility }),
 		});
 		if (!resp.ok) return;
-		// Update local map
+
+		// Update local glow rules map
 		if (rules.length) {
 			widgetGlowRulesMap.set(glowConfigWidgetKey, rules);
 		} else {
 			widgetGlowRulesMap.delete(glowConfigWidgetKey);
 		}
+
+		// Update local visibility map
+		if (visibility !== 'all') {
+			widgetVisibilityMap.set(glowConfigWidgetKey, visibility);
+		} else {
+			widgetVisibilityMap.delete(glowConfigWidgetKey);
+		}
+
 		// Apply glow to the card immediately
 		const card = document.querySelector(`.glass[data-widget-key="${glowConfigWidgetKey}"]`);
 		if (card) {
@@ -1565,6 +1632,9 @@ async function saveGlowConfigRules() {
 				applyGlowStyle(card, glowColor);
 			}
 		}
+
+		// Re-render to apply visibility changes
+		render();
 	} catch (e) {
 		// Silent fail
 	}
@@ -3205,7 +3275,14 @@ function patchWidgets(widgets, nodes) {
 
 function render() {
 	const q = state.filter.trim().toLowerCase();
-	const source = q ? (state.searchWidgets || state.rawWidgets) : state.rawWidgets;
+	const rawSource = q ? (state.searchWidgets || state.rawWidgets) : state.rawWidgets;
+
+	// Filter by visibility (sections always show, widgets filtered by user role)
+	const source = rawSource.filter(w => {
+		if (w?.__section) return true;
+		return isWidgetVisible(w);
+	});
+
 	const matches = source.filter(w => {
 		if (!q) return true;
 		const hay = `${widgetLabel(w)} ${widgetState(w)} ${widgetType(w)} ${w?.item?.name || ''}`.toLowerCase();
