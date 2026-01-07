@@ -3685,7 +3685,7 @@ async function refresh(showLoading) {
 		state.rawWidgets = normalizeWidgets(page);
 		state.lastPageUrl = state.pageUrl;
 		if (fade) await fade.promise;
-		if (shouldScroll) scrollToTop(true);
+		if (shouldScroll) scrollToTop();
 		render();
 		saveHomeSnapshot();
 		clearLoadingStatusTimer();
@@ -3707,7 +3707,7 @@ async function refresh(showLoading) {
 		setConnectionStatus(false, e.message);
 		if (fade) await fade.promise;
 		if (!hasFallback) {
-			if (shouldScroll) scrollToTop(true);
+			if (shouldScroll) scrollToTop();
 			els.grid.innerHTML = `
 				<div class="glass rounded-2xl p-5 sm:col-span-2 lg:col-span-3">
 					<div class="font-semibold">Couldn’t load sitemap page</div>
@@ -3718,7 +3718,7 @@ async function refresh(showLoading) {
 				</div>
 			`;
 		} else if (usedSnapshot) {
-			if (shouldScroll) scrollToTop(true);
+			if (shouldScroll) scrollToTop();
 			render();
 		}
 		if (fade) runPageFadeIn(fade.token);

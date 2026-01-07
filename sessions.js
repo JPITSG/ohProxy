@@ -281,17 +281,6 @@ function setGlowRules(widgetId, rules) {
 	return true;
 }
 
-/**
- * Delete rules for a widget.
- * @param {string} widgetId - The widget ID
- * @returns {boolean} - True if deleted, false if not found
- */
-function deleteGlowRules(widgetId) {
-	if (!db) initDb();
-	const result = db.prepare('DELETE FROM widget_glow_rules WHERE widget_id = ?').run(widgetId);
-	return result.changes > 0;
-}
-
 // ============================================
 // Widget Visibility Functions
 // ============================================
@@ -309,17 +298,6 @@ function getAllVisibilityRules() {
 		widgetId: row.widget_id,
 		visibility: row.visibility
 	}));
-}
-
-/**
- * Get visibility for a specific widget.
- * @param {string} widgetId - The widget ID
- * @returns {string} - Visibility ('all', 'normal', 'admin') or 'all' if not set
- */
-function getVisibility(widgetId) {
-	if (!db) initDb();
-	const row = db.prepare('SELECT visibility FROM widget_visibility WHERE widget_id = ?').get(widgetId);
-	return row ? row.visibility : 'all';
 }
 
 /**
@@ -342,17 +320,6 @@ function setVisibility(widgetId, visibility) {
 		`).run(widgetId, visibility, now);
 	}
 	return true;
-}
-
-/**
- * Delete visibility rule for a widget.
- * @param {string} widgetId - The widget ID
- * @returns {boolean} - True if deleted
- */
-function deleteVisibility(widgetId) {
-	if (!db) initDb();
-	const result = db.prepare('DELETE FROM widget_visibility WHERE widget_id = ?').run(widgetId);
-	return result.changes > 0;
 }
 
 // ============================================
@@ -391,18 +358,6 @@ function getUser(username) {
 		role: row.role,
 		createdAt: row.created_at
 	};
-}
-
-/**
- * Validate username and password against database.
- * @param {string} username
- * @param {string} password
- * @returns {object|null} - User object if valid, null otherwise
- */
-function validateUser(username, password) {
-	const user = getUser(username);
-	if (!user || user.password !== password) return null;
-	return user;
 }
 
 /**
@@ -484,16 +439,12 @@ module.exports = {
 	getAllGlowRules,
 	getGlowRules,
 	setGlowRules,
-	deleteGlowRules,
 	// Visibility
 	getAllVisibilityRules,
-	getVisibility,
 	setVisibility,
-	deleteVisibility,
 	// User management
 	getAllUsers,
 	getUser,
-	validateUser,
 	createUser,
 	updateUserPassword,
 	updateUserRole,
