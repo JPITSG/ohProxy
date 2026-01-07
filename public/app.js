@@ -2133,6 +2133,9 @@ function applyDeltaChanges(changes) {
 					w.icon = change.icon;
 					if (w.item) w.item.icon = change.icon;
 				}
+				if (change.mapping !== undefined) {
+					w.mapping = change.mapping;
+				}
 				updated = true;
 			}
 		}

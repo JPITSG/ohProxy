@@ -2189,7 +2189,41 @@ function serverWidgetKey(widget) {
 	return `widget:${item}|${label}|${type}|${link}`;
 }
 
+function normalizeMappings(mapping) {
+	if (!mapping) return [];
+	if (Array.isArray(mapping)) {
+		return mapping
+			.map((m) => {
+				if (!m || typeof m !== 'object') return null;
+				const command = safeText(m.command ?? '');
+				const label = safeText(m.label ?? m.command ?? '');
+				if (!command && !label) return null;
+				return { command, label: label || command };
+			})
+			.filter(Boolean);
+	}
+	if (typeof mapping === 'object') {
+		if ('command' in mapping || 'label' in mapping) {
+			const command = safeText(mapping.command ?? '');
+			const label = safeText(mapping.label ?? mapping.command ?? '');
+			if (!command && !label) return [];
+			return [{ command, label: label || command }];
+		}
+		return Object.entries(mapping).map(([command, label]) => ({
+			command: safeText(command),
+			label: safeText(label),
+		}));
+	}
+	return [];
+}
+
+function mappingsSignature(mapping) {
+	const normalized = normalizeMappings(mapping);
+	return normalized.map((m) => `${m.command}:${m.label}`).join('|');
+}
+
 function widgetSnapshot(widget) {
+	const mappingSig = mappingsSignature(widget?.mapping);
 	return {
 		key: deltaKey(widget),
 		id: safeText(widget?.widgetId || widget?.id || ''),
@@ -2204,6 +2238,8 @@ function widgetSnapshot(widget) {
 			''
 		),
 		icon: safeText(widget?.icon || widget?.item?.icon || widget?.item?.category || ''),
+		mappings: mappingSig,
+		mapping: mappingSig ? normalizeMappings(widget?.mapping) : [],
 	};
 }
 
@@ -2235,6 +2271,7 @@ function buildSnapshot(page) {
 			state: e.state,
 			valuecolor: e.valuecolor,
 			icon: e.icon,
+			mappings: e.mappings,
 		})),
 	}));
 
@@ -2304,7 +2341,8 @@ async function computeDeltaResponse(url, since) {
 			prev.label !== current.label ||
 			prev.state !== current.state ||
 			prev.valuecolor !== current.valuecolor ||
-			prev.icon !== current.icon
+			prev.icon !== current.icon ||
+			prev.mappings !== current.mappings
 		) {
 			changes.push(current);
 		}
@@ -3356,7 +3394,8 @@ app.use('/rest', async (req, res, next) => {
 			prev.label !== current.label ||
 			prev.state !== current.state ||
 			prev.valuecolor !== current.valuecolor ||
-			prev.icon !== current.icon
+			prev.icon !== current.icon ||
+			prev.mappings !== current.mappings
 		) {
 			changes.push(current);
 		}
