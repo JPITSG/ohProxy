@@ -130,7 +130,7 @@ async function removeUser(username) {
 	}
 }
 
-function changePassword(username, newPassword) {
+async function changePassword(username, newPassword) {
 	if (!username || !newPassword) {
 		console.error('Error: Username and new password required');
 		usage();
@@ -138,6 +138,13 @@ function changePassword(username, newPassword) {
 	}
 	if (sessions.updateUserPassword(username, newPassword)) {
 		console.log(`Password updated for user '${username}'`);
+		// Notify server to disconnect active sessions
+		const result = await sendIpcMessage('password-changed', { username });
+		if (result.serverOffline) {
+			console.log('(Server not running - no active sessions to disconnect)');
+		} else if (result.ok && result.disconnected > 0) {
+			console.log(`Disconnected ${result.disconnected} active session(s)`);
+		}
 	} else {
 		console.error(`Error: User '${username}' not found`);
 		process.exit(1);
@@ -178,7 +185,7 @@ sessions.initDb();
 			await removeUser(args[1]);
 			break;
 		case 'passwd':
-			changePassword(args[1], args[2]);
+			await changePassword(args[1], args[2]);
 			break;
 		case 'role':
 			changeRole(args[1], args[2]);

@@ -3511,13 +3511,14 @@ function handleIpcMessage(msg, client) {
 	logMessage(`[IPC] Received action: ${action}`);
 
 	switch (action) {
-		case 'user-deleted': {
+		case 'user-deleted':
+		case 'password-changed': {
 			const { username } = payload || {};
 			if (!username) {
 				client.write(JSON.stringify({ ok: false, error: 'Missing username' }) + '\n');
 				return;
 			}
-			const count = notifyUserDeleted(username);
+			const count = notifyUserLogout(username, action);
 			client.write(JSON.stringify({ ok: true, disconnected: count }) + '\n');
 			break;
 		}
@@ -3530,20 +3531,20 @@ function handleIpcMessage(msg, client) {
 	}
 }
 
-function notifyUserDeleted(username) {
+function notifyUserLogout(username, reason) {
 	let count = 0;
 	for (const ws of wss.clients) {
 		if (ws.ohProxyUser === username && ws.readyState === WebSocket.OPEN) {
 			try {
 				ws.send(JSON.stringify({ event: 'account-deleted' }));
-				ws.close(1000, 'Account deleted');
+				ws.close(1000, reason || 'Account deleted');
 				count++;
 			} catch (err) {
 				logMessage(`[IPC] Failed to notify client: ${err.message}`);
 			}
 		}
 	}
-	logMessage(`[IPC] Notified ${count} client(s) of user deletion: ${username}`);
+	logMessage(`[IPC] Notified ${count} client(s) of ${reason || 'logout'}: ${username}`);
 	return count;
 }
 

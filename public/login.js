@@ -81,7 +81,7 @@
 			const data = await response.json();
 
 			if (response.ok && data.success) {
-				window.location.reload();
+				window.location.href = '/';
 				return;
 			}
 
