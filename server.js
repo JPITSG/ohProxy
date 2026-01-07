@@ -2762,6 +2762,11 @@ app.use((req, res, next) => {
 			!reqPath.endsWith('.woff2');
 
 		if (isHtmlPageRequest) {
+			// Redirect all paths to / for login
+			if (req.path !== '/') {
+				res.redirect('/');
+				return;
+			}
 			// Set CSRF cookie for login page
 			const csrfToken = generateCsrfToken();
 			setCsrfCookie(res, csrfToken);
@@ -2835,8 +2840,8 @@ app.use((req, res, next) => {
 			res.status(401).json({ error: 'account-deleted' });
 			return;
 		}
-		// For page requests, redirect to login
-		res.redirect('/login');
+		// For page requests, redirect to /
+		res.redirect('/');
 		return;
 	}
 	next();
@@ -3171,6 +3176,11 @@ app.get(/^\/icons\/apple-touch-icon\.v[\w.-]+\.png$/i, (req, res) => {
 
 app.get(['/', '/index.html'], (req, res) => {
 	sendIndex(req, res);
+});
+
+// Redirect /login to / (single entry point)
+app.get('/login', (req, res) => {
+	res.redirect('/');
 });
 
 app.get(/^\/app\.v[\w.-]+\.js$/i, (req, res) => {
