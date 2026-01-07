@@ -1552,14 +1552,16 @@ function openGlowConfigModal(widget, card) {
 	const visRadio = glowConfigModal.querySelector(`input[name="visibility"][value="${visibility}"]`);
 	if (visRadio) visRadio.checked = true;
 
-	// Check if widget has subtext (state) - glow rules only apply to widgets with subtext
-	// Sections don't have glow rules either
+	// Check if widget should show glow rules
+	// Only Text widgets with subtext (state) can have glow rules
 	const isSection = !!widget?.__section;
+	const wType = widgetType(widget).toLowerCase();
+	const isTextType = wType.includes('text');
 	const labelParts = splitLabelState(widget?.label || '');
 	const hasSubtext = !!labelParts.state;
 	const glowRulesSection = glowConfigModal.querySelector('.glow-rules-section');
 	if (glowRulesSection) {
-		glowRulesSection.style.display = (hasSubtext && !isSection) ? '' : 'none';
+		glowRulesSection.style.display = (isTextType && hasSubtext && !isSection) ? '' : 'none';
 	}
 
 	// Load existing rules
@@ -4070,7 +4072,7 @@ function restoreNormalPolling() {
 	window.addEventListener('touchend', handleBounceTouchEnd, { passive: true });
 	window.addEventListener('touchcancel', handleBounceTouchEnd, { passive: true });
 	window.addEventListener('click', noteActivity, { passive: true });
-	// Ctrl+click on Text/Group cards opens glow config modal
+	// Ctrl+click on cards opens item config modal
 	document.addEventListener('click', (e) => {
 		if (!(e.ctrlKey || e.metaKey) || state.isSlim) return;
 		// Cards are .glass elements with data-widget-key attribute inside #grid
@@ -4081,9 +4083,6 @@ function restoreNormalPolling() {
 		// Find widget in current page
 		const widget = findWidgetByKey(key);
 		if (!widget) return;
-		const wType = widgetType(widget).toLowerCase();
-		// Use includes() like the rest of the codebase
-		if (!wType.includes('text') && !wType.includes('group')) return;
 		e.preventDefault();
 		e.stopPropagation();
 		openGlowConfigModal(widget, card);
