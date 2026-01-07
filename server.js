@@ -782,7 +782,6 @@ function buildHstsHeader() {
 
 function applySecurityHeaders(req, res) {
 	if (!liveConfig.securityHeadersEnabled) return;
-	if (res.statusCode === 401) return;
 	if (liveConfig.securityHsts.enabled && isSecureRequest(req)) {
 		res.setHeader('Strict-Transport-Security', buildHstsHeader());
 	}
