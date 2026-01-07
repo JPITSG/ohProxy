@@ -2925,15 +2925,18 @@ app.use((req, res, next) => {
 		let sessionId = (cookieResult && !cookieResult.isLegacy) ? cookieResult.sessionId : getSessionCookie(req);
 
 		if (sessionId) {
-			const session = sessions.getSession(sessionId);
+			let session = sessions.getSession(sessionId);
+			if (!session && req.ohProxyAuth === 'authenticated' && req.ohProxyUser) {
+				// Session missing but user authenticated - recreate session
+				sessions.createSession(sessionId, req.ohProxyUser, sessions.getDefaultSettings(), clientIp);
+				session = sessions.getSession(sessionId);
+			}
 			if (session) {
 				// Valid session found - touch it and attach to request
 				sessions.touchSession(sessionId, clientIp);
 				req.ohProxySession = session;
 				req.ohProxySession.lastIp = clientIp || session.lastIp;
 			} else {
-				// Session ID exists but not in DB (session was created in auth middleware but may have failed)
-				// This shouldn't normally happen, but handle gracefully
 				req.ohProxySession = null;
 			}
 		} else {
