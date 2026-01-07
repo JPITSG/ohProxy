@@ -396,6 +396,7 @@ html:not(.slim) .has-meta .labelStack {
 	color: var(--color-control-off-text);
 	border: var(--glass-border-width) solid var(--color-control-off-border);
 	font-size: .75rem;
+	line-height: 1;
 	padding: 8px 12px;
 	border-radius: 10px;
 	display: inline-flex;
@@ -881,6 +882,7 @@ body.theme-dark #themeToggleBtn svg {
 	border-radius: 10px;
 	border-width: var(--glass-border-width);
 	font-size: .75rem;
+	line-height: 1;
 	white-space: nowrap;
 	transition: background-color .4s ease, border-color .4s ease, color .4s ease, box-shadow .4s ease;
 	background-color: var(--color-control-off-bg) !important;
@@ -1153,6 +1155,7 @@ body.theme-light .glow-config-frame {
 .glow-rule-row input {
 	padding: 8px 12px;
 	font-size: .75rem;
+	line-height: 1;
 	color: var(--color-text-primary);
 	background: rgba(30, 33, 54, 0.7);
 	backdrop-filter: blur(6px);
@@ -1198,6 +1201,7 @@ body.theme-light .glow-rule-row input:focus {
 	width: 100%;
 	padding: 8px 12px;
 	font-size: .75rem;
+	line-height: 1;
 	color: var(--color-text-primary);
 	background: var(--color-control-off-bg);
 	border: var(--glass-border-width) solid var(--color-control-off-border);
@@ -1230,6 +1234,7 @@ body.theme-light .glow-rule-row input:focus {
 	border: 1px solid var(--color-select-option-border-card);
 	color: var(--color-select-option-text-card);
 	font-size: .75rem;
+	line-height: 1;
 	padding: 8px 12px;
 	border-radius: 8px;
 	text-align: center;
@@ -1306,6 +1311,7 @@ body.theme-light .glow-rule-row input:focus {
 .glow-config-add {
 	padding: 8px 12px;
 	font-size: .75rem;
+	line-height: 1;
 	font-weight: 500;
 	border-radius: 10px;
 	cursor: pointer;
@@ -1334,6 +1340,7 @@ body.theme-light .glow-rule-row input:focus {
 	flex: 1;
 	padding: 8px 12px;
 	font-size: .75rem;
+	line-height: 1;
 	font-weight: 500;
 	border-radius: 10px;
 	cursor: pointer;
@@ -1381,6 +1388,7 @@ body.glow-config-open {
 	justify-content: center;
 	padding: 8px 12px;
 	font-size: .75rem;
+	line-height: 1;
 	cursor: pointer;
 	background: var(--color-control-off-bg);
 	border: var(--glass-border-width) solid var(--color-control-off-border);
