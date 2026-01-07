@@ -51,8 +51,10 @@ module.exports = {
 			cookieDays: 365,
 			// Auth cookie HMAC key (string; empty disables cookie auth).
 			cookieKey: '',
-			// Auth failure notify command (shell; {IP} placeholder; empty disables; max 1 per 15 min).
+			// Auth failure notify command (shell; {IP} placeholder; empty disables).
 			authFailNotifyCmd: '',
+			// Auth failure notify interval (minutes; >=1; rate limit for notification commands).
+			authFailNotifyIntervalMins: 15,
 		},
 		// Security headers (HSTS/CSP/Referrer-Policy).
 		securityHeaders: {

@@ -213,7 +213,7 @@ const AUTH_COOKIE_DAYS = configNumber(SERVER_AUTH.cookieDays, 0);
 const AUTH_COOKIE_KEY = safeText(SERVER_AUTH.cookieKey || '');
 const AUTH_FAIL_NOTIFY_CMD = safeText(SERVER_AUTH.authFailNotifyCmd || '');
 const AUTH_MODE = safeText(SERVER_AUTH.mode || 'basic');
-const AUTH_FAIL_NOTIFY_INTERVAL_MS = 15 * 60 * 1000;
+const AUTH_FAIL_NOTIFY_INTERVAL_MINS = configNumber(SERVER_AUTH.authFailNotifyIntervalMins, 15);
 const AUTH_LOCKOUT_THRESHOLD = 3;
 const SESSION_COOKIE_NAME = 'ohSession';
 const SESSION_COOKIE_DAYS = 3650; // 10 years
@@ -231,7 +231,6 @@ const WEBSOCKET_CONFIG = SERVER_CONFIG.websocket || {};
 const WS_MODE = (WEBSOCKET_CONFIG.mode === 'atmosphere') ? 'atmosphere' : 'polling';
 const WS_POLLING_INTERVAL_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalMs) || 500;
 const WS_POLLING_INTERVAL_BG_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalBgMs) || 2000;
-let lastAuthFailNotifyAt = 0;
 const authLockouts = new Map();
 
 function logMessage(message) {
@@ -521,6 +520,7 @@ function validateConfig() {
 		ensureNumber(AUTH_COOKIE_DAYS, 'server.auth.cookieDays', { min: 0 }, errors);
 		ensureString(AUTH_COOKIE_KEY, 'server.auth.cookieKey', { allowEmpty: true }, errors);
 		ensureString(SERVER_AUTH.authFailNotifyCmd, 'server.auth.authFailNotifyCmd', { allowEmpty: true }, errors);
+		ensureNumber(AUTH_FAIL_NOTIFY_INTERVAL_MINS, 'server.auth.authFailNotifyIntervalMins', { min: 1 }, errors);
 		if (AUTH_COOKIE_KEY) {
 			if (!AUTH_COOKIE_NAME) {
 				errors.push(`server.auth.cookieName is required when cookieKey is set but currently is ${describeValue(AUTH_COOKIE_NAME)}`);
@@ -938,11 +938,13 @@ function normalizeNotifyIp(value) {
 function maybeNotifyAuthFailure(ip) {
 	if (!liveConfig.authFailNotifyCmd) return;
 	const now = Date.now();
-	if (lastAuthFailNotifyAt && now - lastAuthFailNotifyAt < AUTH_FAIL_NOTIFY_INTERVAL_MS) return;
+	const intervalMs = (liveConfig.authFailNotifyIntervalMins || 15) * 60 * 1000;
+	const lastNotify = Number(sessions.getServerSetting('lastAuthFailNotifyAt')) || 0;
+	if (lastNotify && now - lastNotify < intervalMs) return;
 	const safeIp = normalizeNotifyIp(ip);
 	const command = liveConfig.authFailNotifyCmd.replace(/\{IP\}/g, safeIp).trim();
 	if (!command) return;
-	lastAuthFailNotifyAt = now;
+	sessions.setServerSetting('lastAuthFailNotifyAt', String(now));
 	try {
 		const child = execFile('/bin/sh', ['-c', command], { detached: true, stdio: 'ignore' });
 		child.unref();
@@ -1039,6 +1041,7 @@ const liveConfig = {
 	authCookieDays: AUTH_COOKIE_DAYS,
 	authCookieKey: AUTH_COOKIE_KEY,
 	authFailNotifyCmd: AUTH_FAIL_NOTIFY_CMD,
+	authFailNotifyIntervalMins: AUTH_FAIL_NOTIFY_INTERVAL_MINS,
 	authMode: AUTH_MODE,
 	securityHeadersEnabled: SECURITY_HEADERS_ENABLED,
 	securityHsts: SECURITY_HSTS,
@@ -1167,6 +1170,7 @@ function reloadLiveConfig() {
 	liveConfig.authCookieDays = configNumber(newAuth.cookieDays, 0);
 	liveConfig.authCookieKey = safeText(newAuth.cookieKey || '');
 	liveConfig.authFailNotifyCmd = safeText(newAuth.authFailNotifyCmd || '');
+	liveConfig.authFailNotifyIntervalMins = configNumber(newAuth.authFailNotifyIntervalMins, 15);
 	liveConfig.authMode = safeText(newAuth.mode || 'basic');
 	liveConfig.securityHeadersEnabled = newSecurityHeaders.enabled !== false;
 	liveConfig.securityHsts = newSecurityHeaders.hsts || {};

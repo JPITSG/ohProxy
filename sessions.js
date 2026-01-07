@@ -63,6 +63,14 @@ function initDb() {
 		);
 	`);
 
+	// Create server settings table (key-value store for persistent server state)
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS server_settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+	`);
+
 	// Migration: add IP columns if they don't exist
 	try {
 		db.exec(`ALTER TABLE sessions ADD COLUMN created_ip TEXT DEFAULT NULL`);
@@ -436,6 +444,31 @@ function deleteUser(username) {
 	return result.changes > 0;
 }
 
+// ============================================
+// Server Settings Functions (Key-Value Store)
+// ============================================
+
+/**
+ * Get a server setting by key.
+ * @param {string} key - The setting key
+ * @returns {string|null} - The value or null if not found
+ */
+function getServerSetting(key) {
+	if (!db) initDb();
+	const row = db.prepare('SELECT value FROM server_settings WHERE key = ?').get(key);
+	return row ? row.value : null;
+}
+
+/**
+ * Set a server setting.
+ * @param {string} key - The setting key
+ * @param {string} value - The value to store
+ */
+function setServerSetting(key, value) {
+	if (!db) initDb();
+	db.prepare('INSERT OR REPLACE INTO server_settings (key, value) VALUES (?, ?)').run(key, String(value));
+}
+
 module.exports = {
 	initDb,
 	generateSessionId,
@@ -463,4 +496,7 @@ module.exports = {
 	updateUserPassword,
 	updateUserRole,
 	deleteUser,
+	// Server settings
+	getServerSetting,
+	setServerSetting,
 };
