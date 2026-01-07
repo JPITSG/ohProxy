@@ -2724,8 +2724,8 @@ app.use((req, res, next) => {
 			}
 		}
 
-		// Allow login.js to load (needed by login page)
-		if (req.path === '/login.js') {
+		// Allow login.js and fonts to load (needed by login page)
+		if (req.path === '/login.js' || req.path.startsWith('/fonts/')) {
 			req.ohProxyAuth = 'unauthenticated';
 			req.ohProxyUser = '';
 			return next();
