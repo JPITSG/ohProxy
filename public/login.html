@@ -78,7 +78,10 @@
 		.login-form {
 			display: flex;
 			flex-direction: column;
-			gap: 8px;
+		}
+
+		.login-form > * + * {
+			margin-top: 8px;
 		}
 
 		.form-input {
@@ -113,7 +116,6 @@
 			font-family: inherit;
 			font-size: .75rem;
 			line-height: 1;
-			font-weight: 500;
 			color: rgba(19, 21, 54, 0.98);
 			background: rgba(19, 21, 54, 0.08);
 			border: 0.5px solid rgba(19, 21, 54, 0.2);

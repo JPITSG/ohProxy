@@ -1312,7 +1312,6 @@ body.theme-light .glow-rule-row input:focus {
 	padding: 11px 12px;
 	font-size: .75rem;
 	line-height: 1;
-	font-weight: 500;
 	border-radius: 10px;
 	cursor: pointer;
 	width: 100%;
@@ -1341,7 +1340,6 @@ body.theme-light .glow-rule-row input:focus {
 	padding: 11px 12px;
 	font-size: .75rem;
 	line-height: 1;
-	font-weight: 500;
 	border-radius: 10px;
 	cursor: pointer;
 	background-color: var(--color-control-off-bg);
