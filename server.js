@@ -2743,6 +2743,7 @@ app.use((req, res, next) => {
 			if (cookieResult) {
 				req.ohProxyAuth = 'authenticated';
 				req.ohProxyUser = cookieResult.user;
+				req._cookieResult = cookieResult; // Store for session middleware
 				// Handle legacy cookie upgrade
 				if (cookieResult.isLegacy) {
 					const clientIp = req.ohProxyClientIp || null;
