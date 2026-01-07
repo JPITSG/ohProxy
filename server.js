@@ -217,7 +217,14 @@ const AUTH_FAIL_NOTIFY_INTERVAL_MINS = configNumber(SERVER_AUTH.authFailNotifyIn
 const AUTH_LOCKOUT_THRESHOLD = 3;
 const SESSION_COOKIE_NAME = 'ohSession';
 const SESSION_COOKIE_DAYS = 3650; // 10 years
-const SESSION_MAX_AGE_DAYS = configNumber(SERVER_CONFIG.sessionMaxAgeDays, 14);
+const SESSION_MAX_AGE_DAYS = (() => {
+	const val = configNumber(SERVER_CONFIG.sessionMaxAgeDays, 14);
+	if (val < 1) {
+		console.warn(`sessionMaxAgeDays must be >= 1, got ${val}; using default 14`);
+		return 14;
+	}
+	return val;
+})();
 const AUTH_LOCKOUT_MS = 15 * 60 * 1000;
 const SECURITY_HEADERS_ENABLED = SECURITY_HEADERS.enabled !== false;
 const SECURITY_HSTS = SECURITY_HEADERS.hsts || {};
