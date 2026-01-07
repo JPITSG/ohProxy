@@ -23,16 +23,25 @@
 			padding: 20px;
 		}
 
+		/* Blurred background overlay */
+		body::before {
+			content: '';
+			position: fixed;
+			inset: 0;
+			background: rgba(245, 246, 250, 0.6);
+			backdrop-filter: blur(12px);
+			-webkit-backdrop-filter: blur(12px);
+			z-index: -1;
+		}
+
 		.login-container {
 			width: 100%;
-			max-width: 300px;
+			max-width: 420px;
 		}
 
 		.login-card {
-			background: rgba(255, 255, 255, 0.08);
-			backdrop-filter: blur(8px) saturate(1.2);
-			-webkit-backdrop-filter: blur(8px) saturate(1.2);
-			border: 0.5px solid rgba(255, 255, 255, 0.3);
+			background: rgb(245, 246, 250);
+			border: 0.5px solid rgba(255, 255, 255, 0.15);
 			border-radius: 18px;
 			box-shadow:
 				0 12px 20px rgba(0, 0, 0, 0.15),
@@ -40,19 +49,19 @@
 				-2px -2px 0.5px -2px rgba(255, 255, 255, 0.30) inset,
 				0 0 8px 1px rgba(255, 255, 255, 0.10) inset,
 				0 0 2px 0 rgba(0, 0, 0, 0.10);
-			padding: 20px 18px;
+			padding: 12px;
 		}
 
 		.login-form {
 			display: flex;
 			flex-direction: column;
+			gap: 8px;
 		}
 
 		.form-input {
 			width: 100%;
-			padding: 10px 12px;
-			margin-bottom: 10px;
-			font-size: 14px;
+			padding: 6px 10px;
+			font-size: 12px;
 			color: rgba(19, 21, 54, 0.98);
 			background: rgba(255, 255, 255, 0.7);
 			backdrop-filter: blur(6px);
@@ -75,22 +84,24 @@
 
 		.submit-btn {
 			width: 100%;
-			padding: 10px 12px;
-			font-size: 14px;
+			padding: 6px 10px;
+			font-size: 12px;
 			font-weight: 500;
 			color: rgba(19, 21, 54, 0.98);
 			background: rgba(19, 21, 54, 0.08);
-			border: 1px solid rgba(19, 21, 54, 0.2);
+			border: 0.5px solid rgba(19, 21, 54, 0.2);
 			border-radius: 10px;
 			box-shadow: 0 0 8px rgba(19, 21, 54, 0.12);
 			cursor: pointer;
 			transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
 		}
 
-		.submit-btn:hover {
-			background: rgba(78, 183, 128, 0.12);
-			border-color: rgba(78, 183, 128, 0.45);
-			box-shadow: 0 0 10px rgba(78, 183, 128, 0.35);
+		@media (hover: hover) and (pointer: fine) {
+			.submit-btn:hover {
+				background: rgba(78, 183, 128, 0.12);
+				border-color: rgba(78, 183, 128, 0.45);
+				box-shadow: 0 0 10px rgba(78, 183, 128, 0.35);
+			}
 		}
 
 		.submit-btn:active {
@@ -110,12 +121,6 @@
 
 		.shake {
 			animation: shake 0.5s ease-in-out;
-		}
-
-		@media (max-width: 400px) {
-			.login-card {
-				padding: 24px 20px;
-			}
 		}
 	</style>
 </head>
