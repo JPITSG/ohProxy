@@ -2888,12 +2888,17 @@ function updateCard(card, w, afterImage, info) {
 		const canReuse = existingButtons && existingButtons.length === switchButtonCount;
 
 		if (canReuse) {
-			// Reuse existing controls - just update is-active class for smooth CSS transition
+			// Reuse existing controls - update text, command, and is-active class
 			if (mapping.length) {
+				let i = 0;
 				for (const btn of existingButtons) {
-					const cmd = btn.dataset.command;
-					const shouldBeActive = safeText(cmd) === currentState;
-					btn.classList.toggle('is-active', shouldBeActive);
+					const m = mapping[i++];
+					if (m) {
+						btn.textContent = m.label || m.command;
+						btn.dataset.command = m.command;
+						const shouldBeActive = safeText(m.command) === currentState;
+						btn.classList.toggle('is-active', shouldBeActive);
+					}
 				}
 			} else {
 				// Single ON/OFF switch - update class, text, and click handler
