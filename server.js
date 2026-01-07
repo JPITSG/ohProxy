@@ -2475,6 +2475,54 @@ function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3) {
 	});
 }
 
+function pipeStreamingProxy(targetUrl, expressRes, headers = {}) {
+	return new Promise((resolve, reject) => {
+		let url;
+		try {
+			url = new URL(targetUrl);
+		} catch (err) {
+			reject(err);
+			return;
+		}
+
+		const isHttps = url.protocol === 'https:';
+		const client = isHttps ? https : http;
+		const requestHeaders = { ...headers, 'User-Agent': liveConfig.userAgent };
+
+		const req = client.request({
+			method: 'GET',
+			hostname: url.hostname,
+			port: url.port || (isHttps ? 443 : 80),
+			path: `${url.pathname}${url.search}`,
+			headers: requestHeaders,
+		}, (upstreamRes) => {
+			const status = upstreamRes.statusCode || 502;
+			const contentType = safeText(upstreamRes.headers['content-type']);
+
+			expressRes.status(status);
+			if (contentType) expressRes.setHeader('Content-Type', contentType);
+			expressRes.setHeader('Cache-Control', 'no-store');
+			expressRes.setHeader('Connection', 'close');
+
+			upstreamRes.pipe(expressRes);
+
+			upstreamRes.on('end', () => resolve({ streamed: true }));
+			upstreamRes.on('error', (err) => {
+				logMessage(`Stream error: ${err.message}`);
+				resolve({ streamed: true, error: err });
+			});
+		});
+
+		req.on('error', reject);
+
+		expressRes.on('close', () => {
+			req.destroy();
+		});
+
+		req.end();
+	});
+}
+
 function fetchOpenhab(pathname) {
 	return new Promise((resolve, reject) => {
 		const target = new URL(liveConfig.ohTarget);
@@ -3366,7 +3414,7 @@ app.use('/images', createProxyMiddleware({
 app.get('/proxy', async (req, res, next) => {
 	const raw = req.query?.url;
 
-	// External URL proxy (url= parameter)
+	// External URL proxy (url= parameter) - supports regular images and MJPEG streams
 	if (raw) {
 		const candidate = Array.isArray(raw) ? raw[0] : raw;
 		const text = safeText(candidate).trim();
@@ -3397,14 +3445,13 @@ app.get('/proxy', async (req, res, next) => {
 		if (accept) headers.Accept = accept;
 
 		try {
-			const result = await fetchBinaryFromUrl(target.toString(), headers);
-			res.status(result.status || 502);
-			if (result.contentType) res.setHeader('Content-Type', result.contentType);
-			res.setHeader('Cache-Control', 'no-store');
-			res.send(result.body);
+			// Use streaming proxy - works for both regular images and MJPEG streams
+			await pipeStreamingProxy(target.toString(), res, headers);
 		} catch (err) {
 			logMessage(`Direct proxy failed for ${target.toString()}: ${err.message || err}`);
-			res.status(502).send('Proxy error');
+			if (!res.headersSent) {
+				res.status(502).send('Proxy error');
+			}
 		}
 		return;
 	}
