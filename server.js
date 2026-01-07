@@ -122,11 +122,17 @@ function loadUserConfig() {
 function parseProxyAllowEntry(value) {
 	const raw = safeText(value).trim();
 	if (!raw) return null;
-	const candidate = /^(https?:)?\/\//i.test(raw) ? raw : `http://${raw}`;
+	// Reject non-http/https schemes (must have :// to be a scheme)
+	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && !/^https?:\/\//i.test(raw)) return null;
+	const candidate = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
 	try {
 		const url = new URL(candidate);
-		const host = safeText(url.hostname).toLowerCase();
+		let host = safeText(url.hostname).toLowerCase();
 		if (!host) return null;
+		// Strip brackets from IPv6 for consistent matching
+		if (host.startsWith('[') && host.endsWith(']')) {
+			host = host.slice(1, -1);
+		}
 		return { host, port: safeText(url.port) };
 	} catch {
 		return null;
