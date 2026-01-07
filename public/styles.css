@@ -356,7 +356,7 @@ html:not(.slim) .has-meta .labelStack {
 }
 @media (hover: hover) and (pointer: fine) {
 	.glow-dot {
-		margin-top: 2px;
+		margin-top: 1px;
 	}
 }
 
@@ -978,6 +978,11 @@ input[type="range"] {
 	background: var(--color-status-pending);
 	box-shadow: 0 0 8px var(--color-status-pending);
 	margin-right: .45rem;
+}
+@media (hover: hover) and (pointer: fine) {
+	.status-dot {
+		margin-top: -2px;
+	}
 }
 .status-bar.status-pending .status-dot {
 	background: var(--color-status-pending);
