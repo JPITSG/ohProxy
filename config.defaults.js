@@ -39,16 +39,12 @@ module.exports = {
 		allowSubnets: [],
 		// Allowlist for /proxy?url= (host or host:port; required, non-empty).
 		proxyAllowlist: [],
-		// LAN subnets used for auth bypass + status labeling (IPv4 CIDR list; 0.0.0.0 for all; empty allowed).
-		lanSubnets: [],
 		// Authentication settings.
 		auth: {
 			// Auth mode ('basic' for HTTP Basic Auth, 'html' for HTML form login).
 			mode: 'basic',
 			// Users file (absolute path; required).
 			usersFile: '',
-			// Subnets that bypass auth (IPv4 CIDR list; empty allowed).
-			whitelistSubnets: [],
 			// Basic auth realm label (string; non-empty).
 			realm: 'openHAB Proxy',
 			// Auth cookie name (string; empty disables cookie auth).

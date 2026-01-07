@@ -14,8 +14,6 @@ function createAccessControlApp(config = {}) {
 
 	const USERS = config.users || TEST_USERS;
 	const ALLOW_SUBNETS = config.allowSubnets || ['0.0.0.0'];
-	const WHITELIST_SUBNETS = config.whitelistSubnets || [];
-	const LAN_SUBNETS = config.lanSubnets || [];
 	const AUTH_COOKIE_NAME = config.cookieName || 'AuthStore';
 	const AUTH_COOKIE_KEY = config.cookieKey || TEST_COOKIE_KEY;
 	const AUTH_COOKIE_DAYS = config.cookieDays || 365;
@@ -166,36 +164,19 @@ function createAccessControlApp(config = {}) {
 		next();
 	});
 
-	// Whitelist/LAN/Auth check
+	// Auth check (always required)
 	app.use((req, res, next) => {
 		// Auth-exempt paths (manifest with referer)
 		if (req.path === '/manifest.webmanifest' && req.headers.referer) {
-			req.authInfo = { auth: 'exempt', user: null, lan: false };
-			return next();
-		}
-
-		// Check whitelist
-		if (ipInAnySubnet(req.clientIp, WHITELIST_SUBNETS)) {
-			req.authInfo = { auth: 'authenticated', user: 'whitelist', lan: true };
-			res.setHeader('X-OhProxy-Authenticated', 'true');
-			res.setHeader('X-OhProxy-Lan', 'true');
-			return next();
-		}
-
-		// Check LAN
-		if (ipInAnySubnet(req.clientIp, LAN_SUBNETS)) {
-			req.authInfo = { auth: 'authenticated', user: 'lan', lan: true };
-			res.setHeader('X-OhProxy-Authenticated', 'true');
-			res.setHeader('X-OhProxy-Lan', 'true');
+			req.authInfo = { auth: 'exempt', user: null };
 			return next();
 		}
 
 		// Check cookie auth
 		const cookieUser = getAuthCookieUser(req);
 		if (cookieUser) {
-			req.authInfo = { auth: 'authenticated', user: cookieUser, lan: false };
+			req.authInfo = { auth: 'authenticated', user: cookieUser };
 			res.setHeader('X-OhProxy-Authenticated', 'true');
-			res.setHeader('X-OhProxy-Lan', 'false');
 			return next();
 		}
 
@@ -203,9 +184,8 @@ function createAccessControlApp(config = {}) {
 		const authHeader = req.headers.authorization;
 		const [user, pass] = parseBasicAuthHeader(authHeader);
 		if (user && USERS[user] === pass) {
-			req.authInfo = { auth: 'authenticated', user, lan: false };
+			req.authInfo = { auth: 'authenticated', user };
 			res.setHeader('X-OhProxy-Authenticated', 'true');
-			res.setHeader('X-OhProxy-Lan', 'false');
 			return next();
 		}
 
@@ -241,7 +221,6 @@ function createAccessControlApp(config = {}) {
 		res.json({
 			ip: req.clientIp,
 			user: req.authInfo?.user,
-			lan: req.authInfo?.lan,
 		});
 	});
 
@@ -255,8 +234,6 @@ describe('Access Control Security Tests', () => {
 	before(async () => {
 		const app = createAccessControlApp({
 			allowSubnets: ['192.168.0.0/16', '10.0.0.0/8'],
-			whitelistSubnets: ['10.0.0.0/24'],
-			lanSubnets: ['192.168.1.0/24'],
 			proxyAllowlist: ['allowed.example.com', 'api.example.com'],
 		});
 		server = http.createServer(app);
@@ -303,63 +280,12 @@ describe('Access Control Security Tests', () => {
 		});
 	});
 
-	describe('Whitelist Bypass', () => {
-		it('whitelist IP bypasses auth', async () => {
-			const res = await fetch(`${baseUrl}/`, {
-				headers: {
-					'X-Test-Client-IP': '10.0.0.50',
-					// No Authorization header
-				},
-			});
-			assert.strictEqual(res.status, 200);
-		});
-
-		it('whitelist IP sets authenticated true', async () => {
-			const res = await fetch(`${baseUrl}/`, {
-				headers: {
-					'X-Test-Client-IP': '10.0.0.50',
-				},
-			});
-			assert.strictEqual(res.headers.get('x-ohproxy-authenticated'), 'true');
-		});
-	});
-
-	describe('LAN Bypass', () => {
-		it('LAN IP bypasses auth', async () => {
-			const res = await fetch(`${baseUrl}/`, {
-				headers: {
-					'X-Test-Client-IP': '192.168.1.100',
-					// No Authorization header
-				},
-			});
-			assert.strictEqual(res.status, 200);
-		});
-
-		it('LAN IP sets lan header true', async () => {
-			const res = await fetch(`${baseUrl}/`, {
-				headers: {
-					'X-Test-Client-IP': '192.168.1.100',
-				},
-			});
-			assert.strictEqual(res.headers.get('x-ohproxy-lan'), 'true');
-		});
-
-		it('non-LAN IP sets lan header false', async () => {
-			const res = await fetch(`${baseUrl}/`, {
-				headers: {
-					'X-Test-Client-IP': '192.168.5.100',
-					'Authorization': basicAuthHeader('testuser', 'testpassword'),
-				},
-			});
-			assert.strictEqual(res.headers.get('x-ohproxy-lan'), 'false');
-		});
-	});
-
 	describe('IPv6-mapped IPv4', () => {
 		it('::ffff: prefix is normalized', async () => {
 			const res = await fetch(`${baseUrl}/api/session`, {
 				headers: {
 					'X-Test-Client-IP': '::ffff:192.168.1.100',
+					'Authorization': basicAuthHeader('testuser', 'testpassword'),
 				},
 			});
 			assert.strictEqual(res.status, 200);
@@ -398,6 +324,7 @@ describe('Access Control Security Tests', () => {
 			const res = await fetch(`${baseUrl}/proxy?host=allowed.example.com`, {
 				headers: {
 					'X-Test-Client-IP': '192.168.1.100',
+					'Authorization': basicAuthHeader('testuser', 'testpassword'),
 				},
 			});
 			assert.strictEqual(res.status, 200);
@@ -407,6 +334,7 @@ describe('Access Control Security Tests', () => {
 			const res = await fetch(`${baseUrl}/proxy?host=evil.example.com`, {
 				headers: {
 					'X-Test-Client-IP': '192.168.1.100',
+					'Authorization': basicAuthHeader('testuser', 'testpassword'),
 				},
 			});
 			assert.strictEqual(res.status, 403);
@@ -416,6 +344,7 @@ describe('Access Control Security Tests', () => {
 			const res = await fetch(`${baseUrl}/proxy?host=ALLOWED.EXAMPLE.COM`, {
 				headers: {
 					'X-Test-Client-IP': '192.168.1.100',
+					'Authorization': basicAuthHeader('testuser', 'testpassword'),
 				},
 			});
 			assert.strictEqual(res.status, 200);
@@ -467,6 +396,7 @@ describe('Access Control Security Tests', () => {
 			const res = await fetch(`${baseUrl}/api/session`, {
 				headers: {
 					'X-Test-Client-IP': '192.168.1.123',
+					'Authorization': basicAuthHeader('testuser', 'testpassword'),
 				},
 			});
 			const data = await res.json();

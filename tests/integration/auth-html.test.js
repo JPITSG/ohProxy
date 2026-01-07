@@ -15,7 +15,6 @@ function createHtmlAuthApp(config = {}) {
 	const AUTH_COOKIE_NAME = config.cookieName || 'AuthStore';
 	const AUTH_COOKIE_KEY = config.cookieKey || TEST_COOKIE_KEY;
 	const AUTH_COOKIE_DAYS = config.cookieDays || 365;
-	const LAN_SUBNETS = config.lanSubnets || [];
 	const USERS = config.users || TEST_USERS;
 	const CSRF_COOKIE_NAME = 'ohCSRF';
 
@@ -94,23 +93,6 @@ function createHtmlAuthApp(config = {}) {
 		return raw;
 	}
 
-	function ipInSubnet(ip, cidr) {
-		if (cidr === '0.0.0.0' || cidr === '0.0.0.0/0') return true;
-		const parts = cidr.split('/');
-		if (parts.length !== 2) return false;
-		const subnet = parts[0].split('.').slice(0, 3).join('.');
-		const ipPrefix = ip.split('.').slice(0, 3).join('.');
-		return subnet === ipPrefix;
-	}
-
-	function ipInAnySubnet(ip, subnets) {
-		if (!Array.isArray(subnets) || !subnets.length) return false;
-		for (const cidr of subnets) {
-			if (ipInSubnet(ip, cidr)) return true;
-		}
-		return false;
-	}
-
 	function generateCsrfToken() {
 		return crypto.randomBytes(32).toString('hex');
 	}
@@ -172,21 +154,15 @@ function createHtmlAuthApp(config = {}) {
 		res.json({ success: true });
 	});
 
-	// Auth middleware for HTML mode
+	// Auth middleware for HTML mode (always requires authentication)
 	app.use((req, res, next) => {
 		const ip = normalizeRemoteIp(req.socket?.remoteAddress || '');
 		req.clientIp = ip;
 
-		// Check LAN
-		if (ipInAnySubnet(ip, LAN_SUBNETS)) {
-			req.authInfo = { auth: 'authenticated', user: 'lan', lan: true };
-			return next();
-		}
-
 		// Check cookie auth
 		const cookieUser = getAuthCookieUser(req);
 		if (cookieUser) {
-			req.authInfo = { auth: 'authenticated', user: cookieUser, lan: false };
+			req.authInfo = { auth: 'authenticated', user: cookieUser };
 			return next();
 		}
 
@@ -242,9 +218,7 @@ describe('HTML Auth Integration', () => {
 	let baseUrl;
 
 	before(async () => {
-		const app = createHtmlAuthApp({
-			lanSubnets: ['192.168.1.0/24'],
-		});
+		const app = createHtmlAuthApp({});
 		server = http.createServer(app);
 		await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 		const addr = server.address();

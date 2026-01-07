@@ -18,8 +18,6 @@ function createTestApp(config = {}) {
 	const AUTH_COOKIE_NAME = config.cookieName || 'AuthStore';
 	const AUTH_COOKIE_KEY = config.cookieKey || TEST_COOKIE_KEY;
 	const AUTH_COOKIE_DAYS = config.cookieDays || 365;
-	const WHITELIST_SUBNETS = config.whitelistSubnets || [];
-	const LAN_SUBNETS = config.lanSubnets || [];
 	const USERS = config.users || TEST_USERS;
 
 	function safeText(value) {
@@ -113,52 +111,16 @@ function createTestApp(config = {}) {
 		return raw;
 	}
 
-	function ipInSubnet(ip, cidr) {
-		// Simplified - just check if 0.0.0.0
-		if (cidr === '0.0.0.0' || cidr === '0.0.0.0/0') return true;
-		// Basic /24 check
-		const parts = cidr.split('/');
-		if (parts.length !== 2) return false;
-		const subnet = parts[0].split('.').slice(0, 3).join('.');
-		const ipPrefix = ip.split('.').slice(0, 3).join('.');
-		return subnet === ipPrefix;
-	}
-
-	function ipInAnySubnet(ip, subnets) {
-		if (!Array.isArray(subnets) || !subnets.length) return false;
-		for (const cidr of subnets) {
-			if (ipInSubnet(ip, cidr)) return true;
-		}
-		return false;
-	}
-
-	// Auth middleware
+	// Auth middleware (always requires authentication)
 	app.use((req, res, next) => {
 		const ip = normalizeRemoteIp(req.socket?.remoteAddress || '');
 		req.clientIp = ip;
 
-		// Check whitelist
-		if (ipInAnySubnet(ip, WHITELIST_SUBNETS)) {
-			req.authInfo = { auth: 'authenticated', user: 'whitelist', lan: true };
-			res.setHeader('X-OhProxy-Authenticated', 'true');
-			res.setHeader('X-OhProxy-Lan', 'true');
-			return next();
-		}
-
-		// Check LAN
-		if (ipInAnySubnet(ip, LAN_SUBNETS)) {
-			req.authInfo = { auth: 'authenticated', user: 'lan', lan: true };
-			res.setHeader('X-OhProxy-Authenticated', 'true');
-			res.setHeader('X-OhProxy-Lan', 'true');
-			return next();
-		}
-
 		// Check cookie auth
 		const cookieUser = getAuthCookieUser(req);
 		if (cookieUser) {
-			req.authInfo = { auth: 'authenticated', user: cookieUser, lan: false };
+			req.authInfo = { auth: 'authenticated', user: cookieUser };
 			res.setHeader('X-OhProxy-Authenticated', 'true');
-			res.setHeader('X-OhProxy-Lan', 'false');
 			return next();
 		}
 
@@ -167,9 +129,8 @@ function createTestApp(config = {}) {
 		const [user, pass] = parseBasicAuthHeader(authHeader);
 
 		if (user && USERS[user] === pass) {
-			req.authInfo = { auth: 'authenticated', user, lan: false };
+			req.authInfo = { auth: 'authenticated', user };
 			res.setHeader('X-OhProxy-Authenticated', 'true');
-			res.setHeader('X-OhProxy-Lan', 'false');
 
 			// Set auth cookie
 			if (AUTH_COOKIE_KEY && AUTH_COOKIE_NAME) {
@@ -191,7 +152,6 @@ function createTestApp(config = {}) {
 
 		// Auth required
 		res.setHeader('X-OhProxy-Authenticated', 'false');
-		res.setHeader('X-OhProxy-Lan', 'false');
 		res.setHeader('WWW-Authenticate', `Basic realm="${AUTH_REALM}"`);
 		res.status(401).type('text/plain').send('Unauthorized');
 	});
@@ -223,8 +183,6 @@ describe('Basic Auth Integration', () => {
 	before(async () => {
 		const app = createTestApp({
 			realm: 'openHAB Proxy',
-			lanSubnets: ['192.168.1.0/24'],
-			whitelistSubnets: ['10.0.0.0/24'],
 		});
 		server = http.createServer(app);
 		await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -339,15 +297,6 @@ describe('Basic Auth Integration', () => {
 			},
 		});
 		assert.strictEqual(res.headers.get('x-ohproxy-authenticated'), 'true');
-	});
-
-	it('sets X-OhProxy-Lan header to false for non-LAN', async () => {
-		const res = await fetch(`${baseUrl}/`, {
-			headers: {
-				'Authorization': basicAuthHeader('testuser', 'testpassword'),
-			},
-		});
-		assert.strictEqual(res.headers.get('x-ohproxy-lan'), 'false');
 	});
 
 	it('WWW-Authenticate has correct realm', async () => {

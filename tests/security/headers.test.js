@@ -72,7 +72,6 @@ function createSecurityHeadersApp(config = {}) {
 
 			// X-OhProxy headers
 			res.setHeader('X-OhProxy-Authenticated', 'false');
-			res.setHeader('X-OhProxy-Lan', 'false');
 		}
 
 		next();
@@ -238,21 +237,6 @@ describe('Security Headers Tests', () => {
 			assert.strictEqual(auth, 'true');
 		});
 
-		it('X-OhProxy-Lan is present', async () => {
-			const res = await fetch(`${baseUrl}/`, {
-				headers: { 'Authorization': basicAuthHeader('testuser', 'testpassword') },
-			});
-			const lan = res.headers.get('x-ohproxy-lan');
-			assert.ok(lan);
-		});
-
-		it('all three X-OhProxy headers are set', async () => {
-			const res = await fetch(`${baseUrl}/`, {
-				headers: { 'Authorization': basicAuthHeader('testuser', 'testpassword') },
-			});
-			assert.ok(res.headers.get('x-ohproxy-authenticated'));
-			assert.ok(res.headers.get('x-ohproxy-lan'));
-		});
 	});
 
 	describe('Server Information', () => {

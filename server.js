@@ -98,7 +98,6 @@ function setAuthResponseHeaders(res, authInfo) {
 	const safeUser = authenticated ? safeText(authInfo.user).replace(/[\r\n]/g, '').trim() : '';
 	if (safeUser) res.setHeader('X-OhProxy-Username', safeUser);
 	else res.removeHeader('X-OhProxy-Username');
-	res.setHeader('X-OhProxy-Lan', authInfo && authInfo.lan ? 'true' : 'false');
 }
 
 const BOOT_LOG_FILE = safeText(process.env.LOG_FILE || '');
@@ -184,7 +183,6 @@ const HTTPS_CERT_FILE = safeText(HTTPS_CONFIG.certFile);
 const HTTPS_KEY_FILE = safeText(HTTPS_CONFIG.keyFile);
 const HTTPS_HTTP2 = typeof HTTPS_CONFIG.http2 === 'boolean' ? HTTPS_CONFIG.http2 : false;
 const ALLOW_SUBNETS = SERVER_CONFIG.allowSubnets;
-const LAN_SUBNETS = Array.isArray(SERVER_CONFIG.lanSubnets) ? SERVER_CONFIG.lanSubnets : [];
 const OH_TARGET = safeText(process.env.OH_TARGET || SERVER_CONFIG.openhab?.target);
 const OH_USER = safeText(process.env.OH_USER || SERVER_CONFIG.openhab?.user || '');
 const OH_PASS = safeText(process.env.OH_PASS || SERVER_CONFIG.openhab?.pass || '');
@@ -209,7 +207,6 @@ const ACCESS_LOG_LEVEL = safeText(process.env.ACCESS_LOG_LEVEL || SERVER_CONFIG.
 	.trim()
 	.toLowerCase();
 const SLOW_QUERY_MS = configNumber(SERVER_CONFIG.slowQueryMs, 0);
-const AUTH_WHITELIST = SERVER_AUTH.whitelistSubnets;
 const AUTH_REALM = safeText(SERVER_AUTH.realm || 'openHAB Proxy');
 const AUTH_COOKIE_NAME = safeText(SERVER_AUTH.cookieName || 'AuthStore');
 const AUTH_COOKIE_DAYS = configNumber(SERVER_AUTH.cookieDays, 0);
@@ -520,7 +517,6 @@ function validateConfig() {
 
 	if (ensureObject(SERVER_CONFIG.auth, 'server.auth', errors)) {
 		ensureReadableFile(SERVER_AUTH.usersFile, 'server.auth.usersFile', errors);
-		ensureCidrList(SERVER_AUTH.whitelistSubnets, 'server.auth.whitelistSubnets', { allowEmpty: true }, errors);
 		ensureString(AUTH_REALM, 'server.auth.realm', { allowEmpty: false }, errors);
 		ensureString(AUTH_COOKIE_NAME, 'server.auth.cookieName', { allowEmpty: true }, errors);
 		ensureNumber(AUTH_COOKIE_DAYS, 'server.auth.cookieDays', { min: 0 }, errors);
@@ -958,9 +954,7 @@ function maybeNotifyAuthFailure(ip) {
 }
 
 function sendAuthRequired(res) {
-	// Set auth headers so client can update status (user is not on LAN if auth is required)
 	res.setHeader('X-OhProxy-Authenticated', 'false');
-	res.setHeader('X-OhProxy-Lan', 'false');
 	res.setHeader('WWW-Authenticate', `Basic realm="${liveConfig.authRealm}"`);
 	res.status(401).type('text/plain').send('Unauthorized');
 }
@@ -1001,13 +995,9 @@ function getAuthInfo(req) {
 	const authState = safeText(req?.ohProxyAuth || '').trim().toLowerCase();
 	const authUser = safeText(req?.ohProxyUser || '').trim();
 	if (authState === 'authenticated' && authUser) {
-		return { auth: 'authenticated', user: authUser, lan: false };
+		return { auth: 'authenticated', user: authUser };
 	}
-	const clientIp = normalizeRequestIp(req?.ohProxyClientIp || '');
-	const remote = normalizeRequestIp(req?.socket?.remoteAddress || '');
-	const isLan = (clientIp && ipInAnySubnet(clientIp, liveConfig.lanSubnets))
-		|| (remote && ipInAnySubnet(remote, liveConfig.lanSubnets));
-	return { auth: 'unauthenticated', user: '', lan: isLan };
+	return { auth: 'unauthenticated', user: '' };
 }
 
 function inlineJson(value) {
@@ -1031,7 +1021,6 @@ let configRestartTriggered = false;
 // Live config - values that can be hot-reloaded without restart
 const liveConfig = {
 	allowSubnets: ALLOW_SUBNETS,
-	lanSubnets: LAN_SUBNETS,
 	proxyAllowlist: PROXY_ALLOWLIST,
 	ohTarget: OH_TARGET,
 	ohUser: OH_USER,
@@ -1046,7 +1035,6 @@ const liveConfig = {
 	iconCacheConcurrency: ICON_CACHE_CONCURRENCY,
 	deltaCacheLimit: DELTA_CACHE_LIMIT,
 	slowQueryMs: SLOW_QUERY_MS,
-	authWhitelist: AUTH_WHITELIST,
 	authRealm: AUTH_REALM,
 	authCookieName: AUTH_COOKIE_NAME,
 	authCookieDays: AUTH_COOKIE_DAYS,
@@ -1093,6 +1081,9 @@ function migrateGlowRulesToDb() {
 
 // Run migration on startup
 migrateGlowRulesToDb();
+
+// Clean up any LAN user sessions (all users now require authentication)
+sessions.deleteLanSessions();
 
 // Values that require restart if changed
 const restartRequiredKeys = [
@@ -1150,7 +1141,6 @@ function reloadLiveConfig() {
 	const newWsConfig = newServer.websocket || {};
 
 	liveConfig.allowSubnets = newServer.allowSubnets;
-	liveConfig.lanSubnets = Array.isArray(newServer.lanSubnets) ? newServer.lanSubnets : [];
 	liveConfig.proxyAllowlist = normalizeProxyAllowlist(newServer.proxyAllowlist);
 	liveConfig.ohTarget = safeText(newServer.openhab?.target);
 	liveConfig.ohUser = safeText(newServer.openhab?.user || '');
@@ -1173,7 +1163,6 @@ function reloadLiveConfig() {
 	liveConfig.iconCacheConcurrency = Math.max(1, Math.floor(configNumber(newServer.iconCacheConcurrency, 5)));
 	liveConfig.deltaCacheLimit = configNumber(newServer.deltaCacheLimit);
 	liveConfig.slowQueryMs = configNumber(newServer.slowQueryMs, 0);
-	liveConfig.authWhitelist = newAuth.whitelistSubnets;
 	liveConfig.authRealm = safeText(newAuth.realm || 'openHAB Proxy');
 	liveConfig.authCookieName = safeText(newAuth.cookieName || 'AuthStore');
 	liveConfig.authCookieDays = configNumber(newAuth.cookieDays, 0);
@@ -1842,15 +1831,8 @@ function handleWsUpgrade(req, socket, head) {
 		return;
 	}
 
-	// Check if auth is required
-	let requiresAuth = !clientIp;
-	if (clientIp) {
-		const inWhitelist = ipInAnySubnet(clientIp, liveConfig.authWhitelist);
-		const inLan = ipInAnySubnet(clientIp, liveConfig.lanSubnets);
-		requiresAuth = !inWhitelist && !inLan;
-	}
-
-	if (requiresAuth) {
+	// Always require authentication
+	{
 		// Check lockout
 		const lockKey = getLockoutKey(clientIp);
 		const lockout = getAuthLockout(lockKey);
@@ -2703,19 +2685,8 @@ app.use((req, res, next) => {
 		req.ohProxyUser = '';
 		return next();
 	}
-	let requiresAuth = !clientIp;
-	if (clientIp) {
-		const inWhitelist = ipInAnySubnet(clientIp, liveConfig.authWhitelist);
-		const inLan = ipInAnySubnet(clientIp, liveConfig.lanSubnets);
-		requiresAuth = !inWhitelist && !inLan;
-	}
-	if (!requiresAuth) {
-		req.ohProxyAuth = 'unauthenticated';
-		req.ohProxyUser = '';
-		return next();
-	}
 
-	// Auth is required - handle based on auth mode
+	// Auth is always required - handle based on auth mode
 	const users = loadAuthUsers();
 	if (!users || Object.keys(users).length === 0) {
 		res.status(500).type('text/plain').send('Auth config unavailable');
@@ -2909,9 +2880,6 @@ app.get('/config.js', (req, res) => {
 
 	res.send(`window.__OH_CONFIG__=${JSON.stringify({
 		iconVersion: liveConfig.iconVersion,
-		server: {
-			lanSubnets: Array.isArray(liveConfig.lanSubnets) ? liveConfig.lanSubnets : [],
-		},
 		client: clientConfig,
 		widgetGlowRules: sessions.getAllGlowRules(),
 		widgetVisibilityRules: sessions.getAllVisibilityRules(),

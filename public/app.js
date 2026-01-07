@@ -53,7 +53,6 @@ const state = {
 	lastError: '',
 	proxyAuth: '',
 	proxyUser: '',
-	authIsLan: false,
 	isRefreshing: false,
 	pendingScrollTop: false,
 	initialStatusText: '',
@@ -71,7 +70,6 @@ const AUTH_INFO = (window.__OH_AUTH__ && typeof window.__OH_AUTH__ === 'object')
 
 state.proxyAuth = typeof AUTH_INFO.auth === 'string' ? AUTH_INFO.auth.toLowerCase() : '';
 state.proxyUser = typeof AUTH_INFO.user === 'string' ? AUTH_INFO.user : '';
-state.authIsLan = !!AUTH_INFO.lan;
 
 function configNumber(value, fallback) {
 	const num = Number(value);
@@ -716,9 +714,6 @@ function connectionStatusInfo() {
 	const headerUser = safeText(state.proxyUser).trim();
 	if (headerAuth === 'authenticated' && headerUser) {
 		return { label: `Connected · ${headerUser}`, isError: false };
-	}
-	if (state.authIsLan) {
-		return { label: 'Connected · LAN', isError: false };
 	}
 	return { label: 'Connected', isError: false };
 }
@@ -1839,26 +1834,20 @@ function syncAuthFromHeaders(res) {
 	if (!res || !res.headers) return;
 	const rawAuth = safeText(res.headers.get('X-OhProxy-Authenticated') || '').trim().toLowerCase();
 	const rawUser = safeText(res.headers.get('X-OhProxy-Username') || '').trim();
-	const rawLan = safeText(res.headers.get('X-OhProxy-Lan') || '').trim().toLowerCase();
-	if (!rawAuth && !rawUser && !rawLan) return;
+	if (!rawAuth && !rawUser) return;
 	const authenticated = ['true', '1', 'yes', 'authenticated'].includes(rawAuth);
 	const nextAuth = authenticated ? 'authenticated' : 'unauthenticated';
 	const nextUser = authenticated ? rawUser : '';
-	const nextLan = ['true', '1', 'yes', 'lan'].includes(rawLan);
-	const changed = nextAuth !== state.proxyAuth
-		|| nextUser !== state.proxyUser
-		|| nextLan !== state.authIsLan;
+	const changed = nextAuth !== state.proxyAuth || nextUser !== state.proxyUser;
 	state.proxyAuth = nextAuth;
 	state.proxyUser = nextUser;
-	state.authIsLan = nextLan;
 	if (changed) updateStatusBar();
 }
 
 async function fetchWithAuth(url, options) {
 	const res = await fetch(url, options);
 	syncAuthFromHeaders(res);
-	// Detect 401 - user may have switched from LAN to WAN without auth cookie
-	// Or account was deleted - redirect to login
+	// Detect 401 - session expired or account was deleted - redirect to login
 	if (res.status === 401) {
 		// Check if account was deleted
 		try {

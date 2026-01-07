@@ -215,6 +215,19 @@ function cleanupSessions() {
 }
 
 /**
+ * Delete all sessions without a username (former LAN user sessions).
+ * @returns {number} - Number of sessions deleted
+ */
+function deleteLanSessions() {
+	if (!db) initDb();
+	const result = db.prepare('DELETE FROM sessions WHERE username IS NULL').run();
+	if (result.changes > 0) {
+		console.log(`[sessions] Deleted ${result.changes} LAN session(s)`);
+	}
+	return result.changes;
+}
+
+/**
  * Close the database connection.
  */
 function closeDb() {
@@ -432,6 +445,7 @@ module.exports = {
 	updateUsername,
 	touchSession,
 	cleanupSessions,
+	deleteLanSessions,
 	closeDb,
 	getDefaultSettings,
 	setMaxAgeDays,
