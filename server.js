@@ -1089,7 +1089,61 @@ const liveConfig = {
 	wsMode: WS_MODE,
 	wsPollingIntervalMs: WS_POLLING_INTERVAL_MS,
 	wsPollingIntervalBgMs: WS_POLLING_INTERVAL_BG_MS,
+	widgetGlowRules: [],
 };
+
+// Widget glow rules JSON file handling
+const GLOW_RULES_DEFAULTS_PATH = path.join(__dirname, 'widgetGlowRules.defaults.json');
+const GLOW_RULES_LOCAL_PATH = path.join(__dirname, 'widgetGlowRules.local.json');
+let lastGlowRulesMtime = 0;
+
+function readGlowRulesLocalMtime() {
+	try {
+		const stat = fs.statSync(GLOW_RULES_LOCAL_PATH);
+		const mtime = stat.mtimeMs || stat.mtime.getTime();
+		return Number.isFinite(mtime) ? mtime : 0;
+	} catch (err) {
+		if (err && err.code === 'ENOENT') return 0;
+		return 0;
+	}
+}
+
+function loadWidgetGlowRules() {
+	let defaults = [];
+	let local = [];
+	try {
+		const raw = fs.readFileSync(GLOW_RULES_DEFAULTS_PATH, 'utf8');
+		defaults = JSON.parse(raw);
+		if (!Array.isArray(defaults)) defaults = [];
+	} catch {}
+	try {
+		const raw = fs.readFileSync(GLOW_RULES_LOCAL_PATH, 'utf8');
+		local = JSON.parse(raw);
+		if (!Array.isArray(local)) local = [];
+	} catch {}
+
+	// Merge: local overrides defaults by widgetId
+	const merged = new Map(defaults.map(r => [r.widgetId, r]));
+	for (const rule of local) {
+		if (rule && rule.widgetId) merged.set(rule.widgetId, rule);
+	}
+	return Array.from(merged.values());
+}
+
+function saveWidgetGlowRules(rules) {
+	try {
+		fs.writeFileSync(GLOW_RULES_LOCAL_PATH, JSON.stringify(rules, null, '\t'), 'utf8');
+		lastGlowRulesMtime = readGlowRulesLocalMtime();
+		return true;
+	} catch (err) {
+		logMessage(`Failed to save widget glow rules: ${err.message || err}`);
+		return false;
+	}
+}
+
+// Initialize glow rules
+liveConfig.widgetGlowRules = loadWidgetGlowRules();
+lastGlowRulesMtime = readGlowRulesLocalMtime();
 
 // Values that require restart if changed
 const restartRequiredKeys = [
@@ -2605,6 +2659,13 @@ app.use((req, res, next) => {
 			}
 		}
 	}
+	// Hot reload widget glow rules
+	const glowMtime = readGlowRulesLocalMtime();
+	if (glowMtime !== lastGlowRulesMtime) {
+		lastGlowRulesMtime = glowMtime;
+		liveConfig.widgetGlowRules = loadWidgetGlowRules();
+		logMessage('Widget glow rules hot-reloaded');
+	}
 	next();
 });
 app.use((req, res, next) => {
@@ -2860,6 +2921,7 @@ app.get('/config.js', (req, res) => {
 			lanSubnets: Array.isArray(liveConfig.lanSubnets) ? liveConfig.lanSubnets : [],
 		},
 		client: clientConfig,
+		widgetGlowRules: Array.isArray(liveConfig.widgetGlowRules) ? liveConfig.widgetGlowRules : [],
 	})};`);
 });
 
@@ -2896,6 +2958,91 @@ app.post('/api/settings', express.json(), (req, res) => {
 		return;
 	}
 	res.json({ ok: true, settings: merged });
+});
+
+// Widget glow rules API
+app.get('/api/glow-rules/:widgetId', (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+	const widgetId = safeText(req.params.widgetId);
+	if (!widgetId) {
+		res.status(400).json({ error: 'Missing widgetId' });
+		return;
+	}
+	const entry = liveConfig.widgetGlowRules.find(r => r.widgetId === widgetId);
+	res.json({ widgetId, rules: entry ? entry.rules : [] });
+});
+
+app.post('/api/glow-rules', express.json(), (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+
+	const { widgetId, rules } = req.body || {};
+	if (!widgetId || typeof widgetId !== 'string') {
+		res.status(400).json({ error: 'Missing or invalid widgetId' });
+		return;
+	}
+	if (!Array.isArray(rules)) {
+		res.status(400).json({ error: 'Rules must be an array' });
+		return;
+	}
+
+	// Validate rules
+	const validOperators = ['=', '!=', '>', '<', '>=', '<=', 'contains', '!contains', 'startsWith', 'endsWith', '*'];
+	const validColors = ['green', 'orange', 'red'];
+	for (const rule of rules) {
+		if (!rule || typeof rule !== 'object') {
+			res.status(400).json({ error: 'Each rule must be an object' });
+			return;
+		}
+		if (!validOperators.includes(rule.operator)) {
+			res.status(400).json({ error: `Invalid operator: ${rule.operator}` });
+			return;
+		}
+		if (!validColors.includes(rule.color)) {
+			res.status(400).json({ error: `Invalid color: ${rule.color}` });
+			return;
+		}
+		if (rule.operator !== '*' && (rule.value === undefined || rule.value === null)) {
+			res.status(400).json({ error: 'Value required for non-wildcard operator' });
+			return;
+		}
+	}
+
+	// Read current local rules
+	let localRules = [];
+	try {
+		const raw = fs.readFileSync(GLOW_RULES_LOCAL_PATH, 'utf8');
+		localRules = JSON.parse(raw);
+		if (!Array.isArray(localRules)) localRules = [];
+	} catch {}
+
+	// Update or remove entry
+	const existingIdx = localRules.findIndex(r => r.widgetId === widgetId);
+	if (rules.length === 0) {
+		// Remove entry if rules array is empty
+		if (existingIdx >= 0) {
+			localRules.splice(existingIdx, 1);
+		}
+	} else {
+		// Update or add entry
+		if (existingIdx >= 0) {
+			localRules[existingIdx] = { widgetId, rules };
+		} else {
+			localRules.push({ widgetId, rules });
+		}
+	}
+
+	// Save to file
+	if (!saveWidgetGlowRules(localRules)) {
+		res.status(500).json({ error: 'Failed to save rules' });
+		return;
+	}
+
+	// Reload merged rules
+	liveConfig.widgetGlowRules = loadWidgetGlowRules();
+
+	res.json({ ok: true, widgetId, rules });
 });
 
 app.get('/sw.js', (req, res) => {

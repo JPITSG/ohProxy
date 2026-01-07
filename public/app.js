@@ -88,6 +88,17 @@ const IMAGE_LOAD_TIMEOUT_MS = configNumber(CLIENT_CONFIG.imageLoadTimeoutMs, 150
 const CONNECTION_PENDING_DELAY_MS = 500;
 const IMAGE_VIEWER_MAX_VIEWPORT = 0.9;
 
+// Widget glow rules: Map from widgetId to rules array
+const widgetGlowRulesMap = new Map();
+(function initWidgetGlowRules() {
+	const rules = Array.isArray(OH_CONFIG.widgetGlowRules) ? OH_CONFIG.widgetGlowRules : [];
+	for (const entry of rules) {
+		if (entry.widgetId && Array.isArray(entry.rules)) {
+			widgetGlowRulesMap.set(entry.widgetId, entry.rules);
+		}
+	}
+})();
+
 let connectionPendingTimer = null;
 
 function scheduleConnectionPending() {
@@ -786,9 +797,9 @@ function colorToRgba(color, alpha) {
 	if (!c) return '';
 	let rgb = resolveColorToRgb(c);
 	if (!rgb) return c;
-	// Use specific glow colors
+	// Use specific glow colors (matching status indicator)
 	if (isGreenishRgb(rgb)) {
-		rgb = { r: 154, g: 240, b: 0 }; // #9af000
+		rgb = { r: 118, g: 214, b: 152 }; // matches --color-status-ok
 	} else if (rgb.r > 150 && rgb.g > 100 && rgb.g < 200 && rgb.b < 100) {
 		// Orange/yellow
 		rgb = { r: 255, g: 130, b: 42 }; // #ff822a
@@ -874,19 +885,85 @@ function getStateGlowColor(widget, stateValue) {
 }
 
 function applyGlowStyle(card, color) {
-	const edge = colorToRgba(color, 0.5) || color;
-	const glow = colorToRgba(color, 0.4) || color;
-	const bg = colorToRgba(color, 0.15) || color;
-	if (!edge || !glow) return;
+	const solid = colorToRgba(color, 1) || color;
+	const glow = colorToRgba(color, 0.6) || color;
+	if (!solid || !glow) return;
 	card.classList.add('glow-card');
-	card.style.setProperty('--glow-edge', edge);
-	card.style.setProperty('--glow-color', glow);
-	card.style.setProperty('--glow-bg', bg);
+	// Add or update glow dot next to meta text
+	let dot = card.querySelector('.glow-dot');
+	if (!dot) {
+		dot = document.createElement('span');
+		dot.className = 'glow-dot';
+		const meta = card.querySelector('.meta');
+		if (meta && meta.parentNode) {
+			meta.parentNode.insertBefore(dot, meta);
+		} else {
+			card.appendChild(dot);
+		}
+	}
+	dot.style.setProperty('--glow-solid', solid);
+	dot.style.setProperty('--glow-color', glow);
 }
 
 function applyGlow(card, color, widget) {
 	if (!isGlowContext(widget)) return;
 	applyGlowStyle(card, color);
+}
+
+// Per-widget glow rule matching
+function extractNumericValue(val) {
+	const str = String(val).trim();
+	// Handle "Rained X days ago" pattern
+	const rainedMatch = str.match(/^rained\s+(\d+)\s+days?\s+ago$/i);
+	if (rainedMatch) return parseInt(rainedMatch[1], 10);
+	// Extract leading number from strings like "15.5 l/min", "23.4 °C", "100 W"
+	const match = str.match(/^-?\d+\.?\d*/);
+	if (match) return parseFloat(match[0]);
+	return parseFloat(str);
+}
+
+function matchesGlowRule(rule, stateValue) {
+	const op = rule.operator;
+	const ruleVal = rule.value;
+
+	// Normalize values for comparison
+	const stateStr = String(stateValue).toLowerCase();
+	const ruleStr = String(ruleVal).toLowerCase();
+
+	// Try numeric comparison - extract numbers from values with units (e.g. "15.5 l/min")
+	const stateNum = extractNumericValue(stateValue);
+	const ruleNum = extractNumericValue(ruleVal);
+	const bothNumeric = !isNaN(stateNum) && !isNaN(ruleNum);
+
+	switch (op) {
+		case '*': return true; // catch-all
+		case '=':
+			if (bothNumeric) return stateNum === ruleNum;
+			return stateStr === ruleStr;
+		case '!=':
+			if (bothNumeric) return stateNum !== ruleNum;
+			return stateStr !== ruleStr;
+		case '>':  return bothNumeric && stateNum > ruleNum;
+		case '<':  return bothNumeric && stateNum < ruleNum;
+		case '>=': return bothNumeric && stateNum >= ruleNum;
+		case '<=': return bothNumeric && stateNum <= ruleNum;
+		case 'contains':   return stateStr.includes(ruleStr);
+		case '!contains':  return !stateStr.includes(ruleStr);
+		case 'startsWith': return stateStr.startsWith(ruleStr);
+		case 'endsWith':   return stateStr.endsWith(ruleStr);
+		default: return false;
+	}
+}
+
+function getWidgetGlowOverride(wKey, stateValue) {
+	const rules = widgetGlowRulesMap.get(wKey);
+	if (!rules || !rules.length) return null;
+	for (const rule of rules) {
+		if (matchesGlowRule(rule, stateValue)) {
+			return rule.color;
+		}
+	}
+	return null;
 }
 
 function ensureJsonParam(url) {
@@ -1229,6 +1306,268 @@ function pushImageViewerHistory(url, refreshMs, isMjpeg) {
 		},
 	};
 	history.pushState(payload, '', window.location.pathname);
+}
+
+// Glow Config Modal
+let glowConfigModal = null;
+let glowConfigWidgetKey = '';
+let glowConfigWidgetLabel = '';
+
+function ensureGlowConfigModal() {
+	if (glowConfigModal) return;
+	const wrap = document.createElement('div');
+	wrap.id = 'glowConfigModal';
+	wrap.className = 'glow-config-modal hidden';
+	wrap.innerHTML = `
+		<div class="glow-config-frame glass">
+			<div class="glow-config-body">
+				<div class="glow-config-rules"></div>
+				<button type="button" class="glow-config-add">+ Add Rule</button>
+				<div class="glow-config-footer">
+					<button type="button" class="glow-config-cancel">Close</button>
+					<button type="button" class="glow-config-save">Save</button>
+				</div>
+			</div>
+		</div>
+	`;
+	document.body.appendChild(wrap);
+	glowConfigModal = wrap;
+
+	// Event listeners
+	wrap.querySelector('.glow-config-cancel').addEventListener('click', closeGlowConfigModal);
+	wrap.querySelector('.glow-config-save').addEventListener('click', async () => {
+		await saveGlowConfigRules();
+		closeGlowConfigModal();
+	});
+	wrap.querySelector('.glow-config-add').addEventListener('click', addGlowRuleRow);
+	wrap.addEventListener('click', (e) => {
+		if (e.target === wrap) closeGlowConfigModal();
+	});
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape' && glowConfigModal && !glowConfigModal.classList.contains('hidden')) {
+			closeGlowConfigModal();
+		}
+	});
+}
+
+function createGlowCustomSelect(options, initialValue, className) {
+	const wrap = document.createElement('div');
+	wrap.className = `glow-select-wrap ${className}`;
+
+	const current = options.find(o => o.value === initialValue) || options[0];
+	wrap.dataset.value = current.value;
+
+	const fakeSelect = document.createElement('button');
+	fakeSelect.type = 'button';
+	fakeSelect.className = 'glow-fake-select';
+	fakeSelect.textContent = current.label;
+	if (className === 'glow-color-select') {
+		fakeSelect.dataset.color = current.value;
+	}
+
+	const menu = document.createElement('div');
+	menu.className = 'glow-select-menu';
+
+	const closeMenu = () => {
+		menu.style.display = 'none';
+		wrap.classList.remove('menu-open');
+	};
+
+	for (const opt of options) {
+		const optBtn = document.createElement('button');
+		optBtn.type = 'button';
+		optBtn.className = 'glow-select-option';
+		if (opt.value === current.value) optBtn.classList.add('active');
+		optBtn.textContent = opt.label;
+		optBtn.dataset.value = opt.value;
+		if (className === 'glow-color-select') {
+			optBtn.dataset.color = opt.value;
+		}
+		optBtn.onclick = (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			wrap.dataset.value = opt.value;
+			fakeSelect.textContent = opt.label;
+			if (className === 'glow-color-select') {
+				fakeSelect.dataset.color = opt.value;
+			}
+			menu.querySelectorAll('.glow-select-option').forEach(b => b.classList.remove('active'));
+			optBtn.classList.add('active');
+			closeMenu();
+		};
+		menu.appendChild(optBtn);
+	}
+
+	const openMenu = () => {
+		const rect = fakeSelect.getBoundingClientRect();
+		menu.style.position = 'fixed';
+		menu.style.left = rect.left + 'px';
+		menu.style.top = (rect.bottom + 4) + 'px';
+		menu.style.minWidth = rect.width + 'px';
+		menu.style.display = 'block';
+		wrap.classList.add('menu-open');
+	};
+
+	fakeSelect.onclick = (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		// Close other open menus
+		document.querySelectorAll('.glow-select-menu').forEach(m => {
+			if (m !== menu) m.style.display = 'none';
+		});
+		document.querySelectorAll('.glow-select-wrap.menu-open').forEach(w => {
+			if (w !== wrap) w.classList.remove('menu-open');
+		});
+		if (wrap.classList.contains('menu-open')) {
+			closeMenu();
+		} else {
+			openMenu();
+		}
+	};
+
+	// Close on click outside
+	document.addEventListener('click', (e) => {
+		if (!wrap.contains(e.target) && !menu.contains(e.target)) {
+			closeMenu();
+		}
+	});
+
+	wrap.appendChild(fakeSelect);
+	document.body.appendChild(menu);
+	return wrap;
+}
+
+function createGlowRuleRow(rule = {}) {
+	const row = document.createElement('div');
+	row.className = 'glow-rule-row';
+
+	const operatorOptions = [
+		{ value: '=', label: '=' },
+		{ value: '!=', label: '!=' },
+		{ value: '>', label: '>' },
+		{ value: '<', label: '<' },
+		{ value: '>=', label: '>=' },
+		{ value: '<=', label: '<=' },
+		{ value: 'contains', label: 'contains' },
+		{ value: '!contains', label: '!contains' },
+		{ value: 'startsWith', label: 'startsWith' },
+		{ value: 'endsWith', label: 'endsWith' },
+		{ value: '*', label: '* (any)' },
+	];
+
+	const colorOptions = [
+		{ value: 'green', label: 'Green' },
+		{ value: 'orange', label: 'Orange' },
+		{ value: 'red', label: 'Red' },
+	];
+
+	const operatorSelect = createGlowCustomSelect(operatorOptions, rule.operator || '=', 'glow-operator-select');
+	const colorSelect = createGlowCustomSelect(colorOptions, rule.color || 'green', 'glow-color-select');
+
+	const valueInput = document.createElement('input');
+	valueInput.type = 'text';
+	valueInput.className = 'glow-rule-value';
+	valueInput.placeholder = 'value';
+	if (rule.value !== undefined) valueInput.value = rule.value;
+
+	const deleteBtn = document.createElement('button');
+	deleteBtn.type = 'button';
+	deleteBtn.className = 'glow-rule-delete';
+	deleteBtn.innerHTML = '<img src="icons/image-viewer-close.svg" alt="X" />';
+	deleteBtn.onclick = () => row.remove();
+
+	row.appendChild(operatorSelect);
+	row.appendChild(valueInput);
+	row.appendChild(colorSelect);
+	row.appendChild(deleteBtn);
+
+	return row;
+}
+
+function addGlowRuleRow() {
+	const rulesContainer = glowConfigModal.querySelector('.glow-config-rules');
+	rulesContainer.appendChild(createGlowRuleRow());
+}
+
+function openGlowConfigModal(widget, card) {
+	if (state.isSlim) return;
+	haptic();
+	ensureGlowConfigModal();
+	const wKey = widgetKey(widget);
+	glowConfigWidgetKey = wKey;
+	glowConfigWidgetLabel = widget?.label || widget?.item?.label || widget?.item?.name || wKey;
+
+	// Load existing rules
+	const rulesContainer = glowConfigModal.querySelector('.glow-config-rules');
+	rulesContainer.innerHTML = '';
+	const existingRules = widgetGlowRulesMap.get(wKey) || [];
+	if (existingRules.length) {
+		for (const rule of existingRules) {
+			rulesContainer.appendChild(createGlowRuleRow(rule));
+		}
+	} else {
+		// Start with one empty row
+		rulesContainer.appendChild(createGlowRuleRow());
+	}
+
+	glowConfigModal.classList.remove('hidden');
+	document.body.classList.add('glow-config-open');
+}
+
+function closeGlowConfigModal() {
+	if (!glowConfigModal) return;
+	haptic();
+	// Remove dropdown menus from body
+	document.querySelectorAll('.glow-select-menu').forEach(m => m.remove());
+	glowConfigModal.classList.add('hidden');
+	document.body.classList.remove('glow-config-open');
+	glowConfigWidgetKey = '';
+	glowConfigWidgetLabel = '';
+}
+
+async function saveGlowConfigRules() {
+	if (!glowConfigModal || !glowConfigWidgetKey) return;
+	const rows = glowConfigModal.querySelectorAll('.glow-rule-row');
+	const rules = [];
+	for (const row of rows) {
+		const operator = row.querySelector('.glow-operator-select')?.dataset.value || '=';
+		const value = row.querySelector('.glow-rule-value').value;
+		const color = row.querySelector('.glow-color-select')?.dataset.value || 'green';
+		// Skip empty catch-all rules without color
+		if (operator === '*' && !value) {
+			rules.push({ operator, value: '', color });
+		} else if (value || operator === '*') {
+			rules.push({ operator, value, color });
+		}
+	}
+
+	try {
+		const resp = await fetch('/api/glow-rules', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ widgetId: glowConfigWidgetKey, rules }),
+		});
+		if (!resp.ok) return;
+		// Update local map
+		if (rules.length) {
+			widgetGlowRulesMap.set(glowConfigWidgetKey, rules);
+		} else {
+			widgetGlowRulesMap.delete(glowConfigWidgetKey);
+		}
+		// Apply glow to the card immediately
+		const card = document.querySelector(`.glass[data-widget-key="${glowConfigWidgetKey}"]`);
+		if (card) {
+			clearGlow(card);
+			const meta = card.querySelector('.meta');
+			const stateValue = meta ? meta.textContent : '';
+			const glowColor = getWidgetGlowOverride(glowConfigWidgetKey, stateValue);
+			if (glowColor) {
+				applyGlowStyle(card, glowColor);
+			}
+		}
+	} catch (e) {
+		// Silent fail
+	}
 }
 
 function ensureImageViewer() {
@@ -1681,6 +2020,18 @@ function updateItemState(itemName, nextState) {
 	}
 }
 
+function findWidgetByKey(key) {
+	if (!key) return null;
+	const lists = [state.rawWidgets, state.searchWidgets];
+	for (const list of lists) {
+		if (!Array.isArray(list)) continue;
+		for (const w of list) {
+			if (widgetKey(w) === key) return w;
+		}
+	}
+	return null;
+}
+
 async function fetchItemState(itemName) {
 	if (!itemName) return null;
 	try {
@@ -1770,10 +2121,11 @@ function widgetIconName(widget) {
 
 function widgetKey(widget) {
 	if (widget?.__section) return `section:${safeText(widget.label)}`;
-	const id = safeText(widget?.widgetId || '');
-	if (id) return `widget:${id}`;
+	// Don't use widgetId - it's positional and changes when visibility shifts widgets
 	const item = safeText(widget?.item?.name || '');
-	const label = safeText(widget?.label || '');
+	// Use title only (without state) so key is stable when state changes
+	const fullLabel = safeText(widget?.label || '');
+	const label = splitLabelState(fullLabel).title || fullLabel;
 	const type = widgetType(widget);
 	const link = safeText(widgetPageLink(widget) || '');
 	return `widget:${item}|${label}|${type}|${link}`;
@@ -1955,8 +2307,8 @@ function createCardElement() {
 
 function clearGlow(card) {
 	card.classList.remove('glow-card');
-	card.style.removeProperty('--glow-edge');
-	card.style.removeProperty('--glow-color');
+	const dot = card.querySelector('.glow-dot');
+	if (dot) dot.remove();
 }
 
 function resetCardInteractions(card) {
@@ -2221,9 +2573,16 @@ function updateCard(card, w, afterImage, info) {
 		metaEl.textContent = labelParts.state;
 	}
 	if (labelParts.state) card.classList.add('has-meta');
-	const stateGlowColor = getStateGlowColor(w, labelParts.state || st);
-	if (stateGlowColor) applyGlowStyle(card, stateGlowColor);
-	else if (valueColor) applyGlow(card, valueColor, w);
+	// Apply glow: custom rules override state glow and value glow
+	const wKey = widgetKey(w);
+	const customGlowColor = getWidgetGlowOverride(wKey, labelParts.state || st);
+	if (customGlowColor) {
+		applyGlowStyle(card, customGlowColor);
+	} else {
+		const stateGlowColor = getStateGlowColor(w, labelParts.state || st);
+		if (stateGlowColor) applyGlowStyle(card, stateGlowColor);
+		else if (valueColor) applyGlow(card, valueColor, w);
+	}
 
 	if (isImage) {
 		labelRow.classList.add('hidden');
@@ -3593,6 +3952,24 @@ function restoreNormalPolling() {
 	window.addEventListener('touchend', handleBounceTouchEnd, { passive: true });
 	window.addEventListener('touchcancel', handleBounceTouchEnd, { passive: true });
 	window.addEventListener('click', noteActivity, { passive: true });
+	// Ctrl+click on Text/Group cards opens glow config modal
+	document.addEventListener('click', (e) => {
+		if (!(e.ctrlKey || e.metaKey) || state.isSlim) return;
+		// Cards are .glass elements with data-widget-key attribute inside #grid
+		const card = e.target.closest('#grid > .glass[data-widget-key]');
+		if (!card) return;
+		const key = card.dataset.widgetKey;
+		if (!key || !key.startsWith('widget:')) return;
+		// Find widget in current page
+		const widget = findWidgetByKey(key);
+		if (!widget) return;
+		const wType = widgetType(widget).toLowerCase();
+		// Use includes() like the rest of the codebase
+		if (!wType.includes('text') && !wType.includes('group')) return;
+		e.preventDefault();
+		e.stopPropagation();
+		openGlowConfigModal(widget, card);
+	}, true);
 	window.addEventListener('keydown', noteActivity, { passive: true });
 	window.addEventListener('resize', scheduleImageResizeRefresh, { passive: true });
 	window.addEventListener('orientationchange', scheduleImageResizeRefresh, { passive: true });

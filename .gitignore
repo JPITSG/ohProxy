@@ -1,4 +1,5 @@
 config.local.js
+widgetGlowRules.local.json
 sessions.db
 sessions.db-*
 node_modules/
