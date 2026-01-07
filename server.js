@@ -14,6 +14,7 @@ const spdy = require('spdy');
 const crypto = require('crypto');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const WebSocket = require('ws');
+const net = require('net');
 const sessions = require('./sessions');
 
 const CONFIG_PATH = path.join(__dirname, 'config.js');
@@ -1323,6 +1324,7 @@ function handleWsConnection(ws, req) {
 
 	ws.isAlive = true;
 	ws.clientState = { focused: true };  // Assume focused on connect; client will send actual state
+	ws.ohProxyUser = req.ohProxyUser || null;  // Track authenticated username
 
 	// Send welcome message
 	try {
@@ -1900,6 +1902,7 @@ function handleWsUpgrade(req, socket, head) {
 
 		clearAuthFailures(lockKey);
 		logMessage(`[WS] Authenticated user ${authenticatedUser} from ${clientIp || 'unknown'}`);
+		req.ohProxyUser = authenticatedUser;
 	}
 
 	// Create a new headers object without extensions
@@ -2814,6 +2817,30 @@ app.use((req, res, next) => {
 	req.ohProxyUser = authenticatedUser;
 	next();
 });
+// User validation middleware - verify authenticated user still exists
+app.use((req, res, next) => {
+	// Only check authenticated users
+	if (req.ohProxyAuth !== 'authenticated' || !req.ohProxyUser) {
+		return next();
+	}
+	// Verify user still exists in database
+	const user = sessions.getUser(req.ohProxyUser);
+	if (!user) {
+		// User was deleted - clear auth and redirect to login
+		clearAuthCookie(res);
+		req.ohProxyAuth = 'unauthenticated';
+		req.ohProxyUser = '';
+		// For API requests, return 401
+		if (req.path.startsWith('/api/')) {
+			res.status(401).json({ error: 'account-deleted' });
+			return;
+		}
+		// For page requests, redirect to login
+		res.redirect('/login');
+		return;
+	}
+	next();
+});
 // Session middleware - runs after auth, assigns/loads session for all authorized users
 app.use((req, res, next) => {
 	try {
@@ -3443,3 +3470,102 @@ if (HTTP_ENABLED) startHttpServer();
 if (HTTPS_ENABLED) startHttpsServer();
 
 logMessage(`Proxying openHAB from: ${OH_TARGET}`);
+
+// --- IPC Socket for CLI communication ---
+const IPC_SOCKET_PATH = path.join(__dirname, 'ohproxy.sock');
+
+// Clean up stale socket file on startup
+try {
+	if (fs.existsSync(IPC_SOCKET_PATH)) {
+		fs.unlinkSync(IPC_SOCKET_PATH);
+	}
+} catch (err) {
+	logMessage(`[IPC] Failed to clean up stale socket: ${err.message}`);
+}
+
+const ipcServer = net.createServer((client) => {
+	let buffer = '';
+	client.on('data', (data) => {
+		buffer += data.toString();
+		// Process complete JSON messages (newline-delimited)
+		const lines = buffer.split('\n');
+		buffer = lines.pop(); // Keep incomplete line in buffer
+		for (const line of lines) {
+			if (!line.trim()) continue;
+			try {
+				const msg = JSON.parse(line);
+				handleIpcMessage(msg, client);
+			} catch (err) {
+				logMessage(`[IPC] Invalid message: ${err.message}`);
+				client.write(JSON.stringify({ ok: false, error: 'Invalid JSON' }) + '\n');
+			}
+		}
+	});
+	client.on('error', (err) => {
+		logMessage(`[IPC] Client error: ${err.message}`);
+	});
+});
+
+function handleIpcMessage(msg, client) {
+	const { action, payload } = msg;
+	logMessage(`[IPC] Received action: ${action}`);
+
+	switch (action) {
+		case 'user-deleted': {
+			const { username } = payload || {};
+			if (!username) {
+				client.write(JSON.stringify({ ok: false, error: 'Missing username' }) + '\n');
+				return;
+			}
+			const count = notifyUserDeleted(username);
+			client.write(JSON.stringify({ ok: true, disconnected: count }) + '\n');
+			break;
+		}
+		case 'ping': {
+			client.write(JSON.stringify({ ok: true, pong: true }) + '\n');
+			break;
+		}
+		default:
+			client.write(JSON.stringify({ ok: false, error: `Unknown action: ${action}` }) + '\n');
+	}
+}
+
+function notifyUserDeleted(username) {
+	let count = 0;
+	for (const ws of wss.clients) {
+		if (ws.ohProxyUser === username && ws.readyState === WebSocket.OPEN) {
+			try {
+				ws.send(JSON.stringify({ event: 'account-deleted' }));
+				ws.close(1000, 'Account deleted');
+				count++;
+			} catch (err) {
+				logMessage(`[IPC] Failed to notify client: ${err.message}`);
+			}
+		}
+	}
+	logMessage(`[IPC] Notified ${count} client(s) of user deletion: ${username}`);
+	return count;
+}
+
+ipcServer.on('error', (err) => {
+	logMessage(`[IPC] Server error: ${err.message}`);
+});
+
+ipcServer.listen(IPC_SOCKET_PATH, () => {
+	// Make socket accessible
+	try {
+		fs.chmodSync(IPC_SOCKET_PATH, 0o660);
+	} catch (err) {
+		logMessage(`[IPC] Failed to set socket permissions: ${err.message}`);
+	}
+	logMessage(`[IPC] Listening on ${IPC_SOCKET_PATH}`);
+});
+
+// Clean up socket on exit
+process.on('exit', () => {
+	try {
+		if (fs.existsSync(IPC_SOCKET_PATH)) fs.unlinkSync(IPC_SOCKET_PATH);
+	} catch (err) { /* ignore */ }
+});
+process.on('SIGINT', () => process.exit());
+process.on('SIGTERM', () => process.exit());

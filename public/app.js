@@ -1856,8 +1856,18 @@ async function fetchWithAuth(url, options) {
 	const res = await fetch(url, options);
 	syncAuthFromHeaders(res);
 	// Detect 401 - user may have switched from LAN to WAN without auth cookie
-	// Reload page to show login prompt (or HTTP basic auth dialog)
+	// Or account was deleted - redirect to login
 	if (res.status === 401) {
+		// Check if account was deleted
+		try {
+			const clone = res.clone();
+			const data = await clone.json();
+			if (data?.error === 'account-deleted') {
+				window.location.href = '/login';
+				return new Promise(() => {});
+			}
+		} catch {}
+		// Normal 401 - reload to show login prompt
 		window.location.reload();
 		// Return a never-resolving promise to prevent further processing
 		return new Promise(() => {});
@@ -3950,6 +3960,11 @@ function connectWs() {
 		wsConnection.onmessage = (event) => {
 			try {
 				const msg = JSON.parse(event.data);
+				if (msg.event === 'account-deleted') {
+					// Account was deleted - redirect to login
+					window.location.href = '/login';
+					return;
+				}
 				if (msg.event === 'update' && msg.data) {
 					applyWsUpdate(msg.data);
 				} else if (msg.event === 'deltaResponse' && msg.data) {

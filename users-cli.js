@@ -2,6 +2,10 @@
 'use strict';
 
 const sessions = require('./sessions');
+const net = require('net');
+const path = require('path');
+
+const IPC_SOCKET_PATH = path.join(__dirname, 'ohproxy.sock');
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -74,7 +78,36 @@ function addUser(username, password, role = 'normal') {
 	}
 }
 
-function removeUser(username) {
+function sendIpcMessage(action, payload) {
+	return new Promise((resolve) => {
+		const client = net.createConnection(IPC_SOCKET_PATH, () => {
+			client.write(JSON.stringify({ action, payload }) + '\n');
+		});
+		let buffer = '';
+		client.on('data', (data) => {
+			buffer += data.toString();
+			if (buffer.includes('\n')) {
+				try {
+					const response = JSON.parse(buffer.split('\n')[0]);
+					resolve(response);
+				} catch (err) {
+					resolve({ ok: false, error: 'Invalid response' });
+				}
+				client.end();
+			}
+		});
+		client.on('error', () => {
+			// Server not running - that's okay, user is still deleted
+			resolve({ ok: true, serverOffline: true });
+		});
+		client.setTimeout(2000, () => {
+			client.destroy();
+			resolve({ ok: false, error: 'Timeout' });
+		});
+	});
+}
+
+async function removeUser(username) {
 	if (!username) {
 		console.error('Error: Username required');
 		usage();
@@ -82,6 +115,15 @@ function removeUser(username) {
 	}
 	if (sessions.deleteUser(username)) {
 		console.log(`User '${username}' and their sessions deleted`);
+		// Notify server to disconnect active sessions
+		const result = await sendIpcMessage('user-deleted', { username });
+		if (result.serverOffline) {
+			console.log('(Server not running - no active sessions to disconnect)');
+		} else if (result.ok) {
+			if (result.disconnected > 0) {
+				console.log(`Disconnected ${result.disconnected} active session(s)`);
+			}
+		}
 	} else {
 		console.error(`Error: User '${username}' not found`);
 		process.exit(1);
@@ -123,27 +165,28 @@ function changeRole(username, newRole) {
 // Initialize DB
 sessions.initDb();
 
-// Route commands
-switch (command) {
-	case 'list':
-		listUsers();
-		break;
-	case 'add':
-		addUser(args[1], args[2], args[3]);
-		break;
-	case 'remove':
-		removeUser(args[1]);
-		break;
-	case 'passwd':
-		changePassword(args[1], args[2]);
-		break;
-	case 'role':
-		changeRole(args[1], args[2]);
-		break;
-	default:
-		usage();
-		if (command) process.exit(1);
-}
-
-// Close DB
-sessions.closeDb();
+// Route commands (async wrapper for remove command)
+(async () => {
+	switch (command) {
+		case 'list':
+			listUsers();
+			break;
+		case 'add':
+			addUser(args[1], args[2], args[3]);
+			break;
+		case 'remove':
+			await removeUser(args[1]);
+			break;
+		case 'passwd':
+			changePassword(args[1], args[2]);
+			break;
+		case 'role':
+			changeRole(args[1], args[2]);
+			break;
+		default:
+			usage();
+			if (command) process.exit(1);
+	}
+	// Close DB
+	sessions.closeDb();
+})();
