@@ -77,6 +77,7 @@ function configNumber(value, fallback) {
 }
 
 const ICON_VERSION = OH_CONFIG.iconVersion || 'v1';
+const WEBVIEW_NO_PROXY = Array.isArray(OH_CONFIG.webviewNoProxy) ? OH_CONFIG.webviewNoProxy : [];
 
 const PAGE_FADE_OUT_MS = configNumber(CLIENT_CONFIG.pageFadeOutMs, 250);
 const PAGE_FADE_IN_MS = configNumber(CLIENT_CONFIG.pageFadeInMs, 250);
@@ -1056,6 +1057,23 @@ function normalizeMediaUrl(url) {
 		// fall through
 	}
 	return stripLeadingSlash(url);
+}
+
+function shouldBypassProxy(url) {
+	if (!url || !WEBVIEW_NO_PROXY.length) return false;
+	try {
+		const u = new URL(url);
+		const host = u.hostname.toLowerCase();
+		const port = u.port || (u.protocol === 'https:' ? '443' : '80');
+		return WEBVIEW_NO_PROXY.some((entry) => {
+			if (!entry || typeof entry !== 'object') return false;
+			const entryHost = (entry.host || '').toLowerCase();
+			const entryPort = entry.port || '';
+			return host === entryHost && (!entryPort || port === entryPort);
+		});
+	} catch {
+		return false;
+	}
 }
 
 function imageWidgetUrl(widget) {
@@ -2615,7 +2633,9 @@ function getWidgetRenderInfo(w, afterImage) {
 	const mediaUrl = isImage ? normalizeMediaUrl(imageWidgetUrl(w)) : '';
 	const chartUrl = isChart ? normalizeMediaUrl(chartWidgetUrl(w)) : '';
 	const rawWebviewUrl = isWebview ? safeText(w?.label || '') : '';
-	const webviewUrl = rawWebviewUrl ? `/proxy?url=${encodeURIComponent(rawWebviewUrl)}` : '';
+	const webviewUrl = rawWebviewUrl
+		? (shouldBypassProxy(rawWebviewUrl) ? rawWebviewUrl : `/proxy?url=${encodeURIComponent(rawWebviewUrl)}`)
+		: '';
 	const webviewHeight = isWebview ? parseInt(w?.height, 10) || 0 : 0;
 	const rawVideoUrl = isVideo ? safeText(w?.label || '') : '';
 	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}` : '';

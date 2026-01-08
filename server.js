@@ -181,6 +181,7 @@ const SERVER_AUTH = SERVER_CONFIG.auth || {};
 const SECURITY_HEADERS = SERVER_CONFIG.securityHeaders || {};
 const CLIENT_CONFIG = USER_CONFIG.client || {};
 const PROXY_ALLOWLIST = normalizeProxyAllowlist(SERVER_CONFIG.proxyAllowlist);
+const WEBVIEW_NO_PROXY = normalizeProxyAllowlist(SERVER_CONFIG.webviewNoProxy);
 
 const HTTP_ENABLED = typeof HTTP_CONFIG.enabled === 'boolean' ? HTTP_CONFIG.enabled : false;
 const HTTPS_ENABLED = typeof HTTPS_CONFIG.enabled === 'boolean' ? HTTPS_CONFIG.enabled : false;
@@ -1080,6 +1081,7 @@ let configRestartTriggered = false;
 const liveConfig = {
 	allowSubnets: ALLOW_SUBNETS,
 	proxyAllowlist: PROXY_ALLOWLIST,
+	webviewNoProxy: WEBVIEW_NO_PROXY,
 	ohTarget: OH_TARGET,
 	ohUser: OH_USER,
 	ohPass: OH_PASS,
@@ -1198,6 +1200,7 @@ function reloadLiveConfig() {
 
 	liveConfig.allowSubnets = newServer.allowSubnets;
 	liveConfig.proxyAllowlist = normalizeProxyAllowlist(newServer.proxyAllowlist);
+	liveConfig.webviewNoProxy = normalizeProxyAllowlist(newServer.webviewNoProxy);
 	liveConfig.ohTarget = safeText(newServer.openhab?.target);
 	liveConfig.ohUser = safeText(newServer.openhab?.user || '');
 	liveConfig.ohPass = safeText(newServer.openhab?.pass || '');
@@ -3114,6 +3117,7 @@ app.get('/config.js', (req, res) => {
 	res.send(`window.__OH_CONFIG__=${JSON.stringify({
 		iconVersion: liveConfig.iconVersion,
 		client: clientConfig,
+		webviewNoProxy: liveConfig.webviewNoProxy,
 		widgetGlowRules: sessions.getAllGlowRules(),
 		widgetVisibilityRules: sessions.getAllVisibilityRules(),
 		userRole: userRole,

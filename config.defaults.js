@@ -54,6 +54,8 @@ module.exports = {
 		allowSubnets: [],
 		// Allowlist for /proxy?url= (host or host:port; required, non-empty).
 		proxyAllowlist: [],
+		// Webview URLs matching these hosts bypass /proxy and load directly (host or host:port).
+		webviewNoProxy: [],
 		// Authentication settings.
 		auth: {
 			// Auth mode ('basic' for HTTP Basic Auth, 'html' for HTML form login).
