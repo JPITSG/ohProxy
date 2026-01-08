@@ -1513,15 +1513,13 @@ function openGlowConfigModal(widget, card) {
 	if (visRadio) visRadio.checked = true;
 
 	// Check if widget should show glow rules
-	// Only Text widgets with subtext (state) can have glow rules
+	// Any widget with subtext (state in label like "Title [State]") can have glow rules
 	const isSection = !!widget?.__section;
-	const wType = widgetType(widget).toLowerCase();
-	const isTextType = wType.includes('text');
 	const labelParts = splitLabelState(widget?.label || '');
 	const hasSubtext = !!labelParts.state;
 	const glowRulesSection = glowConfigModal.querySelector('.glow-rules-section');
 	if (glowRulesSection) {
-		glowRulesSection.style.display = (isTextType && hasSubtext && !isSection) ? '' : 'none';
+		glowRulesSection.style.display = (hasSubtext && !isSection) ? '' : 'none';
 	}
 
 	// Load existing rules
