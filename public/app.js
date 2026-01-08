@@ -3215,6 +3215,15 @@ function updateCard(card, w, afterImage, info) {
 				const menu = document.createElement('div');
 				menu.className = 'select-menu';
 				const optionButtons = [];
+				const needsScroll = mapping.length > 5;
+				let scrollInner = null;
+
+				if (needsScroll) {
+					menu.classList.add('scrollable');
+					scrollInner = document.createElement('div');
+					scrollInner.className = 'select-menu-scroll';
+					menu.appendChild(scrollInner);
+				}
 
 				const setActive = (command) => {
 					for (const btn of optionButtons) {
@@ -3240,13 +3249,14 @@ function updateCard(card, w, afterImage, info) {
 						setActive(m.command);
 						closeMenu();
 					};
-					menu.appendChild(optBtn);
+					(scrollInner || menu).appendChild(optBtn);
 					optionButtons.push(optBtn);
 				}
 
 				setActive(current ? current.command : '');
 
 				let menuOpen = false;
+				let scrollHeightSet = false;
 				const onDocClick = (e) => {
 					if (!card.contains(e.target)) closeMenu();
 				};
@@ -3257,12 +3267,43 @@ function updateCard(card, w, afterImage, info) {
 					card.classList.add('menu-open');
 					state.suppressRefreshCount += 1;
 					document.addEventListener('click', onDocClick, true);
+					// Decide whether to show menu above or below
+					requestAnimationFrame(() => {
+						const btnRect = fakeSelect.getBoundingClientRect();
+						const menuHeight = menu.offsetHeight;
+						const spaceBelow = window.innerHeight - btnRect.bottom - 10;
+						const spaceAbove = btnRect.top - 10;
+						if (spaceBelow < menuHeight && spaceAbove > spaceBelow) {
+							card.classList.add('menu-above');
+						} else {
+							card.classList.remove('menu-above');
+						}
+					});
+					// Calculate scroll dimensions on first open based on actual sizes
+					if (!scrollHeightSet && scrollInner && optionButtons.length > 1) {
+						scrollHeightSet = true;
+						requestAnimationFrame(() => {
+							const btn = optionButtons[0];
+							const btnHeight = btn.offsetHeight;
+							const btn2Style = getComputedStyle(optionButtons[1]);
+							const btnMargin = parseFloat(btn2Style.marginTop || 0);
+							// 5 buttons + 5 margins
+							scrollInner.style.maxHeight = `${(btnHeight * 5) + (btnMargin * 5)}px`;
+							// Width: fakeSelect width + scroll padding + scrollbar + menu padding
+							const scrollStyle = getComputedStyle(scrollInner);
+							const scrollPadding = parseFloat(scrollStyle.paddingRight || 0);
+							const scrollbarWidth = scrollInner.offsetWidth - scrollInner.clientWidth;
+							const menuStyle = getComputedStyle(menu);
+							const menuPadding = parseFloat(menuStyle.paddingLeft || 0) + parseFloat(menuStyle.paddingRight || 0);
+							menu.style.minWidth = `${fakeSelect.offsetWidth + scrollPadding + scrollbarWidth + menuPadding}px`;
+						});
+					}
 				};
 
 				const closeMenu = () => {
 					if (!menuOpen) return;
 					menuOpen = false;
-					card.classList.remove('menu-open');
+					card.classList.remove('menu-open', 'menu-above');
 					document.removeEventListener('click', onDocClick, true);
 					releaseRefresh();
 				};

@@ -481,6 +481,14 @@ html:not(.slim) .has-meta .labelStack {
 .selection-card.menu-open .select-menu {
 	display: block;
 }
+.selection-card.menu-above .select-menu {
+	top: auto;
+	bottom: calc(100% + 6px);
+	box-shadow: 0 -12px 20px rgba(0, 0, 0, 0.28), var(--glass-inset-shadow);
+}
+body.theme-light .selection-card.menu-above .select-menu {
+	box-shadow: 0 -12px 20px rgba(0, 0, 0, 0.15), var(--glass-inset-shadow);
+}
 .selection-card .select-option {
 	display: block;
 	width: 100%;
@@ -511,6 +519,40 @@ html:not(.slim) .has-meta .labelStack {
 	border-color: var(--color-select-option-active-border);
 	color: var(--color-select-option-active-text);
 	box-shadow: 0 0 10px var(--color-select-option-active-shadow);
+}
+.selection-card .select-menu.scrollable {
+	overflow: hidden;
+	right: auto;
+	left: 0;
+}
+.selection-card .select-menu-scroll {
+	padding-right: 4px;
+	overflow-y: auto;
+	overflow-x: hidden;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+.selection-card .select-menu-scroll::-webkit-scrollbar {
+	width: 4px;
+}
+.selection-card .select-menu-scroll::-webkit-scrollbar-track {
+	background: transparent;
+}
+.selection-card .select-menu-scroll::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.25);
+	border-radius: 2px;
+}
+.selection-card .select-menu-scroll::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.4);
+}
+body.theme-light .selection-card .select-menu-scroll {
+	scrollbar-color: #888 transparent;
+}
+body.theme-light .selection-card .select-menu-scroll::-webkit-scrollbar-thumb {
+	background: #888;
+}
+body.theme-light .selection-card .select-menu-scroll::-webkit-scrollbar-thumb:hover {
+	background: #666;
 }
 
 /* Image and chart card styles */
