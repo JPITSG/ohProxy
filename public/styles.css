@@ -513,12 +513,14 @@ html:not(.slim) .has-meta .labelStack {
 	box-shadow: 0 0 10px var(--color-select-option-active-shadow);
 }
 
-/* Image card styles */
-.image-card {
+/* Image and chart card styles */
+.image-card,
+.chart-card {
 	padding: 0 !important;
 	overflow: hidden;
 }
-.image-card.image-loading {
+.image-card.image-loading,
+.chart-card.image-loading {
 	visibility: hidden;
 	height: 0;
 	overflow: hidden;
@@ -526,13 +528,16 @@ html:not(.slim) .has-meta .labelStack {
 	margin: 0 !important;
 	border: none !important;
 }
-.image-card .cardRow {
+.image-card .cardRow,
+.chart-card .cardRow {
 	display: block;
 }
-.image-card .controls {
+.image-card .controls,
+.chart-card .controls {
 	margin: 0;
 }
-.image-card img {
+.image-card img,
+.chart-card img {
 	width: 100% !important;
 	height: auto !important;
 	display: block;

@@ -2839,7 +2839,7 @@ function updateCard(card, w, afterImage, info) {
 		else if (valueColor) applyGlow(card, valueColor, w);
 	}
 
-	if (isImage || isChart) {
+	if (isImage || isChart || isWebview || isVideo) {
 		labelRow.classList.add('hidden');
 		if (iconWrap) iconWrap.classList.add('hidden');
 	} else {

@@ -252,6 +252,10 @@ function createAuthTestApp(config = {}) {
 		res.json({ preview: 'test' });
 	});
 
+	app.get('/presence', (req, res) => {
+		res.type('text/html').send('<!DOCTYPE html><html><body>Map</body></html>');
+	});
+
 	app.get('/proxy', (req, res) => {
 		res.json({ proxied: true });
 	});
@@ -335,6 +339,7 @@ describe('Authentication Required Tests - HTML Mode', () => {
 			{ method: 'POST', path: '/api/glow-rules', description: 'Glow rules POST', body: '{}' },
 			{ method: 'GET', path: '/search-index', description: 'Search index' },
 			{ method: 'GET', path: '/video-preview?url=rtsp://test', description: 'Video preview' },
+			{ method: 'GET', path: '/presence', description: 'GPS presence map' },
 			{ method: 'GET', path: '/proxy?url=http://test', description: 'Proxy endpoint' },
 			{ method: 'GET', path: '/app.v123.js', description: 'App JS (versioned)' },
 			{ method: 'GET', path: '/tailwind.v123.css', description: 'Tailwind CSS (versioned)' },
@@ -495,6 +500,7 @@ describe('Authentication Required Tests - Basic Auth Mode', () => {
 			{ method: 'GET', path: '/config.js', description: 'Client config' },
 			{ method: 'GET', path: '/api/settings', description: 'User settings' },
 			{ method: 'GET', path: '/search-index', description: 'Search index' },
+			{ method: 'GET', path: '/presence', description: 'GPS presence map' },
 			{ method: 'GET', path: '/proxy?url=http://test', description: 'Proxy endpoint' },
 		];
 
