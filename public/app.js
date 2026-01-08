@@ -2544,6 +2544,7 @@ function getWidgetRenderInfo(w, afterImage) {
 		webviewHeight,
 		videoUrl,
 		videoHeight,
+		rawVideoUrl,
 		signature,
 	};
 }
@@ -2587,6 +2588,7 @@ function updateCard(card, w, afterImage, info) {
 		webviewHeight,
 		videoUrl,
 		videoHeight,
+		rawVideoUrl,
 		signature,
 	} = data;
 
@@ -2624,6 +2626,11 @@ function updateCard(card, w, afterImage, info) {
 	if (existingVideo && existingVideo.src) {
 		existingVideo.src = '';
 		existingVideo.load();
+	}
+	// Remove video container if switching to non-video widget
+	if (!isVideo) {
+		const existingContainer = card.querySelector('.video-container');
+		if (existingContainer) existingContainer.remove();
 	}
 
 	row.classList.remove('items-center', 'hidden');
@@ -2807,14 +2814,83 @@ function updateCard(card, w, afterImage, info) {
 			controls.innerHTML = `<div class="text-sm text-slate-400">Video URL not available</div>`;
 			return true;
 		}
-		let videoEl = card.querySelector('video.video-stream');
-		if (!videoEl) {
+		card.style.padding = '0';
+		card.style.overflow = 'hidden';
+
+		// Get or create video container
+		let videoContainer = card.querySelector('.video-container');
+		if (!videoContainer) {
+			videoContainer = document.createElement('div');
+			videoContainer.className = 'video-container relative w-full rounded-2xl overflow-hidden';
+			card.appendChild(videoContainer);
+		}
+
+		// Get or create preview placeholder with 50% opacity
+		let previewDiv = videoContainer.querySelector('.video-preview');
+		if (!previewDiv) {
+			previewDiv = document.createElement('div');
+			previewDiv.className = 'video-preview';
+			previewDiv.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background-size:cover;background-position:center;opacity:0.5;z-index:10;';
+			videoContainer.appendChild(previewDiv);
+		}
+		// Set preview background if RTSP URL available
+		if (rawVideoUrl && rawVideoUrl.startsWith('rtsp://')) {
+			const previewUrl = `/video-preview?url=${encodeURIComponent(rawVideoUrl)}`;
+			previewDiv.style.backgroundImage = `url('${previewUrl}')`;
+			previewDiv.classList.remove('hidden');
+		} else {
+			previewDiv.classList.add('hidden');
+		}
+
+		// Get or create spinner overlay
+		let spinner = videoContainer.querySelector('.video-spinner');
+		if (!spinner) {
+			// Ensure spin keyframes exist
+			if (!document.getElementById('video-spinner-keyframes')) {
+				const style = document.createElement('style');
+				style.id = 'video-spinner-keyframes';
+				style.textContent = '@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}';
+				document.head.appendChild(style);
+			}
+			spinner = document.createElement('div');
+			spinner.className = 'video-spinner';
+			spinner.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:20;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);';
+			const spinnerInner = document.createElement('div');
+			spinnerInner.style.cssText = 'width:3rem;height:3rem;border:5px solid rgba(255,255,255,0.4);border-top-color:white;border-radius:50%;animation:spin 1s linear infinite;';
+			spinner.appendChild(spinnerInner);
+			videoContainer.appendChild(spinner);
+		}
+		// Get or create video element
+		let videoEl = videoContainer.querySelector('video.video-stream');
+		const isNewVideo = !videoEl;
+		if (isNewVideo) {
 			videoEl = document.createElement('video');
-			videoEl.className = 'video-stream w-full block rounded-2xl';
+			videoEl.className = 'video-stream w-full block';
 			videoEl.setAttribute('autoplay', '');
 			videoEl.setAttribute('muted', '');
 			videoEl.setAttribute('playsinline', '');
 			videoEl.muted = true;
+		}
+
+		// Show spinner only if video not playing yet
+		const isVideoPlaying = !videoEl.paused && !videoEl.ended && videoEl.readyState > 2;
+		if (isVideoPlaying) {
+			// Video already playing, hide spinner and preview
+			spinner.style.display = 'none';
+			previewDiv.style.display = 'none';
+		} else {
+			spinner.style.display = 'flex';
+			previewDiv.style.display = 'block';
+			// Hide spinner/preview when video starts playing
+			const hideOverlays = () => {
+				spinner.style.display = 'none';
+				previewDiv.style.display = 'none';
+			};
+			videoEl.addEventListener('playing', hideOverlays, { once: true });
+		}
+
+		if (isNewVideo) {
+
 			// Auto-reconnect on error
 			videoEl.addEventListener('error', () => {
 				setTimeout(() => {
@@ -2844,17 +2920,20 @@ function updateCard(card, w, afterImage, info) {
 					}
 				}, 1000);
 			});
-			card.appendChild(videoEl);
+			videoContainer.appendChild(videoEl);
 		}
-		card.style.padding = '0';
-		card.style.overflow = 'hidden';
+
 		// Height: if 0, use 16:9 aspect ratio; otherwise use specified height
 		if (videoHeight > 0) {
-			videoEl.style.height = `${videoHeight}px`;
+			videoContainer.style.height = `${videoHeight}px`;
+			videoContainer.style.aspectRatio = '';
+			videoEl.style.height = '100%';
 			videoEl.style.aspectRatio = '';
 		} else {
+			videoContainer.style.height = '';
+			videoContainer.style.aspectRatio = '16 / 9';
 			videoEl.style.height = '';
-			videoEl.style.aspectRatio = '16 / 9';
+			videoEl.style.aspectRatio = '';
 		}
 		if (videoEl.src !== videoUrl) {
 			videoEl.src = videoUrl;

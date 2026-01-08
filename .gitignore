@@ -4,6 +4,7 @@ sessions.db
 sessions.db-*
 node_modules/
 .icon-cache/
+video-previews/
 *.log
 fullchain.pem
 privkey.pem

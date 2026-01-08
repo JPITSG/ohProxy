@@ -131,6 +131,13 @@ module.exports = {
 			// Polling interval in ms when all clients are unfocused/background (>=100).
 			pollingIntervalBgMs: 2000,
 		},
+		// Video preview screenshot configuration.
+		videoPreview: {
+			// Interval to capture preview frames from RTSP streams (ms; 0 = disabled).
+			intervalMs: 900000,
+			// Delete preview images older than this (hours; >=1).
+			pruneAfterHours: 24,
+		},
 	},
 
 	// Client-visible settings.

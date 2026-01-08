@@ -246,6 +246,11 @@ const WEBSOCKET_CONFIG = SERVER_CONFIG.websocket || {};
 const WS_MODE = (WEBSOCKET_CONFIG.mode === 'atmosphere') ? 'atmosphere' : 'polling';
 const WS_POLLING_INTERVAL_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalMs) || 500;
 const WS_POLLING_INTERVAL_BG_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalBgMs) || 2000;
+const PREVIEW_CONFIG = SERVER_CONFIG.videoPreview || {};
+const VIDEO_PREVIEW_INTERVAL_MS = configNumber(PREVIEW_CONFIG.intervalMs, 900000);
+const VIDEO_PREVIEW_PRUNE_HOURS = configNumber(PREVIEW_CONFIG.pruneAfterHours, 24);
+const VIDEO_PREVIEW_DIR = path.join(__dirname, 'video-previews');
+let videoPreviewInitialCaptureDone = false;
 const authLockouts = new Map();
 
 function logMessage(message) {
@@ -583,6 +588,11 @@ function validateConfig() {
 
 	if (ensureObject(SERVER_CONFIG.backgroundTasks, 'server.backgroundTasks', errors)) {
 		ensureNumber(SITEMAP_REFRESH_MS, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
+	}
+
+	if (ensureObject(SERVER_CONFIG.videoPreview, 'server.videoPreview', errors)) {
+		ensureNumber(VIDEO_PREVIEW_INTERVAL_MS, 'server.videoPreview.intervalMs', { min: 0 }, errors);
+		ensureNumber(VIDEO_PREVIEW_PRUNE_HOURS, 'server.videoPreview.pruneAfterHours', { min: 1 }, errors);
 	}
 
 	if (ensureArray(SERVER_CONFIG.proxyAllowlist, 'server.proxyAllowlist', { allowEmpty: false }, errors)) {
@@ -1627,6 +1637,38 @@ function extractPageIds(data, pages = new Set()) {
 	return pages;
 }
 
+// Extract all RTSP URLs from Video widgets in sitemap data
+function extractRtspUrls(data, urls = new Set()) {
+	if (!data) return urls;
+	// Check if this is a Video widget with rtsp:// label
+	const type = (data.type || '').toLowerCase();
+	if (type === 'video') {
+		const label = data.label || '';
+		if (label.startsWith('rtsp://')) {
+			urls.add(label);
+		}
+	}
+	// Recurse into widgets
+	const widgets = Array.isArray(data.widget) ? data.widget : (data.widget ? [data.widget] : []);
+	for (const w of widgets) {
+		extractRtspUrls(w, urls);
+	}
+	// Recurse into linkedPage
+	if (data.linkedPage) {
+		extractRtspUrls(data.linkedPage, urls);
+	}
+	// Recurse into homepage
+	if (data.homepage) {
+		extractRtspUrls(data.homepage, urls);
+	}
+	return urls;
+}
+
+// Hash RTSP URL to generate filename
+function rtspUrlHash(url) {
+	return crypto.createHash('md5').update(url).digest('hex').substring(0, 16);
+}
+
 async function fetchAllPages() {
 	const sitemapName = backgroundState.sitemap.name || 'default';
 	try {
@@ -2614,6 +2656,14 @@ async function refreshSitemapCache() {
 		ok: true,
 	};
 
+	// Trigger initial video preview capture on first successful sitemap pull
+	if (!videoPreviewInitialCaptureDone && VIDEO_PREVIEW_INTERVAL_MS > 0) {
+		videoPreviewInitialCaptureDone = true;
+		captureVideoPreviewsTask().catch((err) => {
+			logMessage(`Initial video preview capture failed: ${err.message || err}`);
+		});
+	}
+
 	return true;
 }
 
@@ -3448,6 +3498,26 @@ app.use('/images', (req, res, next) => {
 	...proxyCommon,
 	pathRewrite: (path) => `/openhab.app${stripIconVersion(path)}`,
 }));
+
+// Video preview endpoint
+app.get('/video-preview', (req, res) => {
+	const url = req.query.url;
+	if (!url || !url.startsWith('rtsp://')) {
+		return res.status(400).type('text/plain').send('Invalid RTSP URL');
+	}
+
+	const hash = rtspUrlHash(url);
+	const filePath = path.join(VIDEO_PREVIEW_DIR, `${hash}.jpg`);
+
+	if (!fs.existsSync(filePath)) {
+		return res.status(404).type('text/plain').send('Preview not available');
+	}
+
+	res.type('image/jpeg');
+	res.set('Cache-Control', 'no-cache, max-age=300');
+	res.sendFile(filePath);
+});
+
 app.get('/proxy', async (req, res, next) => {
 	const raw = req.query?.url;
 
@@ -3582,6 +3652,112 @@ app.use((req, res) => {
 
 if (SITEMAP_REFRESH_MS > 0) {
 	registerBackgroundTask('sitemap-cache', SITEMAP_REFRESH_MS, refreshSitemapCache);
+}
+
+// Video preview capture function
+async function captureRtspPreview(rtspUrl) {
+	ensureDir(VIDEO_PREVIEW_DIR);
+	const hash = rtspUrlHash(rtspUrl);
+	const outputPath = path.join(VIDEO_PREVIEW_DIR, `${hash}.jpg`);
+
+	return new Promise((resolve) => {
+		const ffmpeg = spawn('ffmpeg', [
+			'-y',
+			'-rtsp_transport', 'tcp',
+			'-i', rtspUrl,
+			'-vframes', '1',
+			'-q:v', '2',
+			outputPath,
+		], {
+			stdio: ['ignore', 'pipe', 'pipe'],
+		});
+
+		let killed = false;
+		const timer = setTimeout(() => {
+			killed = true;
+			ffmpeg.kill('SIGKILL');
+		}, 10000);
+
+		ffmpeg.on('close', (code) => {
+			clearTimeout(timer);
+			resolve(!killed && code === 0);
+		});
+
+		ffmpeg.on('error', () => {
+			clearTimeout(timer);
+			resolve(false);
+		});
+	});
+}
+
+// Prune old video preview images
+function pruneVideoPreviews() {
+	if (!fs.existsSync(VIDEO_PREVIEW_DIR)) return;
+
+	const maxAgeMs = VIDEO_PREVIEW_PRUNE_HOURS * 60 * 60 * 1000;
+	const now = Date.now();
+
+	try {
+		const files = fs.readdirSync(VIDEO_PREVIEW_DIR);
+		for (const file of files) {
+			if (!file.endsWith('.jpg')) continue;
+			const filePath = path.join(VIDEO_PREVIEW_DIR, file);
+			try {
+				const stat = fs.statSync(filePath);
+				if (now - stat.mtimeMs > maxAgeMs) {
+					fs.unlinkSync(filePath);
+				}
+			} catch (err) {
+				// Ignore individual file errors
+			}
+		}
+	} catch (err) {
+		logMessage(`Video preview prune failed: ${err.message || err}`);
+	}
+}
+
+// Video preview capture background task
+async function captureVideoPreviewsTask() {
+	const sitemapName = backgroundState.sitemap?.name;
+	if (!sitemapName) return;
+
+	let sitemapData;
+	try {
+		const response = await fetchOpenhab(`/rest/sitemaps/${sitemapName}?type=json`);
+		if (!response || !response.ok) {
+			logMessage(`Video preview: sitemap fetch failed (HTTP ${response?.status || 'unknown'})`);
+			return;
+		}
+		sitemapData = JSON.parse(response.body);
+	} catch (err) {
+		logMessage(`Video preview: failed to fetch/parse sitemap: ${err.message || err}`);
+		return;
+	}
+
+	const rtspUrls = extractRtspUrls(sitemapData);
+	if (rtspUrls.size === 0) return;
+
+	// Capture screenshots sequentially
+	for (const url of rtspUrls) {
+		try {
+			const ok = await captureRtspPreview(url);
+			if (ok) {
+				logMessage(`Video preview: captured screenshot for ${url}`);
+			} else {
+				logMessage(`Video preview: failed to capture ${url}`);
+			}
+		} catch (err) {
+			logMessage(`Video preview: error capturing ${url}: ${err.message || err}`);
+		}
+	}
+
+	// Prune old previews
+	pruneVideoPreviews();
+}
+
+// Register video preview task if enabled
+if (VIDEO_PREVIEW_INTERVAL_MS > 0) {
+	registerBackgroundTask('video-preview', VIDEO_PREVIEW_INTERVAL_MS, captureVideoPreviewsTask);
 }
 
 // Initialize sessions database
