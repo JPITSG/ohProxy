@@ -44,7 +44,6 @@ ohProxy sits between your users and openHAB, providing:
 | **Switch** | Single toggle or multi-option buttons with active state highlighting |
 | **Selection** | Custom dropdown on desktop; native overlay picker on small/touch and slim layouts |
 | **Slider/Dimmer** | Real-time value display, debounced updates, smart activation detection |
-| **Roller Shutter** | UP/STOP/DOWN button controls |
 | **Image** | Auto-refresh, MJPEG streaming, zoomable overlay viewer |
 | **Text** | State-only display items |
 | **Navigation** | Links to sub-pages with visual indicators |
