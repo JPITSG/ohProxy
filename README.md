@@ -14,6 +14,26 @@ ohProxy sits between your users and openHAB, providing:
 - **Real-time**: WebSocket updates with intelligent polling fallback
 - **Offline support**: Service worker caching for reliable access
 
+## Screenshots
+
+### Desktop (3-column layout)
+
+| Dark Mode | Light Mode |
+|-----------|------------|
+| ![Desktop Dark](docs/screenshots/desktop-dark.png) | ![Desktop Light](docs/screenshots/desktop-light.png) |
+
+### Tablet (2-column layout)
+
+| Dark Mode | Light Mode |
+|-----------|------------|
+| ![Tablet Dark](docs/screenshots/tablet-dark.png) | ![Tablet Light](docs/screenshots/tablet-light.png) |
+
+### Phone (1-column layout)
+
+| Dark Mode | Light Mode |
+|-----------|------------|
+| ![Phone Dark](docs/screenshots/phone-dark.png) | ![Phone Light](docs/screenshots/phone-light.png) |
+
 ## Features
 
 ### User Interface
