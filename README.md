@@ -66,6 +66,7 @@ ohProxy sits between your users and openHAB, providing:
 | **Slider/Dimmer** | Real-time value display, debounced updates, smart activation detection |
 | **Image** | Auto-refresh, MJPEG streaming, zoomable overlay viewer |
 | **Video** | RTSP to MP4 streaming via FFmpeg, full-width display, 16:9 aspect ratio, auto-reconnect |
+| **Chart** | Proxied through ohProxy with TTL caching, responsive width, zoomable overlay viewer, auto-refresh |
 | **Webview** | Embedded iframe, full-width display, 16:9 aspect ratio (or custom height), proxied URL |
 | **Text** | State-only display items |
 | **Navigation** | Links to sub-pages with visual indicators |

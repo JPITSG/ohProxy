@@ -1065,6 +1065,14 @@ function imageWidgetUrl(widget) {
 	return `proxy?url=${encodeURIComponent(label)}`;
 }
 
+function chartWidgetUrl(widget) {
+	// Chart items use /chart?item=NAME&period=PERIOD - width added by resolveImageUrl
+	const itemName = safeText(widget?.item?.name || '').trim();
+	const period = safeText(widget?.period || '').trim();
+	if (!itemName || !period) return '';
+	return `chart?item=${encodeURIComponent(itemName)}&period=${encodeURIComponent(period)}`;
+}
+
 function withCacheBust(url) {
 	if (!url) return url;
 	return url + (url.includes('?') ? '&' : '?') + `_ts=${Date.now()}`;
@@ -1105,6 +1113,24 @@ function resolveImageUrl(imgEl, url) {
 	return appendProxyWidth(url, width);
 }
 
+function resolveChartUrl(imgEl, url) {
+	if (!imgEl) return url;
+	const rect = imgEl.getBoundingClientRect();
+	const width = Math.round(rect.width || 0);
+	if (width <= 0) return url;
+	const separator = url.includes('?') ? '&' : '?';
+	return `${url}${separator}width=${width}`;
+}
+
+function isChartUrl(url) {
+	return typeof url === 'string' && url.startsWith('chart?');
+}
+
+function resolveMediaUrl(imgEl, url) {
+	if (isChartUrl(url)) return resolveChartUrl(imgEl, url);
+	return resolveImageUrl(imgEl, url);
+}
+
 function clearImageTimers() {
 	for (const t of imageTimers) clearInterval(t);
 	imageTimers = [];
@@ -1119,7 +1145,7 @@ function hasProxyImagesInView() {
 	const viewBottom = window.innerHeight || document.documentElement.clientHeight || 0;
 	for (const img of imgs) {
 		const url = safeText(img.dataset.mediaUrl || img.src || '');
-		if (!url.includes('proxy?url=')) continue;
+		if (!url.includes('proxy?url=') && !isChartUrl(url)) continue;
 		const rect = img.getBoundingClientRect();
 		if (rect.bottom >= viewTop && rect.top <= viewBottom) return true;
 	}
@@ -1133,11 +1159,11 @@ function refreshVisibleProxyImages() {
 	const epoch = imageResizeEpoch;
 	for (const img of imgs) {
 		const url = safeText(img.dataset.mediaUrl || img.src || '');
-		if (!url.includes('proxy?url=')) continue;
+		if (!url.includes('proxy?url=') && !isChartUrl(url)) continue;
 		const rect = img.getBoundingClientRect();
 		if (rect.bottom < 0 || rect.top > viewBottom) continue;
 		if (epoch && img.dataset.resizeEpoch === String(epoch)) continue;
-		const resolved = resolveImageUrl(img, url);
+		const resolved = resolveMediaUrl(img, url);
 		img.src = withCacheBust(resolved);
 		if (epoch) img.dataset.resizeEpoch = String(epoch);
 	}
@@ -1149,7 +1175,7 @@ function hasStaleProxyImages() {
 	const imgs = Array.from(document.querySelectorAll('.image-viewer-trigger'));
 	for (const img of imgs) {
 		const url = safeText(img.dataset.mediaUrl || img.src || '');
-		if (!url.includes('proxy?url=')) continue;
+		if (!url.includes('proxy?url=') && !isChartUrl(url)) continue;
 		if (img.dataset.resizeEpoch !== String(epoch)) return true;
 	}
 	return false;
@@ -1198,7 +1224,7 @@ function processImageQueue() {
 	if (state.isSlim && Number.isFinite(ms) && ms > 0 && ms < MIN_IMAGE_REFRESH_MS) {
 		ms = MIN_IMAGE_REFRESH_MS;
 	}
-	const resolved = resolveImageUrl(imgEl, url);
+	const resolved = resolveMediaUrl(imgEl, url);
 	let done = false;
 	let timeoutId = null;
 	const finish = () => {
@@ -1208,11 +1234,11 @@ function processImageQueue() {
 		imgEl.removeEventListener('load', handleLoad);
 		imgEl.removeEventListener('error', handleError);
 		imgEl.dataset.loaded = 'true';
-		const card = imgEl.closest('.image-card');
+		const card = imgEl.closest('.image-card, .chart-card');
 		if (card) card.classList.remove('image-loading');
 		if (Number.isFinite(ms) && ms > 0) {
 			const update = () => {
-				const freshUrl = resolveImageUrl(imgEl, url);
+				const freshUrl = resolveMediaUrl(imgEl, url);
 				imgEl.src = withCacheBust(freshUrl);
 				if (imageResizeEpoch) imgEl.dataset.resizeEpoch = String(imageResizeEpoch);
 			};
@@ -1842,7 +1868,7 @@ function setImageViewerSource(url, refreshMs) {
 	}
 	const update = () => {
 		if (!imageViewerImg) return;
-		const resolved = resolveImageUrl(imageViewerImg, url);
+		const resolved = resolveMediaUrl(imageViewerImg, url);
 		imageViewerImg.src = withCacheBust(resolved);
 	};
 	const start = () => {
@@ -2566,11 +2592,12 @@ function getWidgetRenderInfo(w, afterImage) {
 	const type = widgetType(w);
 	const t = type.toLowerCase();
 	const isImage = t.includes('image');
+	const isChart = t === 'chart';
 	const isText = t.includes('text');
 	const isGroup = t.includes('group');
 	const isWebview = t.includes('webview');
 	const isVideo = t === 'video';
-	const label = isImage || isVideo ? safeText(w?.label || '') : widgetLabel(w);
+	const label = isImage || isVideo || isChart ? safeText(w?.label || '') : widgetLabel(w);
 	const st = widgetState(w);
 	const icon = widgetIconName(w);
 	const valueColor = safeText(
@@ -2586,6 +2613,7 @@ function getWidgetRenderInfo(w, afterImage) {
 	const pageLink = widgetPageLink(w);
 	const labelParts = splitLabelState(label);
 	const mediaUrl = isImage ? normalizeMediaUrl(imageWidgetUrl(w)) : '';
+	const chartUrl = isChart ? normalizeMediaUrl(chartWidgetUrl(w)) : '';
 	const rawWebviewUrl = isWebview ? safeText(w?.label || '') : '';
 	const webviewUrl = rawWebviewUrl ? `/proxy?url=${encodeURIComponent(rawWebviewUrl)}` : '';
 	const webviewHeight = isWebview ? parseInt(w?.height, 10) || 0 : 0;
@@ -2606,6 +2634,7 @@ function getWidgetRenderInfo(w, afterImage) {
 		pageLink || '',
 		mappingSig,
 		mediaUrl,
+		chartUrl,
 		webviewUrl,
 		String(webviewHeight),
 		videoUrl,
@@ -2622,6 +2651,7 @@ function getWidgetRenderInfo(w, afterImage) {
 		type,
 		t,
 		isImage,
+		isChart,
 		isText,
 		isGroup,
 		isWebview,
@@ -2636,6 +2666,7 @@ function getWidgetRenderInfo(w, afterImage) {
 		pageLink,
 		labelParts,
 		mediaUrl,
+		chartUrl,
 		webviewUrl,
 		webviewHeight,
 		videoUrl,
@@ -2666,6 +2697,7 @@ function updateCard(card, w, afterImage, info) {
 	const {
 		t,
 		isImage,
+		isChart,
 		isText,
 		isGroup,
 		isWebview,
@@ -2680,6 +2712,7 @@ function updateCard(card, w, afterImage, info) {
 		pageLink,
 		labelParts,
 		mediaUrl,
+		chartUrl,
 		webviewUrl,
 		webviewHeight,
 		videoUrl,
@@ -2702,6 +2735,7 @@ function updateCard(card, w, afterImage, info) {
 		'switch-card',
 		'slider-card',
 		'image-card',
+		'chart-card',
 		'image-loading',
 		'webview-card',
 		'video-card',
@@ -2712,8 +2746,8 @@ function updateCard(card, w, afterImage, info) {
 		'switch-many',
 		'switch-single'
 	);
-	card.classList.toggle('sm:col-span-2', isImage || isWebview || isVideo || (afterImage && isText));
-	card.classList.toggle('lg:col-span-3', isImage || isWebview || isVideo || (afterImage && isText));
+	card.classList.toggle('sm:col-span-2', isImage || isChart || isWebview || isVideo || (afterImage && isText));
+	card.classList.toggle('lg:col-span-3', isImage || isChart || isWebview || isVideo || (afterImage && isText));
 	// Reset webview/video inline styles
 	card.style.padding = '';
 	card.style.overflow = '';
@@ -2752,7 +2786,7 @@ function updateCard(card, w, afterImage, info) {
 	resetLabelRow(labelRow, labelStack, navHint, preserveElement);
 	removeOverlaySelects(card);
 
-	if (!isImage) {
+	if (!isImage && !isChart) {
 		controls.innerHTML = '';
 	} else {
 		for (const child of Array.from(controls.children)) {
@@ -2785,7 +2819,7 @@ function updateCard(card, w, afterImage, info) {
 		else if (valueColor) applyGlow(card, valueColor, w);
 	}
 
-	if (isImage) {
+	if (isImage || isChart) {
 		labelRow.classList.add('hidden');
 		if (iconWrap) iconWrap.classList.add('hidden');
 	} else {
@@ -2858,6 +2892,46 @@ function updateCard(card, w, afterImage, info) {
 		}
 		if (urlChanged || refreshChanged || imgEl.dataset.loaded !== 'true') {
 			setupImage(imgEl, mediaUrl, w?.refresh);
+		}
+		return true;
+	}
+
+	if (isChart) {
+		card.classList.add('chart-card');
+		if (!chartUrl) {
+			controls.classList.add('mt-3');
+			controls.innerHTML = `<div class="text-sm text-slate-400">Chart not available</div>`;
+			card.classList.remove('image-loading');
+			return true;
+		}
+		let imgEl = controls.querySelector('img.image-viewer-trigger');
+		if (!imgEl) {
+			imgEl = document.createElement('img');
+			controls.appendChild(imgEl);
+		}
+		imgEl.className = 'w-full rounded-xl border border-white/10 bg-white/5 image-viewer-trigger';
+		imgEl.onclick = state.isSlim ? null : (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			openImageViewer(imgEl.dataset.mediaUrl || chartUrl, w?.refresh);
+		};
+
+		const refreshKey = safeText(w?.refresh ?? '');
+		const refreshChanged = imgEl.dataset.refreshMs !== refreshKey;
+		if (refreshChanged) imgEl.dataset.refreshMs = refreshKey;
+
+		const urlChanged = imgEl.dataset.mediaUrl !== chartUrl;
+		if (urlChanged) {
+			imgEl.dataset.mediaUrl = chartUrl;
+			imgEl.dataset.loaded = '';
+			card.classList.add('image-loading');
+		} else if (imgEl.dataset.loaded !== 'true') {
+			card.classList.add('image-loading');
+		} else {
+			card.classList.remove('image-loading');
+		}
+		if (urlChanged || refreshChanged || imgEl.dataset.loaded !== 'true') {
+			setupImage(imgEl, chartUrl, w?.refresh);
 		}
 		return true;
 	}
