@@ -250,6 +250,14 @@ const PREVIEW_CONFIG = SERVER_CONFIG.videoPreview || {};
 const VIDEO_PREVIEW_INTERVAL_MS = configNumber(PREVIEW_CONFIG.intervalMs, 900000);
 const VIDEO_PREVIEW_PRUNE_HOURS = configNumber(PREVIEW_CONFIG.pruneAfterHours, 24);
 const VIDEO_PREVIEW_DIR = path.join(__dirname, 'video-previews');
+const CHART_CACHE_DIR = path.join(__dirname, 'chart-cache');
+const CHART_PERIOD_TTL = {
+	h: 60 * 1000,        // 1 minute
+	D: 10 * 60 * 1000,   // 10 minutes
+	W: 60 * 60 * 1000,   // 1 hour
+	M: 60 * 60 * 1000,   // 1 hour
+	Y: 60 * 60 * 1000,   // 1 hour
+};
 let videoPreviewInitialCaptureDone = false;
 const activeRtspStreams = new Map(); // Track active RTSP streams: id -> { url, user, ip, startTime }
 let rtspStreamIdCounter = 0;
@@ -1669,6 +1677,28 @@ function extractRtspUrls(data, urls = new Set()) {
 // Hash RTSP URL to generate filename
 function rtspUrlHash(url) {
 	return crypto.createHash('md5').update(url).digest('hex').substring(0, 16);
+}
+
+// Chart cache helpers
+function chartCacheKey(item, period, width) {
+	return crypto.createHash('md5').update(`${item}|${period}|${width}`).digest('hex').substring(0, 16);
+}
+
+function getChartCachePath(item, period, width) {
+	const hash = chartCacheKey(item, period, width);
+	return path.join(CHART_CACHE_DIR, `${hash}.png`);
+}
+
+function isChartCacheValid(cachePath, period) {
+	if (!fs.existsSync(cachePath)) return false;
+	const ttl = CHART_PERIOD_TTL[period];
+	if (!ttl) return false;
+	try {
+		const stat = fs.statSync(cachePath);
+		return (Date.now() - stat.mtimeMs) < ttl;
+	} catch {
+		return false;
+	}
 }
 
 async function fetchAllPages() {
@@ -3485,10 +3515,8 @@ app.use('/icon', createProxyMiddleware({
 	...proxyCommon,
 	pathRewrite: (path) => `/openhab.app${stripIconVersion(path)}`,
 }));
-app.use('/chart', createProxyMiddleware({
-	...proxyCommon,
-	pathRewrite: (path) => `/openhab.app${path}`,
-}));
+// /chart is handled by dedicated endpoint with caching (see app.get('/chart', ...))
+
 // Serve local images from public/images/ before proxying to openHAB
 app.use('/images', (req, res, next) => {
 	const localPath = path.join(PUBLIC_DIR, 'images', req.path);
@@ -3518,6 +3546,77 @@ app.get('/video-preview', (req, res) => {
 	res.type('image/jpeg');
 	res.set('Cache-Control', 'no-cache, max-age=300');
 	res.sendFile(filePath);
+});
+
+// Chart endpoint with caching
+app.get('/chart', async (req, res) => {
+	// Extract and validate parameters
+	const item = safeText(req.query.item || '').trim();
+	const period = safeText(req.query.period || '').trim();
+	const widthRaw = safeText(req.query.width || '').trim();
+
+	// Validate item: a-zA-Z0-9_- max 50 chars
+	if (!item || !/^[a-zA-Z0-9_-]{1,50}$/.test(item)) {
+		return res.status(400).type('text/plain').send('Invalid item parameter');
+	}
+
+	// Validate period: h D W M Y
+	if (!['h', 'D', 'W', 'M', 'Y'].includes(period)) {
+		return res.status(400).type('text/plain').send('Invalid period parameter');
+	}
+
+	// Validate width: integer 0-10000
+	const width = parseInt(widthRaw, 10);
+	if (!Number.isFinite(width) || width < 0 || width > 10000) {
+		return res.status(400).type('text/plain').send('Invalid width parameter');
+	}
+
+	const height = Math.round(width / 2);
+	const cachePath = getChartCachePath(item, period, width);
+
+	// Check cache
+	if (isChartCacheValid(cachePath, period)) {
+		try {
+			const buffer = fs.readFileSync(cachePath);
+			res.setHeader('Content-Type', 'image/png');
+			res.setHeader('Cache-Control', `private, max-age=${Math.floor(CHART_PERIOD_TTL[period] / 1000)}`);
+			res.setHeader('X-Chart-Cache', 'hit');
+			return res.send(buffer);
+		} catch {
+			// Fall through to fetch
+		}
+	}
+
+	// Fetch from openHAB
+	const chartPath = `/chart?items=${encodeURIComponent(item)}&period=${period}&w=${width}&h=${height}`;
+	try {
+		const response = await fetchOpenhabBinary(chartPath);
+		if (!response.ok) {
+			return res.status(response.status || 502).type('text/plain').send('Chart fetch failed');
+		}
+
+		// Verify we got an image
+		const contentType = safeText(response.contentType).toLowerCase();
+		if (!contentType.includes('image/')) {
+			return res.status(502).type('text/plain').send('Invalid chart response');
+		}
+
+		// Cache the successful response
+		try {
+			ensureDir(CHART_CACHE_DIR);
+			fs.writeFileSync(cachePath, response.body);
+		} catch (err) {
+			logMessage(`Chart cache write failed: ${err.message || err}`);
+		}
+
+		res.setHeader('Content-Type', response.contentType || 'image/png');
+		res.setHeader('Cache-Control', `private, max-age=${Math.floor(CHART_PERIOD_TTL[period] / 1000)}`);
+		res.setHeader('X-Chart-Cache', 'miss');
+		res.send(response.body);
+	} catch (err) {
+		logMessage(`Chart fetch error: ${err.message || err}`);
+		res.status(502).type('text/plain').send('Chart fetch failed');
+	}
 });
 
 app.get('/proxy', async (req, res, next) => {
@@ -3702,6 +3801,37 @@ async function captureRtspPreview(rtspUrl) {
 	});
 }
 
+// Prune old chart cache images (older than 1 week)
+function pruneChartCache() {
+	if (!fs.existsSync(CHART_CACHE_DIR)) return;
+
+	const maxAgeMs = 7 * 24 * 60 * 60 * 1000; // 1 week
+	const now = Date.now();
+	let pruned = 0;
+
+	try {
+		const files = fs.readdirSync(CHART_CACHE_DIR);
+		for (const file of files) {
+			if (!file.endsWith('.png')) continue;
+			const filePath = path.join(CHART_CACHE_DIR, file);
+			try {
+				const stat = fs.statSync(filePath);
+				if (now - stat.mtimeMs > maxAgeMs) {
+					fs.unlinkSync(filePath);
+					pruned++;
+				}
+			} catch (err) {
+				// Ignore individual file errors
+			}
+		}
+		if (pruned > 0) {
+			logMessage(`Chart cache pruned ${pruned} old entries`);
+		}
+	} catch (err) {
+		logMessage(`Chart cache prune failed: ${err.message || err}`);
+	}
+}
+
 // Prune old video preview images
 function pruneVideoPreviews() {
 	if (!fs.existsSync(VIDEO_PREVIEW_DIR)) return;
@@ -3771,6 +3901,9 @@ async function captureVideoPreviewsTask() {
 if (VIDEO_PREVIEW_INTERVAL_MS > 0) {
 	registerBackgroundTask('video-preview', VIDEO_PREVIEW_INTERVAL_MS, captureVideoPreviewsTask);
 }
+
+// Register chart cache prune task (every 24 hours)
+registerBackgroundTask('chart-cache-prune', 24 * 60 * 60 * 1000, pruneChartCache);
 
 // Periodic RTSP stream status logging (every 10 seconds, only if streams active)
 setInterval(() => {

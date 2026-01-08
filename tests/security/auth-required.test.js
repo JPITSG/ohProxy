@@ -1,0 +1,574 @@
+'use strict';
+
+/**
+ * Authentication Required Tests
+ *
+ * Tests that all protected endpoints properly require authentication
+ * and return 401 or redirect to login when accessed without auth.
+ */
+
+const { describe, it, before, after } = require('node:test');
+const assert = require('node:assert');
+const http = require('http');
+const path = require('path');
+const fs = require('fs');
+const express = require('express');
+const crypto = require('crypto');
+
+const { basicAuthHeader, TEST_USERS, TEST_COOKIE_KEY, generateTestAuthCookie } = require('../test-helpers');
+
+// Create a minimal test app that mirrors the auth behavior of the real server
+function createAuthTestApp(config = {}) {
+	const app = express();
+
+	const USERS = config.users || TEST_USERS;
+	const AUTH_MODE = config.authMode || 'html';
+	const AUTH_COOKIE_NAME = config.cookieName || 'AuthStore';
+	const AUTH_COOKIE_KEY = config.cookieKey || TEST_COOKIE_KEY;
+
+	function safeText(value) {
+		return value === null || value === undefined ? '' : String(value);
+	}
+
+	function getRequestPath(req) {
+		const raw = safeText(req?.originalUrl || req?.url || '');
+		if (!raw) return '';
+		const q = raw.indexOf('?');
+		return q === -1 ? raw : raw.slice(0, q);
+	}
+
+	function isAuthExemptPath(req) {
+		const pathname = getRequestPath(req);
+		if (!pathname) return false;
+		if (pathname === '/manifest.webmanifest') return true;
+		if (pathname === '/sw.js') return true;
+		if (pathname === '/favicon.ico') return true;
+		if (pathname.startsWith('/icons/')) return true;
+		if (pathname.startsWith('/images/')) return true;
+		return false;
+	}
+
+	function hasMatchingReferrer(req) {
+		const ref = safeText(req?.headers?.referer || req?.headers?.referrer || '').trim();
+		const host = safeText(req?.headers?.host || '').trim().toLowerCase();
+		if (!ref || !host) return false;
+		let refUrl;
+		try {
+			refUrl = new URL(ref);
+		} catch {
+			return false;
+		}
+		return safeText(refUrl.host).trim().toLowerCase() === host;
+	}
+
+	function parseBasicAuthHeader(value) {
+		if (!value) return [null, null];
+		if (!/^basic /i.test(value)) return [null, null];
+		const encoded = value.slice(6).trim();
+		if (!encoded) return [null, null];
+		let decoded = '';
+		try {
+			decoded = Buffer.from(encoded, 'base64').toString('utf8');
+		} catch {
+			return [null, null];
+		}
+		const idx = decoded.indexOf(':');
+		if (idx === -1) return [decoded, ''];
+		return [decoded.slice(0, idx), decoded.slice(idx + 1)];
+	}
+
+	function base64UrlEncode(value) {
+		return Buffer.from(String(value), 'utf8')
+			.toString('base64')
+			.replace(/\+/g, '-')
+			.replace(/\//g, '_')
+			.replace(/=+$/g, '');
+	}
+
+	function base64UrlDecode(value) {
+		const raw = safeText(value).replace(/-/g, '+').replace(/_/g, '/');
+		if (!raw) return null;
+		const pad = raw.length % 4;
+		const padded = pad ? raw + '='.repeat(4 - pad) : raw;
+		try {
+			return Buffer.from(padded, 'base64').toString('utf8');
+		} catch {
+			return null;
+		}
+	}
+
+	function getCookieValue(req, name) {
+		const header = safeText(req?.headers?.cookie || '').trim();
+		if (!header || !name) return '';
+		for (const part of header.split(';')) {
+			const trimmed = part.trim();
+			if (!trimmed) continue;
+			const eq = trimmed.indexOf('=');
+			if (eq === -1) continue;
+			const key = trimmed.slice(0, eq).trim();
+			if (key !== name) continue;
+			return trimmed.slice(eq + 1).trim();
+		}
+		return '';
+	}
+
+	function getAuthCookieUser(req) {
+		if (!AUTH_COOKIE_KEY) return null;
+		const raw = getCookieValue(req, AUTH_COOKIE_NAME);
+		if (!raw) return null;
+		const decoded = base64UrlDecode(raw);
+		if (!decoded) return null;
+		const parts = decoded.split('|');
+		if (parts.length !== 3) return null;
+		const [userEncoded, expiryRaw, sig] = parts;
+		if (!/^\d+$/.test(expiryRaw)) return null;
+		const expiry = Number(expiryRaw);
+		if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
+		const user = base64UrlDecode(userEncoded);
+		if (!user || !Object.prototype.hasOwnProperty.call(USERS, user)) return null;
+		const expected = crypto.createHmac('sha256', AUTH_COOKIE_KEY).update(`${userEncoded}|${expiryRaw}|${USERS[user]}`).digest('hex');
+		try {
+			const sigBuf = Buffer.from(sig, 'hex');
+			const expectedBuf = Buffer.from(expected, 'hex');
+			if (sigBuf.length !== expectedBuf.length) return null;
+			if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
+		} catch {
+			return null;
+		}
+		return user;
+	}
+
+	// Auth middleware - mirrors server.js behavior
+	app.use((req, res, next) => {
+		const pathname = getRequestPath(req);
+
+		// /images/*.ext is fully public (for iframe embedding)
+		if (pathname && pathname.startsWith('/images/') && /\.\w+$/.test(pathname)) {
+			req.ohProxyAuth = 'unauthenticated';
+			return next();
+		}
+
+		// Other exempt paths require matching referrer
+		if (isAuthExemptPath(req) && hasMatchingReferrer(req)) {
+			req.ohProxyAuth = 'unauthenticated';
+			return next();
+		}
+
+		// HTML auth mode
+		if (AUTH_MODE === 'html') {
+			// Check cookie auth
+			if (AUTH_COOKIE_KEY && AUTH_COOKIE_NAME) {
+				const cookieUser = getAuthCookieUser(req);
+				if (cookieUser) {
+					req.ohProxyAuth = 'authenticated';
+					req.ohProxyUser = cookieUser;
+					return next();
+				}
+			}
+
+			// Allow login.js and fonts
+			if (req.path === '/login.js' || req.path.startsWith('/fonts/')) {
+				req.ohProxyAuth = 'unauthenticated';
+				return next();
+			}
+
+			// Not authenticated - check request type
+			const acceptHeader = req.headers.accept || '';
+			const reqPath = req.path.toLowerCase();
+
+			const isHtmlPageRequest = acceptHeader.includes('text/html') &&
+				!reqPath.endsWith('.js') &&
+				!reqPath.endsWith('.css') &&
+				!reqPath.endsWith('.png') &&
+				!reqPath.endsWith('.jpg') &&
+				!reqPath.endsWith('.ico') &&
+				!reqPath.endsWith('.svg') &&
+				!reqPath.endsWith('.woff') &&
+				!reqPath.endsWith('.woff2');
+
+			if (isHtmlPageRequest) {
+				// Redirect non-root paths to / for login
+				if (req.path !== '/') {
+					return res.redirect('/');
+				}
+				// Serve login page
+				return res.status(200).send('LOGIN_PAGE');
+			}
+
+			// API/asset requests without auth - return 401
+			return res.status(401).json({ error: 'Authentication required' });
+		}
+
+		// Basic auth mode
+		const [user, pass] = parseBasicAuthHeader(req.headers.authorization);
+		if (user && USERS[user] === pass) {
+			req.ohProxyAuth = 'authenticated';
+			req.ohProxyUser = user;
+			return next();
+		}
+
+		res.setHeader('WWW-Authenticate', 'Basic realm="Test"');
+		res.status(401).send('Unauthorized');
+	});
+
+	// Test endpoints mirroring server.js routes
+	app.post('/api/auth/login', express.json(), (req, res) => {
+		res.json({ info: 'Login endpoint - always accessible' });
+	});
+
+	app.get('/config.js', (req, res) => {
+		res.type('application/javascript').send('window.__CONFIG__={};');
+	});
+
+	app.get('/api/settings', (req, res) => {
+		res.json({ settings: {} });
+	});
+
+	app.post('/api/settings', express.json(), (req, res) => {
+		res.json({ success: true });
+	});
+
+	app.get('/api/glow-rules/:widgetId', (req, res) => {
+		res.json({ rules: {} });
+	});
+
+	app.post('/api/glow-rules', express.json(), (req, res) => {
+		res.json({ success: true });
+	});
+
+	app.get('/sw.js', (req, res) => {
+		res.type('application/javascript').send('// SW');
+	});
+
+	app.get('/manifest.webmanifest', (req, res) => {
+		res.json({ name: 'test' });
+	});
+
+	app.get('/search-index', (req, res) => {
+		res.json({ items: [] });
+	});
+
+	app.get('/video-preview', (req, res) => {
+		res.json({ preview: 'test' });
+	});
+
+	app.get('/proxy', (req, res) => {
+		res.json({ proxied: true });
+	});
+
+	app.get(['/', '/index.html'], (req, res) => {
+		res.send('MAIN_PAGE');
+	});
+
+	app.get('/login', (req, res) => {
+		res.send('LOGIN_PAGE');
+	});
+
+	app.get('/classic', (req, res) => {
+		res.redirect('http://example.com/');
+	});
+
+	// Versioned assets
+	app.get(/^\/app\.v[\w.-]+\.js$/i, (req, res) => {
+		res.type('application/javascript').send('// App JS');
+	});
+
+	app.get(/^\/tailwind\.v[\w.-]+\.css$/i, (req, res) => {
+		res.type('text/css').send('/* CSS */');
+	});
+
+	app.get(/^\/styles\.v[\w.-]+\.css$/i, (req, res) => {
+		res.type('text/css').send('/* CSS */');
+	});
+
+	app.get(/^\/icons\/apple-touch-icon\.v[\w.-]+\.png$/i, (req, res) => {
+		res.type('image/png').send('PNG');
+	});
+
+	app.get('/icons/icon-192.png', (req, res) => {
+		res.type('image/png').send('PNG');
+	});
+
+	app.get('/favicon.ico', (req, res) => {
+		res.type('image/x-icon').send('ICO');
+	});
+
+	app.get('/images/v1/test.png', (req, res) => {
+		res.type('image/png').send('PNG');
+	});
+
+	app.get('/login.js', (req, res) => {
+		res.type('application/javascript').send('// Login JS');
+	});
+
+	app.get('/fonts/test.woff2', (req, res) => {
+		res.type('font/woff2').send('FONT');
+	});
+
+	return app;
+}
+
+describe('Authentication Required Tests - HTML Mode', () => {
+	let server;
+	let baseUrl;
+
+	before(async () => {
+		const app = createAuthTestApp({ authMode: 'html' });
+		server = http.createServer(app);
+		await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+		const addr = server.address();
+		baseUrl = `http://127.0.0.1:${addr.port}`;
+	});
+
+	after(async () => {
+		if (server) {
+			await new Promise((resolve) => server.close(resolve));
+		}
+	});
+
+	describe('Protected Endpoints Return 401 Without Auth', () => {
+		const protectedEndpoints = [
+			{ method: 'GET', path: '/config.js', description: 'Client config' },
+			{ method: 'GET', path: '/api/settings', description: 'User settings GET' },
+			{ method: 'POST', path: '/api/settings', description: 'User settings POST', body: '{}' },
+			{ method: 'GET', path: '/api/glow-rules/test123', description: 'Glow rules GET' },
+			{ method: 'POST', path: '/api/glow-rules', description: 'Glow rules POST', body: '{}' },
+			{ method: 'GET', path: '/search-index', description: 'Search index' },
+			{ method: 'GET', path: '/video-preview?url=rtsp://test', description: 'Video preview' },
+			{ method: 'GET', path: '/proxy?url=http://test', description: 'Proxy endpoint' },
+			{ method: 'GET', path: '/app.v123.js', description: 'App JS (versioned)' },
+			{ method: 'GET', path: '/tailwind.v123.css', description: 'Tailwind CSS (versioned)' },
+			{ method: 'GET', path: '/styles.v123.css', description: 'Styles CSS (versioned)' },
+		];
+
+		for (const endpoint of protectedEndpoints) {
+			it(`${endpoint.method} ${endpoint.path} - ${endpoint.description} returns 401`, async () => {
+				const options = {
+					method: endpoint.method,
+					headers: {},
+				};
+				if (endpoint.body) {
+					options.body = endpoint.body;
+					options.headers['Content-Type'] = 'application/json';
+				}
+				const res = await fetch(`${baseUrl}${endpoint.path}`, options);
+				assert.strictEqual(res.status, 401, `Expected 401 for ${endpoint.path}, got ${res.status}`);
+			});
+		}
+	});
+
+	describe('HTML Page Requests Redirect or Serve Login', () => {
+		it('GET / serves login page', async () => {
+			const res = await fetch(`${baseUrl}/`, {
+				headers: { 'Accept': 'text/html' },
+			});
+			// Should serve login page (200) in HTML mode
+			assert.strictEqual(res.status, 200);
+			const body = await res.text();
+			assert.ok(body.includes('LOGIN_PAGE'), 'Should serve login page');
+		});
+
+		it('GET /login serves login page', async () => {
+			const res = await fetch(`${baseUrl}/login`, {
+				headers: { 'Accept': 'text/html' },
+			});
+			// In our test app, /login redirects to / for login
+			assert.ok(res.status === 302 || res.status === 200);
+		});
+
+		it('GET /classic redirects to / for login (HTML page request)', async () => {
+			const res = await fetch(`${baseUrl}/classic`, {
+				redirect: 'manual',
+				headers: { 'Accept': 'text/html' },
+			});
+			assert.strictEqual(res.status, 302);
+			const location = res.headers.get('Location');
+			assert.ok(location === '/' || location === `${baseUrl}/`, 'Should redirect to / for login');
+		});
+	});
+
+	describe('Auth-Exempt Paths', () => {
+		it('/images/*.ext is fully public without referrer', async () => {
+			const res = await fetch(`${baseUrl}/images/v1/test.png`);
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('/manifest.webmanifest with matching referrer is allowed', async () => {
+			const res = await fetch(`${baseUrl}/manifest.webmanifest`, {
+				headers: { 'Referer': `${baseUrl}/` },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('/manifest.webmanifest without referrer returns 401', async () => {
+			const res = await fetch(`${baseUrl}/manifest.webmanifest`);
+			assert.strictEqual(res.status, 401);
+		});
+
+		it('/sw.js with matching referrer is allowed', async () => {
+			const res = await fetch(`${baseUrl}/sw.js`, {
+				headers: { 'Referer': `${baseUrl}/` },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('/sw.js without referrer returns 401', async () => {
+			const res = await fetch(`${baseUrl}/sw.js`);
+			assert.strictEqual(res.status, 401);
+		});
+
+		it('/favicon.ico with matching referrer is allowed', async () => {
+			const res = await fetch(`${baseUrl}/favicon.ico`, {
+				headers: { 'Referer': `${baseUrl}/` },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('/icons/* with matching referrer is allowed', async () => {
+			const res = await fetch(`${baseUrl}/icons/icon-192.png`, {
+				headers: { 'Referer': `${baseUrl}/` },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('/icons/* without referrer returns 401', async () => {
+			const res = await fetch(`${baseUrl}/icons/icon-192.png`);
+			assert.strictEqual(res.status, 401);
+		});
+
+		it('/login.js is allowed (needed for login page)', async () => {
+			const res = await fetch(`${baseUrl}/login.js`);
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('/fonts/* is allowed (needed for login page)', async () => {
+			const res = await fetch(`${baseUrl}/fonts/test.woff2`);
+			assert.strictEqual(res.status, 200);
+		});
+	});
+
+	describe('Authenticated Access Works', () => {
+		it('protected endpoint with valid cookie returns 200', async () => {
+			const validCookie = generateTestAuthCookie('testuser', 'testpassword', TEST_COOKIE_KEY, 365);
+			const res = await fetch(`${baseUrl}/api/settings`, {
+				headers: { 'Cookie': `AuthStore=${validCookie}` },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('main page with valid cookie returns content', async () => {
+			const validCookie = generateTestAuthCookie('testuser', 'testpassword', TEST_COOKIE_KEY, 365);
+			const res = await fetch(`${baseUrl}/`, {
+				headers: {
+					'Accept': 'text/html',
+					'Cookie': `AuthStore=${validCookie}`,
+				},
+			});
+			assert.strictEqual(res.status, 200);
+			const body = await res.text();
+			assert.ok(body.includes('MAIN_PAGE'), 'Should serve main page when authenticated');
+		});
+	});
+});
+
+describe('Authentication Required Tests - Basic Auth Mode', () => {
+	let server;
+	let baseUrl;
+
+	before(async () => {
+		const app = createAuthTestApp({ authMode: 'basic' });
+		server = http.createServer(app);
+		await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+		const addr = server.address();
+		baseUrl = `http://127.0.0.1:${addr.port}`;
+	});
+
+	after(async () => {
+		if (server) {
+			await new Promise((resolve) => server.close(resolve));
+		}
+	});
+
+	describe('Protected Endpoints Return 401 Without Auth', () => {
+		const protectedEndpoints = [
+			{ method: 'GET', path: '/', description: 'Main page' },
+			{ method: 'GET', path: '/config.js', description: 'Client config' },
+			{ method: 'GET', path: '/api/settings', description: 'User settings' },
+			{ method: 'GET', path: '/search-index', description: 'Search index' },
+			{ method: 'GET', path: '/proxy?url=http://test', description: 'Proxy endpoint' },
+		];
+
+		for (const endpoint of protectedEndpoints) {
+			it(`${endpoint.method} ${endpoint.path} - ${endpoint.description} returns 401`, async () => {
+				const res = await fetch(`${baseUrl}${endpoint.path}`);
+				assert.strictEqual(res.status, 401, `Expected 401 for ${endpoint.path}, got ${res.status}`);
+				// Basic auth should have WWW-Authenticate header
+				const wwwAuth = res.headers.get('WWW-Authenticate');
+				assert.ok(wwwAuth && wwwAuth.toLowerCase().includes('basic'), 'Should have Basic WWW-Authenticate header');
+			});
+		}
+	});
+
+	describe('Authenticated Access Works', () => {
+		it('protected endpoint with valid basic auth returns 200', async () => {
+			const res = await fetch(`${baseUrl}/api/settings`, {
+				headers: { 'Authorization': basicAuthHeader('testuser', 'testpassword') },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('main page with valid basic auth returns content', async () => {
+			const res = await fetch(`${baseUrl}/`, {
+				headers: { 'Authorization': basicAuthHeader('testuser', 'testpassword') },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('invalid credentials return 401', async () => {
+			const res = await fetch(`${baseUrl}/`, {
+				headers: { 'Authorization': basicAuthHeader('testuser', 'wrongpassword') },
+			});
+			assert.strictEqual(res.status, 401);
+		});
+	});
+});
+
+describe('Referrer Validation', () => {
+	let server;
+	let baseUrl;
+
+	before(async () => {
+		const app = createAuthTestApp({ authMode: 'html' });
+		server = http.createServer(app);
+		await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+		const addr = server.address();
+		baseUrl = `http://127.0.0.1:${addr.port}`;
+	});
+
+	after(async () => {
+		if (server) {
+			await new Promise((resolve) => server.close(resolve));
+		}
+	});
+
+	it('mismatched referrer host is rejected', async () => {
+		const res = await fetch(`${baseUrl}/manifest.webmanifest`, {
+			headers: { 'Referer': 'http://evil.com/' },
+		});
+		assert.strictEqual(res.status, 401);
+	});
+
+	it('matching referrer host is accepted', async () => {
+		const res = await fetch(`${baseUrl}/manifest.webmanifest`, {
+			headers: { 'Referer': `${baseUrl}/somepage` },
+		});
+		assert.strictEqual(res.status, 200);
+	});
+
+	it('referrer with different port is rejected', async () => {
+		const res = await fetch(`${baseUrl}/manifest.webmanifest`, {
+			headers: { 'Referer': 'http://127.0.0.1:9999/' },
+		});
+		assert.strictEqual(res.status, 401);
+	});
+});
