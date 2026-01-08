@@ -2830,7 +2830,7 @@ function updateCard(card, w, afterImage, info) {
 		if (!previewDiv) {
 			previewDiv = document.createElement('div');
 			previewDiv.className = 'video-preview';
-			previewDiv.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background-size:cover;background-position:center;opacity:0.5;z-index:10;';
+			previewDiv.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background-size:cover;background-position:center;opacity:0.75;z-index:10;';
 			videoContainer.appendChild(previewDiv);
 		}
 		// Set preview background if RTSP URL available
@@ -2854,9 +2854,9 @@ function updateCard(card, w, afterImage, info) {
 			}
 			spinner = document.createElement('div');
 			spinner.className = 'video-spinner';
-			spinner.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:20;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);';
+			spinner.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:12;display:flex;align-items:center;justify-content:center;';
 			const spinnerInner = document.createElement('div');
-			spinnerInner.style.cssText = 'width:3rem;height:3rem;border:5px solid rgba(255,255,255,0.4);border-top-color:white;border-radius:50%;animation:spin 1s linear infinite;';
+			spinnerInner.style.cssText = 'width:3rem;height:3rem;border:5px solid #666;border-top-color:white;border-radius:50%;animation:spin 1s linear infinite;';
 			spinner.appendChild(spinnerInner);
 			videoContainer.appendChild(spinner);
 		}
@@ -2866,28 +2866,14 @@ function updateCard(card, w, afterImage, info) {
 		if (isNewVideo) {
 			videoEl = document.createElement('video');
 			videoEl.className = 'video-stream w-full block';
+			videoEl.style.cssText = 'position:relative;z-index:15;';
 			videoEl.setAttribute('autoplay', '');
 			videoEl.setAttribute('muted', '');
 			videoEl.setAttribute('playsinline', '');
 			videoEl.muted = true;
 		}
 
-		// Show spinner only if video not playing yet
-		const isVideoPlaying = !videoEl.paused && !videoEl.ended && videoEl.readyState > 2;
-		if (isVideoPlaying) {
-			// Video already playing, hide spinner and preview
-			spinner.style.display = 'none';
-			previewDiv.style.display = 'none';
-		} else {
-			spinner.style.display = 'flex';
-			previewDiv.style.display = 'block';
-			// Hide spinner/preview when video starts playing
-			const hideOverlays = () => {
-				spinner.style.display = 'none';
-				previewDiv.style.display = 'none';
-			};
-			videoEl.addEventListener('playing', hideOverlays, { once: true });
-		}
+		// Video z-15 covers preview z-10 and spinner z-12 when playing
 
 		if (isNewVideo) {
 

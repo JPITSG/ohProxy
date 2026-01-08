@@ -251,6 +251,8 @@ const VIDEO_PREVIEW_INTERVAL_MS = configNumber(PREVIEW_CONFIG.intervalMs, 900000
 const VIDEO_PREVIEW_PRUNE_HOURS = configNumber(PREVIEW_CONFIG.pruneAfterHours, 24);
 const VIDEO_PREVIEW_DIR = path.join(__dirname, 'video-previews');
 let videoPreviewInitialCaptureDone = false;
+const activeRtspStreams = new Map(); // Track active RTSP streams: id -> { url, user, ip, startTime }
+let rtspStreamIdCounter = 0;
 const authLockouts = new Map();
 
 function logMessage(message) {
@@ -3550,6 +3552,14 @@ app.get('/proxy', async (req, res, next) => {
 		// RTSP stream - convert to MP4 via FFmpeg
 		if (target.protocol === 'rtsp:') {
 			const rtspUrl = target.toString();
+			const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+			const username = req.ohProxyUser || 'anonymous';
+			const streamId = ++rtspStreamIdCounter;
+
+			// Track and log stream start
+			activeRtspStreams.set(streamId, { url: rtspUrl, user: username, ip: clientIp, startTime: Date.now() });
+			logMessage(`[RTSP] Starting stream ${rtspUrl} to ${username}@${clientIp}`);
+
 			const ffmpegArgs = [
 				'-fflags', 'nobuffer',
 				'-flags', 'low_delay',
@@ -3568,22 +3578,24 @@ app.get('/proxy', async (req, res, next) => {
 			res.setHeader('Content-Type', 'video/mp4');
 			res.setHeader('Cache-Control', 'no-store');
 			ffmpeg.stdout.pipe(res);
-			ffmpeg.stderr.on('data', (data) => {
-				const msg = data.toString().trim();
-				if (msg && !msg.startsWith('frame=')) {
-					logMessage(`FFmpeg RTSP: ${msg}`);
+			// Silence FFmpeg stderr output
+			ffmpeg.stderr.resume();
+
+			const endStream = () => {
+				if (activeRtspStreams.has(streamId)) {
+					activeRtspStreams.delete(streamId);
+					logMessage(`[RTSP] Ending stream ${rtspUrl} to ${username}@${clientIp}`);
 				}
-			});
+			};
+
 			ffmpeg.on('error', (err) => {
-				logMessage(`FFmpeg RTSP error: ${err.message}`);
+				endStream();
 				if (!res.headersSent) {
 					res.status(502).send('RTSP proxy error');
 				}
 			});
-			ffmpeg.on('close', (code) => {
-				if (code && code !== 0 && code !== 255) {
-					logMessage(`FFmpeg RTSP exited with code ${code}`);
-				}
+			ffmpeg.on('close', () => {
+				endStream();
 				if (!res.writableEnded) res.end();
 			});
 			req.on('close', () => {
@@ -3759,6 +3771,14 @@ async function captureVideoPreviewsTask() {
 if (VIDEO_PREVIEW_INTERVAL_MS > 0) {
 	registerBackgroundTask('video-preview', VIDEO_PREVIEW_INTERVAL_MS, captureVideoPreviewsTask);
 }
+
+// Periodic RTSP stream status logging (every 10 seconds, only if streams active)
+setInterval(() => {
+	const count = activeRtspStreams.size;
+	if (count > 0) {
+		logMessage(`[RTSP] ${count} stream${count === 1 ? '' : 's'} active`);
+	}
+}, 10000);
 
 // Initialize sessions database
 try {
