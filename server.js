@@ -3622,6 +3622,106 @@ app.get('/chart', async (req, res) => {
 	}
 });
 
+app.get('/presence', async (req, res) => {
+	const conn = getMysqlConnection();
+	if (!conn) {
+		return res.status(503).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
+	}
+
+	const query = `
+		SELECT lg1.* FROM log_gps AS lg1
+		INNER JOIN (SELECT id FROM log_gps ORDER BY id DESC LIMIT 20) AS lg2
+		ON lg1.id = lg2.id
+		ORDER BY lg1.id DESC LIMIT 20
+	`;
+
+	const QUERY_TIMEOUT_MS = 10000;
+
+	let rows;
+	try {
+		rows = await new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => {
+				reject(new Error('Query timeout'));
+			}, QUERY_TIMEOUT_MS);
+
+			conn.query(query, (err, results) => {
+				clearTimeout(timeout);
+				if (err) reject(err);
+				else resolve(results);
+			});
+		});
+	} catch (err) {
+		logMessage(`[Presence] Query failed: ${err.message || err}`);
+		return res.status(504).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
+	}
+
+	const markers = [];
+	let last = null;
+	let first = true;
+
+	for (const row of rows) {
+		const current = [
+			Math.round(row.lat * 10000000) / 10000000,
+			Math.round(row.lon * 10000000) / 10000000,
+		];
+		if (last && current[0] === last[0] && current[1] === last[1]) {
+			continue;
+		}
+		last = current;
+		markers.push([current[0], current[1], first ? 'red' : 'blue']);
+		first = false;
+	}
+
+	const zoom = 15;
+	markers.reverse();
+	const markersJson = JSON.stringify(markers);
+
+	const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Map</title>
+<style>
+.olControlAttribution{display:none!important}
+#map{position:absolute;top:0;left:0;right:0;bottom:0}
+body{margin:0;padding:0}
+</style>
+<script src="https://openlayers.org/api/OpenLayers.js"></script>
+</head>
+<body>
+<div id="map"></div>
+<script>
+(function(){
+var markers=${markersJson};
+var zoom=${zoom};
+if(!markers.length)return;
+
+var map=new OpenLayers.Map("map");
+map.addLayer(new OpenLayers.Layer.OSM("OSM",["//a.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//b.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//c.tile.openstreetmap.org/\${z}/\${x}/\${y}.png"]));
+
+var wgs84=new OpenLayers.Projection("EPSG:4326");
+var proj=map.getProjectionObject();
+var vector=new OpenLayers.Layer.Vector("Markers");
+
+markers.forEach(function(m){
+vector.addFeatures(new OpenLayers.Feature.Vector(
+new OpenLayers.Geometry.Point(m[1],m[0]).transform(wgs84,proj),
+{},{externalGraphic:'/images/marker-'+m[2]+'.png',graphicHeight:41,graphicWidth:25,graphicXOffset:-12,graphicYOffset:-41}
+));
+});
+
+map.addLayer(vector);
+map.setCenter(new OpenLayers.LonLat(markers[0][1],markers[0][0]).transform(wgs84,proj),zoom);
+})();
+</script>
+</body>
+</html>`;
+
+	res.setHeader('Content-Type', 'text/html; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-store');
+	res.send(html);
+});
+
 app.get('/proxy', async (req, res, next) => {
 	const raw = req.query?.url;
 
