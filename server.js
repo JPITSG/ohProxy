@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const zlib = require('zlib');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const http = require('http');
 const https = require('https');
 const spdy = require('spdy');
@@ -122,9 +122,9 @@ function loadUserConfig() {
 function parseProxyAllowEntry(value) {
 	const raw = safeText(value).trim();
 	if (!raw) return null;
-	// Reject non-http/https schemes (must have :// to be a scheme)
-	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && !/^https?:\/\//i.test(raw)) return null;
-	const candidate = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+	// Reject non-http/https/rtsp schemes (must have :// to be a scheme)
+	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && !/^(https?|rtsp):\/\//i.test(raw)) return null;
+	const candidate = /^(https?|rtsp):\/\//i.test(raw) ? raw : `http://${raw}`;
 	try {
 		const url = new URL(candidate);
 		let host = safeText(url.hostname).toLowerCase();
@@ -151,7 +151,9 @@ function normalizeProxyAllowlist(list) {
 
 function targetPortForUrl(url) {
 	if (url.port) return url.port;
-	return url.protocol === 'https:' ? '443' : '80';
+	if (url.protocol === 'https:') return '443';
+	if (url.protocol === 'rtsp:') return '554';
+	return '80';
 }
 
 function isProxyTargetAllowed(url, allowlist) {
@@ -3468,11 +3470,56 @@ app.get('/proxy', async (req, res, next) => {
 			}
 		}
 
-		if (!['http:', 'https:'].includes(target.protocol)) {
+		if (!['http:', 'https:', 'rtsp:'].includes(target.protocol)) {
 			return res.status(400).send('Invalid proxy target');
 		}
 		if (!isProxyTargetAllowed(target, liveConfig.proxyAllowlist)) {
 			return res.status(403).send('Proxy target not allowed');
+		}
+
+		// RTSP stream - convert to MP4 via FFmpeg
+		if (target.protocol === 'rtsp:') {
+			const rtspUrl = target.toString();
+			const ffmpegArgs = [
+				'-fflags', 'nobuffer',
+				'-flags', 'low_delay',
+				'-rtsp_transport', 'tcp',
+				'-i', rtspUrl,
+				'-c:v', 'copy',
+				'-an',
+				'-f', 'mp4',
+				'-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart',
+				'-reset_timestamps', '1',
+				'pipe:1',
+			];
+			const ffmpeg = spawn('ffmpeg', ffmpegArgs, {
+				stdio: ['ignore', 'pipe', 'pipe'],
+			});
+			res.setHeader('Content-Type', 'video/mp4');
+			res.setHeader('Cache-Control', 'no-store');
+			ffmpeg.stdout.pipe(res);
+			ffmpeg.stderr.on('data', (data) => {
+				const msg = data.toString().trim();
+				if (msg && !msg.startsWith('frame=')) {
+					logMessage(`FFmpeg RTSP: ${msg}`);
+				}
+			});
+			ffmpeg.on('error', (err) => {
+				logMessage(`FFmpeg RTSP error: ${err.message}`);
+				if (!res.headersSent) {
+					res.status(502).send('RTSP proxy error');
+				}
+			});
+			ffmpeg.on('close', (code) => {
+				if (code && code !== 0 && code !== 255) {
+					logMessage(`FFmpeg RTSP exited with code ${code}`);
+				}
+				if (!res.writableEnded) res.end();
+			});
+			req.on('close', () => {
+				ffmpeg.kill('SIGKILL');
+			});
+			return;
 		}
 
 		const headers = {};
