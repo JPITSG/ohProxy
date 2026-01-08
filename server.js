@@ -1005,6 +1005,7 @@ function isAuthExemptPath(req) {
 	if (pathname === '/sw.js') return true;
 	if (pathname === '/favicon.ico') return true;
 	if (pathname.startsWith('/icons/')) return true;
+	if (pathname.startsWith('/images/')) return true;
 	return false;
 }
 
@@ -2786,6 +2787,13 @@ app.post('/api/auth/login', express.json(), (req, res) => {
 app.use((req, res, next) => {
 	const clientIp = getRemoteIp(req);
 	if (clientIp) req.ohProxyClientIp = clientIp;
+	const pathname = getRequestPath(req);
+	// /images/*.ext is fully public (for iframe embedding); other exempt paths require matching referrer
+	if (pathname && pathname.startsWith('/images/') && /\.\w+$/.test(pathname)) {
+		req.ohProxyAuth = 'unauthenticated';
+		req.ohProxyUser = '';
+		return next();
+	}
 	if (isAuthExemptPath(req) && hasMatchingReferrer(req)) {
 		req.ohProxyAuth = 'unauthenticated';
 		req.ohProxyUser = '';
@@ -3427,7 +3435,14 @@ app.use('/chart', createProxyMiddleware({
 	...proxyCommon,
 	pathRewrite: (path) => `/openhab.app${path}`,
 }));
-app.use('/images', createProxyMiddleware({
+// Serve local images from public/images/ before proxying to openHAB
+app.use('/images', (req, res, next) => {
+	const localPath = path.join(PUBLIC_DIR, 'images', req.path);
+	if (fs.existsSync(localPath) && fs.statSync(localPath).isFile()) {
+		return res.sendFile(localPath);
+	}
+	next();
+}, createProxyMiddleware({
 	...proxyCommon,
 	pathRewrite: (path) => `/openhab.app${stripIconVersion(path)}`,
 }));
