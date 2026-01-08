@@ -3513,9 +3513,9 @@ app.get('/classic', (req, res) => {
 	res.redirect('/openhab.app');
 });
 
-// SPA fallback
+// Redirect unknown routes to homepage
 app.use((req, res) => {
-	sendIndex(req, res);
+	res.redirect('/');
 });
 
 if (SITEMAP_REFRESH_MS > 0) {
