@@ -4590,6 +4590,11 @@ function restoreNormalPolling() {
 			e.target.blur();
 		}
 	});
+	els.search.addEventListener('focus', () => {
+		if (!state.isSlim && !state.searchIndexReady && !state.searchIndexBuilding) {
+			buildSearchIndex();
+		}
+	});
 
 	els.back.addEventListener('click', () => {
 		haptic();
@@ -4642,7 +4647,6 @@ function restoreNormalPolling() {
 		await loadDefaultSitemap();
 		syncHistory(true);
 		await refresh(true);
-		if (!state.isSlim) buildSearchIndex();
 		startPolling();
 		connectWs();
 	} catch (e) {
