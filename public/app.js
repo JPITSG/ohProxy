@@ -3330,7 +3330,7 @@ function render() {
 		widgets._matchCount = combined.length;
 	}
 
-	const siteName = state.rootPageTitle || state.pageTitle || 'openHAB';
+	const siteName = CLIENT_CONFIG.siteName || state.rootPageTitle || state.pageTitle || 'openHAB';
 	const isRoot = state.rootPageUrl && state.pageUrl && state.rootPageUrl === state.pageUrl;
 	const pageLabel = isRoot ? 'Home' : (state.pageTitle || siteName);
 	const pageParts = splitLabelState(pageLabel);

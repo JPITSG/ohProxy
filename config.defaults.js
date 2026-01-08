@@ -135,6 +135,8 @@ module.exports = {
 
 	// Client-visible settings.
 	client: {
+		// Site name override for header display (empty string uses sitemap name).
+		siteName: '',
 		// Subsections using valueColor glow (titles; case-insensitive; "*" for all; empty allowed).
 		glowSections: [],
 		// State-based glow rules (array; section prefix match; e.g. [{ section: 'Interior Open', states: { Closed: 'green', Open: 'red' } }]).
