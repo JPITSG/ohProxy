@@ -1661,20 +1661,115 @@ function ensureImageViewer() {
 			imageViewer.classList.remove('loading');
 			imageViewerInitialLoadPending = false;
 		});
-		imageViewerImg.addEventListener('click', (e) => {
-			if (state.isSlim) return;
-			e.preventDefault();
-			e.stopPropagation();
-			toggleImageViewerZoom();
-		});
-		imageViewerImg.addEventListener('pointermove', (e) => {
-			if (state.isSlim) return;
-			if (!imageViewerZoomed) return;
-			const rect = imageViewerImg.getBoundingClientRect();
-			const x = Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100));
-			const y = Math.min(100, Math.max(0, ((e.clientY - rect.top) / rect.height) * 100));
-			imageViewerImg.style.transformOrigin = `${x}% ${y}%`;
-		});
+		const isTouch = isTouchDevice();
+		// Click-to-zoom and pointer pan only for non-touch devices
+		if (!isTouch) {
+			imageViewerImg.addEventListener('click', (e) => {
+				if (state.isSlim) return;
+				e.preventDefault();
+				e.stopPropagation();
+				toggleImageViewerZoom();
+			});
+			imageViewerImg.addEventListener('pointermove', (e) => {
+				if (state.isSlim) return;
+				if (!imageViewerZoomed) return;
+				const rect = imageViewerImg.getBoundingClientRect();
+				const x = Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100));
+				const y = Math.min(100, Math.max(0, ((e.clientY - rect.top) / rect.height) * 100));
+				imageViewerImg.style.transformOrigin = `${x}% ${y}%`;
+			});
+		} else {
+			// Pinch-to-zoom and pan for touch devices
+			let pinchStartDist = 0;
+			let pinchStartScale = 1;
+			let currentScale = 1;
+			let translateX = 0;
+			let translateY = 0;
+			let panStartX = 0;
+			let panStartY = 0;
+			let panStartTranslateX = 0;
+			let panStartTranslateY = 0;
+			let isPanning = false;
+
+			const clampTranslate = () => {
+				// Limit panning so image stays within view
+				const rect = imageViewerImg.getBoundingClientRect();
+				const imgWidth = rect.width / currentScale;
+				const imgHeight = rect.height / currentScale;
+				const maxX = (imgWidth * (currentScale - 1)) / 2;
+				const maxY = (imgHeight * (currentScale - 1)) / 2;
+				translateX = Math.min(maxX, Math.max(-maxX, translateX));
+				translateY = Math.min(maxY, Math.max(-maxY, translateY));
+			};
+
+			const updateTransform = () => {
+				if (currentScale > 1) {
+					clampTranslate();
+					imageViewerImg.style.transform = `translate(${translateX}px, ${translateY}px) scale(${currentScale})`;
+				} else {
+					imageViewerImg.style.transform = '';
+				}
+			};
+
+			imageViewerImg.addEventListener('touchstart', (e) => {
+				if (e.touches.length === 2) {
+					// Pinch start
+					e.preventDefault();
+					isPanning = false;
+					const dx = e.touches[0].clientX - e.touches[1].clientX;
+					const dy = e.touches[0].clientY - e.touches[1].clientY;
+					pinchStartDist = Math.hypot(dx, dy);
+					pinchStartScale = currentScale;
+				} else if (e.touches.length === 1 && currentScale > 1) {
+					// Pan start (only when zoomed)
+					isPanning = true;
+					panStartX = e.touches[0].clientX;
+					panStartY = e.touches[0].clientY;
+					panStartTranslateX = translateX;
+					panStartTranslateY = translateY;
+				}
+			}, { passive: false });
+
+			imageViewerImg.addEventListener('touchmove', (e) => {
+				if (e.touches.length === 2 && pinchStartDist > 0) {
+					// Pinch zoom
+					e.preventDefault();
+					const dx = e.touches[0].clientX - e.touches[1].clientX;
+					const dy = e.touches[0].clientY - e.touches[1].clientY;
+					const dist = Math.hypot(dx, dy);
+					const scale = Math.min(4, Math.max(1, pinchStartScale * (dist / pinchStartDist)));
+					currentScale = scale;
+					imageViewerZoomed = scale > 1;
+					imageViewerImg.classList.toggle('zoomed', imageViewerZoomed);
+					updateTransform();
+				} else if (e.touches.length === 1 && isPanning && currentScale > 1) {
+					// Pan (1.5x speed multiplier)
+					e.preventDefault();
+					const dx = (e.touches[0].clientX - panStartX) * 1.5;
+					const dy = (e.touches[0].clientY - panStartY) * 1.5;
+					translateX = panStartTranslateX + dx;
+					translateY = panStartTranslateY + dy;
+					updateTransform();
+				}
+			}, { passive: false });
+
+			imageViewerImg.addEventListener('touchend', (e) => {
+				if (e.touches.length < 2) {
+					pinchStartDist = 0;
+				}
+				if (e.touches.length === 0) {
+					isPanning = false;
+					// Reset if scale is close to 1
+					if (currentScale < 1.1) {
+						currentScale = 1;
+						translateX = 0;
+						translateY = 0;
+						updateTransform();
+						setImageViewerZoom(false);
+					}
+				}
+			});
+		}
 	}
 	wrap.addEventListener('click', (e) => {
 		if (e.target === wrap) requestCloseImageViewer();
@@ -1717,6 +1812,7 @@ function closeImageViewer() {
 	imageViewerRefreshMs = null;
 	if (imageViewerImg) {
 		imageViewerImg.removeAttribute('src');
+		imageViewerImg.style.transform = '';
 	}
 }
 
