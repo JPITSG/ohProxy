@@ -15,6 +15,7 @@ const crypto = require('crypto');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const WebSocket = require('ws');
 const net = require('net');
+const mysql = require('mysql2');
 const sessions = require('./sessions');
 
 const CONFIG_PATH = path.join(__dirname, 'config.js');
@@ -250,7 +251,7 @@ const PREVIEW_CONFIG = SERVER_CONFIG.videoPreview || {};
 const VIDEO_PREVIEW_INTERVAL_MS = configNumber(PREVIEW_CONFIG.intervalMs, 900000);
 const VIDEO_PREVIEW_PRUNE_HOURS = configNumber(PREVIEW_CONFIG.pruneAfterHours, 24);
 const VIDEO_PREVIEW_DIR = path.join(__dirname, 'video-previews');
-const CHART_CACHE_DIR = path.join(__dirname, 'chart-cache');
+const CHART_CACHE_DIR = path.join(__dirname, 'cache', 'chart');
 const CHART_PERIOD_TTL = {
 	h: 60 * 1000,        // 1 minute
 	D: 10 * 60 * 1000,   // 10 minutes
@@ -258,6 +259,10 @@ const CHART_PERIOD_TTL = {
 	M: 60 * 60 * 1000,   // 1 hour
 	Y: 60 * 60 * 1000,   // 1 hour
 };
+const MYSQL_CONFIG = SERVER_CONFIG.mysql || {};
+const MYSQL_RECONNECT_DELAY_MS = 5000;
+let mysqlConnection = null;
+let mysqlConnecting = false;
 let videoPreviewInitialCaptureDone = false;
 const activeRtspStreams = new Map(); // Track active RTSP streams: id -> { url, user, ip, startTime }
 let rtspStreamIdCounter = 0;
@@ -1280,7 +1285,7 @@ const STYLE_BUNDLE_PATH = path.join(PUBLIC_DIR, 'styles.css');
 const TAILWIND_BUNDLE_PATH = path.join(PUBLIC_DIR, 'tailwind.css');
 const INDEX_HTML_PATH = path.join(PUBLIC_DIR, 'index.html');
 const SERVICE_WORKER_PATH = path.join(PUBLIC_DIR, 'sw.js');
-const ICON_CACHE_ROOT = path.join(__dirname, '.icon-cache');
+const ICON_CACHE_ROOT = path.join(__dirname, 'cache', 'icon');
 function getIconCacheDir() {
 	return path.join(ICON_CACHE_ROOT, liveConfig.iconVersion);
 }
@@ -3419,7 +3424,7 @@ app.get(/^\/(?:openhab\.app\/)?images\/(v\d+)\/(.+)$/i, async (req, res, next) =
 	const parsed = path.parse(rawRel);
 	const cacheRel = path.join(parsed.dir, `${parsed.name}.png`);
 	const cachePath = path.join(getIconCacheDir(), cacheRel);
-	const sourcePath = `/openhab.app/images/${rawRel}`;
+	const sourcePath = `/images/${rawRel}`;
 	const sourceExt = parsed.ext || '.png';
 
 	try {
@@ -3931,6 +3936,91 @@ registerBackgroundTask('session-cleanup', SESSION_CLEANUP_MS, () => {
 		logMessage(`Session cleanup failed: ${err.message || err}`);
 	}
 });
+
+// MySQL connection worker
+function getMysqlConnectionTarget() {
+	const socket = safeText(MYSQL_CONFIG.socket);
+	const host = safeText(MYSQL_CONFIG.host);
+	const port = safeText(MYSQL_CONFIG.port);
+	if (socket) return socket;
+	if (host && port) return `${host}:${port}`;
+	if (host) return host;
+	return null;
+}
+
+function isMysqlConfigured() {
+	return !!(safeText(MYSQL_CONFIG.socket) || safeText(MYSQL_CONFIG.host));
+}
+
+function connectMysql() {
+	if (!isMysqlConfigured()) return;
+	if (mysqlConnecting) return;
+	if (mysqlConnection) return;
+
+	mysqlConnecting = true;
+	const target = getMysqlConnectionTarget();
+	logMessage(`[MySQL] Connecting to ${target}...`);
+
+	const connectionConfig = {
+		database: safeText(MYSQL_CONFIG.database) || undefined,
+		user: safeText(MYSQL_CONFIG.username) || undefined,
+		password: safeText(MYSQL_CONFIG.password) || undefined,
+	};
+
+	const socket = safeText(MYSQL_CONFIG.socket);
+	if (socket) {
+		connectionConfig.socketPath = socket;
+	} else {
+		connectionConfig.host = safeText(MYSQL_CONFIG.host);
+		const port = configNumber(MYSQL_CONFIG.port);
+		if (port) connectionConfig.port = port;
+	}
+
+	const connection = mysql.createConnection(connectionConfig);
+
+	connection.connect((err) => {
+		mysqlConnecting = false;
+		if (err) {
+			logMessage(`[MySQL] Connection to ${target} failed: ${err.message || err}`);
+			mysqlConnection = null;
+			scheduleMysqlReconnect();
+			return;
+		}
+		mysqlConnection = connection;
+		logMessage(`[MySQL] Connection to ${target} established`);
+	});
+
+	connection.on('error', (err) => {
+		logMessage(`[MySQL] Connection error: ${err.message || err}`);
+		if (err.fatal) {
+			mysqlConnection = null;
+			scheduleMysqlReconnect();
+		}
+	});
+
+	connection.on('end', () => {
+		logMessage(`[MySQL] Connection closed`);
+		mysqlConnection = null;
+	});
+}
+
+function scheduleMysqlReconnect() {
+	if (!isMysqlConfigured()) return;
+	const target = getMysqlConnectionTarget();
+	logMessage(`[MySQL] Reconnecting to ${target} in ${MYSQL_RECONNECT_DELAY_MS / 1000}s...`);
+	setTimeout(() => {
+		connectMysql();
+	}, MYSQL_RECONNECT_DELAY_MS);
+}
+
+function getMysqlConnection() {
+	return mysqlConnection;
+}
+
+// Initialize MySQL connection if configured
+if (isMysqlConfigured()) {
+	connectMysql();
+}
 
 startBackgroundTasks();
 

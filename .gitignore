@@ -3,9 +3,9 @@ widgetGlowRules.local.json
 sessions.db
 sessions.db-*
 node_modules/
-.icon-cache/
+cache/icon/
+cache/chart/
 video-previews/
-chart-cache/
 *.log
 fullchain.pem
 privkey.pem

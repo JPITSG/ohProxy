@@ -35,6 +35,21 @@ module.exports = {
 			// openHAB password (optional).
 			pass: '',
 		},
+		// MySQL database connection (optional).
+		mysql: {
+			// Unix socket path (if set, host/port ignored).
+			socket: '',
+			// MySQL host.
+			host: '',
+			// MySQL port.
+			port: '',
+			// MySQL database name.
+			database: '',
+			// MySQL username.
+			username: '',
+			// MySQL password.
+			password: '',
+		},
 		// Access control for the wrapper server (IPv4 CIDR list; required, use 0.0.0.0 to allow all).
 		allowSubnets: [],
 		// Allowlist for /proxy?url= (host or host:port; required, non-empty).
