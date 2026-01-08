@@ -2052,6 +2052,13 @@ function updateWidgetState(widget, nextState) {
 	} else if ('state' in widget) {
 		widget.state = nextState;
 	}
+	// Update label if it contains bracketed state (e.g., "Front Door [Locked + Closed]")
+	if (widget.label && widget.label.includes('[') && widget.label.includes(']')) {
+		const parts = splitLabelState(widget.label);
+		if (parts.state && parts.title) {
+			widget.label = `${parts.title} [${nextState}]`;
+		}
+	}
 }
 
 function updateItemState(itemName, nextState) {
