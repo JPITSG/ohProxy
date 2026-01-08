@@ -2462,6 +2462,7 @@ function getWidgetRenderInfo(w, afterImage) {
 	const isImage = t.includes('image');
 	const isText = t.includes('text');
 	const isGroup = t.includes('group');
+	const isWebview = t.includes('webview');
 	const label = isImage ? safeText(w?.label || '') : widgetLabel(w);
 	const st = widgetState(w);
 	const icon = widgetIconName(w);
@@ -2478,6 +2479,9 @@ function getWidgetRenderInfo(w, afterImage) {
 	const pageLink = widgetPageLink(w);
 	const labelParts = splitLabelState(label);
 	const mediaUrl = isImage ? normalizeMediaUrl(imageWidgetUrl(w)) : '';
+	const rawWebviewUrl = isWebview ? safeText(w?.label || '') : '';
+	const webviewUrl = rawWebviewUrl ? `/proxy?url=${encodeURIComponent(rawWebviewUrl)}` : '';
+	const webviewHeight = isWebview ? parseInt(w?.height, 10) || 0 : 0;
 	const mappingSig = mapping.map((m) => `${m.command}:${m.label}`).join('|');
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
@@ -2492,6 +2496,8 @@ function getWidgetRenderInfo(w, afterImage) {
 		pageLink || '',
 		mappingSig,
 		mediaUrl,
+		webviewUrl,
+		String(webviewHeight),
 		safeText(w?.refresh ?? ''),
 		afterImage ? 'after' : '',
 		state.isSlim ? 'slim' : '',
@@ -2506,6 +2512,7 @@ function getWidgetRenderInfo(w, afterImage) {
 		isImage,
 		isText,
 		isGroup,
+		isWebview,
 		label,
 		st,
 		icon,
@@ -2516,6 +2523,8 @@ function getWidgetRenderInfo(w, afterImage) {
 		pageLink,
 		labelParts,
 		mediaUrl,
+		webviewUrl,
+		webviewHeight,
 		signature,
 	};
 }
@@ -2543,6 +2552,7 @@ function updateCard(card, w, afterImage, info) {
 		isImage,
 		isText,
 		isGroup,
+		isWebview,
 		label,
 		st,
 		icon,
@@ -2553,6 +2563,8 @@ function updateCard(card, w, afterImage, info) {
 		pageLink,
 		labelParts,
 		mediaUrl,
+		webviewUrl,
+		webviewHeight,
 		signature,
 	} = data;
 
@@ -2571,6 +2583,7 @@ function updateCard(card, w, afterImage, info) {
 		'slider-card',
 		'image-card',
 		'image-loading',
+		'webview-card',
 		'menu-open',
 		'cursor-pointer',
 		'title-hidden',
@@ -2578,13 +2591,17 @@ function updateCard(card, w, afterImage, info) {
 		'switch-many',
 		'switch-single'
 	);
-	card.classList.toggle('sm:col-span-2', isImage || (afterImage && isText));
-	card.classList.toggle('lg:col-span-3', isImage || (afterImage && isText));
+	card.classList.toggle('sm:col-span-2', isImage || isWebview || (afterImage && isText));
+	card.classList.toggle('lg:col-span-3', isImage || isWebview || (afterImage && isText));
+	// Reset webview inline styles
+	card.style.padding = '';
+	card.style.overflow = '';
 
-	row.classList.remove('items-center');
+	row.classList.remove('items-center', 'hidden');
 	row.classList.add('items-start');
 	controls.classList.remove('hidden', 'mt-3');
 	labelRow.classList.remove('hidden');
+	if (iconWrap) iconWrap.classList.remove('hidden');
 	navHint.classList.add('hidden');
 	// Capture slider state before removal for smooth transition animation
 	const isSliderType = t.includes('dimmer') || t.includes('roller') || t.includes('slider');
@@ -2709,6 +2726,42 @@ function updateCard(card, w, afterImage, info) {
 		}
 		if (urlChanged || refreshChanged || imgEl.dataset.loaded !== 'true') {
 			setupImage(imgEl, mediaUrl, w?.refresh);
+		}
+		return true;
+	}
+
+	if (isWebview) {
+		card.classList.add('webview-card');
+		// Hide title and icon for webview cards
+		labelRow.classList.add('hidden');
+		if (iconWrap) iconWrap.classList.add('hidden');
+		row.classList.add('hidden');
+		if (!webviewUrl) {
+			row.classList.remove('hidden');
+			controls.classList.add('mt-3');
+			controls.innerHTML = `<div class="text-sm text-slate-400">Webview URL not available</div>`;
+			return true;
+		}
+		let iframeEl = card.querySelector('iframe.webview-frame');
+		if (!iframeEl) {
+			iframeEl = document.createElement('iframe');
+			iframeEl.className = 'webview-frame w-full block rounded-2xl';
+			iframeEl.setAttribute('frameborder', '0');
+			iframeEl.setAttribute('allowfullscreen', 'true');
+			card.appendChild(iframeEl);
+		}
+		card.style.padding = '0';
+		card.style.overflow = 'hidden';
+		// Height: if 0, use 16:9 aspect ratio; otherwise use specified height
+		if (webviewHeight > 0) {
+			iframeEl.style.height = `${webviewHeight}px`;
+			iframeEl.style.aspectRatio = '';
+		} else {
+			iframeEl.style.height = '';
+			iframeEl.style.aspectRatio = '16 / 9';
+		}
+		if (iframeEl.src !== webviewUrl) {
+			iframeEl.src = webviewUrl;
 		}
 		return true;
 	}

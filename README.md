@@ -65,6 +65,7 @@ ohProxy sits between your users and openHAB, providing:
 | **Selection** | Custom dropdown on desktop; native overlay picker on small/touch and slim layouts |
 | **Slider/Dimmer** | Real-time value display, debounced updates, smart activation detection |
 | **Image** | Auto-refresh, MJPEG streaming, zoomable overlay viewer |
+| **Webview** | Embedded iframe, full-width display, 16:9 aspect ratio (or custom height), proxied URL |
 | **Text** | State-only display items |
 | **Navigation** | Links to sub-pages with visual indicators |
 

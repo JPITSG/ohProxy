@@ -78,7 +78,7 @@ module.exports = {
 				// Use report-only mode (true/false).
 				reportOnly: false,
 				// CSP policy string (empty disables).
-				policy: "default-src 'self'; img-src 'self' data: https: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https:; font-src 'self' data:;",
+				policy: "default-src 'self'; img-src 'self' data: https: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https:; font-src 'self' data:; frame-src 'self' https:;",
 			},
 			// Referrer-Policy value (same-origin|no-referrer|strict-origin-when-cross-origin|etc).
 			// Note: 'same-origin' is required for auth-exempt assets to work correctly.
