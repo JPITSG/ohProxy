@@ -65,6 +65,7 @@ ohProxy sits between your users and openHAB, providing:
 | **Selection** | Custom dropdown on desktop; native overlay picker on small/touch and slim layouts |
 | **Slider/Dimmer** | Real-time value display, debounced updates, smart activation detection |
 | **Image** | Auto-refresh, MJPEG streaming, zoomable overlay viewer |
+| **Video** | RTSP to MP4 streaming via FFmpeg, full-width display, 16:9 aspect ratio, auto-reconnect |
 | **Webview** | Embedded iframe, full-width display, 16:9 aspect ratio (or custom height), proxied URL |
 | **Text** | State-only display items |
 | **Navigation** | Links to sub-pages with visual indicators |
@@ -429,6 +430,30 @@ For MJPEG camera streams, use a normal http/https URL in your openHAB sitemap (o
 ```
 Image url="http://camera.local/stream"
 ```
+
+### RTSP Streaming
+
+ohProxy can convert RTSP streams to browser-playable MP4 via FFmpeg. Use the Video widget in your sitemap:
+
+```
+Video url="rtsp://user:pass@camera-ip:554/stream"
+```
+
+The RTSP host must be in `proxyAllowlist`:
+```javascript
+proxyAllowlist: [
+  '192.168.1.40:554',  // camera IP:port
+],
+```
+
+Features:
+- Low-latency streaming (~1-2s with 1s keyframes)
+- No transcoding (H264 passthrough)
+- Auto-reconnect on stream errors
+- FFmpeg process auto-terminates when client disconnects
+
+Requirements:
+- FFmpeg must be installed on the server
 
 ### Classic UI
 

@@ -2463,7 +2463,8 @@ function getWidgetRenderInfo(w, afterImage) {
 	const isText = t.includes('text');
 	const isGroup = t.includes('group');
 	const isWebview = t.includes('webview');
-	const label = isImage ? safeText(w?.label || '') : widgetLabel(w);
+	const isVideo = t === 'video';
+	const label = isImage || isVideo ? safeText(w?.label || '') : widgetLabel(w);
 	const st = widgetState(w);
 	const icon = widgetIconName(w);
 	const valueColor = safeText(
@@ -2482,6 +2483,9 @@ function getWidgetRenderInfo(w, afterImage) {
 	const rawWebviewUrl = isWebview ? safeText(w?.label || '') : '';
 	const webviewUrl = rawWebviewUrl ? `/proxy?url=${encodeURIComponent(rawWebviewUrl)}` : '';
 	const webviewHeight = isWebview ? parseInt(w?.height, 10) || 0 : 0;
+	const rawVideoUrl = isVideo ? safeText(w?.label || '') : '';
+	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}` : '';
+	const videoHeight = isVideo ? parseInt(w?.height, 10) || 0 : 0;
 	const mappingSig = mapping.map((m) => `${m.command}:${m.label}`).join('|');
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
@@ -2498,6 +2502,8 @@ function getWidgetRenderInfo(w, afterImage) {
 		mediaUrl,
 		webviewUrl,
 		String(webviewHeight),
+		videoUrl,
+		String(videoHeight),
 		safeText(w?.refresh ?? ''),
 		afterImage ? 'after' : '',
 		state.isSlim ? 'slim' : '',
@@ -2513,6 +2519,7 @@ function getWidgetRenderInfo(w, afterImage) {
 		isText,
 		isGroup,
 		isWebview,
+		isVideo,
 		label,
 		st,
 		icon,
@@ -2525,6 +2532,8 @@ function getWidgetRenderInfo(w, afterImage) {
 		mediaUrl,
 		webviewUrl,
 		webviewHeight,
+		videoUrl,
+		videoHeight,
 		signature,
 	};
 }
@@ -2553,6 +2562,7 @@ function updateCard(card, w, afterImage, info) {
 		isText,
 		isGroup,
 		isWebview,
+		isVideo,
 		label,
 		st,
 		icon,
@@ -2565,6 +2575,8 @@ function updateCard(card, w, afterImage, info) {
 		mediaUrl,
 		webviewUrl,
 		webviewHeight,
+		videoUrl,
+		videoHeight,
 		signature,
 	} = data;
 
@@ -2584,6 +2596,7 @@ function updateCard(card, w, afterImage, info) {
 		'image-card',
 		'image-loading',
 		'webview-card',
+		'video-card',
 		'menu-open',
 		'cursor-pointer',
 		'title-hidden',
@@ -2591,8 +2604,8 @@ function updateCard(card, w, afterImage, info) {
 		'switch-many',
 		'switch-single'
 	);
-	card.classList.toggle('sm:col-span-2', isImage || isWebview || (afterImage && isText));
-	card.classList.toggle('lg:col-span-3', isImage || isWebview || (afterImage && isText));
+	card.classList.toggle('sm:col-span-2', isImage || isWebview || isVideo || (afterImage && isText));
+	card.classList.toggle('lg:col-span-3', isImage || isWebview || isVideo || (afterImage && isText));
 	// Reset webview inline styles
 	card.style.padding = '';
 	card.style.overflow = '';
@@ -2762,6 +2775,74 @@ function updateCard(card, w, afterImage, info) {
 		}
 		if (iframeEl.src !== webviewUrl) {
 			iframeEl.src = webviewUrl;
+		}
+		return true;
+	}
+
+	if (isVideo) {
+		card.classList.add('video-card');
+		// Hide title and icon for video cards
+		labelRow.classList.add('hidden');
+		if (iconWrap) iconWrap.classList.add('hidden');
+		row.classList.add('hidden');
+		if (!videoUrl) {
+			row.classList.remove('hidden');
+			controls.classList.add('mt-3');
+			controls.innerHTML = `<div class="text-sm text-slate-400">Video URL not available</div>`;
+			return true;
+		}
+		let videoEl = card.querySelector('video.video-stream');
+		if (!videoEl) {
+			videoEl = document.createElement('video');
+			videoEl.className = 'video-stream w-full block rounded-2xl';
+			videoEl.setAttribute('autoplay', '');
+			videoEl.setAttribute('muted', '');
+			videoEl.setAttribute('playsinline', '');
+			videoEl.muted = true;
+			// Auto-reconnect on error
+			videoEl.addEventListener('error', () => {
+				setTimeout(() => {
+					if (videoEl.src) {
+						const src = videoEl.src;
+						videoEl.src = '';
+						videoEl.src = src;
+						videoEl.play().catch(() => {});
+					}
+				}, 2000);
+			});
+			// Auto-reconnect on stall/ended
+			videoEl.addEventListener('stalled', () => {
+				setTimeout(() => {
+					if (videoEl.src) {
+						videoEl.play().catch(() => {});
+					}
+				}, 1000);
+			});
+			videoEl.addEventListener('ended', () => {
+				setTimeout(() => {
+					if (videoEl.src) {
+						const src = videoEl.src;
+						videoEl.src = '';
+						videoEl.src = src;
+						videoEl.play().catch(() => {});
+					}
+				}, 1000);
+			});
+			card.appendChild(videoEl);
+		}
+		card.style.padding = '0';
+		card.style.overflow = 'hidden';
+		// Height: if 0, use 16:9 aspect ratio; otherwise use specified height
+		if (videoHeight > 0) {
+			videoEl.style.height = `${videoHeight}px`;
+			videoEl.style.aspectRatio = '';
+		} else {
+			videoEl.style.height = '';
+			videoEl.style.aspectRatio = '16 / 9';
+		}
+		if (videoEl.src !== videoUrl) {
+			videoEl.src = videoUrl;
+			videoEl.play().catch(() => {});
 		}
 		return true;
 	}
