@@ -3628,12 +3628,7 @@ app.get('/presence', async (req, res) => {
 		return res.status(503).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
 	}
 
-	const query = `
-		SELECT lg1.* FROM log_gps AS lg1
-		INNER JOIN (SELECT id FROM log_gps ORDER BY id DESC LIMIT 20) AS lg2
-		ON lg1.id = lg2.id
-		ORDER BY lg1.id DESC LIMIT 20
-	`;
+	const query = 'SELECT * FROM log_gps ORDER BY id DESC LIMIT 20';
 
 	const QUERY_TIMEOUT_MS = 10000;
 
