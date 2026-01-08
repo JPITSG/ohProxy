@@ -1410,8 +1410,8 @@ function handleWsConnection(ws, req) {
 		}
 	});
 
-	ws.on('close', (code, reason) => {
-		logMessage(`[WS] Client disconnected from ${clientIp}, code: ${code}, reason: ${reason || 'none'}, remaining: ${wss.clients.size}`);
+	ws.on('close', (code) => {
+		logMessage(`[WS] Client disconnected from ${clientIp}, code: ${code}, remaining: ${wss.clients.size}`);
 		// Clear focus state before adjusting (ensures not counted if still in wss.clients)
 		ws.clientState.focused = null;
 		stopWsPushIfUnneeded();
