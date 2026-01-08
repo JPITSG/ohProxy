@@ -1453,7 +1453,6 @@ function wsBroadcast(event, data) {
 			} catch {}
 		}
 	}
-	logMessage(`[WS] Broadcast '${event}' to ${sent}/${wss.clients.size} clients, payload: ${payload.length} bytes`);
 }
 
 function parseAtmosphereUpdate(body) {
@@ -1833,7 +1832,6 @@ async function pollItems() {
 		lastSeenItems = new Set(items.map(i => i.name));
 		const actualChanges = filterChangedItems(items);
 		if (actualChanges.length > 0) {
-			logMessage(`[Polling] ${actualChanges.length} items changed (${items.length} total, ${currentPollingIntervalMs}ms)`);
 			wsBroadcast('update', { type: 'items', changes: actualChanges });
 		}
 	}
