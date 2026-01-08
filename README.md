@@ -2,7 +2,7 @@
 
 A modern, secure reverse proxy and web interface for [openHAB](https://www.openhab.org/) **1.8.3**. ohProxy provides a responsive Progressive Web App (PWA) with real-time updates, touch-optimized controls, and comprehensive security features.
 
-> **Note:** This project is designed specifically for **openHAB 1.8.3** and its REST API. It is not compatible with openHAB 2.x, 3.x, or 4.x which use a different REST API structure.
+This project is designed specifically for **openHAB 1.8.3** and its REST API. It is not compatible with openHAB 2.x, 3.x, or 4.x which use a different REST API structure.
 
 ## Overview
 
