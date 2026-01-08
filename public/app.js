@@ -3860,7 +3860,7 @@ function render() {
 // --- Navigation / Data ---
 function updateNavButtons() {
 	const hasSearch = !!state.filter.trim();
-	els.back.disabled = state.stack.length === 0 && !hasSearch;
+	els.back.disabled = (state.stack.length === 0 && !hasSearch) || !state.connectionOk;
 	els.home.disabled = !state.rootPageUrl || (!hasSearch && state.pageUrl === state.rootPageUrl) || !state.connectionOk;
 }
 
@@ -4182,6 +4182,27 @@ function noteActivity() {
 	armIdleTimer();
 }
 
+// --- Heartbeat Check ---
+let heartbeatInProgress = false;
+
+async function checkHeartbeat() {
+	if (heartbeatInProgress) return;
+	heartbeatInProgress = true;
+	try {
+		const res = await fetch('/api/heartbeat', { cache: 'no-store' });
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		// Connection is alive - ensure we're not in error state
+		if (!state.connectionOk) {
+			setConnectionStatus(true);
+		}
+	} catch (e) {
+		console.warn('Heartbeat failed:', e.message);
+		setConnectionStatus(false, 'Connection lost');
+	} finally {
+		heartbeatInProgress = false;
+	}
+}
+
 // --- WebSocket Push ---
 let wsConnection = null;
 let wsConnected = false;
@@ -4399,6 +4420,8 @@ function connectWs() {
 		wsConnection.onerror = (err) => {
 			// Only log here - onclose will handle fail count and reconnection
 			console.warn('WebSocket error:', err);
+			// Check if server is reachable
+			checkHeartbeat();
 		};
 	} catch {
 		wsConnected = false;

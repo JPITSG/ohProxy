@@ -3159,6 +3159,13 @@ app.post('/api/settings', express.json(), (req, res) => {
 	res.json({ ok: true, settings: merged });
 });
 
+// Heartbeat endpoint for connection liveness check
+app.get('/api/heartbeat', (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache, no-store');
+	res.json({ ok: true, ts: Date.now() });
+});
+
 // Widget glow rules API (admin only)
 app.get('/api/glow-rules/:widgetId', (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
