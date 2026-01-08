@@ -2045,15 +2045,18 @@ function widgetState(widget) {
 
 function updateWidgetState(widget, nextState) {
 	if (!widget || nextState === undefined) return;
+	const prevState = widget?.item?.state ?? widget?.state;
 	if (widget.item && typeof widget.item === 'object') {
 		widget.item.state = nextState;
 	} else if ('state' in widget) {
 		widget.state = nextState;
 	}
 	// Update label if it contains bracketed state (e.g., "Front Door [Locked + Closed]")
+	// Only update if the label's bracketed value matches the previous state - this avoids
+	// overwriting transformed values like counts (e.g., "[3]" from GroupItem with OPEN state)
 	if (widget.label && widget.label.includes('[') && widget.label.includes(']')) {
 		const parts = splitLabelState(widget.label);
-		if (parts.state && parts.title) {
+		if (parts.state && parts.title && parts.state === prevState) {
 			widget.label = `${parts.title} [${nextState}]`;
 		}
 	}
