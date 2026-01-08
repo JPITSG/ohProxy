@@ -173,6 +173,7 @@ ohProxy sits between your users and openHAB, providing:
 - **openHAB 1.8.3** with REST API enabled
 - ImageMagick (for icon conversion)
 - (Optional) TLS certificates for HTTPS
+- (Optional) MySQL/MariaDB for GPS presence map
 
 ### Setup
 
@@ -357,6 +358,38 @@ module.exports = {
 };
 ```
 
+### MySQL Configuration
+
+ohProxy can optionally connect to a MySQL database to power additional features like the GPS presence map. The connection is established at startup and automatically reconnects on failure.
+
+```javascript
+module.exports = {
+  server: {
+    mysql: {
+      socket: '/run/mysqld/mysqld.sock',  // Unix socket (if set, host/port ignored)
+      host: '',                            // MySQL host (alternative to socket)
+      port: '',                            // MySQL port (default: 3306)
+      database: 'openhab',                 // Database name
+      username: 'openhab',                 // MySQL username
+      password: 'openhab',                 // MySQL password
+    },
+  },
+};
+```
+
+**Connection options:**
+- Use `socket` for local MySQL connections via Unix socket (recommended for performance)
+- Use `host` and `port` for TCP connections (remote or local)
+- If `socket` is set, `host` and `port` are ignored
+
+**Logging:**
+- `[MySQL] Connecting to {target}...` - Connection attempt
+- `[MySQL] Connection to {target} established` - Successful connection
+- `[MySQL] Connection to {target} failed: {error}` - Connection failure
+- `[MySQL] Reconnecting to {target} in 5s...` - Auto-reconnect scheduled
+
+If no `socket` or `host` is configured, the MySQL worker remains dormant.
+
 ### Asset Versioning
 
 Update these versions to bust browser caches after changes:
@@ -459,6 +492,50 @@ Requirements:
 ### Classic UI
 
 Legacy openHAB Classic UI is proxied at `/openhab.app`, with a convenience redirect at `/classic`.
+
+### GPS Presence Map
+
+The `/presence` endpoint displays a map showing recent GPS location history. This requires MySQL to be configured (see [MySQL Configuration](#mysql-configuration)).
+
+```
+https://your-proxy.com/presence
+```
+
+**Features:**
+- Displays last 20 GPS positions on an OpenLayers map with OSM tiles
+- Most recent position marked with red marker, older positions in blue
+- Consecutive duplicate coordinates are deduplicated
+- Map centers on the most recent position at zoom level 15
+- 10-second query timeout with graceful fallback
+
+**Database Schema:**
+
+The endpoint queries a `log_gps` table with the following structure:
+
+```sql
+CREATE TABLE log_gps (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  lat DECIMAL(10, 7) NOT NULL,
+  lon DECIMAL(10, 7) NOT NULL,
+  -- Additional columns are ignored
+);
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INT | Auto-increment primary key (used for ordering) |
+| `lat` | DECIMAL(10,7) | Latitude coordinate |
+| `lon` | DECIMAL(10,7) | Longitude coordinate |
+
+**Error Responses:**
+- `503` - Database connection unavailable (blank HTML page)
+- `504` - Query timeout or failure (blank HTML page)
+
+**Marker Images:**
+
+The map expects marker images at:
+- `/images/marker-red.png` - Current position
+- `/images/marker-blue.png` - Historical positions
 
 ## User Management
 
