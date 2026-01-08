@@ -328,6 +328,16 @@ function applyHomeSnapshot(snapshot) {
 	return true;
 }
 
+function stopAllVideoStreams() {
+	const videos = document.querySelectorAll('video.video-stream');
+	for (const video of videos) {
+		if (video.src) {
+			video.src = '';
+			video.load();
+		}
+	}
+}
+
 function beginPageFadeOut() {
 	if (!els.grid || state.isSlim) return null;
 	pageFadeToken += 1;
@@ -2606,9 +2616,15 @@ function updateCard(card, w, afterImage, info) {
 	);
 	card.classList.toggle('sm:col-span-2', isImage || isWebview || isVideo || (afterImage && isText));
 	card.classList.toggle('lg:col-span-3', isImage || isWebview || isVideo || (afterImage && isText));
-	// Reset webview inline styles
+	// Reset webview/video inline styles
 	card.style.padding = '';
 	card.style.overflow = '';
+	// Stop any active video stream to terminate FFmpeg process
+	const existingVideo = card.querySelector('video.video-stream');
+	if (existingVideo && existingVideo.src) {
+		existingVideo.src = '';
+		existingVideo.load();
+	}
 
 	row.classList.remove('items-center', 'hidden');
 	row.classList.add('items-start');
@@ -3751,6 +3767,7 @@ async function refresh(showLoading) {
 	state.isRefreshing = true;
 	updateStatusBar();
 	const isPageChange = state.lastPageUrl && state.pageUrl !== state.lastPageUrl;
+	if (isPageChange) stopAllVideoStreams();
 	const fade = (!state.isSlim && isPageChange) ? beginPageFadeOut() : null;
 	const shouldScroll = state.pendingScrollTop;
 	state.pendingScrollTop = false;
