@@ -2366,11 +2366,36 @@ function buildSnapshot(page) {
 	};
 }
 
+const DELTA_HASH_HISTORY = 5; // Keep last N snapshots per cache key
+
 function setDeltaCache(key, value) {
-	deltaCache.set(key, value);
+	let entry = deltaCache.get(key);
+	if (!entry) {
+		entry = { history: [] };
+		deltaCache.set(key, entry);
+	}
+	// Add new snapshot to history
+	entry.history.push(value);
+	// Keep only last N entries
+	if (entry.history.length > DELTA_HASH_HISTORY) {
+		entry.history.shift();
+	}
+	// Prune old cache keys if needed
 	if (deltaCache.size <= DELTA_CACHE_LIMIT) return;
 	const oldestKey = deltaCache.keys().next().value;
 	if (oldestKey) deltaCache.delete(oldestKey);
+}
+
+function findDeltaMatch(key, since) {
+	const entry = deltaCache.get(key);
+	if (!entry || !entry.history.length || !since) return null;
+	// Search history for matching hash (most recent first)
+	for (let i = entry.history.length - 1; i >= 0; i--) {
+		if (entry.history[i].hash === since) {
+			return entry.history[i];
+		}
+	}
+	return null;
 }
 
 // Compute delta response for a sitemap URL (used by both HTTP and WS)
@@ -2405,8 +2430,8 @@ async function computeDeltaResponse(url, since) {
 
 	const cacheKey = `${sitemapPath}?${params.toString()}`;
 	const snapshot = buildSnapshot(page);
-	const cached = deltaCache.get(cacheKey);
-	const canDelta = cached && since && since === cached.hash && cached.structureHash === snapshot.structureHash;
+	const cached = findDeltaMatch(cacheKey, since);
+	const canDelta = cached && cached.structureHash === snapshot.structureHash;
 
 	if (!canDelta) {
 		setDeltaCache(cacheKey, snapshot);
@@ -3655,6 +3680,91 @@ app.get('/search-index', async (req, res) => {
 	return res.json({ widgets: filteredWidgets, frames });
 });
 
+// Return full sitemap structure with all pages indexed by URL
+app.get('/sitemap-full', async (req, res) => {
+	try {
+		const rawRoot = safeText(req.query?.root || '');
+		const rawSitemap = safeText(req.query?.sitemap || '');
+		let rootPath = '';
+
+		if (rawRoot) {
+			const normalized = normalizeOpenhabPath(rawRoot);
+			if (normalized && normalized.includes('/rest/sitemaps/')) {
+				rootPath = normalized;
+			}
+		}
+
+		if (!rootPath && rawSitemap) {
+			const nameEnc = encodeURIComponent(rawSitemap);
+			rootPath = `/rest/sitemaps/${nameEnc}/${nameEnc}`;
+		}
+
+		if (!rootPath) return res.status(400).send('Missing sitemap');
+		rootPath = ensureJsonParam(rootPath);
+
+		const queue = [rootPath];
+		const seenPages = new Set();
+		const pages = {};
+
+		while (queue.length) {
+			const rawUrl = queue.shift();
+			if (!rawUrl) continue;
+			const normalized = normalizeOpenhabPath(rawUrl);
+			if (!normalized) continue;
+			const url = ensureJsonParam(normalized);
+			if (!url || !url.includes('/rest/sitemaps/')) continue;
+			if (seenPages.has(url)) continue;
+			seenPages.add(url);
+
+			let page;
+			try {
+				const body = await fetchOpenhab(url);
+				if (!body.ok) continue;
+				page = JSON.parse(body.body);
+			} catch {
+				continue;
+			}
+
+			// Store the raw page data indexed by URL
+			pages[url] = page;
+
+			// Find linked pages and add to queue
+			const findLinks = (widgets) => {
+				if (!widgets) return;
+				let list;
+				if (Array.isArray(widgets)) {
+					list = widgets;
+				} else if (Array.isArray(widgets.item)) {
+					list = widgets.item;
+				} else if (widgets.item) {
+					list = [widgets.item];
+				} else {
+					list = [widgets];
+				}
+				for (const w of list) {
+					if (!w) continue;
+					const link = w?.linkedPage?.link || w?.link;
+					if (link && typeof link === 'string' && link.includes('/rest/sitemaps/')) {
+						const rel = normalizeOpenhabPath(link);
+						if (rel && !seenPages.has(ensureJsonParam(rel))) {
+							queue.push(rel);
+						}
+					}
+					// Recurse into nested widgets (Frames)
+					if (w?.widget) findLinks(w.widget);
+				}
+			};
+			findLinks(page?.widget);
+		}
+
+		res.setHeader('Cache-Control', 'no-store');
+		return res.json({ pages, root: rootPath });
+	} catch (err) {
+		console.error('[sitemap-full] Error:', err);
+		return res.status(500).json({ error: err.message });
+	}
+});
+
 app.get(/^\/icons\/apple-touch-icon\.v[\w.-]+\.png$/i, (req, res) => {
 	const iconPath = path.join(PUBLIC_DIR, 'icons', 'apple-touch-icon.png');
 	res.setHeader('Content-Type', 'image/png');
@@ -3757,8 +3867,8 @@ app.use('/rest', async (req, res, next) => {
 
 	const cacheKey = `${req.path}?${params.toString()}`;
 	const snapshot = buildSnapshot(page);
-	const cached = deltaCache.get(cacheKey);
-	const canDelta = cached && since && since === cached.hash && cached.structureHash === snapshot.structureHash;
+	const cached = findDeltaMatch(cacheKey, since);
+	const canDelta = cached && cached.structureHash === snapshot.structureHash;
 
 	if (!canDelta) {
 		setDeltaCache(cacheKey, snapshot);

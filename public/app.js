@@ -57,6 +57,8 @@ const state = {
 	isRefreshing: false,
 	pendingScrollTop: false,
 	initialStatusText: '',
+	sitemapCache: new Map(),		// Full sitemap cache: pageUrl -> page data
+	sitemapCacheReady: false,		// Whether the full sitemap has been loaded
 };
 
 const OH_CONFIG = (window.__OH_CONFIG__ && typeof window.__OH_CONFIG__ === 'object')
@@ -2093,8 +2095,29 @@ function pageCacheKey(url) {
 	return ensureJsonParam(toRelativeRestLink(url));
 }
 
+// Track in-flight fetch requests to prevent concurrent fetches for same URL
+const fetchPageInflight = new Map();
+
 async function fetchPage(url, options) {
 	const opts = options || {};
+	const key = pageCacheKey(url);
+
+	// If a fetch is already in flight for this URL, wait for it instead of making a duplicate request
+	const existing = fetchPageInflight.get(key);
+	if (existing) {
+		return existing;
+	}
+
+	const fetchPromise = fetchPageInternal(url, opts);
+	fetchPageInflight.set(key, fetchPromise);
+	try {
+		return await fetchPromise;
+	} finally {
+		fetchPageInflight.delete(key);
+	}
+}
+
+async function fetchPageInternal(url, opts) {
 	const key = pageCacheKey(url);
 	const since = opts.forceFull ? '' : (state.deltaTokens.get(key) || '');
 
@@ -2311,6 +2334,61 @@ function applyDeltaChanges(changes) {
 		}
 	}
 	return updated;
+}
+
+// Sync delta changes to the sitemap cache so navigating back shows updated data
+function syncDeltaToCache(pageUrl, changes) {
+	if (!state.sitemapCacheReady || !Array.isArray(changes) || !changes.length) return;
+	const cachedPage = getPageFromCache(pageUrl);
+	if (!cachedPage) return;
+
+	// Build a map of changes by key for quick lookup
+	const changeMap = new Map();
+	for (const change of changes) {
+		const key = safeText(change?.key || '');
+		if (key) changeMap.set(key, change);
+	}
+
+	// Recursively update widgets in the cached page structure
+	const updateWidgets = (widgets) => {
+		if (!widgets) return;
+		const list = Array.isArray(widgets) ? widgets : (widgets.item ? (Array.isArray(widgets.item) ? widgets.item : [widgets.item]) : [widgets]);
+		for (const w of list) {
+			if (!w) continue;
+			// Get widget key (same logic as deltaKey/widgetSnapshot)
+			const itemName = safeText(w?.item?.name || w?.name || '');
+			const widgetId = safeText(w?.widgetId || '');
+			const key = itemName || widgetId;
+			if (key && changeMap.has(key)) {
+				const change = changeMap.get(key);
+				if (change.label !== undefined) w.label = change.label;
+				if (change.state !== undefined) {
+					if (w.item) w.item.state = change.state;
+					w.state = change.state;
+				}
+				if (change.valuecolor !== undefined) {
+					w.valuecolor = change.valuecolor;
+					if (w.item) {
+						w.item.valuecolor = change.valuecolor;
+						w.item.valueColor = change.valuecolor;
+					}
+				}
+				if (change.icon !== undefined) {
+					w.icon = change.icon;
+					if (w.item) w.item.icon = change.icon;
+				}
+				if (change.mapping !== undefined) {
+					w.mapping = change.mapping;
+				}
+			}
+			// Recurse into nested widgets (Frames, etc.)
+			if (w.widget) updateWidgets(w.widget);
+			if (w.widgets) updateWidgets(w.widgets);
+		}
+	};
+
+	updateWidgets(cachedPage?.widget);
+	// No need to call updatePageInCache - we modified the object in place
 }
 
 function widgetType(widget) {
@@ -3970,6 +4048,8 @@ function syncHistory(replace) {
 }
 
 async function pushPage(pageUrl, pageTitle) {
+	// Block navigation when offline
+	if (!state.connectionOk) return;
 	if (state.filter.trim()) {
 		state.filter = '';
 		if (els.search) els.search.value = '';
@@ -4050,6 +4130,40 @@ async function fetchSearchIndexAggregate() {
 		widgets: data.widgets,
 		frames: Array.isArray(data.frames) ? data.frames : [],
 	};
+}
+
+async function fetchFullSitemap() {
+	if (state.sitemapCacheReady) return true;
+	const params = new URLSearchParams();
+	if (state.rootPageUrl) params.set('root', state.rootPageUrl);
+	if (state.sitemapName) params.set('sitemap', state.sitemapName);
+	if (!params.toString()) return false;
+	try {
+		const data = await fetchJson(`sitemap-full?${params.toString()}`);
+		if (!data || !data.pages) return false;
+		state.sitemapCache.clear();
+		for (const [url, page] of Object.entries(data.pages)) {
+			state.sitemapCache.set(url, page);
+		}
+		state.sitemapCacheReady = true;
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function getPageFromCache(url) {
+	let key = ensureJsonParam(toRelativeRestLink(url));
+	// Normalize: ensure leading slash to match server cache keys
+	if (key && !key.startsWith('/')) key = '/' + key;
+	return state.sitemapCache.get(key) || null;
+}
+
+function updatePageInCache(url, page) {
+	let key = ensureJsonParam(toRelativeRestLink(url));
+	// Normalize: ensure leading slash to match server cache keys
+	if (key && !key.startsWith('/')) key = '/' + key;
+	state.sitemapCache.set(key, page);
 }
 
 async function buildSearchIndex() {
@@ -4138,16 +4252,44 @@ async function refresh(showLoading) {
 
 	state.isRefreshing = true;
 	updateStatusBar();
+	const refreshUrl = state.pageUrl; // Capture URL at start to detect stale responses
 	const isPageChange = state.lastPageUrl && state.pageUrl !== state.lastPageUrl;
 	if (isPageChange) stopAllVideoStreams();
 	const fade = (!state.isSlim && isPageChange) ? beginPageFadeOut() : null;
 	const shouldScroll = state.pendingScrollTop;
 	state.pendingScrollTop = false;
+
+	// For page changes with cache: use cache only, no network request
+	// Delta updates via polling will keep widget states fresh independently
+	if (isPageChange && state.sitemapCacheReady) {
+		const cachedPage = getPageFromCache(state.pageUrl);
+		if (cachedPage) {
+			state.pageTitle = cachedPage?.title || state.pageTitle;
+			state.rawWidgets = normalizeWidgets(cachedPage);
+			state.lastPageUrl = state.pageUrl;
+			if (fade) await fade.promise;
+			if (shouldScroll) scrollToTop();
+			render();
+			saveHomeSnapshot();
+			clearLoadingStatusTimer();
+			if (fade) runPageFadeIn(fade.token);
+			state.isRefreshing = false;
+			return;
+		}
+	}
+
 	try {
 		const result = await fetchPage(state.pageUrl, { forceFull: showLoading || isPageChange });
+		// Abort if user navigated away during fetch (stale response)
+		if (state.pageUrl !== refreshUrl) {
+			state.isRefreshing = false;
+			clearLoadingStatusTimer();
+			return;
+		}
 		if (result.delta) {
 			if (result.title) state.pageTitle = result.title;
 			const updated = applyDeltaChanges(result.changes);
+			syncDeltaToCache(state.pageUrl, result.changes);
 			if (!state.lastPageUrl) state.lastPageUrl = state.pageUrl;
 			if (updated || result.title) render();
 			state.isRefreshing = false;
@@ -4160,6 +4302,8 @@ async function refresh(showLoading) {
 		state.pageTitle = page?.title || state.pageTitle;
 		state.rawWidgets = normalizeWidgets(page);
 		state.lastPageUrl = state.pageUrl;
+		// Update cache with fresh page data
+		updatePageInCache(state.pageUrl, page);
 		if (fade) await fade.promise;
 		if (shouldScroll) scrollToTop();
 		render();
@@ -4171,6 +4315,26 @@ async function refresh(showLoading) {
 	} catch (e) {
 		console.error(e);
 		clearLoadingStatusTimer();
+
+		// Try sitemap cache (allows offline navigation)
+		if (state.sitemapCacheReady) {
+			const cachedPage = getPageFromCache(state.pageUrl);
+			if (cachedPage) {
+				state.pageTitle = cachedPage?.title || state.pageTitle;
+				state.rawWidgets = normalizeWidgets(cachedPage);
+				state.lastPageUrl = state.pageUrl;
+				if (fade) await fade.promise;
+				if (shouldScroll) scrollToTop();
+				render();
+				saveHomeSnapshot();
+				if (fade) runPageFadeIn(fade.token);
+				state.isRefreshing = false;
+				setConnectionStatus(false, e.message);
+				return;
+			}
+		}
+
+		setConnectionStatus(false, e.message);
 		const hasContent = !!state.lastPageUrl;
 		let usedSnapshot = false;
 		if (!hasContent && canRestoreHomeSnapshot()) {
@@ -4186,7 +4350,7 @@ async function refresh(showLoading) {
 			if (shouldScroll) scrollToTop();
 			els.grid.innerHTML = `
 				<div class="glass rounded-2xl p-5 sm:col-span-2 lg:col-span-3">
-					<div class="font-semibold">Couldn’t load sitemap page</div>
+					<div class="font-semibold">Couldn't load sitemap page</div>
 					<div class="mt-2 text-sm text-slate-300">${safeText(e.message)}</div>
 					<div class="mt-4 text-xs text-slate-500">
 						Try opening <code class="text-slate-300">${safeText(state.pageUrl)}</code> in the browser to see what openHAB returns.
@@ -4617,6 +4781,14 @@ function restoreNormalPolling() {
 	window.addEventListener('keydown', noteActivity, { passive: true });
 	window.addEventListener('resize', scheduleImageResizeRefresh, { passive: true });
 	window.addEventListener('orientationchange', scheduleImageResizeRefresh, { passive: true });
+	// Instant offline/online detection
+	window.addEventListener('offline', () => {
+		setConnectionStatus(false, 'Network offline');
+	});
+	window.addEventListener('online', () => {
+		// Network back - trigger refresh to verify and restore connection
+		refresh(false);
+	});
 	document.addEventListener('visibilitychange', async () => {
 		if (document.visibilityState === 'hidden') {
 			if (resumeReloadArmed) return;
@@ -4833,6 +5005,8 @@ function restoreNormalPolling() {
 	try {
 		await loadDefaultSitemap();
 		syncHistory(true);
+		// Fetch full sitemap for instant navigation (don't await, runs in background)
+		fetchFullSitemap().catch(() => {});
 		await refresh(true);
 		if (!state.isPaused) {
 			startPolling();
