@@ -10,7 +10,7 @@ const zlib = require('zlib');
 const { execFile, spawn } = require('child_process');
 const http = require('http');
 const https = require('https');
-const spdy = require('spdy');
+const http2 = require('http2');
 const crypto = require('crypto');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const WebSocket = require('ws');
@@ -3774,7 +3774,8 @@ app.get('/proxy', async (req, res, next) => {
 				'-rtsp_transport', 'tcp',
 				'-i', rtspUrl,
 				'-c:v', 'copy',
-				'-an',
+				'-c:a', 'aac',
+				'-b:a', '64k',
 				'-f', 'mp4',
 				'-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart',
 				'-reset_timestamps', '1',
@@ -3786,8 +3787,34 @@ app.get('/proxy', async (req, res, next) => {
 			res.setHeader('Content-Type', 'video/mp4');
 			res.setHeader('Cache-Control', 'no-store');
 			ffmpeg.stdout.pipe(res);
-			// Silence FFmpeg stderr output
-			ffmpeg.stderr.resume();
+
+			// Collect stderr to extract stream info
+			let stderrData = '';
+			let streamInfoLogged = false;
+			ffmpeg.stderr.on('data', (chunk) => {
+				if (stderrData.length < 8192) stderrData += chunk.toString();
+				// Log track info once we see Output (means probing is done)
+				if (!streamInfoLogged && stderrData.includes('Output #0')) {
+					streamInfoLogged = true;
+					try {
+						const inputStreams = [];
+						const outputStreams = [];
+						let inOutput = false;
+						for (const line of stderrData.split('\n')) {
+							if (line.includes('Output #0')) inOutput = true;
+							const streamMatch = line.match(/Stream #\d+:\d+.*?: (Video|Audio): (\w+)/);
+							if (streamMatch) {
+								const desc = `${streamMatch[1]}:${streamMatch[2]}`;
+								if (inOutput) outputStreams.push(desc);
+								else inputStreams.push(desc);
+							}
+						}
+						if (inputStreams.length || outputStreams.length) {
+							logMessage(`[RTSP] Stream info for ${username}@${clientIp}: in:[${inputStreams.join(', ')}] out:[${outputStreams.join(', ')}]`);
+						}
+					} catch {}
+				}
+			});
 
 			const endStream = () => {
 				if (activeRtspStreams.has(streamId)) {
@@ -4153,7 +4180,7 @@ function startHttpsServer() {
 		process.exit(1);
 	}
 	const server = HTTPS_HTTP2
-		? spdy.createServer(tlsOptions, app)
+		? http2.createSecureServer({ ...tlsOptions, allowHTTP1: true }, app)
 		: https.createServer(tlsOptions, app);
 	server.on('error', (err) => {
 		logMessage(`HTTPS server error: ${err.message || err}`);

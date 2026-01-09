@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "postinstall": "patch-package",
     "build:tailwind": "tailwindcss -c tailwind.config.js -i ./tailwind.input.css -o ./public/tailwind.css --minify",
     "test": "node --test tests/**/*.test.js",
     "test:unit": "node --test tests/unit/*.test.js",
@@ -20,10 +21,10 @@
     "http-proxy-middleware": "^3.0.5",
     "morgan": "^1.10.1",
     "mysql2": "^3.16.0",
-    "spdy": "^4.0.2",
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "patch-package": "^8.0.1",
     "sinon": "^17.0.1",
     "supertest": "^6.3.4",
     "tailwindcss": "^3.4.17"
