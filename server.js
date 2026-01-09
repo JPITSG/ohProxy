@@ -2922,6 +2922,19 @@ app.post('/api/auth/login', express.json(), (req, res) => {
 	}
 
 	const { username, password } = req.body || {};
+
+	// Validate username format (alphanumeric, underscore, dash, 1-50 chars)
+	if (!username || typeof username !== 'string' || !/^[a-zA-Z0-9_-]{1,50}$/.test(username)) {
+		res.status(400).json({ error: 'Invalid username format' });
+		return;
+	}
+
+	// Validate password is a string with reasonable length
+	if (!password || typeof password !== 'string' || password.length > 200) {
+		res.status(400).json({ error: 'Invalid password format' });
+		return;
+	}
+
 	const clientIp = getRemoteIp(req);
 	const lockKey = getLockoutKey(clientIp);
 
@@ -3248,12 +3261,24 @@ app.post('/api/settings', express.json(), (req, res) => {
 		return;
 	}
 	const newSettings = req.body;
-	if (!newSettings || typeof newSettings !== 'object') {
+	if (!newSettings || typeof newSettings !== 'object' || Array.isArray(newSettings)) {
 		res.status(400).json({ error: 'Invalid settings' });
 		return;
 	}
+	// Whitelist allowed settings keys
+	const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels'];
+	const sanitized = {};
+	for (const key of allowedKeys) {
+		if (key in newSettings) {
+			const val = newSettings[key];
+			// Only allow primitive values (string, number, boolean)
+			if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+				sanitized[key] = val;
+			}
+		}
+	}
 	// Merge with existing settings
-	const merged = { ...session.settings, ...newSettings };
+	const merged = { ...session.settings, ...sanitized };
 	const updated = sessions.updateSettings(session.clientId, merged);
 	if (!updated) {
 		res.status(500).json({ error: 'Failed to update settings' });
@@ -3299,7 +3324,7 @@ app.post('/api/glow-rules', express.json(), (req, res) => {
 	}
 
 	const { widgetId, rules, visibility } = req.body || {};
-	if (!widgetId || typeof widgetId !== 'string') {
+	if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200) {
 		res.status(400).json({ error: 'Missing or invalid widgetId' });
 		return;
 	}
@@ -3362,14 +3387,14 @@ app.post('/api/voice', express.json(), async (req, res) => {
 	res.setHeader('Cache-Control', 'no-cache');
 
 	const { command } = req.body || {};
-	if (!command || typeof command !== 'string') {
+	if (!command || typeof command !== 'string' || command.length > 500) {
 		res.status(400).json({ error: 'Missing or invalid command' });
 		return;
 	}
 
 	const trimmed = command.trim();
-	if (!trimmed) {
-		res.status(400).json({ error: 'Empty command' });
+	if (!trimmed || trimmed.length > 500) {
+		res.status(400).json({ error: 'Empty or too long command' });
 		return;
 	}
 
@@ -3796,9 +3821,26 @@ app.use('/images', (req, res, next) => {
 
 // Video preview endpoint
 app.get('/video-preview', (req, res) => {
-	const url = req.query.url;
-	if (!url || !url.startsWith('rtsp://')) {
+	const url = safeText(req.query.url).trim();
+	if (!url) {
+		return res.status(400).type('text/plain').send('Missing URL');
+	}
+
+	// Parse and validate RTSP URL
+	let target;
+	try {
+		target = new URL(url);
+	} catch {
+		return res.status(400).type('text/plain').send('Invalid URL');
+	}
+
+	if (target.protocol !== 'rtsp:') {
 		return res.status(400).type('text/plain').send('Invalid RTSP URL');
+	}
+
+	// Validate against proxy allowlist
+	if (!isProxyTargetAllowed(target, liveConfig.proxyAllowlist)) {
+		return res.status(403).type('text/plain').send('RTSP target not allowed');
 	}
 
 	const hash = rtspUrlHash(url);
