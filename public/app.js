@@ -3386,6 +3386,15 @@ function updateCard(card, w, afterImage, info) {
 						btn.dataset.command = m.command;
 						const shouldBeActive = safeText(m.command) === currentState;
 						btn.classList.toggle('is-active', shouldBeActive);
+						// Update onclick with current command (closure would have stale value)
+						const cmd = m.command;
+						btn.onclick = async () => {
+							haptic();
+							btn.disabled = true;
+							try { await sendCommand(itemName, cmd); await refresh(false); }
+							catch (e) { alert(e.message); }
+							finally { btn.disabled = false; }
+						};
 					}
 				}
 			} else {
