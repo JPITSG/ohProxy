@@ -505,7 +505,10 @@ function queueScrollTop() {
 
 function updatePauseButton() {
 	if (!els.pause) return;
-	els.pause.textContent = state.isPaused ? 'Resume' : 'Pause';
+	const pauseIcon = els.pause.querySelector('.pause-icon');
+	const playIcon = els.pause.querySelector('.play-icon');
+	if (pauseIcon) pauseIcon.classList.toggle('hidden', state.isPaused);
+	if (playIcon) playIcon.classList.toggle('hidden', !state.isPaused);
 }
 
 function formatAge(ms) {
@@ -685,6 +688,14 @@ function initTheme(forcedMode) {
 	} catch {}
 	setTheme(mode, false); // Don't sync to server on init
 	serverSettingsLoaded = true; // Settings already loaded from server via injection
+}
+
+function initPaused() {
+	try {
+		if (window.__OH_SESSION__ && window.__OH_SESSION__.paused === true) {
+			state.isPaused = true;
+		}
+	} catch {}
 }
 
 async function saveSettingsToServer(settings) {
@@ -3862,6 +3873,7 @@ function updateNavButtons() {
 	const hasSearch = !!state.filter.trim();
 	els.back.disabled = (state.stack.length === 0 && !hasSearch) || !state.connectionOk;
 	els.home.disabled = !state.rootPageUrl || (!hasSearch && state.pageUrl === state.rootPageUrl) || !state.connectionOk;
+	if (els.pause) els.pause.disabled = !state.connectionOk;
 }
 
 function clearSearchFilter() {
@@ -4479,7 +4491,8 @@ function restoreNormalPolling() {
 		if (state.headerMode === 'small') document.documentElement.classList.add('header-small');
 		if (state.headerMode === 'none') document.documentElement.classList.add('header-none');
 		if (!('ontouchstart' in window) && navigator.maxTouchPoints === 0) document.documentElement.classList.add('hover-device');
-		if (els.pause) els.pause.classList.toggle('pause-hidden', !showPause);
+		// TESTING: always show pause button (uncomment to restore)
+		// if (els.pause) els.pause.classList.toggle('pause-hidden', !showPause);
 	} catch {}
 	if (els.search) {
 		els.search.setAttribute('autocomplete', 'off');
@@ -4641,6 +4654,7 @@ function restoreNormalPolling() {
 			connectWs();
 		}
 		updatePauseButton();
+		saveSettingsToServer({ paused: state.isPaused });
 	});
 	els.home.addEventListener('click', () => {
 		haptic();
@@ -4659,6 +4673,7 @@ function restoreNormalPolling() {
 	if (els.lightMode) els.lightMode.addEventListener('click', () => setTheme('light'));
 	if (els.darkMode) els.darkMode.addEventListener('click', () => setTheme('dark'));
 	initTheme(state.forcedMode);
+	initPaused();
 	updatePauseButton();
 	state.initialStatusText = safeText(els.statusText ? els.statusText.textContent : '');
 	scheduleConnectionPending();
@@ -4670,8 +4685,10 @@ function restoreNormalPolling() {
 		await loadDefaultSitemap();
 		syncHistory(true);
 		await refresh(true);
-		startPolling();
-		connectWs();
+		if (!state.isPaused) {
+			startPolling();
+			connectWs();
+		}
 	} catch (e) {
 		console.error(e);
 		const snapshot = loadHomeSnapshot();
@@ -4679,8 +4696,10 @@ function restoreNormalPolling() {
 			setStatus('');
 			setConnectionStatus(false, e.message);
 			render();
-			startPolling();
-			connectWs();
+			if (!state.isPaused) {
+				startPolling();
+				connectWs();
+			}
 		} else {
 			setStatus(`Init failed: ${e.message}`);
 			setConnectionStatus(false, e.message);

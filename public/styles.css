@@ -798,6 +798,23 @@ body.theme-dark #homeBtn svg {
 #homeBtn:disabled {
 	opacity: .4;
 }
+#pauseBtn {
+	width: auto !important;
+}
+#pauseBtn svg {
+	width: 1.65rem;
+	height: 1.65rem;
+	display: block;
+}
+#pauseBtn svg.hidden {
+	display: none;
+}
+body.theme-dark #pauseBtn svg {
+	filter: invert(1);
+}
+#pauseBtn:disabled {
+	opacity: .4;
+}
 #themeToggleBtn {
 	width: auto !important;
 	padding: .5rem .75rem;
