@@ -103,10 +103,9 @@ module.exports = {
 		},
 		// Asset version strings.
 		assets: {
-			// App JS version (v### or ###).
-			jsVersion: 'v1',
-			// App CSS version (v### or ###).
-			cssVersion: 'v1',
+			// Combined version for JS, CSS, and service worker (v### or ###).
+			// When any asset changes, increment this to bust all caches together.
+			assetVersion: 'v1',
 			// Apple touch icon version (v### or ###).
 			appleTouchIconVersion: 'v1',
 			// Icon cache version (v### or ###).

@@ -198,9 +198,7 @@ const OH_USER = safeText(process.env.OH_USER || SERVER_CONFIG.openhab?.user || '
 const OH_PASS = safeText(process.env.OH_PASS || SERVER_CONFIG.openhab?.pass || '');
 const ICON_VERSION = safeText(process.env.ICON_VERSION || SERVER_CONFIG.assets?.iconVersion);
 const USER_AGENT = safeText(process.env.USER_AGENT || SERVER_CONFIG.userAgent);
-const ASSET_JS_VERSION = safeText(SERVER_CONFIG.assets?.jsVersion);
-const ASSET_CSS_VERSION = safeText(SERVER_CONFIG.assets?.cssVersion);
-const ASSET_SW_VERSION = safeText(SERVER_CONFIG.assets?.swVersion);
+const ASSET_VERSION = safeText(SERVER_CONFIG.assets?.assetVersion);
 const APPLE_TOUCH_VERSION_RAW = safeText(SERVER_CONFIG.assets?.appleTouchIconVersion);
 const APPLE_TOUCH_VERSION = APPLE_TOUCH_VERSION_RAW
 	? (APPLE_TOUCH_VERSION_RAW.startsWith('v')
@@ -530,8 +528,7 @@ function validateConfig() {
 	}
 
 	if (ensureObject(SERVER_CONFIG.assets, 'server.assets', errors)) {
-		ensureVersion(ASSET_JS_VERSION, 'server.assets.jsVersion', errors);
-		ensureVersion(ASSET_CSS_VERSION, 'server.assets.cssVersion', errors);
+		ensureVersion(ASSET_VERSION, 'server.assets.assetVersion', errors);
 		const appleRaw = safeText(APPLE_TOUCH_VERSION_RAW);
 		if (!appleRaw) {
 			errors.push(`server.assets.appleTouchIconVersion is required but currently is ${describeValue(APPLE_TOUCH_VERSION_RAW)}`);
@@ -1091,9 +1088,7 @@ const liveConfig = {
 	ohPass: OH_PASS,
 	iconVersion: ICON_VERSION,
 	userAgent: USER_AGENT,
-	assetJsVersion: ASSET_JS_VERSION,
-	assetCssVersion: ASSET_CSS_VERSION,
-	assetSwVersion: ASSET_SW_VERSION,
+	assetVersion: ASSET_VERSION,
 	appleTouchVersion: APPLE_TOUCH_VERSION,
 	iconSize: ICON_SIZE,
 	iconCacheConcurrency: ICON_CACHE_CONCURRENCY,
@@ -1215,9 +1210,7 @@ function reloadLiveConfig() {
 		ensureDir(getIconCacheDir());
 	}
 	liveConfig.userAgent = safeText(newServer.userAgent);
-	liveConfig.assetJsVersion = safeText(newAssets.jsVersion);
-	liveConfig.assetCssVersion = safeText(newAssets.cssVersion);
-	liveConfig.assetSwVersion = safeText(newAssets.swVersion);
+	liveConfig.assetVersion = safeText(newAssets.assetVersion);
 	const appleTouchRaw = safeText(newAssets.appleTouchIconVersion);
 	liveConfig.appleTouchVersion = appleTouchRaw
 		? (appleTouchRaw.startsWith('v') ? appleTouchRaw : `v${appleTouchRaw}`)
@@ -2058,9 +2051,9 @@ function renderIndexHtml(options) {
 	if (!indexTemplate) indexTemplate = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
 	const opts = options || {};
 	let html = indexTemplate;
-	html = html.replace(/__CSS_VERSION__/g, liveConfig.assetCssVersion);
-	html = html.replace(/__JS_VERSION__/g, liveConfig.assetJsVersion);
-	html = html.replace(/__SW_VERSION__/g, liveConfig.assetSwVersion);
+	html = html.replace(/__CSS_VERSION__/g, liveConfig.assetVersion);
+	html = html.replace(/__JS_VERSION__/g, liveConfig.assetVersion);
+	html = html.replace(/__SW_VERSION__/g, liveConfig.assetVersion);
 	html = html.replace(/__APPLE_TOUCH_VERSION__/g, liveConfig.appleTouchVersion);
 	html = html.replace(/__PAGE_TITLE__/g, getInitialPageTitleHtml());
 	html = html.replace(/__DOC_TITLE__/g, escapeHtml(getInitialDocumentTitle()));
@@ -2076,9 +2069,9 @@ function renderIndexHtml(options) {
 function renderServiceWorker() {
 	if (!serviceWorkerTemplate) serviceWorkerTemplate = fs.readFileSync(SERVICE_WORKER_PATH, 'utf8');
 	let script = serviceWorkerTemplate;
-	script = script.replace(/__CSS_VERSION__/g, liveConfig.assetCssVersion);
-	script = script.replace(/__JS_VERSION__/g, liveConfig.assetJsVersion);
-	script = script.replace(/__SW_VERSION__/g, liveConfig.assetSwVersion);
+	script = script.replace(/__CSS_VERSION__/g, liveConfig.assetVersion);
+	script = script.replace(/__JS_VERSION__/g, liveConfig.assetVersion);
+	script = script.replace(/__SW_VERSION__/g, liveConfig.assetVersion);
 	script = script.replace(/__APPLE_TOUCH_VERSION__/g, liveConfig.appleTouchVersion);
 	return script;
 }

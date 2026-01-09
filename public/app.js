@@ -1522,11 +1522,11 @@ function createGlowRuleRow(rule = {}) {
 		{ value: '<', label: '<' },
 		{ value: '>=', label: '>=' },
 		{ value: '<=', label: '<=' },
-		{ value: 'contains', label: 'contains' },
-		{ value: '!contains', label: '!contains' },
-		{ value: 'startsWith', label: 'startsWith' },
-		{ value: 'endsWith', label: 'endsWith' },
-		{ value: '*', label: '* (any)' },
+		{ value: 'contains', label: 'Contains' },
+		{ value: '!contains', label: '! Contain' },
+		{ value: 'startsWith', label: 'Starts With' },
+		{ value: 'endsWith', label: 'Ends With' },
+		{ value: '*', label: '* (Any)' },
 	];
 
 	const colorOptions = [
@@ -3123,6 +3123,37 @@ function updateCard(card, w, afterImage, info) {
 					});
 				}
 			}, 3000);
+
+			// Create mute/unmute button (hidden until video plays)
+			const muteBtn = document.createElement('button');
+			muteBtn.type = 'button';
+			muteBtn.className = 'video-mute-btn';
+			muteBtn.style.cssText = 'position:absolute;top:8px;left:8px;z-index:20;width:32px;height:32px;padding:0;border:none;background:transparent;cursor:pointer;opacity:0;pointer-events:none;transition:opacity 0.2s;';
+			muteBtn.innerHTML = '<img src="icons/video-unmute.svg" alt="Unmute" style="width:100%;height:100%;display:block;" />';
+			muteBtn.title = 'Unmute';
+			videoContainer.appendChild(muteBtn);
+
+			const updateMuteBtn = () => {
+				const isMuted = videoEl.muted;
+				// Show action icon: unmute (green) when muted, mute (red) when playing sound
+				muteBtn.innerHTML = isMuted
+					? '<img src="icons/video-unmute.svg" alt="Unmute" style="width:100%;height:100%;display:block;" />'
+					: '<img src="icons/video-mute.svg" alt="Mute" style="width:100%;height:100%;display:block;" />';
+				muteBtn.title = isMuted ? 'Unmute' : 'Mute';
+			};
+
+			muteBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				videoEl.muted = !videoEl.muted;
+				updateMuteBtn();
+			});
+
+			// Show mute button when video starts playing
+			videoEl.addEventListener('playing', () => {
+				muteBtn.style.opacity = '1';
+				muteBtn.style.pointerEvents = 'auto';
+			});
+
 			videoContainer.appendChild(videoEl);
 		}
 
