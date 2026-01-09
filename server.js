@@ -3764,24 +3764,50 @@ app.get('/proxy', async (req, res, next) => {
 			const username = req.ohProxyUser || 'anonymous';
 			const streamId = ++rtspStreamIdCounter;
 
+			// Get viewport width for scaling time overlay
+			const viewportWidth = parseInt(req.query.w, 10) || 0;
+			// Font size scales with viewport: ~2.5% of width, min 16px, max 48px
+			const fontSize = viewportWidth > 0 ? Math.max(16, Math.min(48, Math.round(viewportWidth / 40))) : 24;
+
 			// Track and log stream start
 			activeRtspStreams.set(streamId, { url: rtspUrl, user: username, ip: clientIp, startTime: Date.now() });
-			logMessage(`[RTSP] Starting stream ${rtspUrl} to ${username}@${clientIp}`);
+			logMessage(`[RTSP] Starting stream ${rtspUrl} to ${username}@${clientIp} (w=${viewportWidth})`);
+
+			// Time overlay filter: top-right, HH:MM:SS format (using strftime expansion for older ffmpeg)
+			const drawtext = `drawtext=text='%H\\:%M\\:%S':expansion=strftime:x=w-tw-15:y=15:fontsize=${fontSize}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`;
+			// Scale to viewport width if provided - ensure even dimensions for x264
+			const scaleWidth = viewportWidth > 0 ? (viewportWidth % 2 === 0 ? viewportWidth : viewportWidth + 1) : 0;
+			const videoFilter = scaleWidth > 0
+				? `scale=${scaleWidth}:-2,${drawtext}`
+				: drawtext;
 
 			const ffmpegArgs = [
-				'-fflags', 'nobuffer',
+				// Input options - minimize probing delay
+				'-probesize', '100000',
+				'-analyzeduration', '100000',
+				'-fflags', '+nobuffer+genpts+discardcorrupt',
 				'-flags', 'low_delay',
 				'-rtsp_transport', 'tcp',
 				'-i', rtspUrl,
-				'-c:v', 'copy',
+				// Video encoding - low latency
+				'-vf', videoFilter,
+				'-c:v', 'libx264',
+				'-preset', 'ultrafast',
+				'-tune', 'zerolatency',
+				'-g', '25',
+				'-keyint_min', '25',
+				// Audio
 				'-c:a', 'aac',
 				'-b:a', '64k',
+				// Output - streaming optimized
 				'-f', 'mp4',
 				'-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart',
+				'-flush_packets', '1',
 				'-reset_timestamps', '1',
 				'pipe:1',
 			];
-			const ffmpeg = spawn('ffmpeg', ffmpegArgs, {
+			// Use system ffmpeg which has drawtext filter (static build doesn't)
+			const ffmpeg = spawn('/usr/bin/ffmpeg', ffmpegArgs, {
 				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 			res.setHeader('Content-Type', 'video/mp4');

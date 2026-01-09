@@ -3078,16 +3078,17 @@ function updateCard(card, w, afterImage, info) {
 
 		if (isNewVideo) {
 
-			// Auto-reconnect on error
+			// Auto-reconnect on error - aggressive retry
 			videoEl.addEventListener('error', () => {
-				setTimeout(() => {
-					if (videoEl.src) {
+				const retry = () => {
+					if (videoEl.src && document.contains(videoEl)) {
 						const src = videoEl.src;
 						videoEl.src = '';
 						videoEl.src = src;
 						videoEl.play().catch(() => {});
 					}
-				}, 2000);
+				};
+				setTimeout(retry, 1000);
 			});
 			// Auto-reconnect on stall/ended
 			videoEl.addEventListener('stalled', () => {
@@ -3095,18 +3096,33 @@ function updateCard(card, w, afterImage, info) {
 					if (videoEl.src) {
 						videoEl.play().catch(() => {});
 					}
-				}, 1000);
+				}, 500);
 			});
 			videoEl.addEventListener('ended', () => {
 				setTimeout(() => {
-					if (videoEl.src) {
+					if (videoEl.src && document.contains(videoEl)) {
 						const src = videoEl.src;
 						videoEl.src = '';
 						videoEl.src = src;
 						videoEl.play().catch(() => {});
 					}
-				}, 1000);
+				}, 500);
 			});
+			// Periodic health check - retry if video is stuck
+			const healthCheck = setInterval(() => {
+				if (!document.contains(videoEl)) {
+					clearInterval(healthCheck);
+					return;
+				}
+				if (videoEl.src && videoEl.paused && !videoEl.ended) {
+					videoEl.play().catch(() => {
+						const src = videoEl.src;
+						videoEl.src = '';
+						videoEl.src = src;
+						videoEl.play().catch(() => {});
+					});
+				}
+			}, 3000);
 			videoContainer.appendChild(videoEl);
 		}
 
@@ -3122,9 +3138,16 @@ function updateCard(card, w, afterImage, info) {
 			videoEl.style.height = '';
 			videoEl.style.aspectRatio = '';
 		}
-		if (videoEl.src !== videoUrl) {
-			videoEl.src = videoUrl;
-			videoEl.play().catch(() => {});
+		// Append container width to URL for potential future transcoding
+		// Defer to next frame so container has layout dimensions
+		if (videoEl.dataset.baseUrl !== videoUrl) {
+			videoEl.dataset.baseUrl = videoUrl;
+			requestAnimationFrame(() => {
+				const containerWidth = videoContainer.offsetWidth || videoContainer.clientWidth || 640;
+				const videoSrc = `${videoUrl}&w=${containerWidth}`;
+				videoEl.src = videoSrc;
+				videoEl.play().catch(() => {});
+			});
 		}
 		return true;
 	}
