@@ -4057,8 +4057,9 @@ app.get('/proxy', async (req, res, next) => {
 			const username = req.ohProxyUser || 'anonymous';
 			const streamId = ++rtspStreamIdCounter;
 
-			// Get viewport width for scaling time overlay
-			const viewportWidth = parseInt(req.query.w, 10) || 0;
+			// Get viewport width for scaling time overlay (0-10000, invalid = 0)
+			const rawWidth = parseInt(req.query.w, 10);
+			const viewportWidth = (Number.isFinite(rawWidth) && rawWidth >= 0 && rawWidth <= 10000) ? rawWidth : 0;
 			// Font size scales with viewport: ~2.5% of width, min 16px, max 48px
 			const fontSize = viewportWidth > 0 ? Math.max(16, Math.min(48, Math.round(viewportWidth / 40))) : 24;
 
