@@ -155,6 +155,15 @@ module.exports = {
 			// Delete preview images older than this (hours; >=1).
 			pruneAfterHours: 24,
 		},
+		// External binary paths.
+		binaries: {
+			// FFmpeg binary path (used for RTSP streaming and video previews).
+			ffmpeg: '/usr/bin/ffmpeg',
+			// ImageMagick convert binary path (used for icon conversion).
+			convert: '/usr/bin/convert',
+			// Shell binary path (used for auth failure notification commands).
+			shell: '/bin/sh',
+		},
 	},
 
 	// Client-visible settings.

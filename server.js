@@ -252,6 +252,10 @@ const PREVIEW_CONFIG = SERVER_CONFIG.videoPreview || {};
 const VIDEO_PREVIEW_INTERVAL_MS = configNumber(PREVIEW_CONFIG.intervalMs, 900000);
 const VIDEO_PREVIEW_PRUNE_HOURS = configNumber(PREVIEW_CONFIG.pruneAfterHours, 24);
 const VIDEO_PREVIEW_DIR = path.join(__dirname, 'video-previews');
+const BINARIES_CONFIG = SERVER_CONFIG.binaries || {};
+const BIN_FFMPEG = safeText(BINARIES_CONFIG.ffmpeg) || '/usr/bin/ffmpeg';
+const BIN_CONVERT = safeText(BINARIES_CONFIG.convert) || '/usr/bin/convert';
+const BIN_SHELL = safeText(BINARIES_CONFIG.shell) || '/bin/sh';
 const CHART_CACHE_DIR = path.join(__dirname, 'cache', 'chart');
 const CHART_PERIOD_TTL = {
 	h: 60 * 1000,        // 1 minute
@@ -1003,7 +1007,7 @@ function maybeNotifyAuthFailure(ip) {
 	if (!command) return;
 	sessions.setServerSetting('lastAuthFailNotifyAt', String(now));
 	try {
-		const child = execFile('/bin/sh', ['-c', command], { detached: true, stdio: 'ignore' });
+		const child = execFile(BIN_SHELL, ['-c', command], { detached: true, stdio: 'ignore' });
 		child.unref();
 		logMessage(`Auth failure notify command executed for ${safeIp}`);
 	} catch (err) {
@@ -2724,7 +2728,7 @@ async function buildIconCache(cachePath, sourcePath, sourceExt) {
 		}
 		fs.writeFileSync(srcPath, res.body);
 		ensureDir(path.dirname(cachePath));
-		await enqueueIconConvert(() => execFileAsync('convert', [
+		await enqueueIconConvert(() => execFileAsync(BIN_CONVERT, [
 			srcPath,
 			'-resize', `${ICON_SIZE}x${ICON_SIZE}`,
 			'-background', 'none',
@@ -3806,8 +3810,7 @@ app.get('/proxy', async (req, res, next) => {
 				'-reset_timestamps', '1',
 				'pipe:1',
 			];
-			// Use system ffmpeg which has drawtext filter (static build doesn't)
-			const ffmpeg = spawn('/usr/bin/ffmpeg', ffmpegArgs, {
+			const ffmpeg = spawn(BIN_FFMPEG, ffmpegArgs, {
 				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 			res.setHeader('Content-Type', 'video/mp4');
@@ -3934,7 +3937,7 @@ async function captureRtspPreview(rtspUrl) {
 	const outputPath = path.join(VIDEO_PREVIEW_DIR, `${hash}.jpg`);
 
 	return new Promise((resolve) => {
-		const ffmpeg = spawn('ffmpeg', [
+		const ffmpeg = spawn(BIN_FFMPEG, [
 			'-y',
 			'-rtsp_transport', 'tcp',
 			'-i', rtspUrl,
