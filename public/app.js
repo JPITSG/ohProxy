@@ -2407,6 +2407,48 @@ function syncDeltaToCache(pageUrl, changes) {
 	// No need to call updatePageInCache - we modified the object in place
 }
 
+// Sync item state changes to ALL cached pages (for WebSocket item updates)
+function syncItemsToAllCachedPages(changes) {
+	if (!state.sitemapCacheReady || !state.sitemapCache || !Array.isArray(changes) || !changes.length) return;
+
+	// Build a map of changes by itemName
+	const changeMap = new Map();
+	for (const change of changes) {
+		const itemName = safeText(change?.itemName || '');
+		if (itemName) changeMap.set(itemName, change);
+	}
+	if (changeMap.size === 0) return;
+
+	// Recursively update widgets matching item names
+	const updateWidgets = (widgets) => {
+		if (!widgets) return;
+		const list = Array.isArray(widgets) ? widgets : (widgets.item ? (Array.isArray(widgets.item) ? widgets.item : [widgets.item]) : [widgets]);
+		for (const w of list) {
+			if (!w) continue;
+			const itemName = safeText(w?.item?.name || w?.name || '');
+			if (itemName && changeMap.has(itemName)) {
+				const change = changeMap.get(itemName);
+				if (change.state !== undefined) {
+					if (w.item) w.item.state = change.state;
+					w.state = change.state;
+					// Only update label for numeric states (group counts like "0", "1", "2")
+					// Don't update for raw states like "OPEN"/"CLOSED" which have transformers
+					if (w.label && w.label.includes('[') && /^\d+$/.test(change.state)) {
+						w.label = w.label.replace(/\[[^\]]*\]/, `[${change.state}]`);
+					}
+				}
+			}
+			if (w.widget) updateWidgets(w.widget);
+			if (w.widgets) updateWidgets(w.widgets);
+		}
+	};
+
+	// Update all cached pages
+	for (const page of state.sitemapCache.values()) {
+		if (page?.widget) updateWidgets(page.widget);
+	}
+}
+
 function widgetType(widget) {
 	return safeText(widget?.type || widget?.widgetType || widget?.item?.type || '');
 }
@@ -4276,8 +4318,8 @@ async function refresh(showLoading) {
 	const shouldScroll = state.pendingScrollTop;
 	state.pendingScrollTop = false;
 
-	// For page changes with cache: use cache only, no network request
-	// Delta updates via polling will keep widget states fresh independently
+	// For page changes with cache: use cache for instant display, then background refresh
+	// to get fresh transformed labels from the server
 	if (isPageChange && state.sitemapCacheReady) {
 		const cachedPage = getPageFromCache(state.pageUrl);
 		if (cachedPage) {
@@ -4291,6 +4333,8 @@ async function refresh(showLoading) {
 			clearLoadingStatusTimer();
 			if (fade) runPageFadeIn(fade.token);
 			state.isRefreshing = false;
+			// Background refresh to get fresh transformed labels
+			setTimeout(() => refresh(false), 100);
 			return;
 		}
 	}
@@ -4537,7 +4581,10 @@ function applyWsUpdate(data) {
 		itemName: item.name,
 		state: item.state,
 	}));
-	if (applyDeltaChanges(deltaChanges)) {
+	const didUpdate = applyDeltaChanges(deltaChanges);
+	// Also sync to sitemap cache so navigation shows updated states
+	syncItemsToAllCachedPages(deltaChanges);
+	if (didUpdate) {
 		render();
 		// Debounced refresh to catch visibility-triggered sitemap changes
 		if (wsRefreshTimer) clearTimeout(wsRefreshTimer);
