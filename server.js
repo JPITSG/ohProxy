@@ -3251,6 +3251,29 @@ app.post('/api/glow-rules', express.json(), (req, res) => {
 	}
 });
 
+app.post('/api/voice', express.json(), (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+
+	const { command } = req.body || {};
+	if (!command || typeof command !== 'string') {
+		res.status(400).json({ error: 'Missing or invalid command' });
+		return;
+	}
+
+	const trimmed = command.trim();
+	if (!trimmed) {
+		res.status(400).json({ error: 'Empty command' });
+		return;
+	}
+
+	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
+	const username = user?.username || 'anonymous';
+	logMessage(`Voice command received from ${username}: "${trimmed}"`);
+
+	res.json({ success: true, command: trimmed });
+});
+
 app.get('/sw.js', (req, res) => {
 	sendServiceWorker(res);
 });

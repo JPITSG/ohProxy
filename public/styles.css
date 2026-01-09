@@ -818,6 +818,9 @@ body.theme-dark #pauseBtn svg {
 #voiceBtn {
 	width: auto !important;
 }
+#voiceBtn.hidden {
+	display: none !important;
+}
 #voiceBtn svg {
 	width: 1.65rem;
 	height: 1.65rem;
@@ -825,6 +828,21 @@ body.theme-dark #pauseBtn svg {
 }
 body.theme-dark #voiceBtn svg {
 	filter: invert(1);
+}
+#voiceBtn.listening svg {
+	filter: drop-shadow(0 0 4px rgba(234, 0, 52, 0.8)) drop-shadow(0 0 8px rgba(234, 0, 52, 0.6)) drop-shadow(0 0 12px rgba(234, 0, 52, 0.4));
+	animation: pulse-listening 1s ease-in-out infinite;
+}
+body.theme-dark #voiceBtn.listening svg {
+	animation: pulse-listening-dark 1s ease-in-out infinite;
+}
+@keyframes pulse-listening {
+	0%, 100% { filter: drop-shadow(0 0 4px rgba(234, 0, 52, 0.8)) drop-shadow(0 0 8px rgba(234, 0, 52, 0.6)) drop-shadow(0 0 12px rgba(234, 0, 52, 0.4)); }
+	50% { filter: drop-shadow(0 0 6px rgba(234, 0, 52, 1)) drop-shadow(0 0 12px rgba(234, 0, 52, 0.8)) drop-shadow(0 0 18px rgba(234, 0, 52, 0.5)); }
+}
+@keyframes pulse-listening-dark {
+	0%, 100% { filter: invert(1) drop-shadow(0 0 4px rgba(234, 0, 52, 0.8)) drop-shadow(0 0 8px rgba(234, 0, 52, 0.6)) drop-shadow(0 0 12px rgba(234, 0, 52, 0.4)); }
+	50% { filter: invert(1) drop-shadow(0 0 6px rgba(234, 0, 52, 1)) drop-shadow(0 0 12px rgba(234, 0, 52, 0.8)) drop-shadow(0 0 18px rgba(234, 0, 52, 0.5)); }
 }
 #themeToggleBtn {
 	width: auto !important;

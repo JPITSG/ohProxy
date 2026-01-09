@@ -4558,9 +4558,32 @@ function restoreNormalPolling() {
 		// TESTING: always show pause button (uncomment to restore)
 		// if (els.pause) els.pause.classList.toggle('pause-hidden', !showPause);
 	} catch {}
-	// Show voice button if Speech Recognition API is available
+	// Show voice button if Speech Recognition API and microphone permission available
 	if (els.voice && (window.SpeechRecognition || window.webkitSpeechRecognition)) {
-		els.voice.classList.remove('hidden');
+		(async () => {
+			try {
+				// Try permissions API first
+				if (navigator.permissions) {
+					try {
+						const result = await navigator.permissions.query({ name: 'microphone' });
+						if (result.state === 'denied') return;
+						els.voice.classList.remove('hidden');
+						return;
+					} catch {
+						// Permissions API doesn't support microphone query, fall through
+					}
+				}
+				// Fallback: check for audio input devices
+				if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+					const devices = await navigator.mediaDevices.enumerateDevices();
+					const hasMic = devices.some(d => d.kind === 'audioinput');
+					if (hasMic) els.voice.classList.remove('hidden');
+				} else {
+					// No way to check, just show the button
+					els.voice.classList.remove('hidden');
+				}
+			} catch {}
+		})();
 	}
 	if (els.search) {
 		els.search.setAttribute('autocomplete', 'off');
@@ -4737,6 +4760,64 @@ function restoreNormalPolling() {
 		queueScrollTop();
 		refresh(true);
 	});
+	if (els.voice) {
+		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+		if (SpeechRecognition) {
+			let recognition = null;
+			let isListening = false;
+
+			els.voice.addEventListener('click', () => {
+				haptic();
+
+				// If currently listening, stop
+				if (isListening && recognition) {
+					recognition.stop();
+					return;
+				}
+
+				// Create new recognition instance
+				recognition = new SpeechRecognition();
+				recognition.lang = navigator.language || 'en-US';
+				recognition.interimResults = false;
+				recognition.maxAlternatives = 1;
+
+				// Show listening state immediately
+				isListening = true;
+				els.voice.classList.add('listening');
+
+				recognition.onresult = async (event) => {
+					const transcript = event.results[0][0].transcript;
+					try {
+						await fetch('/api/voice', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ command: transcript }),
+						});
+					} catch {}
+				};
+
+				recognition.onerror = () => {
+					isListening = false;
+					els.voice.classList.remove('listening');
+					recognition = null;
+				};
+
+				recognition.onend = () => {
+					isListening = false;
+					els.voice.classList.remove('listening');
+					recognition = null;
+				};
+
+				try {
+					recognition.start();
+				} catch {
+					isListening = false;
+					els.voice.classList.remove('listening');
+					recognition = null;
+				}
+			});
+		}
+	}
 	if (els.themeToggle) els.themeToggle.addEventListener('click', () => { haptic(); toggleTheme(); });
 	if (els.lightMode) els.lightMode.addEventListener('click', () => setTheme('light'));
 	if (els.darkMode) els.darkMode.addEventListener('click', () => setTheme('dark'));
