@@ -481,7 +481,7 @@ async function testVoice(voiceCommand) {
 		max_tokens: 1024,
 		system: `You are a home automation voice command interpreter. Your job is to match voice commands to the available smart home items and determine what actions to take.
 
-You will receive a list of controllable items organized by room/section. Each item shows:
+You will receive a list of controllable items organized by room/section (## headers). Each item shows:
 - Item name (technical ID to use in commands)
 - Item type
 - Label (human-readable name)
@@ -504,12 +504,15 @@ If the command is unclear or no matching items found:
 }
 
 Rules:
-- Match items by label, room/section context, and common sense
-- "all lights" means all Switch/Dimmer items with "light" in label or section
+- CRITICAL: When user specifies a room/location, ONLY match items under that room's ## section header. The section hierarchy (e.g. "## Floors / Upstairs / Office") tells you exactly where each item is located. Never pick items from other rooms.
+- Match by label first, then item name. Labels are what users call things.
+- "all lights" means all Switch/Dimmer items with "light" or "lamp" in label within the specified room
 - "turn on" = ON, "turn off" = OFF for switches
 - For dimmers, "dim" = 30, "bright" = 100
+- For items with numeric commands like [commands: 0="Off", 1="On"], use the number (0, 1) not the label
 - Be helpful but only control items that clearly match the request
-- Response should be natural, conversational`,
+- Response should be natural, conversational
+- ONLY output valid JSON, no markdown or extra text`,
 		messages: [
 			{
 				role: 'user',
