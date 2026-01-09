@@ -262,6 +262,9 @@ const CHART_PERIOD_TTL = {
 	M: 60 * 60 * 1000,   // 1 hour
 	Y: 60 * 60 * 1000,   // 1 hour
 };
+const AI_CACHE_DIR = path.join(__dirname, 'cache', 'ai');
+const AI_STRUCTURE_MAP_WRITABLE = path.join(AI_CACHE_DIR, 'structuremap-writable.json');
+const ANTHROPIC_API_KEY = safeText(SERVER_CONFIG.apiKeys?.anthropic) || '';
 const MYSQL_CONFIG = SERVER_CONFIG.mysql || {};
 const MYSQL_RECONNECT_DELAY_MS = 5000;
 let mysqlConnection = null;
@@ -2652,6 +2655,109 @@ function fetchOpenhab(pathname) {
 	});
 }
 
+function sendOpenhabCommand(itemName, command) {
+	return new Promise((resolve, reject) => {
+		const target = new URL(liveConfig.ohTarget);
+		const isHttps = target.protocol === 'https:';
+		const basePath = target.pathname && target.pathname !== '/' ? target.pathname.replace(/\/$/, '') : '';
+		const reqPath = `${basePath}/rest/items/${encodeURIComponent(itemName)}`;
+		const client = isHttps ? https : http;
+		const headers = {
+			'Content-Type': 'text/plain',
+			'Accept': 'application/json',
+			'User-Agent': liveConfig.userAgent,
+		};
+		const ah = authHeader();
+		if (ah) headers.Authorization = ah;
+
+		const req = client.request({
+			method: 'POST',
+			hostname: target.hostname,
+			port: target.port || (isHttps ? 443 : 80),
+			path: reqPath,
+			headers,
+		}, (res) => {
+			let body = '';
+			res.setEncoding('utf8');
+			res.on('data', (chunk) => { body += chunk; });
+			res.on('end', () => resolve({
+				status: res.statusCode || 500,
+				ok: res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
+				body,
+			}));
+		});
+
+		req.on('error', reject);
+		req.write(String(command));
+		req.end();
+	});
+}
+
+function callAnthropicApi(requestBody) {
+	return new Promise((resolve, reject) => {
+		if (!ANTHROPIC_API_KEY) {
+			reject(new Error('Anthropic API key not configured'));
+			return;
+		}
+
+		const postData = JSON.stringify(requestBody);
+
+		const req = https.request({
+			hostname: 'api.anthropic.com',
+			port: 443,
+			path: '/v1/messages',
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'x-api-key': ANTHROPIC_API_KEY,
+				'anthropic-version': '2023-06-01',
+				'Content-Length': Buffer.byteLength(postData),
+			},
+		}, (res) => {
+			let data = '';
+			res.on('data', chunk => data += chunk);
+			res.on('end', () => {
+				if (res.statusCode >= 200 && res.statusCode < 300) {
+					try {
+						resolve(JSON.parse(data));
+					} catch {
+						reject(new Error('Invalid JSON response from Anthropic'));
+					}
+				} else {
+					reject(new Error(`Anthropic API error ${res.statusCode}`));
+				}
+			});
+		});
+
+		req.on('error', reject);
+		req.setTimeout(30000, () => {
+			req.destroy();
+			reject(new Error('Anthropic API timeout'));
+		});
+		req.write(postData);
+		req.end();
+	});
+}
+
+let aiStructureMapCache = null;
+let aiStructureMapMtime = 0;
+
+function getAiStructureMap() {
+	try {
+		if (!fs.existsSync(AI_STRUCTURE_MAP_WRITABLE)) return null;
+		const stat = fs.statSync(AI_STRUCTURE_MAP_WRITABLE);
+		if (aiStructureMapCache && stat.mtimeMs === aiStructureMapMtime) {
+			return aiStructureMapCache;
+		}
+		const data = JSON.parse(fs.readFileSync(AI_STRUCTURE_MAP_WRITABLE, 'utf8'));
+		aiStructureMapCache = data;
+		aiStructureMapMtime = stat.mtimeMs;
+		return data;
+	} catch {
+		return null;
+	}
+}
+
 async function refreshSitemapCache() {
 	let body;
 	try {
@@ -3251,7 +3357,7 @@ app.post('/api/glow-rules', express.json(), (req, res) => {
 	}
 });
 
-app.post('/api/voice', express.json(), (req, res) => {
+app.post('/api/voice', express.json(), async (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
 
@@ -3269,9 +3375,134 @@ app.post('/api/voice', express.json(), (req, res) => {
 
 	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
 	const username = user?.username || 'anonymous';
-	logMessage(`Voice command received from ${username}: "${trimmed}"`);
 
-	res.json({ success: true, command: trimmed });
+	// Check if AI is configured
+	if (!ANTHROPIC_API_KEY) {
+		logMessage(`Voice command from ${username}: "${trimmed}" - AI not configured`);
+		res.status(503).json({ error: 'Voice AI not configured' });
+		return;
+	}
+
+	// Load structure map
+	const structureMap = getAiStructureMap();
+	if (!structureMap) {
+		logMessage(`Voice command from ${username}: "${trimmed}" - structure map not found`);
+		res.status(503).json({ error: 'Voice AI structure map not found. Run ai-cli.js genstructuremap first.' });
+		return;
+	}
+
+	const itemList = structureMap.request?.messages?.[0]?.content;
+	if (!itemList) {
+		logMessage(`Voice command from ${username}: "${trimmed}" - invalid structure map`);
+		res.status(503).json({ error: 'Invalid structure map format' });
+		return;
+	}
+
+	try {
+		const aiResponse = await callAnthropicApi({
+			model: 'claude-3-haiku-20240307',
+			max_tokens: 1024,
+			system: `You are a home automation voice command interpreter. Your job is to match voice commands to the available smart home items and determine what actions to take.
+
+You will receive a list of controllable items organized by room/section (## headers). Each item shows:
+- Item name (technical ID to use in commands)
+- Item type
+- Label (human-readable name)
+- Available commands
+
+Respond with a JSON object:
+{
+  "understood": true,
+  "actions": [
+    { "item": "ItemName", "command": "ON", "description": "Turn on kitchen light" }
+  ],
+  "response": "Turning on the kitchen lights"
+}
+
+If the command is unclear or no matching items found:
+{
+  "understood": false,
+  "actions": [],
+  "response": "I couldn't find any lights in the kitchen"
+}
+
+Rules:
+- CRITICAL: When user specifies a room/location, ONLY match items under that room's ## section header. The section hierarchy (e.g. "## Floors / Upstairs / Office") tells you exactly where each item is located. Never pick items from other rooms.
+- Match by label first, then item name. Labels are what users call things.
+- "all lights" means all Switch/Dimmer items with "light" or "lamp" in label within the specified room
+- "turn on" = ON, "turn off" = OFF for switches
+- For dimmers, "dim" = 30, "bright" = 100
+- For items with numeric commands like [commands: 0="Off", 1="On"], use the number (0, 1) not the label
+- Be helpful but only control items that clearly match the request
+- Response should be natural, conversational
+- ONLY output valid JSON, no markdown or extra text`,
+			messages: [
+				{
+					role: 'user',
+					content: `Available items:\n\n${itemList}\n\n---\n\nVoice command: "${trimmed}"`
+				}
+			]
+		});
+
+		// Extract text content
+		const textContent = aiResponse.content?.find(c => c.type === 'text');
+		if (!textContent?.text) {
+			logMessage(`Voice command from ${username}: "${trimmed}" - empty AI response`);
+			res.status(502).json({ error: 'Empty response from AI' });
+			return;
+		}
+
+		// Parse JSON response
+		let parsed;
+		try {
+			parsed = JSON.parse(textContent.text);
+		} catch {
+			logMessage(`Voice command from ${username}: "${trimmed}" - invalid AI JSON`);
+			res.status(502).json({ error: 'Invalid response from AI' });
+			return;
+		}
+
+		// Execute actions
+		const results = [];
+		if (parsed.understood && Array.isArray(parsed.actions)) {
+			for (const action of parsed.actions) {
+				if (action.item && action.command !== undefined) {
+					try {
+						const cmdResult = await sendOpenhabCommand(action.item, action.command);
+						results.push({
+							item: action.item,
+							command: action.command,
+							success: cmdResult.ok,
+						});
+					} catch (err) {
+						results.push({
+							item: action.item,
+							command: action.command,
+							success: false,
+							error: err.message,
+						});
+					}
+				}
+			}
+		}
+
+		// Log summary
+		const actionSummary = results.length > 0
+			? results.map(r => `${r.item}=${r.command}(${r.success ? 'ok' : 'fail'})`).join(', ')
+			: 'none';
+		logMessage(`Voice [${username}]: "${trimmed}" -> understood=${parsed.understood}, actions=[${actionSummary}]`);
+
+		res.json({
+			success: true,
+			understood: parsed.understood,
+			response: parsed.response || '',
+			actions: results,
+		});
+
+	} catch (err) {
+		logMessage(`Voice command from ${username}: "${trimmed}" - error: ${err.message}`);
+		res.status(502).json({ error: 'AI processing failed' });
+	}
 });
 
 app.get('/sw.js', (req, res) => {
