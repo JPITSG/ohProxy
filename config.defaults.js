@@ -119,6 +119,11 @@ module.exports = {
 		iconCacheConcurrency: 5,
 		// Max delta cache size (integer >=1).
 		deltaCacheLimit: 50,
+		// Group items whose state is calculated from member states.
+		// For each group name listed, the proxy fetches member items and counts
+		// those with state "OPEN" (OPEN=+1, CLOSED=0). The calculated count
+		// replaces the group's native state in sitemap responses.
+		groupItems: [],
 		// Proxy middleware logging level (silent|error|warn|info|debug).
 		proxyMiddlewareLogLevel: 'warn',
 		// Log file path (absolute; empty disables).
