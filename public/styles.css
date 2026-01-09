@@ -829,6 +829,9 @@ body.theme-dark #pauseBtn svg {
 body.theme-dark #voiceBtn svg {
 	filter: invert(1);
 }
+#voiceBtn:disabled {
+	opacity: .4;
+}
 #voiceBtn.listening svg {
 	filter: drop-shadow(0 0 4px rgba(234, 0, 52, 0.8)) drop-shadow(0 0 8px rgba(234, 0, 52, 0.6)) drop-shadow(0 0 12px rgba(234, 0, 52, 0.4));
 	animation: pulse-listening 1s ease-in-out infinite;

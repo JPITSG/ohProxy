@@ -2097,6 +2097,12 @@ function pageCacheKey(url) {
 
 // Track in-flight fetch requests to prevent concurrent fetches for same URL
 const fetchPageInflight = new Map();
+const FETCH_PAGE_TIMEOUT_MS = 15000; // Timeout for page fetches to prevent deadlocks
+
+// Clear all in-flight fetches on network state change to prevent deadlocks
+function clearInflightFetches() {
+	fetchPageInflight.clear();
+}
 
 async function fetchPage(url, options) {
 	const opts = options || {};
@@ -2105,13 +2111,23 @@ async function fetchPage(url, options) {
 	// If a fetch is already in flight for this URL, wait for it instead of making a duplicate request
 	const existing = fetchPageInflight.get(key);
 	if (existing) {
-		return existing;
+		return existing.promise;
 	}
 
+	// Create fetch with timeout to prevent deadlocks on spotty connections
+	let timeoutId;
+	const timeoutPromise = new Promise((_, reject) => {
+		timeoutId = setTimeout(() => reject(new Error('Fetch timeout')), FETCH_PAGE_TIMEOUT_MS);
+	});
+
 	const fetchPromise = fetchPageInternal(url, opts);
-	fetchPageInflight.set(key, fetchPromise);
+	const racedPromise = Promise.race([fetchPromise, timeoutPromise]).finally(() => {
+		clearTimeout(timeoutId);
+	});
+
+	fetchPageInflight.set(key, { promise: racedPromise, timestamp: Date.now() });
 	try {
-		return await fetchPromise;
+		return await racedPromise;
 	} finally {
 		fetchPageInflight.delete(key);
 	}
@@ -4016,6 +4032,7 @@ function updateNavButtons() {
 	els.back.disabled = (state.stack.length === 0 && !hasSearch) || !state.connectionOk;
 	els.home.disabled = !state.rootPageUrl || (!hasSearch && state.pageUrl === state.rootPageUrl) || !state.connectionOk;
 	if (els.pause) els.pause.disabled = !state.connectionOk;
+	if (els.voice) els.voice.disabled = !state.connectionOk;
 }
 
 function clearSearchFilter() {
@@ -4281,9 +4298,11 @@ async function refresh(showLoading) {
 	try {
 		const result = await fetchPage(state.pageUrl, { forceFull: showLoading || isPageChange });
 		// Abort if user navigated away during fetch (stale response)
+		// Still restore connection status since fetch succeeded
 		if (state.pageUrl !== refreshUrl) {
 			state.isRefreshing = false;
 			clearLoadingStatusTimer();
+			setConnectionStatus(true);
 			return;
 		}
 		if (result.delta) {
@@ -4783,9 +4802,11 @@ function restoreNormalPolling() {
 	window.addEventListener('orientationchange', scheduleImageResizeRefresh, { passive: true });
 	// Instant offline/online detection
 	window.addEventListener('offline', () => {
+		clearInflightFetches(); // Clear stuck requests to prevent deadlocks
 		setConnectionStatus(false, 'Network offline');
 	});
 	window.addEventListener('online', () => {
+		clearInflightFetches(); // Clear any timed-out requests before retrying
 		// Network back - trigger refresh to verify and restore connection
 		refresh(false);
 	});
