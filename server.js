@@ -1493,6 +1493,7 @@ const atmospherePages = new Map(); // pageId -> { connection, trackingId, reconn
 
 // Track item states to detect actual changes (not just openHAB reporting unchanged items)
 const itemStates = new Map(); // itemName -> state
+const groupItemCalculatedStates = new Map(); // groupName -> calculated count (for groupItems config)
 let lastSeenItems = new Set(); // Item names from most recent full poll
 let itemStateCleanupTimer = null;
 const ITEM_STATE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
@@ -1587,11 +1588,29 @@ function connectAtmospherePage(pageId) {
 				if (update && update.changes.length > 0) {
 					// Filter to only items that actually changed
 					const actualChanges = filterChangedItems(update.changes);
-					if (actualChanges.length > 0) {
-						logMessage(`[Atmosphere:${pageId}] ${actualChanges.length} items changed (${update.changes.length} reported)`);
+
+					// Check configured group items for calculated state changes
+					const groupChanges = [];
+					if (liveConfig.groupItems && liveConfig.groupItems.length > 0) {
+						for (const groupName of liveConfig.groupItems) {
+							if (actualChanges.some(c => c.name === groupName)) continue;
+							const calculatedState = await calculateGroupState(groupName);
+							if (calculatedState !== null) {
+								const prevCalculated = groupItemCalculatedStates.get(groupName);
+								if (prevCalculated !== calculatedState) {
+									groupItemCalculatedStates.set(groupName, calculatedState);
+									groupChanges.push({ name: groupName, state: calculatedState });
+								}
+							}
+						}
+					}
+
+					const allChanges = [...actualChanges, ...groupChanges];
+					if (allChanges.length > 0) {
+						logMessage(`[Atmosphere:${pageId}] ${allChanges.length} items changed (${update.changes.length} reported)`);
 						if (wss.clients.size > 0) {
 							// Apply group state overrides before broadcasting
-							const transformedChanges = await applyGroupStateToItems(actualChanges);
+							const transformedChanges = await applyGroupStateToItems(allChanges);
 							wsBroadcast('update', { type: 'items', changes: transformedChanges });
 						}
 					}
@@ -1839,9 +1858,36 @@ async function pollItems() {
 		// Track seen items for stale state cleanup
 		lastSeenItems = new Set(items.map(i => i.name));
 		const actualChanges = filterChangedItems(items);
-		if (actualChanges.length > 0) {
+
+		// Check configured group items for calculated state changes
+		// (their native state may not change even when member counts do)
+		const groupChanges = [];
+		if (liveConfig.groupItems && liveConfig.groupItems.length > 0) {
+			for (const groupName of liveConfig.groupItems) {
+				// Skip if already in actualChanges
+				if (actualChanges.some(c => c.name === groupName)) continue;
+
+				const calculatedState = await calculateGroupState(groupName);
+				if (calculatedState !== null) {
+					const prevCalculated = groupItemCalculatedStates.get(groupName);
+					if (prevCalculated !== calculatedState) {
+						groupItemCalculatedStates.set(groupName, calculatedState);
+						// Find the item from the poll to get its full data
+						const itemData = items.find(i => i.name === groupName);
+						if (itemData) {
+							groupChanges.push({ ...itemData, state: calculatedState });
+						} else {
+							groupChanges.push({ name: groupName, state: calculatedState });
+						}
+					}
+				}
+			}
+		}
+
+		const allChanges = [...actualChanges, ...groupChanges];
+		if (allChanges.length > 0) {
 			// Apply group state overrides before broadcasting
-			const transformedChanges = await applyGroupStateToItems(actualChanges);
+			const transformedChanges = await applyGroupStateToItems(allChanges);
 			wsBroadcast('update', { type: 'items', changes: transformedChanges });
 		}
 	}
@@ -2423,7 +2469,6 @@ async function calculateGroupState(groupName) {
 			logMessage(`[GroupState] No members array for ${groupName}`);
 			return null;
 		}
-		// Count members with state OPEN
 		const count = data.members.filter(m => m && m.state === 'OPEN').length;
 		return String(count);
 	} catch (err) {
