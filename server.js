@@ -208,6 +208,7 @@ const APPLE_TOUCH_VERSION = APPLE_TOUCH_VERSION_RAW
 const ICON_SIZE = configNumber(SERVER_CONFIG.iconSize);
 const ICON_CACHE_CONCURRENCY = Math.max(1, Math.floor(configNumber(SERVER_CONFIG.iconCacheConcurrency, 5)));
 const DELTA_CACHE_LIMIT = configNumber(SERVER_CONFIG.deltaCacheLimit);
+const GROUP_ITEMS = Array.isArray(SERVER_CONFIG.groupItems) ? SERVER_CONFIG.groupItems.map(safeText).filter(Boolean) : [];
 const PROXY_LOG_LEVEL = safeText(process.env.PROXY_LOG_LEVEL || SERVER_CONFIG.proxyMiddlewareLogLevel);
 const LOG_FILE = safeText(process.env.LOG_FILE || SERVER_CONFIG.logFile);
 const ACCESS_LOG = safeText(process.env.ACCESS_LOG || SERVER_CONFIG.accessLog);
@@ -1096,6 +1097,7 @@ const liveConfig = {
 	iconSize: ICON_SIZE,
 	iconCacheConcurrency: ICON_CACHE_CONCURRENCY,
 	deltaCacheLimit: DELTA_CACHE_LIMIT,
+	groupItems: GROUP_ITEMS,
 	slowQueryMs: SLOW_QUERY_MS,
 	authRealm: AUTH_REALM,
 	authCookieName: AUTH_COOKIE_NAME,
@@ -1221,6 +1223,7 @@ function reloadLiveConfig() {
 	liveConfig.iconSize = configNumber(newServer.iconSize);
 	liveConfig.iconCacheConcurrency = Math.max(1, Math.floor(configNumber(newServer.iconCacheConcurrency, 5)));
 	liveConfig.deltaCacheLimit = configNumber(newServer.deltaCacheLimit);
+	liveConfig.groupItems = Array.isArray(newServer.groupItems) ? newServer.groupItems.map(safeText).filter(Boolean) : [];
 	liveConfig.slowQueryMs = configNumber(newServer.slowQueryMs, 0);
 	liveConfig.authRealm = safeText(newAuth.realm || 'openHAB Proxy');
 	liveConfig.authCookieName = safeText(newAuth.cookieName || 'AuthStore');
@@ -1577,7 +1580,7 @@ function connectAtmospherePage(pageId) {
 		let body = '';
 		res.setEncoding('utf8');
 		res.on('data', (chunk) => { body += chunk; });
-		res.on('end', () => {
+		res.on('end', async () => {
 			pageState.connection = null;
 			if (res.statusCode === 200 && body.trim()) {
 				const update = parseAtmosphereUpdate(body);
@@ -1587,7 +1590,9 @@ function connectAtmospherePage(pageId) {
 					if (actualChanges.length > 0) {
 						logMessage(`[Atmosphere:${pageId}] ${actualChanges.length} items changed (${update.changes.length} reported)`);
 						if (wss.clients.size > 0) {
-							wsBroadcast('update', { type: 'items', changes: actualChanges });
+							// Apply group state overrides before broadcasting
+							const transformedChanges = await applyGroupStateToItems(actualChanges);
+							wsBroadcast('update', { type: 'items', changes: transformedChanges });
 						}
 					}
 				}
@@ -1835,7 +1840,9 @@ async function pollItems() {
 		lastSeenItems = new Set(items.map(i => i.name));
 		const actualChanges = filterChangedItems(items);
 		if (actualChanges.length > 0) {
-			wsBroadcast('update', { type: 'items', changes: actualChanges });
+			// Apply group state overrides before broadcasting
+			const transformedChanges = await applyGroupStateToItems(actualChanges);
+			wsBroadcast('update', { type: 'items', changes: transformedChanges });
 		}
 	}
 
@@ -2398,6 +2405,86 @@ function findDeltaMatch(key, since) {
 	return null;
 }
 
+// Cache for group member data (structure only, states fetched fresh)
+const groupMemberCache = new Map();
+const GROUP_MEMBER_CACHE_TTL_MS = 60000; // 1 minute TTL for member structure
+
+// Fetch group members and calculate count of OPEN states
+async function calculateGroupState(groupName) {
+	if (!groupName) return null;
+	try {
+		const body = await fetchOpenhab(`/rest/items/${encodeURIComponent(groupName)}`);
+		if (!body.ok) {
+			logMessage(`[GroupState] Failed to fetch ${groupName}: ${body.status}`);
+			return null;
+		}
+		const data = JSON.parse(body.body);
+		if (!data || !Array.isArray(data.members)) {
+			logMessage(`[GroupState] No members array for ${groupName}`);
+			return null;
+		}
+		// Count members with state OPEN
+		const count = data.members.filter(m => m && m.state === 'OPEN').length;
+		return String(count);
+	} catch (err) {
+		logMessage(`[GroupState] Error for ${groupName}: ${err.message}`);
+		return null;
+	}
+}
+
+// Apply group state overrides to item changes (for WebSocket broadcasts)
+async function applyGroupStateToItems(items) {
+	if (!items || !items.length || !liveConfig.groupItems || !liveConfig.groupItems.length) {
+		return items;
+	}
+	const groupSet = new Set(liveConfig.groupItems);
+	const result = [];
+	for (const item of items) {
+		if (item && item.name && groupSet.has(item.name)) {
+			const calculatedState = await calculateGroupState(item.name);
+			if (calculatedState !== null) {
+				result.push({ ...item, state: calculatedState });
+				continue;
+			}
+		}
+		result.push(item);
+	}
+	return result;
+}
+
+// Apply group state overrides to widgets in a page
+async function applyGroupStateOverrides(page) {
+	if (!page || !liveConfig.groupItems || !liveConfig.groupItems.length) {
+		return;
+	}
+	const groupSet = new Set(liveConfig.groupItems);
+
+	const processWidgets = async (widgets) => {
+		if (!widgets) return;
+		const list = Array.isArray(widgets) ? widgets : (Array.isArray(widgets.item) ? widgets.item : (widgets.item ? [widgets.item] : [widgets]));
+		for (const w of list) {
+			if (!w) continue;
+			const itemName = w?.item?.name || w?.name || '';
+			if (itemName && groupSet.has(itemName)) {
+				const calculatedState = await calculateGroupState(itemName);
+				if (calculatedState !== null) {
+					if (w.item) w.item.state = calculatedState;
+					w.state = calculatedState;
+					// Also update label if it contains a value in brackets like "Motion [1]"
+					if (w.label && w.label.includes('[')) {
+						w.label = w.label.replace(/\[[^\]]*\]/, `[${calculatedState}]`);
+					}
+				}
+			}
+			// Recurse into nested widgets (Frames)
+			if (w.widget) await processWidgets(w.widget);
+			if (w.widgets) await processWidgets(w.widgets);
+		}
+	};
+
+	await processWidgets(page?.widget);
+}
+
 // Compute delta response for a sitemap URL (used by both HTTP and WS)
 async function computeDeltaResponse(url, since) {
 	// Parse the URL to extract path and query params
@@ -2427,6 +2514,9 @@ async function computeDeltaResponse(url, since) {
 	} catch {
 		throw new Error('Non-JSON response from openHAB');
 	}
+
+	// Apply group state overrides (calculate state from member items)
+	await applyGroupStateOverrides(page);
 
 	const cacheKey = `${sitemapPath}?${params.toString()}`;
 	const snapshot = buildSnapshot(page);
@@ -3725,7 +3815,10 @@ app.get('/sitemap-full', async (req, res) => {
 				continue;
 			}
 
-			// Store the raw page data indexed by URL
+			// Apply group state overrides (calculate state from member items)
+			await applyGroupStateOverrides(page);
+
+			// Store the page data indexed by URL
 			pages[url] = page;
 
 			// Find linked pages and add to queue
@@ -3864,6 +3957,9 @@ app.use('/rest', async (req, res, next) => {
 	} catch {
 		return res.status(502).json({ delta: false, error: 'Non-JSON response from openHAB' });
 	}
+
+	// Apply group state overrides (calculate state from member items)
+	await applyGroupStateOverrides(page);
 
 	const cacheKey = `${req.path}?${params.toString()}`;
 	const snapshot = buildSnapshot(page);
