@@ -815,6 +815,17 @@ body.theme-dark #pauseBtn svg {
 #pauseBtn:disabled {
 	opacity: .4;
 }
+#voiceBtn {
+	width: auto !important;
+}
+#voiceBtn svg {
+	width: 1.65rem;
+	height: 1.65rem;
+	display: block;
+}
+body.theme-dark #voiceBtn svg {
+	filter: invert(1);
+}
 #themeToggleBtn {
 	width: auto !important;
 	padding: .5rem .75rem;

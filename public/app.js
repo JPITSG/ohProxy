@@ -10,6 +10,7 @@ const els = {
 	search: document.getElementById('search'),
 	back: document.getElementById('backBtn'),
 	pause: document.getElementById('pauseBtn'),
+	voice: document.getElementById('voiceBtn'),
 	home: document.getElementById('homeBtn'),
 	themeToggle: document.getElementById('themeToggleBtn'),
 	lightMode: document.getElementById('lightModeBtn'),
@@ -4557,6 +4558,10 @@ function restoreNormalPolling() {
 		// TESTING: always show pause button (uncomment to restore)
 		// if (els.pause) els.pause.classList.toggle('pause-hidden', !showPause);
 	} catch {}
+	// Show voice button if Speech Recognition API is available
+	if (els.voice && (window.SpeechRecognition || window.webkitSpeechRecognition)) {
+		els.voice.classList.remove('hidden');
+	}
 	if (els.search) {
 		els.search.setAttribute('autocomplete', 'off');
 		els.search.setAttribute('name', `oh-search-${Date.now()}`);
