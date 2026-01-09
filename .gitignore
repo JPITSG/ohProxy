@@ -5,6 +5,7 @@ sessions.db-*
 node_modules/
 cache/icon/
 cache/chart/
+cache/ai/
 video-previews/
 *.log
 fullchain.pem

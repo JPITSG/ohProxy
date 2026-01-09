@@ -163,6 +163,11 @@ module.exports = {
 			// Shell binary path (used for auth failure notification commands).
 			shell: '/bin/sh',
 		},
+		// API keys for external services.
+		apiKeys: {
+			// Anthropic API key (for Claude AI integration).
+			anthropic: '',
+		},
 	},
 
 	// Client-visible settings.
