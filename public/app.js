@@ -528,10 +528,10 @@ function updateStatusBar() {
 		els.statusText.textContent = label;
 		if (state.connectionPending) {
 			els.statusBar.classList.add('status-pending');
-			els.statusBar.classList.remove('status-ok', 'status-error');
+			els.statusBar.classList.remove('status-ok', 'status-error', 'status-fast');
 		} else {
 			els.statusBar.classList.add('status-ok');
-			els.statusBar.classList.remove('status-error', 'status-pending');
+			els.statusBar.classList.remove('status-error', 'status-pending', 'status-fast');
 		}
 		updateErrorUiState();
 		return;
@@ -539,17 +539,21 @@ function updateStatusBar() {
 	if (state.connectionOk) {
 		const info = connectionStatusInfo();
 		els.statusText.textContent = info.label;
+		const fast = isFastConnection();
 		if (info.isError) {
 			els.statusBar.classList.add('status-error');
-			els.statusBar.classList.remove('status-ok', 'status-pending');
+			els.statusBar.classList.remove('status-ok', 'status-pending', 'status-fast');
+		} else if (fast) {
+			els.statusBar.classList.add('status-ok', 'status-fast');
+			els.statusBar.classList.remove('status-error', 'status-pending');
 		} else {
 			els.statusBar.classList.add('status-ok');
-			els.statusBar.classList.remove('status-error', 'status-pending');
+			els.statusBar.classList.remove('status-error', 'status-pending', 'status-fast');
 		}
 	} else {
 		els.statusText.textContent = 'Disconnected';
 		els.statusBar.classList.add('status-error');
-		els.statusBar.classList.remove('status-ok', 'status-pending');
+		els.statusBar.classList.remove('status-ok', 'status-pending', 'status-fast');
 	}
 	updateErrorUiState();
 }
@@ -576,6 +580,7 @@ function setConnectionStatus(ok, message) {
 		}
 	} else {
 		state.lastError = message || 'Connection issue';
+		invalidatePing();
 	}
 	updateStatusBar();
 }
@@ -4328,8 +4333,8 @@ async function refresh(showLoading) {
 	state.pendingScrollTop = false;
 
 	// For page changes with cache: use cache for instant display, then background refresh
-	// to get fresh transformed labels from the server
-	if (isPageChange && state.sitemapCacheReady) {
+	// to get fresh transformed labels from the server (skip cache if connection is fast)
+	if (isPageChange && state.sitemapCacheReady && !isFastConnection()) {
 		const cachedPage = getPageFromCache(state.pageUrl);
 		if (cachedPage) {
 			state.pageTitle = cachedPage?.title || state.pageTitle;
@@ -4512,6 +4517,121 @@ async function checkHeartbeat() {
 		setConnectionStatus(false, 'Connection lost');
 	} finally {
 		heartbeatInProgress = false;
+	}
+}
+
+// --- Ping / Latency Tracking ---
+const PING_INTERVAL_MS = 5000;
+const PING_TIMEOUT_MS = 100;
+const PING_SAMPLE_COUNT = 5;
+const FAST_CONNECTION_ENABLE_MS = 50;   // Enter fast mode below this
+const FAST_CONNECTION_DISABLE_MS = 80;  // Exit fast mode above this
+let pingSamples = [];
+let pingTimer = null;
+let fastConnectionActive = false;
+let pingNeedsPrefill = true;
+
+function invalidatePing() {
+	const wasFast = fastConnectionActive;
+	pingSamples = [];
+	fastConnectionActive = false;
+	pingNeedsPrefill = true;
+	if (wasFast) updateStatusBar();
+}
+
+function getRollingLatency() {
+	if (pingSamples.length < PING_SAMPLE_COUNT) return null;
+	return Math.round(pingSamples.reduce((a, b) => a + b, 0) / pingSamples.length);
+}
+
+function isFastConnection() {
+	return fastConnectionActive;
+}
+
+function updateFastConnectionState() {
+	const latency = getRollingLatency();
+	const wasFast = fastConnectionActive;
+	if (latency === null) {
+		fastConnectionActive = false;
+	} else if (fastConnectionActive) {
+		// Hysteresis: exit at >80ms
+		if (latency > FAST_CONNECTION_DISABLE_MS) {
+			fastConnectionActive = false;
+		}
+	} else {
+		// Hysteresis: enter at <50ms
+		if (latency < FAST_CONNECTION_ENABLE_MS) {
+			fastConnectionActive = true;
+		}
+	}
+	if (wasFast !== fastConnectionActive) {
+		updateStatusBar();
+	}
+}
+
+function doPing() {
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), PING_TIMEOUT_MS);
+	const start = performance.now();
+
+	fetch('/api/ping', { signal: controller.signal, cache: 'no-store' })
+		.then((res) => {
+			clearTimeout(timeoutId);
+			if (!res.ok) throw new Error('Ping failed');
+			const latency = performance.now() - start;
+			if (latency > PING_TIMEOUT_MS) {
+				invalidatePing();
+				return;
+			}
+			// If first ping after invalidation and it's good, prefill the samples
+			if (pingNeedsPrefill) {
+				pingNeedsPrefill = false;
+				pingSamples = [];
+				for (let i = 0; i < PING_SAMPLE_COUNT; i++) {
+					pingSamples.push(latency);
+				}
+			} else {
+				pingSamples.push(latency);
+				if (pingSamples.length > PING_SAMPLE_COUNT) {
+					pingSamples.shift();
+				}
+			}
+			updateFastConnectionState();
+		})
+		.catch(() => {
+			clearTimeout(timeoutId);
+			invalidatePing();
+		});
+}
+
+let pingStartDelayTimer = null;
+const PING_START_DELAY_MS = 500;
+
+function startPing() {
+	stopPing();
+	invalidatePing();
+	doPing();
+	pingTimer = setInterval(doPing, PING_INTERVAL_MS);
+}
+
+function startPingDelayed() {
+	stopPing();
+	invalidatePing();
+	if (pingStartDelayTimer) clearTimeout(pingStartDelayTimer);
+	pingStartDelayTimer = setTimeout(() => {
+		pingStartDelayTimer = null;
+		startPing();
+	}, PING_START_DELAY_MS);
+}
+
+function stopPing() {
+	if (pingStartDelayTimer) {
+		clearTimeout(pingStartDelayTimer);
+		pingStartDelayTimer = null;
+	}
+	if (pingTimer) {
+		clearInterval(pingTimer);
+		pingTimer = null;
 	}
 }
 
@@ -4722,6 +4842,7 @@ function connectWs() {
 			// Don't count as failure if paused (intentional stop) or clean close
 			if (!state.isPaused && !timedOut && (!wasConnected || event.code === 1002 || event.code === 1006)) {
 				wsFailCount++;
+				invalidatePing();
 				if (wsFailCount >= WS_MAX_FAILURES) {
 					restoreNormalPolling();
 					return;
@@ -4870,6 +4991,7 @@ function restoreNormalPolling() {
 	// Instant offline/online detection
 	window.addEventListener('offline', () => {
 		clearInflightFetches(); // Clear stuck requests to prevent deadlocks
+		invalidatePing();
 		setConnectionStatus(false, 'Network offline');
 	});
 	window.addEventListener('online', () => {
@@ -4882,9 +5004,11 @@ function restoreNormalPolling() {
 			if (resumeReloadArmed) return;
 			resumeReloadArmed = true;
 			setResumeResetUi(true);
+			stopPing();
 			return;
 		}
 		resumeReloadArmed = false;
+		startPingDelayed();
 
 		// Show spinner on touch devices while resuming
 		const isTouch = isTouchDevice();
@@ -5099,6 +5223,7 @@ function restoreNormalPolling() {
 		if (!state.isPaused) {
 			startPolling();
 			connectWs();
+			startPingDelayed();
 		}
 	} catch (e) {
 		console.error(e);
@@ -5109,6 +5234,7 @@ function restoreNormalPolling() {
 			render();
 			if (!state.isPaused) {
 				startPolling();
+				startPingDelayed();
 				connectWs();
 			}
 		} else {
