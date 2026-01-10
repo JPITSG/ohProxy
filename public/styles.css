@@ -365,6 +365,8 @@ html:not(.slim) .has-meta .labelStack {
 @media (hover: hover) and (pointer: fine) {
 	.glow-dot {
 		margin-top: 1px;
+		position: relative;
+		top: -1px;
 	}
 }
 
@@ -780,17 +782,19 @@ body.theme-light #searchWrap input:focus {
 	display: block;
 	transform: rotate(90deg);
 	transform-origin: 50% 50%;
+	filter: drop-shadow(0 0 0.5px rgba(0,0,0,0.2));
 }
 #homeBtn svg {
 	width: 1.5rem;
 	height: 1.5rem;
 	display: block;
+	filter: drop-shadow(0 0 0.5px rgba(0,0,0,0.2));
 }
 body.theme-dark #backBtn svg {
-	filter: invert(1);
+	filter: invert(1) drop-shadow(0 0 0.5px rgba(255,255,255,0.25));
 }
 body.theme-dark #homeBtn svg {
-	filter: invert(1);
+	filter: invert(1) drop-shadow(0 0 0.5px rgba(255,255,255,0.25));
 }
 #backBtn:disabled {
 	opacity: .4;
@@ -805,12 +809,13 @@ body.theme-dark #homeBtn svg {
 	width: 1.65rem;
 	height: 1.65rem;
 	display: block;
+	filter: drop-shadow(0 0 0.5px rgba(0,0,0,0.2));
 }
 #pauseBtn svg.hidden {
 	display: none;
 }
 body.theme-dark #pauseBtn svg {
-	filter: invert(1);
+	filter: invert(1) drop-shadow(0 0 0.5px rgba(255,255,255,0.25));
 }
 #pauseBtn:disabled {
 	opacity: .4;
@@ -825,9 +830,10 @@ body.theme-dark #pauseBtn svg {
 	width: 1.65rem;
 	height: 1.65rem;
 	display: block;
+	filter: drop-shadow(0 0 0.5px rgba(0,0,0,0.2));
 }
 body.theme-dark #voiceBtn svg {
-	filter: invert(1);
+	filter: invert(1) drop-shadow(0 0 0.5px rgba(255,255,255,0.25));
 }
 #voiceBtn:disabled {
 	opacity: .4;
@@ -856,9 +862,10 @@ body.theme-dark #voiceBtn.listening svg {
 	width: 1.5rem;
 	height: 1.5rem;
 	display: block;
+	filter: drop-shadow(0 0 0.5px rgba(0,0,0,0.2));
 }
 body.theme-dark #themeToggleBtn svg {
-	filter: invert(1);
+	filter: invert(1) drop-shadow(0 0 0.5px rgba(255,255,255,0.25));
 }
 #brandWrap {
 	min-width: 0;
