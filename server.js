@@ -3454,6 +3454,13 @@ app.get('/api/heartbeat', (req, res) => {
 	res.json({ ok: true, ts: Date.now() });
 });
 
+// Ping endpoint for latency measurement
+app.get('/api/ping', (req, res) => {
+	res.setHeader('Content-Type', 'text/plain');
+	res.setHeader('Cache-Control', 'no-cache, no-store');
+	res.send('pong');
+});
+
 // Widget glow rules API (admin only)
 app.get('/api/glow-rules/:widgetId', (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
