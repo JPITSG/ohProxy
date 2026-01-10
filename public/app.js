@@ -2710,6 +2710,11 @@ function crossfadeText(element, newText, fadeOutMs = 200, fadeInMs = 200) {
 	if (!element) return;
 	const oldText = element.textContent;
 	if (oldText === newText) return;
+
+	// Increment token to invalidate any pending animation
+	const token = (element.__crossfadeToken || 0) + 1;
+	element.__crossfadeToken = token;
+
 	// If empty, just set directly (no animation needed for initial render)
 	if (!oldText) {
 		element.textContent = newText;
@@ -2729,8 +2734,10 @@ function crossfadeText(element, newText, fadeOutMs = 200, fadeInMs = 200) {
 
 	// Phase 1: Fade out old text
 	requestAnimationFrame(() => {
+		if (element.__crossfadeToken !== token) return;
 		oldSpan.style.opacity = '0';
 		setTimeout(() => {
+			if (element.__crossfadeToken !== token) return;
 			// Phase 2: Replace with new text and fade in
 			oldSpan.remove();
 			const newSpan = document.createElement('span');
@@ -2738,8 +2745,10 @@ function crossfadeText(element, newText, fadeOutMs = 200, fadeInMs = 200) {
 			newSpan.style.cssText = 'opacity:0;transition:opacity ' + fadeInMs + 'ms ease;';
 			element.appendChild(newSpan);
 			requestAnimationFrame(() => {
+				if (element.__crossfadeToken !== token) return;
 				newSpan.style.opacity = '1';
 				setTimeout(() => {
+					if (element.__crossfadeToken !== token) return;
 					element.textContent = newText;
 					if (originalPosition === 'static') element.style.position = '';
 				}, fadeInMs);
@@ -4778,15 +4787,26 @@ function restoreNormalPolling() {
 		const headerParam = (params.get('header') || '').toLowerCase();
 		state.headerMode = (headerParam === 'small' || headerParam === 'none') ? headerParam : 'full';
 		const pauseParam = params.get('pause');
-		const showPause = pauseParam === 'true';
 		const modeParam = params.get('mode');
 		state.forcedMode = (modeParam === 'dark' || modeParam === 'light') ? modeParam : null;
 		if (state.isSlim) document.documentElement.classList.add('slim');
 		if (state.headerMode === 'small') document.documentElement.classList.add('header-small');
 		if (state.headerMode === 'none') document.documentElement.classList.add('header-none');
 		if (!('ontouchstart' in window) && navigator.maxTouchPoints === 0) document.documentElement.classList.add('hover-device');
-		// TESTING: always show pause button (uncomment to restore)
-		// if (els.pause) els.pause.classList.toggle('pause-hidden', !showPause);
+		// Pause button visibility: URL param overrides and persists to localStorage
+		if (els.pause) {
+			let showPause = true;
+			if (pauseParam !== null) {
+				showPause = pauseParam !== 'false';
+				try { localStorage.setItem('ohPauseEnabled', showPause ? '1' : '0'); } catch {}
+			} else {
+				try {
+					const saved = localStorage.getItem('ohPauseEnabled');
+					if (saved === '0') showPause = false;
+				} catch {}
+			}
+			els.pause.classList.toggle('pause-hidden', !showPause);
+		}
 	} catch {}
 	// Show voice button if Speech Recognition API and microphone permission available
 	if (els.voice && (window.SpeechRecognition || window.webkitSpeechRecognition)) {
