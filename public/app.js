@@ -4916,14 +4916,14 @@ function restoreNormalPolling() {
 		if (!('ontouchstart' in window) && navigator.maxTouchPoints === 0) document.documentElement.classList.add('hover-device');
 		// Pause button visibility: URL param overrides and persists to localStorage
 		if (els.pause) {
-			let showPause = true;
+			let showPause = false;
 			if (pauseParam !== null) {
 				showPause = pauseParam !== 'false';
 				try { localStorage.setItem('ohPauseEnabled', showPause ? '1' : '0'); } catch {}
 			} else {
 				try {
 					const saved = localStorage.getItem('ohPauseEnabled');
-					if (saved === '0') showPause = false;
+					if (saved === '1') showPause = true;
 				} catch {}
 			}
 			els.pause.classList.toggle('pause-hidden', !showPause);
