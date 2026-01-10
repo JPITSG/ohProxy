@@ -3426,7 +3426,7 @@ app.post('/api/settings', express.json(), (req, res) => {
 		return;
 	}
 	// Whitelist allowed settings keys
-	const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels'];
+	const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode', 'paused'];
 	const sanitized = {};
 	for (const key of allowedKeys) {
 		if (key in newSettings) {
@@ -4268,7 +4268,8 @@ new OpenLayers.Geometry.Point(m[1],m[0]).transform(wgs84,proj),
 });
 
 map.addLayer(vector);
-map.setCenter(new OpenLayers.LonLat(markers[0][1],markers[0][0]).transform(wgs84,proj),zoom);
+var red=markers[markers.length-1];
+map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),zoom);
 })();
 </script>
 </body>
