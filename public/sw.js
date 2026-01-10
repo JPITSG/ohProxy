@@ -41,6 +41,7 @@ function shouldHandleRequest(request, url) {
 	if (path.includes('/rest/')) return false;
 	if (path.includes('/proxy')) return false;
 	if (path.includes('/search-index')) return false;
+	if (path.startsWith('/api/')) return false;
 	return true;
 }
 
