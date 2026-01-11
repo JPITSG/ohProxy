@@ -674,6 +674,22 @@ function setTheme(mode, syncToServer = true) {
 	if (syncToServer && serverSettingsLoaded) {
 		saveSettingsToServer({ darkMode: !isLight });
 	}
+	// Reload visible chart iframes with new theme mode
+	reloadChartIframes(mode);
+}
+
+function reloadChartIframes(mode) {
+	const iframes = document.querySelectorAll('iframe.chart-frame');
+	iframes.forEach(iframe => {
+		const currentUrl = iframe.dataset.chartUrl || iframe.src || '';
+		if (!currentUrl) return;
+		// Replace mode param in URL
+		const newUrl = currentUrl.replace(/([?&])mode=(light|dark)/, `$1mode=${mode}`);
+		if (newUrl !== currentUrl) {
+			iframe.dataset.chartUrl = newUrl;
+			iframe.src = newUrl;
+		}
+	});
 }
 
 function toggleTheme() {
@@ -1102,12 +1118,21 @@ function imageWidgetUrl(widget) {
 	return `proxy?url=${encodeURIComponent(label)}`;
 }
 
+function getThemeMode() {
+	return document.body.classList.contains('theme-light') ? 'light' : 'dark';
+}
+
 function chartWidgetUrl(widget) {
-	// Chart items use /chart?item=NAME&period=PERIOD - width added by resolveImageUrl
+	// Chart items use /chart?item=NAME&period=PERIOD&mode=light|dark&title=TITLE
 	const itemName = safeText(widget?.item?.name || '').trim();
 	const period = safeText(widget?.period || '').trim();
 	if (!itemName || !period) return '';
-	return `chart?item=${encodeURIComponent(itemName)}&period=${encodeURIComponent(period)}`;
+	const mode = getThemeMode();
+	const labelParts = splitLabelState(widget?.label || '');
+	const title = labelParts.title || '';
+	let url = `chart?item=${encodeURIComponent(itemName)}&period=${encodeURIComponent(period)}&mode=${mode}`;
+	if (title) url += `&title=${encodeURIComponent(title)}`;
+	return url;
 }
 
 function withCacheBust(url) {
@@ -3083,37 +3108,29 @@ function updateCard(card, w, afterImage, info) {
 		if (!chartUrl) {
 			controls.classList.add('mt-3');
 			controls.innerHTML = `<div class="text-sm text-slate-400">Chart not available</div>`;
-			card.classList.remove('image-loading');
 			return true;
 		}
-		let imgEl = controls.querySelector('img.image-viewer-trigger');
-		if (!imgEl) {
-			imgEl = document.createElement('img');
-			controls.appendChild(imgEl);
+		// Use iframe for HTML charts with 16:9 aspect ratio
+		let frameContainer = controls.querySelector('.chart-frame-container');
+		if (!frameContainer) {
+			frameContainer = document.createElement('div');
+			frameContainer.className = 'chart-frame-container';
+			controls.appendChild(frameContainer);
 		}
-		imgEl.className = 'w-full rounded-xl border border-white/10 bg-white/5 image-viewer-trigger';
-		imgEl.onclick = state.isSlim ? null : (e) => {
-			e.preventDefault();
-			e.stopPropagation();
-			openImageViewer(imgEl.dataset.mediaUrl || chartUrl, w?.refresh);
-		};
+		let iframeEl = frameContainer.querySelector('iframe.chart-frame');
+		if (!iframeEl) {
+			iframeEl = document.createElement('iframe');
+			iframeEl.className = 'chart-frame';
+			iframeEl.setAttribute('frameborder', '0');
+			iframeEl.setAttribute('scrolling', 'no');
+			frameContainer.appendChild(iframeEl);
+		}
 
-		const refreshKey = safeText(w?.refresh ?? '');
-		const refreshChanged = imgEl.dataset.refreshMs !== refreshKey;
-		if (refreshChanged) imgEl.dataset.refreshMs = refreshKey;
-
-		const urlChanged = imgEl.dataset.mediaUrl !== chartUrl;
+		const fullUrl = '/' + chartUrl;
+		const urlChanged = iframeEl.dataset.chartUrl !== fullUrl;
 		if (urlChanged) {
-			imgEl.dataset.mediaUrl = chartUrl;
-			imgEl.dataset.loaded = '';
-			card.classList.add('image-loading');
-		} else if (imgEl.dataset.loaded !== 'true') {
-			card.classList.add('image-loading');
-		} else {
-			card.classList.remove('image-loading');
-		}
-		if (urlChanged || refreshChanged || imgEl.dataset.loaded !== 'true') {
-			setupImage(imgEl, chartUrl, w?.refresh);
+			iframeEl.dataset.chartUrl = fullUrl;
+			iframeEl.src = fullUrl;
 		}
 		return true;
 	}

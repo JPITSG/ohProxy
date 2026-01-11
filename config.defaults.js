@@ -167,6 +167,8 @@ module.exports = {
 			convert: '/usr/bin/convert',
 			// Shell binary path (used for auth failure notification commands).
 			shell: '/bin/sh',
+			// Python 3.9+ binary path (used for chart generation).
+			python3: '',
 		},
 		// API keys for external services.
 		apiKeys: {
