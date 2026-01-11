@@ -22,6 +22,9 @@
 			this.layout = {};
 			this.tapCircle = null;
 			this.hideTimer = null;
+			this.isTouching = false;
+			this.touchMoved = false;
+			this.wasDragging = false;
 			this.init();
 			window.addEventListener('resize', () => this.render());
 		}
@@ -29,7 +32,9 @@
 		init() {
 			this.render();
 			this.container.addEventListener('click', e => this.onClick(e));
-			this.container.addEventListener('touchend', e => this.onClick(e));
+			this.container.addEventListener('touchstart', e => this.onTouchStart(e), { passive: false });
+			this.container.addEventListener('touchmove', e => this.onTouchMove(e), { passive: false });
+			this.container.addEventListener('touchend', e => this.onTouchEnd(e));
 		}
 
 		svg$(tag, attrs) {
@@ -326,19 +331,14 @@
 			return time + ', ' + months[d.getMonth()] + ' ' + d.getDate();
 		}
 
-		onClick(e) {
-			if (!this.layout.sm) return;
-
-			var touch = e.changedTouches ? e.changedTouches[0] : e;
+		findClosestPoint(clientX) {
 			var rect = this.container.getBoundingClientRect();
-			var x = touch.clientX - rect.left - this.layout.pad.left;
+			var x = clientX - rect.left - this.layout.pad.left;
 
 			if (x < 0 || x > this.layout.cw || this.points.length === 0) {
-				this.hideTooltip();
-				return;
+				return null;
 			}
 
-			// Find closest point by X position
 			var closest = null;
 			var minDist = Infinity;
 			for (var i = 0; i < this.points.length; i++) {
@@ -348,12 +348,69 @@
 					closest = this.points[i];
 				}
 			}
+			return closest;
+		}
+
+		onClick(e) {
+			if (!this.layout.sm) return;
+			// Ignore clicks if we just finished a touch drag
+			if (this.wasDragging) {
+				this.wasDragging = false;
+				return;
+			}
+
+			var touch = e.changedTouches ? e.changedTouches[0] : e;
+			var closest = this.findClosestPoint(touch.clientX);
 
 			if (closest) {
 				this.showTapCircle(closest);
 				this.showMobileTooltip(closest);
 				if (this.hideTimer) clearTimeout(this.hideTimer);
 				this.hideTimer = setTimeout(() => this.hideTooltip(), 3000);
+			} else {
+				this.hideTooltip();
+			}
+		}
+
+		onTouchStart(e) {
+			if (!this.layout.sm || this.points.length === 0) return;
+
+			var touch = e.touches[0];
+			var closest = this.findClosestPoint(touch.clientX);
+
+			if (closest) {
+				this.isTouching = true;
+				this.touchMoved = false;
+				this.showTapCircle(closest);
+				this.showMobileTooltip(closest);
+				if (this.hideTimer) clearTimeout(this.hideTimer);
+			}
+		}
+
+		onTouchMove(e) {
+			if (!this.isTouching) return;
+
+			e.preventDefault(); // Prevent scrolling while dragging on chart
+			this.touchMoved = true;
+
+			var touch = e.touches[0];
+			var closest = this.findClosestPoint(touch.clientX);
+
+			if (closest) {
+				this.showTapCircle(closest);
+				this.showMobileTooltip(closest);
+			}
+		}
+
+		onTouchEnd(e) {
+			if (!this.isTouching) return;
+
+			this.isTouching = false;
+			if (this.touchMoved) {
+				this.wasDragging = true;
+				// Keep tooltip visible for a bit after drag ends
+				if (this.hideTimer) clearTimeout(this.hideTimer);
+				this.hideTimer = setTimeout(() => this.hideTooltip(), 2000);
 			}
 		}
 
