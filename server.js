@@ -196,6 +196,7 @@ const ALLOW_SUBNETS = SERVER_CONFIG.allowSubnets;
 const OH_TARGET = safeText(process.env.OH_TARGET || SERVER_CONFIG.openhab?.target);
 const OH_USER = safeText(process.env.OH_USER || SERVER_CONFIG.openhab?.user || '');
 const OH_PASS = safeText(process.env.OH_PASS || SERVER_CONFIG.openhab?.pass || '');
+const OPENHAB_REQUEST_TIMEOUT_MS = configNumber(SERVER_CONFIG.openhab?.timeoutMs, 15000);
 const ICON_VERSION = safeText(process.env.ICON_VERSION || SERVER_CONFIG.assets?.iconVersion);
 const USER_AGENT = safeText(process.env.USER_AGENT || SERVER_CONFIG.userAgent);
 const ASSET_VERSION = safeText(SERVER_CONFIG.assets?.assetVersion);
@@ -235,6 +236,8 @@ const SESSION_MAX_AGE_DAYS = (() => {
 	return val;
 })();
 const AUTH_LOCKOUT_MS = 15 * 60 * 1000;
+const AUTH_LOCKOUT_PRUNE_MS = 60 * 1000;
+const AUTH_LOCKOUT_STALE_MS = Math.max(AUTH_LOCKOUT_MS, 15 * 60 * 1000);
 const SECURITY_HEADERS_ENABLED = SECURITY_HEADERS.enabled !== false;
 const SECURITY_HSTS = SECURITY_HEADERS.hsts || {};
 const SECURITY_CSP = SECURITY_HEADERS.csp || {};
@@ -318,6 +321,24 @@ function recordAuthFailure(key) {
 function clearAuthFailures(key) {
 	if (!key) return;
 	authLockouts.delete(key);
+}
+
+function pruneAuthLockouts() {
+	const now = Date.now();
+	for (const [key, entry] of authLockouts) {
+		if (!entry) {
+			authLockouts.delete(key);
+			continue;
+		}
+		if (entry.lockUntil && entry.lockUntil <= now) {
+			authLockouts.delete(key);
+			continue;
+		}
+		const lastFailAt = entry.lastFailAt || 0;
+		if (!entry.lockUntil && lastFailAt && now - lastFailAt > AUTH_LOCKOUT_STALE_MS) {
+			authLockouts.delete(key);
+		}
+	}
 }
 
 function logAccess(message) {
@@ -981,13 +1002,21 @@ function setCsrfCookie(res, token) {
 	appendSetCookie(res, parts.join('; '));
 }
 
+function getCsrfTokenFromRequest(req) {
+	const headerToken = safeText(req?.headers?.['x-csrf-token'] || '').trim();
+	if (headerToken) return headerToken;
+	const bodyToken = safeText(req?.body?.csrfToken || '').trim();
+	if (bodyToken) return bodyToken;
+	return safeText(req?.query?.csrfToken || '').trim();
+}
+
 function validateCsrfToken(req) {
 	const cookieToken = getCookieValue(req, CSRF_COOKIE_NAME);
-	const headerToken = req.headers['x-csrf-token'];
-	if (!cookieToken || !headerToken) return false;
+	const reqToken = getCsrfTokenFromRequest(req);
+	if (!cookieToken || !reqToken) return false;
 	// Use timing-safe comparison
 	const cookieBuf = Buffer.from(cookieToken);
-	const headerBuf = Buffer.from(headerToken);
+	const headerBuf = Buffer.from(reqToken);
 	if (cookieBuf.length !== headerBuf.length) return false;
 	return crypto.timingSafeEqual(cookieBuf, headerBuf);
 }
@@ -1037,10 +1066,6 @@ function isAuthExemptPath(req) {
 	const pathname = getRequestPath(req);
 	if (!pathname) return false;
 	if (pathname === '/manifest.webmanifest') return true;
-	if (pathname === '/sw.js') return true;
-	if (pathname === '/favicon.ico') return true;
-	if (pathname.startsWith('/icons/')) return true;
-	if (pathname.startsWith('/images/')) return true;
 	return false;
 }
 
@@ -1212,11 +1237,8 @@ function reloadLiveConfig() {
 	liveConfig.ohUser = safeText(newServer.openhab?.user || '');
 	liveConfig.ohPass = safeText(newServer.openhab?.pass || '');
 	const oldIconVersion = liveConfig.iconVersion;
+	const oldIconSize = liveConfig.iconSize;
 	liveConfig.iconVersion = safeText(newAssets.iconVersion);
-	if (liveConfig.iconVersion !== oldIconVersion) {
-		purgeOldIconCache();
-		ensureDir(getIconCacheDir());
-	}
 	liveConfig.userAgent = safeText(newServer.userAgent);
 	liveConfig.assetVersion = safeText(newAssets.assetVersion);
 	const appleTouchRaw = safeText(newAssets.appleTouchIconVersion);
@@ -1239,6 +1261,7 @@ function reloadLiveConfig() {
 	liveConfig.securityHsts = newSecurityHeaders.hsts || {};
 	liveConfig.securityCsp = newSecurityHeaders.csp || {};
 	liveConfig.securityReferrerPolicy = safeText(newSecurityHeaders.referrerPolicy || '');
+	const prevSitemapRefreshMs = liveConfig.sitemapRefreshMs;
 	liveConfig.sitemapRefreshMs = configNumber(newTasks.sitemapRefreshMs);
 	liveConfig.clientConfig = newConfig.client || {};
 
@@ -1249,6 +1272,26 @@ function reloadLiveConfig() {
 	liveConfig.wsPollingIntervalBgMs = configNumber(newWsConfig.pollingIntervalBgMs) || 2000;
 	const newPaths = newServer.paths || {};
 	liveConfig.rrdPath = safeText(newPaths.rrd) || '';
+
+	const iconVersionChanged = liveConfig.iconVersion !== oldIconVersion;
+	const iconSizeChanged = liveConfig.iconSize !== oldIconSize;
+	if (iconVersionChanged || iconSizeChanged) {
+		purgeOldIconCache();
+		if (iconSizeChanged && !iconVersionChanged) {
+			try {
+				const currentDir = getIconCacheDir();
+				if (fs.rmSync) fs.rmSync(currentDir, { recursive: true, force: true });
+				else fs.rmdirSync(currentDir, { recursive: true });
+			} catch (err) {
+				logMessage(`Failed to reset icon cache dir: ${err.message || err}`);
+			}
+		}
+		ensureDir(getIconCacheDir());
+	}
+
+	if (liveConfig.sitemapRefreshMs !== prevSitemapRefreshMs) {
+		updateBackgroundTaskInterval('sitemap-cache', liveConfig.sitemapRefreshMs);
+	}
 
 	// If mode changed and clients are connected, switch modes
 	if (oldWsMode !== liveConfig.wsMode && wss.clients.size > 0) {
@@ -1322,6 +1365,26 @@ function registerBackgroundTask(name, intervalMs, run) {
 	};
 	backgroundTasks.push(task);
 	return task;
+}
+
+function updateBackgroundTaskInterval(name, intervalMs) {
+	if (!name) return false;
+	const task = backgroundTasks.find((entry) => entry.name === name);
+	if (!task) return false;
+	const prevInterval = task.intervalMs;
+	task.intervalMs = configNumber(intervalMs, 0);
+	if (task.timer) {
+		clearTimeout(task.timer);
+		task.timer = null;
+	}
+	if (task.intervalMs > 0) {
+		if (prevInterval <= 0) {
+			runBackgroundTask(task);
+		} else if (!task.running) {
+			scheduleBackgroundTask(task);
+		}
+	}
+	return true;
 }
 
 function scheduleBackgroundTask(task) {
@@ -2759,7 +2822,8 @@ function setDeltaCache(key, value) {
 		entry.history.shift();
 	}
 	// Prune old cache keys if needed
-	if (deltaCache.size <= DELTA_CACHE_LIMIT) return;
+	const limit = configNumber(liveConfig.deltaCacheLimit, DELTA_CACHE_LIMIT);
+	if (deltaCache.size <= limit) return;
 	const oldestKey = deltaCache.keys().next().value;
 	if (oldestKey) deltaCache.delete(oldestKey);
 }
@@ -2965,7 +3029,10 @@ function enqueueIconConvert(task) {
 }
 
 function drainIconConvertQueue() {
-	while (iconConvertActive < ICON_CACHE_CONCURRENCY && iconConvertQueue.length) {
+	const concurrency = Math.max(1, Math.floor(
+		configNumber(liveConfig.iconCacheConcurrency, ICON_CACHE_CONCURRENCY)
+	));
+	while (iconConvertActive < concurrency && iconConvertQueue.length) {
 		const next = iconConvertQueue.shift();
 		if (!next) return;
 		iconConvertActive += 1;
@@ -3135,6 +3202,11 @@ function fetchOpenhab(pathname) {
 			}));
 		});
 
+		if (OPENHAB_REQUEST_TIMEOUT_MS > 0) {
+			req.setTimeout(OPENHAB_REQUEST_TIMEOUT_MS, () => {
+				req.destroy(new Error('openHAB request timed out'));
+			});
+		}
 		req.on('error', reject);
 		req.end();
 	});
@@ -3304,6 +3376,7 @@ function fetchOpenhabBinary(pathname, options = {}) {
 async function buildIconCache(cachePath, sourcePath, sourceExt) {
 	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oh-icon-'));
 	const srcPath = path.join(tmpDir, `src${sourceExt || '.img'}`);
+	const iconSize = configNumber(liveConfig.iconSize, ICON_SIZE);
 	try {
 		const res = await fetchOpenhabBinary(sourcePath);
 		if (!res.ok || !isImageContentType(res.contentType)) {
@@ -3314,10 +3387,10 @@ async function buildIconCache(cachePath, sourcePath, sourceExt) {
 		ensureDir(path.dirname(cachePath));
 		await enqueueIconConvert(() => execFileAsync(BIN_CONVERT, [
 			srcPath,
-			'-resize', `${ICON_SIZE}x${ICON_SIZE}`,
+			'-resize', `${iconSize}x${iconSize}`,
 			'-background', 'none',
 			'-gravity', 'center',
-			'-extent', `${ICON_SIZE}x${ICON_SIZE}`,
+			'-extent', `${iconSize}x${iconSize}`,
 			`PNG32:${cachePath}`,
 		]));
 	} finally {
@@ -3478,13 +3551,7 @@ app.post('/api/auth/login', express.json(), (req, res) => {
 app.use((req, res, next) => {
 	const clientIp = getRemoteIp(req);
 	if (clientIp) req.ohProxyClientIp = clientIp;
-	const pathname = getRequestPath(req);
-	// /images/*.ext is fully public (for iframe embedding); other exempt paths require matching referrer
-	if (pathname && pathname.startsWith('/images/') && /\.\w+$/.test(pathname)) {
-		req.ohProxyAuth = 'unauthenticated';
-		req.ohProxyUser = '';
-		return next();
-	}
+	// Manifest requires matching referrer for PWA install
 	if (isAuthExemptPath(req) && hasMatchingReferrer(req)) {
 		req.ohProxyAuth = 'unauthenticated';
 		req.ohProxyUser = '';
@@ -4252,9 +4319,44 @@ app.get('/login', (req, res) => {
 	res.redirect('/');
 });
 
-// Silent logout endpoint - clears auth cookie and redirects to /
+// Logout endpoint - CSRF-protected for HTML auth mode
 app.get('/logout', (req, res) => {
+	if (liveConfig.authMode === 'html') {
+		const token = generateCsrfToken();
+		setCsrfCookie(res, token);
+		res.setHeader('Content-Type', 'text/html; charset=utf-8');
+		res.setHeader('Cache-Control', 'no-cache');
+		res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Log out</title>
+</head>
+<body style="font-family: system-ui, sans-serif; padding: 2rem;">
+<h1>Log out</h1>
+<p>Confirm to sign out.</p>
+<form method="POST" action="/logout">
+<input type="hidden" name="csrfToken" value="${token}">
+<button type="submit">Log out</button>
+</form>
+<p><a href="/">Cancel</a></p>
+</body>
+</html>`);
+		return;
+	}
 	clearAuthCookie(res);
+	clearSessionCookie(res);
+	res.redirect('/');
+});
+
+app.post('/logout', express.urlencoded({ extended: false }), (req, res) => {
+	if (liveConfig.authMode === 'html' && !validateCsrfToken(req)) {
+		res.status(403).type('text/plain').send('Invalid CSRF token');
+		return;
+	}
+	clearAuthCookie(res);
+	clearSessionCookie(res);
 	res.redirect('/');
 });
 
@@ -4304,11 +4406,21 @@ app.get(/^\/(?:openhab\.app\/)?images\/(v\d+)\/(.+)$/i, async (req, res, next) =
 	if (!match) return next();
 	const version = match[1];
 	if (version !== liveConfig.iconVersion) return next();
-	const rawRel = match[2];
-	const parsed = path.parse(rawRel);
-	const cacheRel = path.join(parsed.dir, `${parsed.name}.png`);
-	const cachePath = path.join(getIconCacheDir(), cacheRel);
-	const sourcePath = `/images/${rawRel}`;
+	const rawRel = safeText(match[2]).replace(/\\/g, '/');
+	const rel = rawRel.replace(/^\/+/, '');
+	if (!rel) return res.status(400).type('text/plain').send('Invalid icon path');
+	const segments = rel.split('/');
+	if (segments.some((seg) => seg === '.' || seg === '..' || seg === '')) {
+		return res.status(400).type('text/plain').send('Invalid icon path');
+	}
+	const parsed = path.posix.parse(rel);
+	const cacheRel = path.posix.join(parsed.dir, `${parsed.name}.png`);
+	const cacheRoot = path.resolve(getIconCacheDir());
+	const cachePath = path.resolve(cacheRoot, cacheRel);
+	if (cachePath !== cacheRoot && !cachePath.startsWith(cacheRoot + path.sep)) {
+		return res.status(400).type('text/plain').send('Invalid icon path');
+	}
+	const sourcePath = `/images/${rel}`;
 	const sourceExt = parsed.ext || '.png';
 
 	try {
@@ -4912,9 +5024,7 @@ app.use((req, res) => {
 	res.redirect('/');
 });
 
-if (SITEMAP_REFRESH_MS > 0) {
-	registerBackgroundTask('sitemap-cache', SITEMAP_REFRESH_MS, refreshSitemapCache);
-}
+registerBackgroundTask('sitemap-cache', SITEMAP_REFRESH_MS, refreshSitemapCache);
 
 // Video preview capture function
 async function captureRtspPreview(rtspUrl) {
@@ -4952,7 +5062,7 @@ async function captureRtspPreview(rtspUrl) {
 	});
 }
 
-// Prune old chart cache images (older than 1 week)
+// Prune old chart cache entries (older than 1 week)
 function pruneChartCache() {
 	if (!fs.existsSync(CHART_CACHE_DIR)) return;
 
@@ -4963,7 +5073,7 @@ function pruneChartCache() {
 	try {
 		const files = fs.readdirSync(CHART_CACHE_DIR);
 		for (const file of files) {
-			if (!file.endsWith('.png')) continue;
+			if (!file.endsWith('.html') && !file.endsWith('.png')) continue;
 			const filePath = path.join(CHART_CACHE_DIR, file);
 			try {
 				const stat = fs.statSync(filePath);
@@ -5063,6 +5173,9 @@ setInterval(() => {
 		logMessage(`[RTSP] ${count} stream${count === 1 ? '' : 's'} active`);
 	}
 }, 10000);
+
+// Periodic auth lockout pruning to prevent unbounded growth
+setInterval(pruneAuthLockouts, AUTH_LOCKOUT_PRUNE_MS);
 
 // Initialize sessions database
 try {
