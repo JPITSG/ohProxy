@@ -1966,6 +1966,7 @@ function generateChartPoints(data) {
 	return data.map(([ts, val], i) => ({
 		x: Math.round((duration > 0 ? ((ts - startTs) / duration) * 100 : 50) * 100) / 100,
 		y: Math.round(val * 1000) / 1000,
+		t: ts * 1000,
 		index: i
 	}));
 }
@@ -1974,6 +1975,7 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, title, unit, mode) {
 	const theme = mode === 'dark' ? 'dark' : 'light';
 	const unitDisplay = unit !== '?' ? unit : '';
 	const legendHtml = unitDisplay ? `<div class="chart-legend"><span class="legend-line"></span><span>${unitDisplay}</span></div>` : '';
+	const assetVersion = liveConfig.assetVersion || 'v1';
 
 	return `<!DOCTYPE html>
 <html lang="en" data-theme="${theme}">
@@ -1981,40 +1983,7 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, title, unit, mode) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${title}</title>
-<style>
-@font-face{font-family:'Rubik';src:url('/fonts/rubik-300.woff2') format('woff2');font-weight:300;font-style:normal;font-display:swap}
-@font-face{font-family:'Rubik';src:url('/fonts/rubik-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
-@font-face{font-family:'Rubik';src:url('/fonts/rubik-500.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
-*{margin:0;padding:0;box-sizing:border-box}
-:root{--bg-primary:#f1f2f9;--bg-secondary:#e6e7f0;--bg-tertiary:#dbdce9;--bg-card:#dbdce9;--text-primary:#0f172a;--text-secondary:#475569;--text-muted:#94a3b8;--border-color:#ccccd1;--border-light:#ccccd1;--grid-color:rgba(148,163,184,0.2);--chart-line:#ef4444;--chart-line-rgb:239,68,68;--chart-gradient-start:rgba(239,68,68,0.15);--chart-gradient-end:rgba(239,68,68,0);--shadow-lg:0 10px 15px -3px rgb(0 0 0/0.08),0 4px 6px -4px rgb(0 0 0/0.05)}
-[data-theme="dark"]{--bg-primary:#080b28;--bg-secondary:#0e1130;--bg-tertiary:#131420;--bg-card:#131420;--text-primary:#fafafa;--text-secondary:#a1a1aa;--text-muted:#71717a;--border-color:#54555e;--border-light:#54555e;--grid-color:rgba(161,161,170,0.1);--chart-line:#f87171;--chart-line-rgb:248,113,113;--chart-gradient-start:rgba(248,113,113,0.2);--chart-gradient-end:rgba(248,113,113,0);--shadow-lg:0 10px 15px -3px rgb(0 0 0/0.4),0 4px 6px -4px rgb(0 0 0/0.3)}
-html,body{height:100%;margin:0;padding:0;overflow:hidden}
-body{font-family:'Rubik',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg-primary);color:var(--text-primary);transition:background .3s,color .3s;line-height:1.5}
-.container{height:100%}
-.chart-card{background:var(--bg-card);height:100%;display:flex;flex-direction:column}
-.chart-header{display:flex;justify-content:space-between;align-items:center;padding:1.25rem 1.5rem;border-bottom:1px solid var(--border-light);gap:1rem;flex-wrap:wrap}
-.chart-title-group{min-width:0;flex:1}
-.chart-title{font-size:1.125rem;font-weight:400;color:var(--text-primary);letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.chart-legend{display:flex;align-items:center;gap:.5rem;font-size:.8125rem;font-weight:500;color:var(--text-secondary);padding:.375rem .75rem;background:var(--bg-tertiary);border-radius:8px;flex-shrink:0}
-.legend-line{width:16px;height:3px;background:var(--chart-line);border-radius:2px;box-shadow:0 0 6px rgba(var(--chart-line-rgb),.5)}
-.chart-header-right{display:flex;align-items:center;gap:.75rem}
-.data-point{fill:var(--bg-card);stroke:var(--chart-line);stroke-width:2.5;cursor:pointer;transition:all .2s;opacity:0;animation:fadeIn .3s ease-out forwards}
-.data-point:hover{r:8;stroke-width:3;filter:drop-shadow(0 0 8px rgba(var(--chart-line-rgb),.5))}
-.tooltip{position:absolute;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:10px;padding:.5rem .75rem;box-shadow:var(--shadow-lg);pointer-events:none;opacity:0;transform:translateY(8px);transition:all .2s;z-index:100}
-.tooltip.visible{opacity:1;transform:translateY(0)}
-.tooltip-value{font-size:1.125rem;font-weight:400;color:var(--text-primary);letter-spacing:-0.01em}
-.tooltip-label{font-size:.6875rem;font-weight:500;color:var(--text-muted);margin-top:.125rem;text-transform:uppercase;letter-spacing:.05em}
-.chart-container{position:relative;flex:1;min-height:0;padding:1rem 2.5rem 1.25rem 2.5rem;background:var(--bg-primary)}
-.chart-svg{width:100%;height:100%;overflow:visible}
-.grid-line{stroke:var(--grid-color);stroke-width:1}
-.axis-label{fill:var(--text-muted);font-size:11px;font-weight:500;font-family:'Rubik',sans-serif}
-.chart-area{fill:url(#areaGradient);opacity:0;animation:fadeIn .8s ease-out .3s forwards}
-.chart-line{fill:none;stroke:var(--chart-line);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 2px 4px rgba(var(--chart-line-rgb),.3));stroke-dasharray:100000;stroke-dashoffset:100000;animation:drawLine 2s ease-out forwards}
-.chart-line-glow{fill:none;stroke:var(--chart-line);stroke-width:8;stroke-linecap:round;stroke-linejoin:round;opacity:.12;filter:blur(4px);stroke-dasharray:100000;stroke-dashoffset:100000;animation:drawLine 2s ease-out forwards}
-@keyframes drawLine{to{stroke-dashoffset:0}}
-@keyframes fadeIn{to{opacity:1}}
-@media(max-width:600px){.chart-container{padding:.5rem 1.5rem .75rem 2rem}.chart-header{padding:.75rem}.chart-title{font-size:1rem}.axis-label{font-size:9px}}
-</style>
+<link rel="stylesheet" href="/chart.css?v=${assetVersion}">
 </head>
 <body>
 <div class="container">
@@ -2030,39 +1999,13 @@ body{font-family:'Rubik',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans
 </div>
 </div>
 <script>
-const chartData=${JSON.stringify(chartData)};
-const xLabels=${JSON.stringify(xLabels)};
-const yMin=${yMin};
-const yMax=${yMax};
-const unit="${unit}";
-(function(){const p=new URLSearchParams(window.location.search);const m=p.get('mode');if(m==='dark'||m==='light'){document.documentElement.setAttribute('data-theme',m);return}const s=localStorage.getItem('theme');const d=window.matchMedia('(prefers-color-scheme:dark)').matches;document.documentElement.setAttribute('data-theme',s||(d?'dark':'light'))})();
-class C{constructor(cid,sid){this.container=document.getElementById(cid);this.svg=document.getElementById(sid);this.tooltip=document.getElementById('tooltip');this.tooltipValue=document.getElementById('tooltipValue');this.tooltipLabel=document.getElementById('tooltipLabel');this.padding={top:25,right:45,bottom:60,left:35};this.points=[];this.init();window.addEventListener('resize',()=>this.render())}
-init(){this.render()}
-svg$(t,a){const e=document.createElementNS('http://www.w3.org/2000/svg',t);for(const k in a)e.setAttribute(k,a[k]);return e}
-render(){const rect=this.container.getBoundingClientRect();const w=rect.width,h=rect.height;const sm=w<500;const pad=sm?{top:15,right:45,bottom:40,left:22}:this.padding;const cw=w-pad.left-pad.right,ch=h-pad.top-pad.bottom;const iL=sm?10:25,iR=sm?10:25;const dw=cw-iL-iR;
-this.svg.innerHTML='';const $=(t,a)=>this.svg$(t,a);
-const defs=$('defs',{});const grad=$('linearGradient',{id:'areaGradient',x1:'0%',y1:'0%',x2:'0%',y2:'100%'});grad.appendChild($('stop',{offset:'0%',style:'stop-color:var(--chart-gradient-start)'}));grad.appendChild($('stop',{offset:'50%',style:'stop-color:var(--chart-gradient-start);stop-opacity:0.6'}));grad.appendChild($('stop',{offset:'100%',style:'stop-color:var(--chart-gradient-end)'}));defs.appendChild(grad);
-const hM=$('mask',{id:'hGridMask',maskUnits:'objectBoundingBox',maskContentUnits:'objectBoundingBox'});const hG=$('linearGradient',{id:'hGridGrad',x1:'0%',y1:'0%',x2:'100%',y2:'0%'});hG.innerHTML='<stop offset="0%" stop-color="white" stop-opacity="0"/><stop offset="3%" stop-color="white" stop-opacity="1"/><stop offset="97%" stop-color="white" stop-opacity="1"/><stop offset="100%" stop-color="white" stop-opacity="0"/>';defs.appendChild(hG);hM.appendChild($('rect',{x:'0',y:'0',width:'1',height:'1',fill:'url(#hGridGrad)'}));defs.appendChild(hM);
-const vM=$('mask',{id:'vGridMask',maskUnits:'objectBoundingBox',maskContentUnits:'objectBoundingBox'});const vG=$('linearGradient',{id:'vGridGrad',x1:'0%',y1:'0%',x2:'0%',y2:'100%'});vG.innerHTML='<stop offset="0%" stop-color="white" stop-opacity="0"/><stop offset="3%" stop-color="white" stop-opacity="1"/><stop offset="97%" stop-color="white" stop-opacity="1"/><stop offset="100%" stop-color="white" stop-opacity="0"/>';defs.appendChild(vG);vM.appendChild($('rect',{x:'0',y:'0',width:'1',height:'1',fill:'url(#vGridGrad)'}));defs.appendChild(vM);
-const cp=$('clipPath',{id:'chartClip'});cp.appendChild($('rect',{x:'0',y:'0',width:cw,height:ch}));defs.appendChild(cp);this.svg.appendChild(defs);
-const g=$('g',{transform:\`translate(\${pad.left},\${pad.top})\`});const hGG=$('g',{mask:'url(#hGridMask)'});const vGG=$('g',{mask:'url(#vGridMask)'});
-const yR=yMax-yMin;const nY=sm?5:6;const uS=unit&&unit!=='?'?' '+unit:'';
-if(sm){for(let i=0;i<5;i++){const y=yMin+(yR*i/4);const yP=ch-(i/4)*ch;hGG.appendChild($('line',{class:'grid-line',x1:0,y1:yP,x2:cw,y2:yP}));const l=$('text',{class:'axis-label',x:-8,y:yP+4,'text-anchor':'end'});l.textContent=this.fmt(y)+uS;g.appendChild(l)}}else{const yS=this.nS(Math.abs(yR),nY);const sY=Math.floor(yMin/yS)*yS;for(let y=sY;y<=yMax+yS*0.1;y+=yS){if(y<yMin-yS*0.1)continue;const yP=ch-((y-yMin)/yR)*ch;if(yP>=-5&&yP<=ch+5){hGG.appendChild($('line',{class:'grid-line',x1:0,y1:yP,x2:cw,y2:yP}));const l=$('text',{class:'axis-label',x:-8,y:yP+4,'text-anchor':'end'});l.textContent=this.fmt(y)+uS;g.appendChild(l)}}}g.appendChild(hGG);
-const mX=Math.min(xLabels.length,Math.floor(dw/70));const xS=Math.max(1,Math.ceil(xLabels.length/mX));xLabels.forEach((ld,i)=>{if(i%xS!==0&&i!==xLabels.length-1)return;const lt=typeof ld==='object'?ld.text:ld;const lp=typeof ld==='object'?ld.pos:null;const xP=lp!==null?iL+(lp/100)*dw:iL+(xLabels.length>1?(i/(xLabels.length-1))*dw:dw/2);vGG.appendChild($('line',{class:'grid-line',x1:xP,y1:0,x2:xP,y2:ch}));const t=$('text',{class:'axis-label',x:xP,y:ch+25,'text-anchor':'middle'});t.textContent=lt;g.appendChild(t)});g.appendChild(vGG);
-this.points=[];let minP=null,maxP=null;for(let i=0;i<chartData.length;i++){const d=chartData[i];const pt={x:iL+(d.x/100)*dw,y:ch-((d.y-yMin)/yR)*ch,value:d.y,index:i};this.points.push(pt);if(!minP||pt.value<minP.value)minP=pt;if(!maxP||pt.value>maxP.value)maxP=pt}
-if(this.points.length>0){const lP=this.cP(this.points);const cG=$('g',{'clip-path':'url(#chartClip)'});const aP=lP+\` L \${this.points[this.points.length-1].x} \${ch} L \${this.points[0].x} \${ch} Z\`;cG.appendChild($('path',{class:'chart-area',d:aP}));cG.appendChild($('path',{class:'chart-line-glow',d:lP}));cG.appendChild($('path',{class:'chart-line',d:lP}));g.appendChild(cG);
-if(!sm){this.circleData=[];const pG=$('g',{class:'data-points'});const gX=[];for(let i=0;i<xLabels.length;i++){const ld=xLabels[i];const lp=typeof ld==='object'?ld.pos:null;if(lp!==null)gX.push({x:iL+(lp/100)*dw,delay:1.2+i*0.05})}
-const mD=['1.0s','1.1s'];[minP,maxP].forEach((pt,idx)=>{const c=$('circle',{class:'data-point',cx:pt.x,cy:pt.y,r:5});c.style.animationDelay=mD[idx];c.dataset.idx=this.circleData.length;this.circleData.push(pt);pG.appendChild(c)});
-for(let i=1;i<this.points.length;i++){const pv=this.points[i-1],cr=this.points[i];const mnX=Math.min(pv.x,cr.x),mxX=Math.max(pv.x,cr.x);for(let j=gX.length-1;j>=0;j--){const gd=gX[j];if(gd.x>=mnX&&gd.x<=mxX){const t=(gd.x-pv.x)/(cr.x-pv.x);const iY=pv.y+t*(cr.y-pv.y);const iV=pv.value+t*(cr.value-pv.value);const c=$('circle',{class:'data-point',cx:gd.x,cy:iY,r:5});c.style.animationDelay=gd.delay+'s';c.dataset.idx=this.circleData.length;this.circleData.push({x:gd.x,y:iY,value:iV});pG.appendChild(c);gX.splice(j,1)}}}
-pG.addEventListener('mouseenter',e=>{if(e.target.classList.contains('data-point'))this.sT(e,this.circleData[e.target.dataset.idx])},true);pG.addEventListener('mouseleave',e=>{if(e.target.classList.contains('data-point'))this.hT()},true);g.appendChild(pG)}}
-this.svg.appendChild(g)}
-cP(pts){if(pts.length<2)return'';const p=[\`M \${pts[0].x} \${pts[0].y}\`];for(let i=1;i<pts.length;i++)p.push(\`L \${pts[i].x} \${pts[i].y}\`);return p.join(' ')}
-nS(r,t){const rough=r/t;const mag=Math.pow(10,Math.floor(Math.log10(rough)));const res=rough/mag;let nice=res<=1.5?1:res<=3?2:res<=7?5:10;return nice*mag}
-fmt(n){if(n===0)return'0.0';if(Number.isInteger(n)||Math.abs(n-Math.round(n))<0.0001){const r=Math.round(n);if(Math.abs(r)>=100)return r.toFixed(0);return r.toFixed(1)}if(Math.abs(n)>=1000)return n.toFixed(0);if(Math.abs(n)>=100)return n.toFixed(0);if(Math.abs(n)>=10)return n.toFixed(1);if(Math.abs(n)>=1)return n.toFixed(1);if(Math.abs(n)>=0.1)return n.toFixed(2);return n.toFixed(2)}
-sT(e,pt){const r=this.container.getBoundingClientRect();const x=e.clientX-r.left,y=e.clientY-r.top;this.tooltipValue.textContent=this.fmt(pt.value)+(unit&&unit!=='?'?' '+unit:'');this.tooltipLabel.textContent='';let tx=x+15,ty=y-15;if(tx+120>r.width)tx=x-120;if(ty<10)ty=y+15;this.tooltip.style.left=tx+'px';this.tooltip.style.top=ty+'px';this.tooltip.classList.add('visible')}
-hT(){this.tooltip.classList.remove('visible')}}
-document.addEventListener('DOMContentLoaded',()=>new C('chartContainer','chartSvg'));
+window._chartData=${JSON.stringify(chartData)};
+window._chartXLabels=${JSON.stringify(xLabels)};
+window._chartYMin=${yMin};
+window._chartYMax=${yMax};
+window._chartUnit="${unit}";
 </script>
+<script src="/chart.js?v=${assetVersion}"></script>
 </body>
 </html>`;
 }
