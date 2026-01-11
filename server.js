@@ -1932,8 +1932,8 @@ function generateXLabels(data, period) {
 	const duration = endTs - startTs;
 
 	const config = {
-		h: { interval: duration < 3600 ? 600 : 900, fmt: { hour: '2-digit', minute: '2-digit' } },
-		D: { interval: 7200, fmt: { hour: '2-digit', minute: '2-digit' } },
+		h: { interval: duration < 3600 ? 600 : 900, fmt: 'time' },
+		D: { interval: 7200, fmt: 'time' },
 		W: { interval: 86400, fmt: { weekday: 'short' } },
 		M: { interval: 432000, fmt: { month: 'short', day: 'numeric' } },
 		Y: { interval: 2592000, fmt: { month: 'short' } }
@@ -1941,16 +1941,18 @@ function generateXLabels(data, period) {
 
 	const { interval, fmt } = config[period] || config.D;
 	const labels = [];
-	const formatter = new Intl.DateTimeFormat('en', fmt);
+	const formatLabel = fmt === 'time'
+		? (d) => { const h = d.getHours(), m = d.getMinutes(); return h + ':' + (m < 10 ? '0' : '') + m; }
+		: (d) => new Intl.DateTimeFormat('en', fmt).format(d);
 
 	for (let ts = startTs; ts <= endTs; ts += interval) {
 		const pos = duration > 0 ? ((ts - startTs) / duration) * 100 : 50;
-		labels.push({ text: formatter.format(new Date(ts * 1000)), pos });
+		labels.push({ text: formatLabel(new Date(ts * 1000)), pos });
 	}
 
 	// Ensure end label
 	if (labels.length > 0 && labels[labels.length - 1].pos < 95) {
-		labels.push({ text: formatter.format(new Date(endTs * 1000)), pos: 100 });
+		labels.push({ text: formatLabel(new Date(endTs * 1000)), pos: 100 });
 	}
 
 	return labels;
