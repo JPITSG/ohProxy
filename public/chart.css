@@ -139,7 +139,35 @@ body {
 .chart-header-right {
 	display: flex;
 	align-items: center;
-	gap: 0.75rem;
+}
+
+.chart-stats {
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+	flex-shrink: 0;
+}
+
+.chart-stats.hidden {
+	display: none;
+}
+
+.stat-item {
+	display: flex;
+	align-items: baseline;
+	gap: 0.25rem;
+}
+
+.stat-label {
+	color: var(--chart-line);
+	font-size: 0.8125rem;
+	font-weight: 500;
+}
+
+.stat-value {
+	color: var(--text-secondary);
+	font-size: 0.8125rem;
+	font-weight: 500;
 }
 
 .data-point {
