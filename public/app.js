@@ -89,6 +89,11 @@ const MIN_IMAGE_REFRESH_MS = configNumber(CLIENT_CONFIG.minImageRefreshMs, 5000)
 const IMAGE_LOAD_TIMEOUT_MS = configNumber(CLIENT_CONFIG.imageLoadTimeoutMs, 15000);
 const CONNECTION_PENDING_DELAY_MS = 500;
 const IMAGE_VIEWER_MAX_VIEWPORT = 0.9;
+const SITEMAP_CACHE_RETRY_BASE_MS = 2000;
+const SITEMAP_CACHE_RETRY_MAX_MS = 60000;
+let sitemapCacheInFlight = false;
+let sitemapCacheRetryTimer = null;
+let sitemapCacheRetryMs = SITEMAP_CACHE_RETRY_BASE_MS;
 
 // Widget glow rules: Map from widgetId to rules array
 const widgetGlowRulesMap = new Map();
@@ -597,6 +602,7 @@ function updateErrorUiState() {
 }
 
 function setConnectionStatus(ok, message) {
+	const prevOk = state.connectionOk;
 	state.connectionOk = ok;
 	state.connectionReady = true;
 	clearConnectionPending();
@@ -612,6 +618,10 @@ function setConnectionStatus(ok, message) {
 	} else {
 		state.lastError = message || 'Connection issue';
 		invalidatePing();
+	}
+	if (ok && !prevOk && !state.sitemapCacheReady) {
+		resetSitemapCacheRetry();
+		fetchFullSitemap();
 	}
 	updateStatusBar();
 }
@@ -2239,7 +2249,10 @@ async function fetchPageInternal(url, opts) {
 		deltaUrl.searchParams.set('since', since);
 	}
 
-	const res = await fetchWithAuth(deltaUrl.toString(), { headers: { 'Accept': 'application/json' } });
+	const res = await fetchWithAuth(deltaUrl.toString(), {
+		headers: { 'Accept': 'application/json' },
+		cache: 'no-store',
+	});
 	const text = await res.text();
 	let data;
 	try {
@@ -4291,23 +4304,52 @@ async function fetchSearchIndexAggregate() {
 	};
 }
 
+function resetSitemapCacheRetry() {
+	sitemapCacheRetryMs = SITEMAP_CACHE_RETRY_BASE_MS;
+	if (sitemapCacheRetryTimer) {
+		clearTimeout(sitemapCacheRetryTimer);
+		sitemapCacheRetryTimer = null;
+	}
+}
+
+function scheduleSitemapCacheRetry() {
+	if (sitemapCacheRetryTimer || state.sitemapCacheReady) return;
+	const delay = sitemapCacheRetryMs;
+	sitemapCacheRetryMs = Math.min(sitemapCacheRetryMs * 2, SITEMAP_CACHE_RETRY_MAX_MS);
+	sitemapCacheRetryTimer = setTimeout(() => {
+		sitemapCacheRetryTimer = null;
+		if (!state.connectionOk || state.sitemapCacheReady) return;
+		fetchFullSitemap();
+	}, delay);
+}
+
 async function fetchFullSitemap() {
 	if (state.sitemapCacheReady) return true;
+	if (sitemapCacheInFlight) return false;
 	const params = new URLSearchParams();
 	if (state.rootPageUrl) params.set('root', state.rootPageUrl);
 	if (state.sitemapName) params.set('sitemap', state.sitemapName);
 	if (!params.toString()) return false;
+	sitemapCacheInFlight = true;
 	try {
 		const data = await fetchJson(`sitemap-full?${params.toString()}`);
-		if (!data || !data.pages) return false;
+		if (!data || !data.pages) {
+			throw new Error('Invalid sitemap cache response');
+		}
 		state.sitemapCache.clear();
 		for (const [url, page] of Object.entries(data.pages)) {
 			state.sitemapCache.set(url, page);
 		}
 		state.sitemapCacheReady = true;
+		resetSitemapCacheRetry();
 		return true;
 	} catch {
+		if (!state.sitemapCacheReady && state.connectionOk) {
+			scheduleSitemapCacheRetry();
+		}
 		return false;
+	} finally {
+		sitemapCacheInFlight = false;
 	}
 }
 

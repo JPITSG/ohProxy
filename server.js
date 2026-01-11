@@ -4595,6 +4595,7 @@ app.use('/rest', async (req, res, next) => {
 	const delta = safeText(req.query?.delta || '');
 	if (delta !== '1' && delta !== 'true') return next();
 	if (!req.path.startsWith('/sitemaps/')) return next();
+	res.setHeader('Cache-Control', 'no-store');
 
 	const rawQuery = req.originalUrl.split('?')[1] || '';
 	const params = new URLSearchParams(rawQuery);
