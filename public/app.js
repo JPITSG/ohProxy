@@ -186,6 +186,8 @@ const HIDE_TITLE_SET = new Set(
 		.map((name) => String(name).trim().toLowerCase())
 		.filter(Boolean)
 );
+const MAX_ICON_CACHE = Math.max(0, Math.round(configNumber(CLIENT_CONFIG.maxIconCache, 500)));
+const MAX_CHART_HASHES = Math.max(0, Math.round(configNumber(CLIENT_CONFIG.maxChartHashes, 500)));
 
 const iconCache = new Map();
 let imageTimers = [];
@@ -204,6 +206,30 @@ let loadingToken = 0;
 // --- Helpers ---
 function delay(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function setBoundedCache(cache, key, value, maxSize) {
+	if (!key || maxSize <= 0) return;
+	if (cache.has(key)) cache.delete(key);
+	cache.set(key, value);
+	if (cache.size > maxSize) {
+		const oldest = cache.keys().next().value;
+		if (oldest !== undefined) cache.delete(oldest);
+	}
+}
+
+function registerCardCleanup(card, cleanup) {
+	if (!card || typeof cleanup !== 'function') return;
+	if (!card._ohCleanups) card._ohCleanups = [];
+	card._ohCleanups.push(cleanup);
+}
+
+function runCardCleanups(card) {
+	const cleanups = card && card._ohCleanups;
+	if (!Array.isArray(cleanups) || cleanups.length === 0) return;
+	for (const cleanup of cleanups.splice(0)) {
+		try { cleanup(); } catch {}
+	}
 }
 
 function clearLoadingStatusTimer() {
@@ -1705,7 +1731,13 @@ async function saveGlowConfigRules() {
 		}
 
 		// Apply glow to the card immediately
-		const card = document.querySelector(`.glass[data-widget-key="${glowConfigWidgetKey}"]`);
+		let card = null;
+		for (const node of document.querySelectorAll('.glass[data-widget-key]')) {
+			if (node.dataset.widgetKey === glowConfigWidgetKey) {
+				card = node;
+				break;
+			}
+		}
 		if (card) {
 			clearGlow(card);
 			const meta = card.querySelector('.meta');
@@ -2609,10 +2641,15 @@ function iconCandidates(icon) {
 
 function loadBestIcon(imgEl, candidates) {
 	const cacheKey = imgEl.dataset.iconKey;
-	if (cacheKey && iconCache.has(cacheKey)) {
-		imgEl.src = iconCache.get(cacheKey);
-		imgEl.classList.add('icon-ready');
-		return;
+	if (cacheKey && MAX_ICON_CACHE > 0 && iconCache.has(cacheKey)) {
+		const cachedUrl = iconCache.get(cacheKey);
+		if (cachedUrl) {
+			setBoundedCache(iconCache, cacheKey, cachedUrl, MAX_ICON_CACHE);
+			imgEl.src = cachedUrl;
+			imgEl.classList.add('icon-ready');
+			return;
+		}
+		iconCache.delete(cacheKey);
 	}
 	imgEl.classList.remove('icon-ready');
 	const token = `${Date.now()}-${Math.random()}`;
@@ -2624,7 +2661,9 @@ function loadBestIcon(imgEl, candidates) {
 		const url = candidates[i++];
 		imgEl.onload = () => {
 			if (imgEl.dataset.iconLoadToken !== token) return;
-			if (cacheKey) iconCache.set(cacheKey, url);
+			if (cacheKey && MAX_ICON_CACHE > 0) {
+				setBoundedCache(iconCache, cacheKey, url, MAX_ICON_CACHE);
+			}
 			imgEl.classList.add('icon-ready');
 		};
 		imgEl.onerror = () => {
@@ -2709,6 +2748,7 @@ function clearGlow(card) {
 }
 
 function resetCardInteractions(card) {
+	runCardCleanups(card);
 	card.onclick = null;
 	card.onkeydown = null;
 	card.onpointerdown = null;
@@ -3502,8 +3542,21 @@ function updateCard(card, w, afterImage, info) {
 
 				let menuOpen = false;
 				let scrollHeightSet = false;
+				let docClickController = null;
 				const onDocClick = (e) => {
 					if (!card.contains(e.target)) closeMenu();
+				};
+
+				const addDocClickListener = () => {
+					if (docClickController) docClickController.abort();
+					docClickController = new AbortController();
+					document.addEventListener('click', onDocClick, { capture: true, signal: docClickController.signal });
+				};
+
+				const removeDocClickListener = () => {
+					if (!docClickController) return;
+					docClickController.abort();
+					docClickController = null;
 				};
 
 				const openMenu = () => {
@@ -3511,7 +3564,7 @@ function updateCard(card, w, afterImage, info) {
 					menuOpen = true;
 					card.classList.add('menu-open');
 					state.suppressRefreshCount += 1;
-					document.addEventListener('click', onDocClick, true);
+					addDocClickListener();
 					// Decide whether to show menu above or below
 					requestAnimationFrame(() => {
 						const btnRect = fakeSelect.getBoundingClientRect();
@@ -3549,7 +3602,7 @@ function updateCard(card, w, afterImage, info) {
 					if (!menuOpen) return;
 					menuOpen = false;
 					card.classList.remove('menu-open', 'menu-above');
-					document.removeEventListener('click', onDocClick, true);
+					removeDocClickListener();
 					releaseRefresh();
 				};
 
@@ -3571,6 +3624,7 @@ function updateCard(card, w, afterImage, info) {
 					toggleMenu();
 				};
 
+				registerCardCleanup(card, closeMenu);
 				selectWrap.appendChild(fakeSelect);
 				selectWrap.appendChild(menu);
 			}
@@ -4062,6 +4116,7 @@ function render() {
 	if (canPatch) {
 		patchWidgets(widgets, nodes);
 	} else {
+		nodes.forEach(runCardCleanups);
 		clearImageTimers();
 		const fragment = document.createDocumentFragment();
 		let afterImage = false;
@@ -4570,7 +4625,9 @@ async function checkChartHashes() {
 					iframe.src = newUrl;
 					iframe.dataset.chartUrl = chartUrl; // Keep original URL without cache buster
 				}
-				chartHashes.set(cacheKey, data.hash);
+				if (MAX_CHART_HASHES > 0) {
+					setBoundedCache(chartHashes, cacheKey, data.hash, MAX_CHART_HASHES);
+				}
 			} catch (e) {
 				// Ignore fetch errors
 			}

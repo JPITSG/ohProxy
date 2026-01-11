@@ -41,10 +41,6 @@ function createAuthTestApp(config = {}) {
 		const pathname = getRequestPath(req);
 		if (!pathname) return false;
 		if (pathname === '/manifest.webmanifest') return true;
-		if (pathname === '/sw.js') return true;
-		if (pathname === '/favicon.ico') return true;
-		if (pathname.startsWith('/icons/')) return true;
-		if (pathname.startsWith('/images/')) return true;
 		return false;
 	}
 
@@ -140,15 +136,7 @@ function createAuthTestApp(config = {}) {
 
 	// Auth middleware - mirrors server.js behavior
 	app.use((req, res, next) => {
-		const pathname = getRequestPath(req);
-
-		// /images/*.ext is fully public (for iframe embedding)
-		if (pathname && pathname.startsWith('/images/') && /\.\w+$/.test(pathname)) {
-			req.ohProxyAuth = 'unauthenticated';
-			return next();
-		}
-
-		// Other exempt paths require matching referrer
+		// Manifest requires matching referrer for PWA install
 		if (isAuthExemptPath(req) && hasMatchingReferrer(req)) {
 			req.ohProxyAuth = 'unauthenticated';
 			return next();
@@ -393,11 +381,6 @@ describe('Authentication Required Tests - HTML Mode', () => {
 	});
 
 	describe('Auth-Exempt Paths', () => {
-		it('/images/*.ext is fully public without referrer', async () => {
-			const res = await fetch(`${baseUrl}/images/v1/test.png`);
-			assert.strictEqual(res.status, 200);
-		});
-
 		it('/manifest.webmanifest with matching referrer is allowed', async () => {
 			const res = await fetch(`${baseUrl}/manifest.webmanifest`, {
 				headers: { 'Referer': `${baseUrl}/` },
@@ -410,37 +393,6 @@ describe('Authentication Required Tests - HTML Mode', () => {
 			assert.strictEqual(res.status, 401);
 		});
 
-		it('/sw.js with matching referrer is allowed', async () => {
-			const res = await fetch(`${baseUrl}/sw.js`, {
-				headers: { 'Referer': `${baseUrl}/` },
-			});
-			assert.strictEqual(res.status, 200);
-		});
-
-		it('/sw.js without referrer returns 401', async () => {
-			const res = await fetch(`${baseUrl}/sw.js`);
-			assert.strictEqual(res.status, 401);
-		});
-
-		it('/favicon.ico with matching referrer is allowed', async () => {
-			const res = await fetch(`${baseUrl}/favicon.ico`, {
-				headers: { 'Referer': `${baseUrl}/` },
-			});
-			assert.strictEqual(res.status, 200);
-		});
-
-		it('/icons/* with matching referrer is allowed', async () => {
-			const res = await fetch(`${baseUrl}/icons/icon-192.png`, {
-				headers: { 'Referer': `${baseUrl}/` },
-			});
-			assert.strictEqual(res.status, 200);
-		});
-
-		it('/icons/* without referrer returns 401', async () => {
-			const res = await fetch(`${baseUrl}/icons/icon-192.png`);
-			assert.strictEqual(res.status, 401);
-		});
-
 		it('/login.js is allowed (needed for login page)', async () => {
 			const res = await fetch(`${baseUrl}/login.js`);
 			assert.strictEqual(res.status, 200);
@@ -449,6 +401,34 @@ describe('Authentication Required Tests - HTML Mode', () => {
 		it('/fonts/* is allowed (needed for login page)', async () => {
 			const res = await fetch(`${baseUrl}/fonts/test.woff2`);
 			assert.strictEqual(res.status, 200);
+		});
+	});
+
+	describe('Auth-Required Paths (previously exempt)', () => {
+		it('/images/*.ext requires auth', async () => {
+			const res = await fetch(`${baseUrl}/images/v1/test.png`);
+			assert.strictEqual(res.status, 401);
+		});
+
+		it('/sw.js requires auth even with matching referrer', async () => {
+			const res = await fetch(`${baseUrl}/sw.js`, {
+				headers: { 'Referer': `${baseUrl}/` },
+			});
+			assert.strictEqual(res.status, 401);
+		});
+
+		it('/favicon.ico requires auth even with matching referrer', async () => {
+			const res = await fetch(`${baseUrl}/favicon.ico`, {
+				headers: { 'Referer': `${baseUrl}/` },
+			});
+			assert.strictEqual(res.status, 401);
+		});
+
+		it('/icons/* requires auth even with matching referrer', async () => {
+			const res = await fetch(`${baseUrl}/icons/icon-192.png`, {
+				headers: { 'Referer': `${baseUrl}/` },
+			});
+			assert.strictEqual(res.status, 401);
 		});
 	});
 
