@@ -259,11 +259,11 @@ const PATHS_CONFIG = SERVER_CONFIG.paths || {};
 const RRD_PATH = safeText(PATHS_CONFIG.rrd) || '';
 const CHART_CACHE_DIR = path.join(__dirname, 'cache', 'chart');
 const CHART_PERIOD_TTL = {
-	h: 60 * 1000,        // 1 minute
-	D: 10 * 60 * 1000,   // 10 minutes
-	W: 60 * 60 * 1000,   // 1 hour
-	M: 60 * 60 * 1000,   // 1 hour
-	Y: 60 * 60 * 1000,   // 1 hour
+	h: 60 * 1000,           // 1 minute
+	D: 10 * 60 * 1000,      // 10 minutes
+	W: 60 * 60 * 1000,      // 1 hour
+	M: 60 * 60 * 1000,      // 1 hour
+	Y: 24 * 60 * 60 * 1000, // 1 day
 };
 const AI_CACHE_DIR = path.join(__dirname, 'cache', 'ai');
 const AI_STRUCTURE_MAP_WRITABLE = path.join(AI_CACHE_DIR, 'structuremap-writable.json');
@@ -4514,6 +4514,49 @@ app.get('/chart', (req, res) => {
 	} catch (err) {
 		logMessage(`Chart generation failed: ${err.message || err}`);
 		res.status(500).type('text/plain').send('Chart generation failed');
+	}
+});
+
+// Chart hash endpoint - regenerates chart and returns hash for smart iframe refresh
+app.get('/api/chart-hash', (req, res) => {
+	const item = safeText(req.query.item || '').trim();
+	const period = safeText(req.query.period || '').trim();
+	const mode = safeText(req.query.mode || '').trim().toLowerCase() || 'dark';
+
+	// Validate parameters
+	if (!item || !/^[a-zA-Z0-9_-]{1,50}$/.test(item)) {
+		return res.status(400).json({ error: 'Invalid item' });
+	}
+	if (!['h', 'D', 'W', 'M', 'Y'].includes(period)) {
+		return res.status(400).json({ error: 'Invalid period' });
+	}
+	if (!['light', 'dark'].includes(mode)) {
+		return res.status(400).json({ error: 'Invalid mode' });
+	}
+
+	const cachePath = getChartCachePath(item, period, mode);
+
+	// Always regenerate chart HTML
+	try {
+		const html = generateChart(item, period, mode, item);
+		if (!html) {
+			res.setHeader('Cache-Control', 'no-cache');
+			return res.json({ hash: null, mtime: 0, error: 'No data' });
+		}
+
+		// Write to cache
+		ensureDir(CHART_CACHE_DIR);
+		fs.writeFileSync(cachePath, html);
+
+		// Return hash of new file
+		const stat = fs.statSync(cachePath);
+		const mtime = Math.floor(stat.mtimeMs);
+		res.setHeader('Cache-Control', 'no-cache');
+		res.json({ hash: mtime.toString(36), mtime });
+	} catch (err) {
+		logMessage(`Chart hash generation failed: ${err.message || err}`);
+		res.setHeader('Cache-Control', 'no-cache');
+		res.json({ hash: null, mtime: 0, error: 'Generation failed' });
 	}
 });
 
