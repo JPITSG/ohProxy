@@ -5481,15 +5481,50 @@ function restoreNormalPolling() {
 	if (els.voice) {
 		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 		if (SpeechRecognition) {
+			const VOICE_RESPONSE_TIMEOUT_MS = window.ohProxyConfig?.voiceResponseTimeoutMs || 10000;
+
 			let recognition = null;
 			let isListening = false;
+			let isProcessing = false;
+			let voiceRequestId = 0;
+			let voiceTimeoutId = null;
+
+			// Text-to-speech
+			function speakText(text) {
+				if (!window.speechSynthesis || !text) return;
+				const utterance = new SpeechSynthesisUtterance(text);
+				utterance.lang = navigator.language || 'en-US';
+				speechSynthesis.speak(utterance);
+			}
+
+			// Reset all voice states to passive
+			function resetVoiceState() {
+				if (voiceTimeoutId) {
+					clearTimeout(voiceTimeoutId);
+					voiceTimeoutId = null;
+				}
+				voiceRequestId++;
+				isListening = false;
+				isProcessing = false;
+				els.voice.classList.remove('listening', 'processing');
+				if (recognition) {
+					try { recognition.abort(); } catch {}
+					recognition = null;
+				}
+			}
 
 			els.voice.addEventListener('click', () => {
 				haptic();
 
-				// If currently listening, stop
-				if (isListening && recognition) {
-					recognition.stop();
+				// If processing, cancel wait and reset to passive
+				if (isProcessing) {
+					resetVoiceState();
+					return;
+				}
+
+				// If listening, abort everything (no request sent)
+				if (isListening) {
+					resetVoiceState();
 					return;
 				}
 
@@ -5499,39 +5534,80 @@ function restoreNormalPolling() {
 				recognition.interimResults = false;
 				recognition.maxAlternatives = 1;
 
-				// Show listening state immediately
+				// Show listening state immediately (solid green)
 				isListening = true;
 				els.voice.classList.add('listening');
 
 				recognition.onresult = async (event) => {
 					const transcript = event.results[0][0].transcript;
+
+					// Transition to processing state (flashing green)
+					isListening = false;
+					els.voice.classList.remove('listening');
+					els.voice.classList.add('processing');
+					isProcessing = true;
+
+					const currentRequestId = ++voiceRequestId;
+
+					// Set timeout for response
+					voiceTimeoutId = setTimeout(() => {
+						if (voiceRequestId === currentRequestId) {
+							els.voice.classList.remove('processing');
+							isProcessing = false;
+							voiceRequestId++;
+						}
+					}, VOICE_RESPONSE_TIMEOUT_MS);
+
 					try {
-						await fetch('/api/voice', {
+						const response = await fetch('/api/voice', {
 							method: 'POST',
 							headers: { 'Content-Type': 'application/json' },
 							body: JSON.stringify({ command: transcript }),
 						});
-					} catch {}
+						const data = await response.json();
+
+						clearTimeout(voiceTimeoutId);
+						voiceTimeoutId = null;
+
+						// Ignore late/cancelled response
+						if (voiceRequestId !== currentRequestId) return;
+
+						els.voice.classList.remove('processing');
+						isProcessing = false;
+
+						if (data.response) {
+							speakText(data.response);
+						}
+					} catch {
+						if (voiceTimeoutId) {
+							clearTimeout(voiceTimeoutId);
+							voiceTimeoutId = null;
+						}
+						if (voiceRequestId === currentRequestId) {
+							els.voice.classList.remove('processing');
+							isProcessing = false;
+						}
+					}
 				};
 
-				recognition.onerror = () => {
-					isListening = false;
-					els.voice.classList.remove('listening');
-					recognition = null;
+				recognition.onerror = (e) => {
+					console.log('Speech recognition error:', e.error);
+					resetVoiceState();
 				};
 
 				recognition.onend = () => {
-					isListening = false;
-					els.voice.classList.remove('listening');
+					// Only reset listening state if not transitioning to processing
+					if (!isProcessing) {
+						isListening = false;
+						els.voice.classList.remove('listening');
+					}
 					recognition = null;
 				};
 
 				try {
 					recognition.start();
 				} catch {
-					isListening = false;
-					els.voice.classList.remove('listening');
-					recognition = null;
+					resetVoiceState();
 				}
 			});
 		}

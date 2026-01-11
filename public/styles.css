@@ -855,20 +855,27 @@ body.theme-dark #voiceBtn svg {
 #voiceBtn:disabled {
 	opacity: .4;
 }
+/* Solid green glow when listening (user is speaking) */
 #voiceBtn.listening svg {
-	filter: drop-shadow(0 0 4px rgba(234, 0, 52, 0.8)) drop-shadow(0 0 8px rgba(234, 0, 52, 0.6)) drop-shadow(0 0 12px rgba(234, 0, 52, 0.4));
-	animation: pulse-listening 1s ease-in-out infinite;
+	filter: drop-shadow(0 0 4px rgba(34, 197, 94, 0.8)) drop-shadow(0 0 8px rgba(34, 197, 94, 0.6)) drop-shadow(0 0 12px rgba(34, 197, 94, 0.4));
 }
 body.theme-dark #voiceBtn.listening svg {
-	animation: pulse-listening-dark 1s ease-in-out infinite;
+	filter: invert(1) drop-shadow(0 0 4px rgba(34, 197, 94, 0.8)) drop-shadow(0 0 8px rgba(34, 197, 94, 0.6)) drop-shadow(0 0 12px rgba(34, 197, 94, 0.4));
 }
-@keyframes pulse-listening {
-	0%, 100% { filter: drop-shadow(0 0 4px rgba(234, 0, 52, 0.8)) drop-shadow(0 0 8px rgba(234, 0, 52, 0.6)) drop-shadow(0 0 12px rgba(234, 0, 52, 0.4)); }
-	50% { filter: drop-shadow(0 0 6px rgba(234, 0, 52, 1)) drop-shadow(0 0 12px rgba(234, 0, 52, 0.8)) drop-shadow(0 0 18px rgba(234, 0, 52, 0.5)); }
+/* Flashing green glow when processing (waiting for AI response) */
+#voiceBtn.processing svg {
+	animation: pulse-processing 1s ease-in-out infinite;
 }
-@keyframes pulse-listening-dark {
-	0%, 100% { filter: invert(1) drop-shadow(0 0 4px rgba(234, 0, 52, 0.8)) drop-shadow(0 0 8px rgba(234, 0, 52, 0.6)) drop-shadow(0 0 12px rgba(234, 0, 52, 0.4)); }
-	50% { filter: invert(1) drop-shadow(0 0 6px rgba(234, 0, 52, 1)) drop-shadow(0 0 12px rgba(234, 0, 52, 0.8)) drop-shadow(0 0 18px rgba(234, 0, 52, 0.5)); }
+body.theme-dark #voiceBtn.processing svg {
+	animation: pulse-processing-dark 1s ease-in-out infinite;
+}
+@keyframes pulse-processing {
+	0%, 100% { filter: drop-shadow(0 0 4px rgba(34, 197, 94, 0.8)) drop-shadow(0 0 8px rgba(34, 197, 94, 0.6)) drop-shadow(0 0 12px rgba(34, 197, 94, 0.4)); }
+	50% { filter: drop-shadow(0 0 1px rgba(34, 197, 94, 0.2)) drop-shadow(0 0 2px rgba(34, 197, 94, 0.15)) drop-shadow(0 0 3px rgba(34, 197, 94, 0.1)); }
+}
+@keyframes pulse-processing-dark {
+	0%, 100% { filter: invert(1) drop-shadow(0 0 4px rgba(34, 197, 94, 0.8)) drop-shadow(0 0 8px rgba(34, 197, 94, 0.6)) drop-shadow(0 0 12px rgba(34, 197, 94, 0.4)); }
+	50% { filter: invert(1) drop-shadow(0 0 1px rgba(34, 197, 94, 0.2)) drop-shadow(0 0 2px rgba(34, 197, 94, 0.15)) drop-shadow(0 0 3px rgba(34, 197, 94, 0.1)); }
 }
 #themeToggleBtn {
 	width: auto !important;
