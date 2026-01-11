@@ -178,6 +178,7 @@ const SEARCH_STATE_CONCURRENCY_SLIM = Math.max(
 const SLIDER_DEBOUNCE_MS = configNumber(CLIENT_CONFIG.sliderDebounceMs, 250);
 const IDLE_AFTER_MS = configNumber(CLIENT_CONFIG.idleAfterMs, 60000);
 const ACTIVITY_THROTTLE_MS = configNumber(CLIENT_CONFIG.activityThrottleMs, 250);
+const CHART_HASH_CHECK_MS = 30000; // Check chart hashes every 30 seconds
 const HOME_CACHE_KEY = 'ohProxyHomeSnapshot';
 const HIDE_TITLE_ITEMS = Array.isArray(CLIENT_CONFIG.hideTitleItems) ? CLIENT_CONFIG.hideTitleItems : [];
 const HIDE_TITLE_SET = new Set(
@@ -191,6 +192,8 @@ let imageTimers = [];
 let imageLoadQueue = [];
 let imageLoadProcessing = false;
 let searchDebounceTimer = null;
+let chartHashTimer = null;
+const chartHashes = new Map(); // item|period|mode -> hash
 let searchStateAbort = null;
 let searchStateActiveToken = 0;
 let resumeReloadArmed = false;
@@ -4464,6 +4467,7 @@ function startPolling() {
 	if (state.isPaused) return;
 	setPollInterval(activeInterval());
 	armIdleTimer();
+	startChartHashCheck();
 }
 
 function stopPolling() {
@@ -4472,6 +4476,7 @@ function stopPolling() {
 	if (state.idleTimer) clearTimeout(state.idleTimer);
 	state.idleTimer = null;
 	state.pollInterval = 0;
+	stopChartHashCheck();
 }
 
 function setPollInterval(ms) {
@@ -4514,6 +4519,66 @@ function noteActivity() {
 		if (state.pollInterval !== next) setPollInterval(next);
 	}
 	armIdleTimer();
+}
+
+// --- Chart Hash Check (smart iframe refresh) ---
+let chartHashCheckInProgress = false;
+
+async function checkChartHashes() {
+	if (chartHashCheckInProgress || state.isPaused) return;
+	const iframes = document.querySelectorAll('iframe.chart-frame');
+	if (iframes.length === 0) return;
+
+	chartHashCheckInProgress = true;
+	const mode = getThemeMode();
+
+	try {
+		for (const iframe of iframes) {
+			const chartUrl = iframe.dataset.chartUrl || '';
+			if (!chartUrl) continue;
+
+			// Parse item and period from URL: /chart?item=X&period=Y&...
+			const urlObj = new URL(chartUrl, window.location.origin);
+			const item = urlObj.searchParams.get('item') || '';
+			const period = urlObj.searchParams.get('period') || '';
+			if (!item || !period) continue;
+
+			const cacheKey = `${item}|${period}|${mode}`;
+			try {
+				const res = await fetch(`/api/chart-hash?item=${encodeURIComponent(item)}&period=${period}&mode=${mode}`, {
+					cache: 'no-store'
+				});
+				if (!res.ok) continue;
+				const data = await res.json();
+				if (!data.hash) continue;
+
+				const prevHash = chartHashes.get(cacheKey);
+				if (prevHash && prevHash !== data.hash) {
+					// Hash changed - reload iframe
+					const newUrl = chartUrl + (chartUrl.includes('?') ? '&' : '?') + '_t=' + data.hash;
+					iframe.src = newUrl;
+					iframe.dataset.chartUrl = chartUrl; // Keep original URL without cache buster
+				}
+				chartHashes.set(cacheKey, data.hash);
+			} catch (e) {
+				// Ignore individual fetch errors
+			}
+		}
+	} finally {
+		chartHashCheckInProgress = false;
+	}
+}
+
+function startChartHashCheck() {
+	if (chartHashTimer) clearInterval(chartHashTimer);
+	chartHashTimer = setInterval(checkChartHashes, CHART_HASH_CHECK_MS);
+}
+
+function stopChartHashCheck() {
+	if (chartHashTimer) {
+		clearInterval(chartHashTimer);
+		chartHashTimer = null;
+	}
 }
 
 // --- Heartbeat Check ---
