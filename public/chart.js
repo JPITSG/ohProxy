@@ -95,15 +95,13 @@
 			var numYLines = sm ? 5 : 6;
 			var unitSuffix = window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '';
 
-			// Y-axis grid and labels
+			// Y-axis grid and labels - collect values first for consistent formatting
+			var yValues = [];
+			var yPositions = [];
 			if (sm) {
 				for (var i = 0; i < 5; i++) {
-					var y = window._chartYMin + (yRange * i / 4);
-					var yPos = ch - (i / 4) * ch;
-					hGridGroup.appendChild($('line', { class: 'grid-line', x1: 0, y1: yPos, x2: cw, y2: yPos }));
-					var label = $('text', { class: 'axis-label', x: -8, y: yPos + 4, 'text-anchor': 'end' });
-					label.textContent = this.fmt(y) + unitSuffix;
-					g.appendChild(label);
+					yValues.push(window._chartYMin + (yRange * i / 4));
+					yPositions.push(ch - (i / 4) * ch);
 				}
 			} else {
 				var yStep = this.niceStep(Math.abs(yRange), numYLines);
@@ -112,12 +110,29 @@
 					if (y < window._chartYMin - yStep * 0.1) continue;
 					var yPos = ch - ((y - window._chartYMin) / yRange) * ch;
 					if (yPos >= -5 && yPos <= ch + 5) {
-						hGridGroup.appendChild($('line', { class: 'grid-line', x1: 0, y1: yPos, x2: cw, y2: yPos }));
-						var label = $('text', { class: 'axis-label', x: -8, y: yPos + 4, 'text-anchor': 'end' });
-						label.textContent = this.fmt(y) + unitSuffix;
-						g.appendChild(label);
+						yValues.push(y);
+						yPositions.push(yPos);
 					}
 				}
+			}
+			// Filter values for majority calculation - exclude clearly irrelevant labels
+			var dMin = typeof window._chartDataMin === 'number' ? window._chartDataMin : window._chartYMin;
+			var dMax = typeof window._chartDataMax === 'number' ? window._chartDataMax : window._chartYMax;
+			var isRelevant = function(v) {
+				// Hide negative labels when all data is positive (>= 0)
+				if (dMin >= 0 && v < 0) return false;
+				// Hide positive labels when all data is negative (<= 0)
+				if (dMax <= 0 && v > 0) return false;
+				return true;
+			};
+			var yValuesInRange = yValues.filter(isRelevant);
+			var yDecimals = this.getMajorityDecimals(yValuesInRange.length > 0 ? yValuesInRange : yValues);
+			for (var i = 0; i < yValues.length; i++) {
+				hGridGroup.appendChild($('line', { class: 'grid-line', x1: 0, y1: yPositions[i], x2: cw, y2: yPositions[i] }));
+				var label = $('text', { class: 'axis-label', x: -8, y: yPositions[i] + 4, 'text-anchor': 'end' });
+				// Only show label if relevant to data range
+				label.textContent = isRelevant(yValues[i]) ? this.fmt(yValues[i], yDecimals) + unitSuffix : '';
+				g.appendChild(label);
 			}
 			g.appendChild(hGridGroup);
 
@@ -252,7 +267,10 @@
 			return nice * magnitude;
 		}
 
-		fmt(n) {
+		fmt(n, decimals) {
+			if (typeof decimals === 'number') {
+				return n.toFixed(decimals);
+			}
 			if (n === 0) return '0.0';
 			if (Number.isInteger(n) || Math.abs(n - Math.round(n)) < 0.0001) {
 				var r = Math.round(n);
@@ -265,6 +283,38 @@
 			if (Math.abs(n) >= 1) return n.toFixed(1);
 			if (Math.abs(n) >= 0.1) return n.toFixed(2);
 			return n.toFixed(2);
+		}
+
+		getDecimals(n) {
+			if (n === 0) return 1;
+			if (Number.isInteger(n) || Math.abs(n - Math.round(n)) < 0.0001) {
+				var r = Math.round(n);
+				if (Math.abs(r) >= 100) return 0;
+				return 1;
+			}
+			if (Math.abs(n) >= 1000) return 0;
+			if (Math.abs(n) >= 100) return 0;
+			if (Math.abs(n) >= 10) return 1;
+			if (Math.abs(n) >= 1) return 1;
+			if (Math.abs(n) >= 0.1) return 2;
+			return 2;
+		}
+
+		getMajorityDecimals(values) {
+			var counts = {};
+			for (var i = 0; i < values.length; i++) {
+				var d = this.getDecimals(values[i]);
+				counts[d] = (counts[d] || 0) + 1;
+			}
+			var maxCount = 0;
+			var majority = 1;
+			for (var d in counts) {
+				if (counts[d] > maxCount) {
+					maxCount = counts[d];
+					majority = parseInt(d, 10);
+				}
+			}
+			return majority;
 		}
 
 		fmtTimestamp(ts) {

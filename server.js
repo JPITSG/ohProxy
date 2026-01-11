@@ -1926,7 +1926,7 @@ function processChartData(data, period, maxPoints = 500) {
 
 	if (yMin === yMax) { yMin -= 1; yMax += 1; }
 
-	return { data: filtered, yMin, yMax };
+	return { data: filtered, yMin, yMax, dataMin, dataMax };
 }
 
 function generateXLabels(data, period) {
@@ -1978,7 +1978,7 @@ function generateChartPoints(data) {
 	}));
 }
 
-function generateChartHtml(chartData, xLabels, yMin, yMax, title, unit, mode) {
+function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode) {
 	const theme = mode === 'dark' ? 'dark' : 'light';
 	const unitDisplay = unit !== '?' ? unit : '';
 	const legendHtml = unitDisplay ? `<div class="chart-legend"><span class="legend-line"></span><span>${unitDisplay}</span></div>` : '';
@@ -2010,6 +2010,8 @@ window._chartData=${JSON.stringify(chartData)};
 window._chartXLabels=${JSON.stringify(xLabels)};
 window._chartYMin=${yMin};
 window._chartYMax=${yMax};
+window._chartDataMin=${dataMin};
+window._chartDataMax=${dataMax};
 window._chartUnit="${unit}";
 </script>
 <script src="/chart.${assetVersion}.js"></script>
@@ -2029,7 +2031,7 @@ function generateChart(item, period, mode, title) {
 	if (!rawData) return null;
 
 	// Process data
-	const { data, yMin, yMax } = processChartData(rawData, period, 500);
+	const { data, yMin, yMax, dataMin, dataMax } = processChartData(rawData, period, 500);
 	if (!data || data.length === 0) return null;
 
 	// Deduce unit from title
@@ -2044,7 +2046,7 @@ function generateChart(item, period, mode, title) {
 	const xLabels = generateXLabels(data, period);
 
 	// Generate HTML
-	return generateChartHtml(chartData, xLabels, yMin, yMax, cleanTitle, unit, mode);
+	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode);
 }
 
 async function fetchAllPages() {
