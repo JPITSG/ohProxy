@@ -4537,22 +4537,24 @@ async function checkChartHashes() {
 			const chartUrl = iframe.dataset.chartUrl || '';
 			if (!chartUrl) continue;
 
-			// Parse item and period from URL: /chart?item=X&period=Y&...
+			// Parse item, period, title from URL: /chart?item=X&period=Y&title=Z&...
 			const urlObj = new URL(chartUrl, window.location.origin);
 			const item = urlObj.searchParams.get('item') || '';
 			const period = urlObj.searchParams.get('period') || '';
+			const title = urlObj.searchParams.get('title') || '';
 			if (!item || !period) continue;
 
 			const cacheKey = `${item}|${period}|${mode}`;
+			const prevHash = chartHashes.get(cacheKey) || null;
+
 			try {
-				const res = await fetch(`/api/chart-hash?item=${encodeURIComponent(item)}&period=${period}&mode=${mode}`, {
-					cache: 'no-store'
-				});
+				const hashUrl = `/api/chart-hash?item=${encodeURIComponent(item)}&period=${period}&mode=${mode}` +
+					(title ? `&title=${encodeURIComponent(title)}` : '');
+				const res = await fetch(hashUrl, { cache: 'no-store' });
 				if (!res.ok) continue;
 				const data = await res.json();
 				if (!data.hash) continue;
 
-				const prevHash = chartHashes.get(cacheKey);
 				if (prevHash && prevHash !== data.hash) {
 					// Hash changed - reload iframe
 					const newUrl = chartUrl + (chartUrl.includes('?') ? '&' : '?') + '_t=' + data.hash;
@@ -4561,7 +4563,7 @@ async function checkChartHashes() {
 				}
 				chartHashes.set(cacheKey, data.hash);
 			} catch (e) {
-				// Ignore individual fetch errors
+				// Ignore fetch errors
 			}
 		}
 	} finally {

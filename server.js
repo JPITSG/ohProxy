@@ -4522,6 +4522,7 @@ app.get('/api/chart-hash', (req, res) => {
 	const item = safeText(req.query.item || '').trim();
 	const period = safeText(req.query.period || '').trim();
 	const mode = safeText(req.query.mode || '').trim().toLowerCase() || 'dark';
+	const title = safeText(req.query.title || '').trim() || item;
 
 	// Validate parameters
 	if (!item || !/^[a-zA-Z0-9_-]{1,50}$/.test(item)) {
@@ -4536,27 +4537,81 @@ app.get('/api/chart-hash', (req, res) => {
 
 	const cachePath = getChartCachePath(item, period, mode);
 
-	// Always regenerate chart HTML
+	// Get RRD data for stable hash (not affected by label positioning)
+	const rrdDir = liveConfig.rrdPath || '';
+	if (!rrdDir) {
+		res.setHeader('Cache-Control', 'no-cache');
+		return res.json({ hash: null, error: 'No RRD path' });
+	}
+	const rrdPath = path.join(rrdDir, `${item}.rrd`);
+	if (!fs.existsSync(rrdPath)) {
+		res.setHeader('Cache-Control', 'no-cache');
+		return res.json({ hash: null, error: 'RRD not found' });
+	}
+
 	try {
-		const html = generateChart(item, period, mode, item);
+		// Parse raw data and create stable hash from values only
+		const rawData = parseRrd4jFile(rrdPath, period);
+		if (!rawData || rawData.length === 0) {
+			res.setHeader('Cache-Control', 'no-cache');
+			return res.json({ hash: null, error: 'No data' });
+		}
+
+		// Sample rate and rounding based on period for stable hashing
+		// Longer periods = fewer samples, more rounding = more stable hash
+		const hashConfig = {
+			h: { sample: 1, decimals: 2, tsRound: 60 },       // every point, round ts to minute
+			D: { sample: 4, decimals: 1, tsRound: 3600 },     // every 4th point, round ts to hour
+			W: { sample: 8, decimals: 1, tsRound: 86400 },    // every 8th point, round ts to day
+			M: { sample: 16, decimals: 0, tsRound: 86400 },   // every 16th point, round ts to day
+			Y: { sample: 32, decimals: 0, tsRound: 604800 },  // every 32nd point, round ts to week
+		};
+		const cfg = hashConfig[period] || hashConfig.D;
+
+		// Sample and round data for stable hash
+		const sampled = rawData.filter((_, i) => i % cfg.sample === 0);
+		const dataStr = sampled.map(([ts, val]) => {
+			const roundedTs = Math.floor(ts / cfg.tsRound) * cfg.tsRound;
+			const roundedVal = Number(val.toFixed(cfg.decimals));
+			return `${roundedTs}:${roundedVal}`;
+		}).join('|');
+		const dataHash = crypto.createHash('md5').update(dataStr).digest('hex').substring(0, 16);
+
+		// Check if hash changed - only regenerate HTML if needed
+		const existingHash = fs.existsSync(cachePath) ? (() => {
+			try {
+				const html = fs.readFileSync(cachePath, 'utf8');
+				const match = html.match(/data-hash="([^"]+)"/);
+				return match ? match[1] : null;
+			} catch { return null; }
+		})() : null;
+
+		if (existingHash === dataHash) {
+			// Data unchanged, no need to regenerate
+			res.setHeader('Cache-Control', 'no-cache');
+			return res.json({ hash: dataHash });
+		}
+
+		// Data changed - regenerate HTML
+		const html = generateChart(item, period, mode, title);
 		if (!html) {
 			res.setHeader('Cache-Control', 'no-cache');
-			return res.json({ hash: null, mtime: 0, error: 'No data' });
+			return res.json({ hash: null, error: 'Generation failed' });
 		}
+
+		// Inject hash into HTML for future comparison
+		const htmlWithHash = html.replace('<html', `<html data-hash="${dataHash}"`);
 
 		// Write to cache
 		ensureDir(CHART_CACHE_DIR);
-		fs.writeFileSync(cachePath, html);
+		fs.writeFileSync(cachePath, htmlWithHash);
 
-		// Return hash of new file
-		const stat = fs.statSync(cachePath);
-		const mtime = Math.floor(stat.mtimeMs);
 		res.setHeader('Cache-Control', 'no-cache');
-		res.json({ hash: mtime.toString(36), mtime });
+		res.json({ hash: dataHash });
 	} catch (err) {
 		logMessage(`Chart hash generation failed: ${err.message || err}`);
 		res.setHeader('Cache-Control', 'no-cache');
-		res.json({ hash: null, mtime: 0, error: 'Generation failed' });
+		res.json({ hash: null, error: 'Generation failed' });
 	}
 });
 
