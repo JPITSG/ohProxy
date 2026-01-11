@@ -148,6 +148,10 @@ body {
 	stroke-width: 2.5;
 	cursor: pointer;
 	transition: all 0.2s;
+	opacity: 1;
+}
+
+.chart-animated .data-point {
 	opacity: 0;
 	animation: fadeIn 0.3s ease-out forwards;
 }
@@ -218,6 +222,10 @@ body {
 
 .chart-area {
 	fill: url(#areaGradient);
+	opacity: 1;
+}
+
+.chart-animated .chart-area {
 	opacity: 0;
 	animation: fadeIn 0.8s ease-out 0.3s forwards;
 }
@@ -229,6 +237,9 @@ body {
 	stroke-linecap: round;
 	stroke-linejoin: round;
 	filter: drop-shadow(0 2px 4px rgba(var(--chart-line-rgb), 0.3));
+}
+
+.chart-animated .chart-line {
 	stroke-dasharray: 100000;
 	stroke-dashoffset: 100000;
 	animation: drawLine 2s ease-out forwards;
@@ -242,6 +253,9 @@ body {
 	stroke-linejoin: round;
 	opacity: 0.12;
 	filter: blur(4px);
+}
+
+.chart-animated .chart-line-glow {
 	stroke-dasharray: 100000;
 	stroke-dashoffset: 100000;
 	animation: drawLine 2s ease-out forwards;
