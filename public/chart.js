@@ -546,7 +546,21 @@
 		}
 	};
 
+	// Check if title is truncated and hide stats if so
+	function checkTitleOverflow() {
+		var title = document.getElementById('chartTitle');
+		var stats = document.getElementById('chartStats');
+		if (!title || !stats) return;
+
+		// Check if title is truncated (scrollWidth > clientWidth)
+		var isOverflowing = title.scrollWidth > title.clientWidth;
+		stats.classList.toggle('hidden', isOverflowing);
+	}
+
 	document.addEventListener('DOMContentLoaded', function() {
 		new window.ChartRenderer('chartContainer', 'chartSvg');
+		checkTitleOverflow();
 	});
+
+	window.addEventListener('resize', checkTitleOverflow);
 })();

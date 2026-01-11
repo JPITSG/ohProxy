@@ -2166,13 +2166,27 @@ function computeChartDataHash(rawData, period) {
 	return crypto.createHash('md5').update(dataStr).digest('hex').substring(0, 16);
 }
 
-function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash) {
+function formatChartValue(n) {
+	if (n === 0) return '0';
+	if (Math.abs(n) >= 100) return n.toFixed(0);
+	if (Math.abs(n) >= 10) return n.toFixed(1);
+	return n.toFixed(1);
+}
+
+function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg) {
 	const theme = mode === 'dark' ? 'dark' : 'light';
 	const safeTitle = escapeHtml(title);
 	const unitDisplay = unit !== '?' ? escapeHtml(unit) : '';
 	const legendHtml = unitDisplay ? `<div class="chart-legend"><span class="legend-line"></span><span>${unitDisplay}</span></div>` : '';
 	const assetVersion = liveConfig.assetVersion || 'v1';
 	const dataHashAttr = dataHash ? ` data-hash="${dataHash}"` : '';
+
+	// Format stats values with unit
+	const statUnit = unitDisplay ? ' ' + unitDisplay : '';
+	const fmtAvg = typeof dataAvg === 'number' ? formatChartValue(dataAvg) + statUnit : '';
+	const fmtMin = typeof dataMin === 'number' ? formatChartValue(dataMin) + statUnit : '';
+	const fmtMax = typeof dataMax === 'number' ? formatChartValue(dataMax) + statUnit : '';
+	const statsHtml = fmtAvg ? `<div class="chart-stats" id="chartStats"><span class="stat-item"><span class="stat-label">Avg</span> <span class="stat-value">${fmtAvg}</span></span><span class="stat-item"><span class="stat-label">Min</span> <span class="stat-value">${fmtMin}</span></span><span class="stat-item"><span class="stat-label">Max</span> <span class="stat-value">${fmtMax}</span></span></div>` : '';
 
 	return `<!DOCTYPE html>
 <html lang="en" data-theme="${theme}"${dataHashAttr}>
@@ -2186,8 +2200,8 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 <div class="container">
 <div class="chart-card">
 <div class="chart-header">
-<div class="chart-title-group"><h2 class="chart-title">${safeTitle}</h2></div>
-<div class="chart-header-right">${legendHtml}</div>
+<div class="chart-title-group"><h2 class="chart-title" id="chartTitle">${safeTitle}</h2></div>
+<div class="chart-header-right">${statsHtml}${legendHtml}</div>
 </div>
 <div class="chart-container" id="chartContainer">
 <svg class="chart-svg" id="chartSvg"></svg>
@@ -2235,11 +2249,16 @@ function generateChart(item, period, mode, title) {
 	const chartData = generateChartPoints(data);
 	const xLabels = generateXLabels(data, period);
 
+	// Compute average from chart data
+	const dataAvg = chartData.length > 0
+		? chartData.reduce((sum, pt) => sum + pt.y, 0) / chartData.length
+		: null;
+
 	// Compute data hash for cache invalidation
 	const dataHash = computeChartDataHash(rawData, period);
 
 	// Generate HTML
-	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash);
+	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg);
 }
 
 async function fetchAllPages() {
