@@ -2,12 +2,17 @@
 	// Set theme from URL param, localStorage, or system preference
 	var params = new URLSearchParams(window.location.search);
 	var mode = params.get('mode');
+	var reloaded = params.get('reloaded') === 'true';
 	if (mode === 'dark' || mode === 'light') {
 		document.documentElement.setAttribute('data-theme', mode);
 	} else {
 		var saved = localStorage.getItem('theme');
 		var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 		document.documentElement.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
+	}
+	// Enable animations only on first load (not reloaded)
+	if (!reloaded) {
+		document.documentElement.classList.add('chart-animated');
 	}
 
 	window.ChartRenderer = class {
@@ -124,10 +129,12 @@
 			var dMin = typeof window._chartDataMin === 'number' ? window._chartDataMin : window._chartYMin;
 			var dMax = typeof window._chartDataMax === 'number' ? window._chartDataMax : window._chartYMax;
 			var isRelevant = function(v) {
-				// Hide negative labels when all data is positive (>= 0)
-				if (dMin >= 0 && v < 0) return false;
-				// Hide positive labels when all data is negative (<= 0)
-				if (dMax <= 0 && v > 0) return false;
+				// When data is flat (all same value), show all axis labels
+				if (dMin === dMax) return true;
+				// Hide negative labels when all data is strictly positive (> 0)
+				if (dMin > 0 && v < 0) return false;
+				// Hide positive labels when all data is strictly negative (< 0)
+				if (dMax < 0 && v > 0) return false;
 				return true;
 			};
 			var yValuesInRange = yValues.filter(isRelevant);
@@ -273,21 +280,33 @@
 		}
 
 		fmt(n, decimals) {
+			var result;
 			if (typeof decimals === 'number') {
-				return n.toFixed(decimals);
-			}
-			if (n === 0) return '0.0';
-			if (Number.isInteger(n) || Math.abs(n - Math.round(n)) < 0.0001) {
+				result = n.toFixed(decimals);
+			} else if (n === 0) {
+				return '0.0';
+			} else if (Number.isInteger(n) || Math.abs(n - Math.round(n)) < 0.0001) {
 				var r = Math.round(n);
-				if (Math.abs(r) >= 100) return r.toFixed(0);
-				return r.toFixed(1);
+				if (Math.abs(r) >= 100) result = r.toFixed(0);
+				else result = r.toFixed(1);
+			} else if (Math.abs(n) >= 1000) {
+				result = n.toFixed(0);
+			} else if (Math.abs(n) >= 100) {
+				result = n.toFixed(0);
+			} else if (Math.abs(n) >= 10) {
+				result = n.toFixed(1);
+			} else if (Math.abs(n) >= 1) {
+				result = n.toFixed(1);
+			} else if (Math.abs(n) >= 0.1) {
+				result = n.toFixed(2);
+			} else {
+				result = n.toFixed(2);
 			}
-			if (Math.abs(n) >= 1000) return n.toFixed(0);
-			if (Math.abs(n) >= 100) return n.toFixed(0);
-			if (Math.abs(n) >= 10) return n.toFixed(1);
-			if (Math.abs(n) >= 1) return n.toFixed(1);
-			if (Math.abs(n) >= 0.1) return n.toFixed(2);
-			return n.toFixed(2);
+			// Normalize negative zero to positive zero
+			if (result.charAt(0) === '-' && parseFloat(result) === 0) {
+				return result.substring(1);
+			}
+			return result;
 		}
 
 		getDecimals(n) {

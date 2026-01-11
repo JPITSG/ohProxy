@@ -1883,7 +1883,11 @@ function rtspUrlHash(url) {
 
 // Chart cache helpers
 function chartCacheKey(item, period, mode) {
-	return crypto.createHash('md5').update(`${item}|${period}|${mode || 'dark'}`).digest('hex').substring(0, 16);
+	const assetVersion = liveConfig.assetVersion || 'v1';
+	return crypto.createHash('md5')
+		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}`)
+		.digest('hex')
+		.substring(0, 16);
 }
 
 function getChartCachePath(item, period, mode) {
@@ -2139,15 +2143,39 @@ function generateChartPoints(data) {
 	}));
 }
 
-function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode) {
+function computeChartDataHash(rawData, period) {
+	if (!rawData || rawData.length === 0) return null;
+
+	// Sample rate and rounding based on period for stable hashing
+	const hashConfig = {
+		h: { sample: 1, decimals: 2, tsRound: 60 },
+		D: { sample: 4, decimals: 1, tsRound: 3600 },
+		W: { sample: 8, decimals: 1, tsRound: 86400 },
+		M: { sample: 16, decimals: 0, tsRound: 86400 },
+		Y: { sample: 32, decimals: 0, tsRound: 604800 },
+	};
+	const cfg = hashConfig[period] || hashConfig.D;
+
+	const sampled = rawData.filter((_, i) => i % cfg.sample === 0);
+	const dataStr = sampled.map(([ts, val]) => {
+		const roundedTs = Math.floor(ts / cfg.tsRound) * cfg.tsRound;
+		const roundedVal = Number(val.toFixed(cfg.decimals));
+		return `${roundedTs}:${roundedVal}`;
+	}).join('|');
+
+	return crypto.createHash('md5').update(dataStr).digest('hex').substring(0, 16);
+}
+
+function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash) {
 	const theme = mode === 'dark' ? 'dark' : 'light';
 	const safeTitle = escapeHtml(title);
 	const unitDisplay = unit !== '?' ? escapeHtml(unit) : '';
 	const legendHtml = unitDisplay ? `<div class="chart-legend"><span class="legend-line"></span><span>${unitDisplay}</span></div>` : '';
 	const assetVersion = liveConfig.assetVersion || 'v1';
+	const dataHashAttr = dataHash ? ` data-hash="${dataHash}"` : '';
 
 	return `<!DOCTYPE html>
-<html lang="en" data-theme="${theme}">
+<html lang="en" data-theme="${theme}"${dataHashAttr}>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -2207,8 +2235,11 @@ function generateChart(item, period, mode, title) {
 	const chartData = generateChartPoints(data);
 	const xLabels = generateXLabels(data, period);
 
+	// Compute data hash for cache invalidation
+	const dataHash = computeChartDataHash(rawData, period);
+
 	// Generate HTML
-	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode);
+	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash);
 }
 
 async function fetchAllPages() {
@@ -4825,32 +4856,18 @@ app.get('/api/chart-hash', (req, res) => {
 	}
 
 	try {
-		// Parse raw data and create stable hash from values only
+		// Parse raw data and compute hash
 		const rawData = parseRrd4jFile(rrdPath, period);
 		if (!rawData || rawData.length === 0) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'No data' });
 		}
 
-		// Sample rate and rounding based on period for stable hashing
-		// Longer periods = fewer samples, more rounding = more stable hash
-		const hashConfig = {
-			h: { sample: 1, decimals: 2, tsRound: 60 },       // every point, round ts to minute
-			D: { sample: 4, decimals: 1, tsRound: 3600 },     // every 4th point, round ts to hour
-			W: { sample: 8, decimals: 1, tsRound: 86400 },    // every 8th point, round ts to day
-			M: { sample: 16, decimals: 0, tsRound: 86400 },   // every 16th point, round ts to day
-			Y: { sample: 32, decimals: 0, tsRound: 604800 },  // every 32nd point, round ts to week
-		};
-		const cfg = hashConfig[period] || hashConfig.D;
-
-		// Sample and round data for stable hash
-		const sampled = rawData.filter((_, i) => i % cfg.sample === 0);
-		const dataStr = sampled.map(([ts, val]) => {
-			const roundedTs = Math.floor(ts / cfg.tsRound) * cfg.tsRound;
-			const roundedVal = Number(val.toFixed(cfg.decimals));
-			return `${roundedTs}:${roundedVal}`;
-		}).join('|');
-		const dataHash = crypto.createHash('md5').update(dataStr).digest('hex').substring(0, 16);
+		const dataHash = computeChartDataHash(rawData, period);
+		if (!dataHash) {
+			res.setHeader('Cache-Control', 'no-cache');
+			return res.json({ hash: null, error: 'Hash computation failed' });
+		}
 
 		// Check if hash changed - only regenerate HTML if needed
 		const existingHash = fs.existsSync(cachePath) ? (() => {
@@ -4867,19 +4884,16 @@ app.get('/api/chart-hash', (req, res) => {
 			return res.json({ hash: dataHash });
 		}
 
-		// Data changed - regenerate HTML
+		// Data changed - regenerate HTML (hash is embedded by generateChart)
 		const html = generateChart(item, period, mode, title);
 		if (!html) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Generation failed' });
 		}
 
-		// Inject hash into HTML for future comparison
-		const htmlWithHash = html.replace('<html', `<html data-hash="${dataHash}"`);
-
 		// Write to cache
 		ensureDir(CHART_CACHE_DIR);
-		fs.writeFileSync(cachePath, htmlWithHash);
+		fs.writeFileSync(cachePath, html);
 
 		res.setHeader('Cache-Control', 'no-cache');
 		res.json({ hash: dataHash });

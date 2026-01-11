@@ -91,6 +91,8 @@ const CONNECTION_PENDING_DELAY_MS = 500;
 const IMAGE_VIEWER_MAX_VIEWPORT = 0.9;
 const SITEMAP_CACHE_RETRY_BASE_MS = 2000;
 const SITEMAP_CACHE_RETRY_MAX_MS = 60000;
+const CHART_IFRAME_SWAP_TIMEOUT_MS = 15000;
+const CHART_IFRAME_CROSSFADE_MS = 400;
 let sitemapCacheInFlight = false;
 let sitemapCacheRetryTimer = null;
 let sitemapCacheRetryMs = SITEMAP_CACHE_RETRY_BASE_MS;
@@ -4632,6 +4634,83 @@ function noteActivity() {
 // --- Chart Hash Check (smart iframe refresh) ---
 let chartHashCheckInProgress = false;
 
+function readIframeChartHash(iframe) {
+	try {
+		const doc = iframe.contentDocument;
+		if (!doc || !doc.documentElement) return null;
+		return doc.documentElement.dataset.hash || null;
+	} catch {
+		return null;
+	}
+}
+
+function buildChartReloadUrl(chartUrl, dataHash) {
+	try {
+		const url = new URL(chartUrl, window.location.origin);
+		url.searchParams.set('reloaded', 'true');
+		if (dataHash) url.searchParams.set('_t', dataHash);
+		return url.pathname + url.search;
+	} catch {
+		const sep = chartUrl.includes('?') ? '&' : '?';
+		const hashPart = dataHash ? `&_t=${encodeURIComponent(dataHash)}` : '';
+		return `${chartUrl}${sep}reloaded=true${hashPart}`;
+	}
+}
+
+function swapChartIframe(iframe, newSrc, baseUrl) {
+	if (!iframe || !newSrc) return;
+	const container = iframe.parentElement;
+	if (!container) {
+		iframe.dataset.chartUrl = baseUrl || newSrc;
+		iframe.src = newSrc;
+		return;
+	}
+
+	const newIframe = document.createElement('iframe');
+	newIframe.className = iframe.className;
+	newIframe.setAttribute('frameborder', iframe.getAttribute('frameborder') || '0');
+	newIframe.setAttribute('scrolling', iframe.getAttribute('scrolling') || 'no');
+	if (iframe.getAttribute('allowfullscreen')) {
+		newIframe.setAttribute('allowfullscreen', iframe.getAttribute('allowfullscreen'));
+	}
+	newIframe.dataset.chartUrl = baseUrl || iframe.dataset.chartUrl || newSrc;
+	newIframe.style.opacity = '0';
+	newIframe.style.transition = `opacity ${CHART_IFRAME_CROSSFADE_MS}ms ease-out`;
+	newIframe.style.position = 'absolute';
+	newIframe.style.top = '0';
+	newIframe.style.left = '0';
+	newIframe.style.width = '100%';
+	newIframe.style.height = '100%';
+	newIframe.src = newSrc;
+
+	// Ensure container has relative positioning for absolute child
+	if (getComputedStyle(container).position === 'static') {
+		container.style.position = 'relative';
+	}
+	container.appendChild(newIframe);
+
+	const timeoutId = setTimeout(() => {
+		// Timeout - remove new iframe, keep old
+		if (container.contains(newIframe)) newIframe.remove();
+	}, CHART_IFRAME_SWAP_TIMEOUT_MS);
+
+	newIframe.addEventListener('load', () => {
+		clearTimeout(timeoutId);
+		// Crossfade: fade in new iframe
+		newIframe.style.opacity = '1';
+		// After transition completes, remove old iframe and reset positioning
+		setTimeout(() => {
+			if (container.contains(iframe)) iframe.remove();
+			newIframe.style.position = '';
+			newIframe.style.top = '';
+			newIframe.style.left = '';
+			newIframe.style.width = '';
+			newIframe.style.height = '';
+			newIframe.style.transition = '';
+		}, CHART_IFRAME_CROSSFADE_MS);
+	}, { once: true });
+}
+
 async function checkChartHashes() {
 	if (chartHashCheckInProgress || state.isPaused) return;
 	const iframes = document.querySelectorAll('iframe.chart-frame');
@@ -4639,6 +4718,7 @@ async function checkChartHashes() {
 
 	chartHashCheckInProgress = true;
 	const mode = getThemeMode();
+	const assetVersion = OH_CONFIG.assetVersion || 'v1';
 
 	try {
 		for (const iframe of iframes) {
@@ -4652,7 +4732,8 @@ async function checkChartHashes() {
 			const title = urlObj.searchParams.get('title') || '';
 			if (!item || !period) continue;
 
-			const cacheKey = `${item}|${period}|${mode}`;
+			// Cache key includes assetVersion to match server
+			const cacheKey = `${item}|${period}|${mode}|${assetVersion}`;
 			const prevHash = chartHashes.get(cacheKey) || null;
 
 			try {
@@ -4663,12 +4744,20 @@ async function checkChartHashes() {
 				const data = await res.json();
 				if (!data.hash) continue;
 
-				if (prevHash && prevHash !== data.hash) {
-					// Hash changed - reload iframe
-					const newUrl = chartUrl + (chartUrl.includes('?') ? '&' : '?') + '_t=' + data.hash;
-					iframe.src = newUrl;
-					iframe.dataset.chartUrl = chartUrl; // Keep original URL without cache buster
+				// On first check, read hash from iframe and compare
+				if (!prevHash) {
+					const iframeHash = readIframeChartHash(iframe);
+					if (iframeHash && iframeHash !== data.hash) {
+						// Iframe has stale data - reload with crossfade
+						const newUrl = buildChartReloadUrl(chartUrl, data.hash);
+						swapChartIframe(iframe, newUrl, chartUrl);
+					}
+				} else if (prevHash !== data.hash) {
+					// Hash changed - reload iframe with crossfade
+					const newUrl = buildChartReloadUrl(chartUrl, data.hash);
+					swapChartIframe(iframe, newUrl, chartUrl);
 				}
+
 				if (MAX_CHART_HASHES > 0) {
 					setBoundedCache(chartHashes, cacheKey, data.hash, MAX_CHART_HASHES);
 				}
