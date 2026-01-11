@@ -67,6 +67,7 @@
 
 		submitBtn.disabled = true;
 		submitBtn.textContent = 'Logging in...';
+		let lockedOut = false;
 
 		try {
 			const response = await fetch('/api/auth/login', {
@@ -87,6 +88,7 @@
 
 			// Handle errors
 			if (response.status === 429 && data.lockedOut) {
+				lockedOut = true;
 				shake();
 				startLockoutCountdown(data.remainingSeconds || 900);
 			} else {
@@ -95,8 +97,11 @@
 		} catch (err) {
 			shake();
 		} finally {
-			submitBtn.disabled = false;
-			submitBtn.textContent = 'Login';
+			// Don't re-enable if locked out - countdown will handle it
+			if (!lockedOut) {
+				submitBtn.disabled = false;
+				submitBtn.textContent = 'Login';
+			}
 		}
 	});
 
