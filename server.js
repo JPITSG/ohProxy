@@ -250,6 +250,10 @@ const WEBSOCKET_CONFIG = SERVER_CONFIG.websocket || {};
 const WS_MODE = (WEBSOCKET_CONFIG.mode === 'atmosphere') ? 'atmosphere' : 'polling';
 const WS_POLLING_INTERVAL_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalMs) || 500;
 const WS_POLLING_INTERVAL_BG_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalBgMs) || 2000;
+const WS_ATMOSPHERE_NO_UPDATE_WARN_MS = Math.max(
+	0,
+	configNumber(WEBSOCKET_CONFIG.atmosphereNoUpdateWarnMs, 5000)
+);
 const PREVIEW_CONFIG = SERVER_CONFIG.videoPreview || {};
 const VIDEO_PREVIEW_INTERVAL_MS = configNumber(PREVIEW_CONFIG.intervalMs, 900000);
 const VIDEO_PREVIEW_PRUNE_HOURS = configNumber(PREVIEW_CONFIG.pruneAfterHours, 24);
@@ -1142,6 +1146,7 @@ const liveConfig = {
 	wsMode: WS_MODE,
 	wsPollingIntervalMs: WS_POLLING_INTERVAL_MS,
 	wsPollingIntervalBgMs: WS_POLLING_INTERVAL_BG_MS,
+	wsAtmosphereNoUpdateWarnMs: WS_ATMOSPHERE_NO_UPDATE_WARN_MS,
 	rrdPath: RRD_PATH,
 };
 
@@ -1270,6 +1275,10 @@ function reloadLiveConfig() {
 	liveConfig.wsMode = (newWsConfig.mode === 'atmosphere') ? 'atmosphere' : 'polling';
 	liveConfig.wsPollingIntervalMs = configNumber(newWsConfig.pollingIntervalMs) || 500;
 	liveConfig.wsPollingIntervalBgMs = configNumber(newWsConfig.pollingIntervalBgMs) || 2000;
+	liveConfig.wsAtmosphereNoUpdateWarnMs = Math.max(
+		0,
+		configNumber(newWsConfig.atmosphereNoUpdateWarnMs, WS_ATMOSPHERE_NO_UPDATE_WARN_MS)
+	);
 	const newPaths = newServer.paths || {};
 	liveConfig.rrdPath = safeText(newPaths.rrd) || '';
 
@@ -1304,6 +1313,7 @@ function reloadLiveConfig() {
 		startWsPushIfNeeded();
 	}
 
+	syncAtmosphereNoUpdateMonitor();
 	logMessage('Config hot-reloaded successfully');
 	return false; // No restart required
 }
@@ -1561,8 +1571,96 @@ function parseAtmosphereUpdate(body) {
 	}
 }
 
+function getAtmosphereNoUpdateWarnMs() {
+	return Math.max(
+		0,
+		configNumber(liveConfig.wsAtmosphereNoUpdateWarnMs, WS_ATMOSPHERE_NO_UPDATE_WARN_MS)
+	);
+}
+
+function stopAtmosphereNoUpdateMonitor() {
+	if (atmosphereNoUpdateTimer) {
+		clearInterval(atmosphereNoUpdateTimer);
+		atmosphereNoUpdateTimer = null;
+	}
+	atmosphereNoUpdateWarned = false;
+	atmosphereLastItemUpdateAt = 0;
+	atmosphereMonitorStartedAt = 0;
+}
+
+function startAtmosphereNoUpdateMonitor() {
+	if (atmosphereNoUpdateTimer) return;
+	if (liveConfig.wsMode !== 'atmosphere' || wss.clients.size === 0) return;
+	const warnMs = getAtmosphereNoUpdateWarnMs();
+	if (!warnMs) return;
+
+	atmosphereNoUpdateTimer = setInterval(() => {
+		const thresholdMs = getAtmosphereNoUpdateWarnMs();
+		if (!thresholdMs) {
+			stopAtmosphereNoUpdateMonitor();
+			return;
+		}
+		if (liveConfig.wsMode !== 'atmosphere' || wss.clients.size === 0) {
+			stopAtmosphereNoUpdateMonitor();
+			return;
+		}
+		const now = Date.now();
+		const last = atmosphereLastItemUpdateAt || atmosphereMonitorStartedAt || now;
+		const ageMs = now - last;
+		if (ageMs >= thresholdMs && !atmosphereNoUpdateWarned) {
+			const ageSec = Math.round(ageMs / 1000);
+			const thresholdSec = Math.round(thresholdMs / 1000);
+			logMessage(`[Atmosphere] No item updates received in ${ageSec}s (threshold: ${thresholdSec}s)`);
+			atmosphereNoUpdateWarned = true;
+		}
+	}, 1000);
+}
+
+function resetAtmosphereNoUpdateMonitor() {
+	const now = Date.now();
+	atmosphereLastItemUpdateAt = now;
+	atmosphereMonitorStartedAt = now;
+	atmosphereNoUpdateWarned = false;
+	startAtmosphereNoUpdateMonitor();
+}
+
+function noteAtmosphereItemUpdate() {
+	atmosphereLastItemUpdateAt = Date.now();
+	atmosphereNoUpdateWarned = false;
+}
+
+function syncAtmosphereNoUpdateMonitor() {
+	const warnMs = getAtmosphereNoUpdateWarnMs();
+	if (liveConfig.wsMode !== 'atmosphere' || wss.clients.size === 0 || warnMs <= 0) {
+		stopAtmosphereNoUpdateMonitor();
+		return;
+	}
+	if (!atmosphereNoUpdateTimer) {
+		resetAtmosphereNoUpdateMonitor();
+	}
+}
+
+function scheduleAtmosphereResubscribe(reason) {
+	if (liveConfig.wsMode !== 'atmosphere' || wss.clients.size === 0) return;
+	if (atmosphereResubscribeTimer) return;
+	logMessage(`[Atmosphere] Resubscribing (${reason})`);
+	atmosphereResubscribeTimer = setTimeout(() => {
+		atmosphereResubscribeTimer = null;
+		connectAtmosphere();
+	}, 250);
+}
+
 // Track multiple page subscriptions
 const atmospherePages = new Map(); // pageId -> { connection, trackingId, reconnectTimer }
+let atmosphereConnectInFlight = false;
+let atmosphereResubscribeTimer = null;
+let atmosphereResubscribeRequested = false;
+let atmosphereNeedsSitemapRefresh = false;
+let lastAtmosphereSitemapName = '';
+let atmosphereNoUpdateTimer = null;
+let atmosphereNoUpdateWarned = false;
+let atmosphereLastItemUpdateAt = 0;
+let atmosphereMonitorStartedAt = 0;
 
 // Track item states to detect actual changes (not just openHAB reporting unchanged items)
 const itemStates = new Map(); // itemName -> state
@@ -1680,7 +1778,7 @@ function connectAtmospherePage(pageId) {
 
 					const allChanges = [...actualChanges, ...groupChanges];
 					if (allChanges.length > 0) {
-						logMessage(`[Atmosphere:${pageId}] ${allChanges.length} items changed (${update.changes.length} reported)`);
+						noteAtmosphereItemUpdate();
 						if (wss.clients.size > 0) {
 							// Apply group state overrides before broadcasting
 							const transformedChanges = await applyGroupStateToItems(allChanges);
@@ -2114,7 +2212,18 @@ function generateChart(item, period, mode, title) {
 }
 
 async function fetchAllPages() {
-	const sitemapName = backgroundState.sitemap.name || 'default';
+	let sitemapName = backgroundState.sitemap.name || '';
+	let needsSitemapRefresh = false;
+
+	if (!sitemapName) {
+		await refreshSitemapCache({ skipAtmosphereResubscribe: true });
+		sitemapName = backgroundState.sitemap.name || '';
+	}
+
+	if (!sitemapName) {
+		sitemapName = 'default';
+		needsSitemapRefresh = true;
+	}
 	try {
 		const result = await fetchOpenhab(`/rest/sitemaps/${sitemapName}?type=json`);
 		if (!result.ok) {
@@ -2122,23 +2231,47 @@ async function fetchAllPages() {
 		}
 		const data = JSON.parse(result.body);
 		const pages = extractPageIds(data);
-		return Array.from(pages);
+		return {
+			pages: Array.from(pages),
+			sitemapName,
+			needsSitemapRefresh,
+		};
 	} catch (e) {
 		logMessage(`[Atmosphere] Failed to fetch pages: ${e.message}`);
-		return [sitemapName]; // fallback to just the sitemap name
+		return {
+			pages: [sitemapName], // fallback to just the sitemap name
+			sitemapName,
+			needsSitemapRefresh: true,
+		};
 	}
 }
 
 async function connectAtmosphere() {
-	// Stop all existing connections
-	stopAllAtmosphereConnections();
+	if (atmosphereConnectInFlight) {
+		atmosphereResubscribeRequested = true;
+		return;
+	}
+	atmosphereConnectInFlight = true;
+	try {
+		// Stop all existing connections
+		stopAllAtmosphereConnections();
+		resetAtmosphereNoUpdateMonitor();
 
-	// Fetch all pages and subscribe to each
-	const pages = await fetchAllPages();
-	logMessage(`[Atmosphere] Subscribing to ${pages.length} pages: ${pages.join(', ')}`);
+		// Fetch all pages and subscribe to each
+		const { pages, sitemapName, needsSitemapRefresh } = await fetchAllPages();
+		atmosphereNeedsSitemapRefresh = needsSitemapRefresh;
+		lastAtmosphereSitemapName = sitemapName || '';
 
-	for (const pageId of pages) {
-		connectAtmospherePage(pageId);
+		logMessage(`[Atmosphere] Subscribing to ${pages.length} pages: ${pages.join(', ')}`);
+		for (const pageId of pages) {
+			connectAtmospherePage(pageId);
+		}
+	} finally {
+		atmosphereConnectInFlight = false;
+		if (atmosphereResubscribeRequested) {
+			atmosphereResubscribeRequested = false;
+			setTimeout(() => connectAtmosphere(), 0);
+		}
 	}
 }
 
@@ -2152,6 +2285,14 @@ function stopAllAtmosphereConnections() {
 		}
 	}
 	atmospherePages.clear();
+	if (atmosphereResubscribeTimer) {
+		clearTimeout(atmosphereResubscribeTimer);
+		atmosphereResubscribeTimer = null;
+	}
+	atmosphereResubscribeRequested = false;
+	atmosphereNeedsSitemapRefresh = false;
+	lastAtmosphereSitemapName = '';
+	stopAtmosphereNoUpdateMonitor();
 }
 
 function startAtmosphereIfNeeded() {
@@ -3315,7 +3456,7 @@ function getAiStructureMap() {
 	}
 }
 
-async function refreshSitemapCache() {
+async function refreshSitemapCache(options = {}) {
 	let body;
 	try {
 		body = await fetchOpenhab('/rest/sitemaps?type=json');
@@ -3353,6 +3494,21 @@ async function refreshSitemapCache() {
 		updatedAt: Date.now(),
 		ok: true,
 	};
+
+	if (!options.skipAtmosphereResubscribe) {
+		const nameChanged = lastAtmosphereSitemapName
+			&& backgroundState.sitemap.name
+			&& lastAtmosphereSitemapName !== backgroundState.sitemap.name;
+		if (liveConfig.wsMode === 'atmosphere' && wss.clients.size > 0) {
+			if (atmosphereNeedsSitemapRefresh || nameChanged) {
+				const reason = nameChanged ? 'sitemap changed' : 'sitemap cache refreshed';
+				atmosphereNeedsSitemapRefresh = false;
+				scheduleAtmosphereResubscribe(reason);
+			}
+		} else {
+			atmosphereNeedsSitemapRefresh = false;
+		}
+	}
 
 	// Trigger initial video preview capture on first successful sitemap pull
 	if (!videoPreviewInitialCaptureDone && VIDEO_PREVIEW_INTERVAL_MS > 0) {

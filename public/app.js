@@ -269,6 +269,8 @@ function setResumeResetUi(active) {
 		state.pageUrl = state.rootPageUrl;
 		state.pageTitle = state.rootPageTitle || state.pageTitle;
 		window.scrollTo(0, 0);
+		updateNavButtons();
+		syncHistory(true);
 	}
 }
 
@@ -5202,7 +5204,23 @@ function restoreNormalPolling() {
 	window.addEventListener('popstate', (event) => {
 		const next = event.state;
 		if (!next) {
-			if (imageViewer && !imageViewer.classList.contains('hidden')) closeImageViewer();
+			if (imageViewer && !imageViewer.classList.contains('hidden')) {
+				closeImageViewer();
+				return;
+			}
+			if (state.stack.length > 0) {
+				const prev = state.stack.pop();
+				if (prev?.pageUrl) {
+					state.pageUrl = prev.pageUrl;
+					state.pageTitle = prev.pageTitle || state.pageTitle;
+					updateNavButtons();
+					syncHistory(true);
+					queueScrollTop();
+					refresh(true);
+				} else {
+					updateNavButtons();
+				}
+			}
 			return;
 		}
 		if (next.imageViewer) {

@@ -151,6 +151,8 @@ module.exports = {
 			pollingIntervalMs: 500,
 			// Polling interval in ms when all clients are unfocused/background (>=100).
 			pollingIntervalBgMs: 2000,
+			// Warn if no Atmosphere item updates are received for this many ms (0 disables).
+			atmosphereNoUpdateWarnMs: 5000,
 		},
 		// Video preview screenshot configuration.
 		videoPreview: {
