@@ -1711,13 +1711,13 @@ function rtspUrlHash(url) {
 }
 
 // Chart cache helpers
-function chartCacheKey(item, period, width) {
-	return crypto.createHash('md5').update(`${item}|${period}|${width}`).digest('hex').substring(0, 16);
+function chartCacheKey(item, period, mode) {
+	return crypto.createHash('md5').update(`${item}|${period}|${mode || 'dark'}`).digest('hex').substring(0, 16);
 }
 
-function getChartCachePath(item, period, width) {
-	const hash = chartCacheKey(item, period, width);
-	return path.join(CHART_CACHE_DIR, `${hash}.png`);
+function getChartCachePath(item, period, mode) {
+	const hash = chartCacheKey(item, period, mode);
+	return path.join(CHART_CACHE_DIR, `${hash}.html`);
 }
 
 function isChartCacheValid(cachePath, period) {
@@ -4113,12 +4113,13 @@ app.get('/video-preview', (req, res) => {
 	res.sendFile(filePath);
 });
 
-// Chart endpoint with caching
-app.get('/chart', async (req, res) => {
+// Chart endpoint - generates interactive HTML charts from RRD data
+app.get('/chart', (req, res) => {
 	// Extract and validate parameters
 	const item = safeText(req.query.item || '').trim();
 	const period = safeText(req.query.period || '').trim();
-	const widthRaw = safeText(req.query.width || '').trim();
+	const mode = safeText(req.query.mode || '').trim().toLowerCase() || 'dark';
+	const title = safeText(req.query.title || '').trim();
 
 	// Validate item: a-zA-Z0-9_- max 50 chars
 	if (!item || !/^[a-zA-Z0-9_-]{1,50}$/.test(item)) {
@@ -4130,57 +4131,47 @@ app.get('/chart', async (req, res) => {
 		return res.status(400).type('text/plain').send('Invalid period parameter');
 	}
 
-	// Validate width: integer 0-10000
-	const width = parseInt(widthRaw, 10);
-	if (!Number.isFinite(width) || width < 0 || width > 10000) {
-		return res.status(400).type('text/plain').send('Invalid width parameter');
+	// Validate mode: light or dark
+	if (!['light', 'dark'].includes(mode)) {
+		return res.status(400).type('text/plain').send('Invalid mode parameter');
 	}
 
-	const height = Math.round(width / 2);
-	const cachePath = getChartCachePath(item, period, width);
+	const cachePath = getChartCachePath(item, period, mode);
 
 	// Check cache
 	if (isChartCacheValid(cachePath, period)) {
 		try {
-			const buffer = fs.readFileSync(cachePath);
-			res.setHeader('Content-Type', 'image/png');
+			const html = fs.readFileSync(cachePath, 'utf8');
+			res.setHeader('Content-Type', 'text/html; charset=utf-8');
 			res.setHeader('Cache-Control', `private, max-age=${Math.floor(CHART_PERIOD_TTL[period] / 1000)}`);
 			res.setHeader('X-Chart-Cache', 'hit');
-			return res.send(buffer);
+			return res.send(html);
 		} catch {
-			// Fall through to fetch
+			// Fall through to generate
 		}
 	}
 
-	// Fetch from openHAB
-	const chartPath = `/chart?items=${encodeURIComponent(item)}&period=${period}&w=${width}&h=${height}`;
+	// Generate HTML chart from RRD using genchart.py
 	try {
-		const response = await fetchOpenhabBinary(chartPath);
-		if (!response.ok) {
-			return res.status(response.status || 502).type('text/plain').send('Chart fetch failed');
-		}
+		ensureDir(CHART_CACHE_DIR);
+		const { execSync } = require('child_process');
+		const python3 = liveConfig.binaries?.python3 || 'python3';
+		const genchartPath = path.join(__dirname, 'genchart.py');
+		const rrdPath = `/var/lib/openhab/persistence/rrd4j/${item}.rrd`;
+		const titleArg = title ? ` -title "${title.replace(/"/g, '\\"')}"` : '';
+		const cmd = `${python3} "${genchartPath}" -o "${cachePath}" -mode ${mode} -rrd "${rrdPath}" -period ${period}${titleArg}`;
 
-		// Verify we got an image
-		const contentType = safeText(response.contentType).toLowerCase();
-		if (!contentType.includes('image/')) {
-			return res.status(502).type('text/plain').send('Invalid chart response');
-		}
+		execSync(cmd, { timeout: 5000, stdio: 'pipe' });
 
-		// Cache the successful response
-		try {
-			ensureDir(CHART_CACHE_DIR);
-			fs.writeFileSync(cachePath, response.body);
-		} catch (err) {
-			logMessage(`Chart cache write failed: ${err.message || err}`);
-		}
-
-		res.setHeader('Content-Type', response.contentType || 'image/png');
+		// Read and serve the generated HTML
+		const html = fs.readFileSync(cachePath, 'utf8');
+		res.setHeader('Content-Type', 'text/html; charset=utf-8');
 		res.setHeader('Cache-Control', `private, max-age=${Math.floor(CHART_PERIOD_TTL[period] / 1000)}`);
 		res.setHeader('X-Chart-Cache', 'miss');
-		res.send(response.body);
+		res.send(html);
 	} catch (err) {
-		logMessage(`Chart fetch error: ${err.message || err}`);
-		res.status(502).type('text/plain').send('Chart fetch failed');
+		logMessage(`Chart generation failed: ${err.message || err}`);
+		res.status(500).type('text/plain').send('Chart generation failed');
 	}
 });
 
