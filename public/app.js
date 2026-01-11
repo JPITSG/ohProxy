@@ -4633,6 +4633,25 @@ function noteActivity() {
 
 // --- Chart Hash Check (smart iframe refresh) ---
 let chartHashCheckInProgress = false;
+const chartTouchActive = new WeakSet();
+
+function setupChartInteractionTracking(iframe) {
+	if (iframe.dataset.interactionTracked) return;
+	iframe.dataset.interactionTracked = 'true';
+	iframe.addEventListener('touchstart', () => chartTouchActive.add(iframe), { passive: true });
+	iframe.addEventListener('touchend', () => chartTouchActive.delete(iframe), { passive: true });
+	iframe.addEventListener('touchcancel', () => chartTouchActive.delete(iframe), { passive: true });
+}
+
+function isChartBeingInteracted(iframe) {
+	// Check for touch interaction
+	if (chartTouchActive.has(iframe)) return true;
+	// Check for mouse hover
+	try {
+		if (iframe.matches(':hover')) return true;
+	} catch { /* ignore */ }
+	return false;
+}
 
 function readIframeChartHash(iframe) {
 	try {
@@ -4688,6 +4707,7 @@ function swapChartIframe(iframe, newSrc, baseUrl) {
 		container.style.position = 'relative';
 	}
 	container.appendChild(newIframe);
+	setupChartInteractionTracking(newIframe);
 
 	const timeoutId = setTimeout(() => {
 		// Timeout - remove new iframe, keep old
@@ -4722,6 +4742,9 @@ async function checkChartHashes() {
 
 	try {
 		for (const iframe of iframes) {
+			// Setup interaction tracking on first encounter
+			setupChartInteractionTracking(iframe);
+
 			const chartUrl = iframe.dataset.chartUrl || '';
 			if (!chartUrl) continue;
 
@@ -4745,20 +4768,32 @@ async function checkChartHashes() {
 				if (!data.hash) continue;
 
 				// On first check, read hash from iframe and compare
+				let swapped = false;
 				if (!prevHash) {
 					const iframeHash = readIframeChartHash(iframe);
 					if (iframeHash && iframeHash !== data.hash) {
-						// Iframe has stale data - reload with crossfade
-						const newUrl = buildChartReloadUrl(chartUrl, data.hash);
-						swapChartIframe(iframe, newUrl, chartUrl);
+						// Skip if user is interacting with chart
+						if (!isChartBeingInteracted(iframe)) {
+							const newUrl = buildChartReloadUrl(chartUrl, data.hash);
+							swapChartIframe(iframe, newUrl, chartUrl);
+							swapped = true;
+						}
+					} else {
+						swapped = true; // No swap needed, consider it done
 					}
 				} else if (prevHash !== data.hash) {
-					// Hash changed - reload iframe with crossfade
-					const newUrl = buildChartReloadUrl(chartUrl, data.hash);
-					swapChartIframe(iframe, newUrl, chartUrl);
+					// Skip if user is interacting with chart
+					if (!isChartBeingInteracted(iframe)) {
+						const newUrl = buildChartReloadUrl(chartUrl, data.hash);
+						swapChartIframe(iframe, newUrl, chartUrl);
+						swapped = true;
+					}
+				} else {
+					swapped = true; // Hashes match, no swap needed
 				}
 
-				if (MAX_CHART_HASHES > 0) {
+				// Only update cache if swap happened or wasn't needed
+				if (swapped && MAX_CHART_HASHES > 0) {
 					setBoundedCache(chartHashes, cacheKey, data.hash, MAX_CHART_HASHES);
 				}
 			} catch (e) {
