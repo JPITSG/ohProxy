@@ -167,8 +167,10 @@ module.exports = {
 			convert: '/usr/bin/convert',
 			// Shell binary path (used for auth failure notification commands).
 			shell: '/bin/sh',
-			// Python 3.9+ binary path (used for chart generation).
-			python3: '',
+		},
+		paths: {
+			// RRD4J persistence directory (for chart generation).
+			rrd: '',
 		},
 		// API keys for external services.
 		apiKeys: {
