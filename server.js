@@ -1294,6 +1294,10 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const APP_BUNDLE_PATH = path.join(PUBLIC_DIR, 'app.js');
 const STYLE_BUNDLE_PATH = path.join(PUBLIC_DIR, 'styles.css');
 const TAILWIND_BUNDLE_PATH = path.join(PUBLIC_DIR, 'tailwind.css');
+const CHART_JS_PATH = path.join(PUBLIC_DIR, 'chart.js');
+const CHART_CSS_PATH = path.join(PUBLIC_DIR, 'chart.css');
+const LOGIN_JS_PATH = path.join(PUBLIC_DIR, 'login.js');
+const LOGIN_HTML_PATH = path.join(PUBLIC_DIR, 'login.html');
 const INDEX_HTML_PATH = path.join(PUBLIC_DIR, 'index.html');
 const SERVICE_WORKER_PATH = path.join(PUBLIC_DIR, 'sw.js');
 const ICON_CACHE_ROOT = path.join(__dirname, 'cache', 'icon');
@@ -1304,6 +1308,7 @@ const iconInflight = new Map();
 const deltaCache = new Map();
 let indexTemplate = null;
 let serviceWorkerTemplate = null;
+let loginTemplate = null;
 const backgroundTasks = [];
 
 function registerBackgroundTask(name, intervalMs, run) {
@@ -1985,7 +1990,7 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, title, unit, mode) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${title}</title>
-<link rel="stylesheet" href="/chart.css?v=${assetVersion}">
+<link rel="stylesheet" href="/chart.${assetVersion}.css">
 </head>
 <body>
 <div class="container">
@@ -2007,7 +2012,7 @@ window._chartYMin=${yMin};
 window._chartYMax=${yMax};
 window._chartUnit="${unit}";
 </script>
-<script src="/chart.js?v=${assetVersion}"></script>
+<script src="/chart.${assetVersion}.js"></script>
 </body>
 </html>`;
 }
@@ -2440,6 +2445,13 @@ function renderServiceWorker() {
 	script = script.replace(/__SW_VERSION__/g, liveConfig.assetVersion);
 	script = script.replace(/__APPLE_TOUCH_VERSION__/g, liveConfig.appleTouchVersion);
 	return script;
+}
+
+function renderLoginHtml() {
+	if (!loginTemplate) loginTemplate = fs.readFileSync(LOGIN_HTML_PATH, 'utf8');
+	let html = loginTemplate;
+	html = html.replace(/__JS_VERSION__/g, liveConfig.assetVersion);
+	return html;
 }
 
 function sendIndex(req, res) {
@@ -3515,8 +3527,8 @@ app.use((req, res, next) => {
 			}
 		}
 
-		// Allow login.js and fonts to load (needed by login page)
-		if (req.path === '/login.js' || req.path.startsWith('/fonts/')) {
+		// Allow login.js (versioned) and fonts to load (needed by login page)
+		if (/^\/login\.v[\w.-]+\.js$/i.test(req.path) || req.path.startsWith('/fonts/')) {
 			req.ohProxyAuth = 'unauthenticated';
 			req.ohProxyUser = '';
 			return next();
@@ -3547,7 +3559,8 @@ app.use((req, res, next) => {
 			// Set CSRF cookie for login page
 			const csrfToken = generateCsrfToken();
 			setCsrfCookie(res, csrfToken);
-			res.sendFile(path.join(__dirname, 'public', 'login.html'));
+			res.setHeader('Content-Type', 'text/html; charset=utf-8');
+			res.send(renderLoginHtml());
 			return;
 		}
 
@@ -4007,7 +4020,7 @@ Rules:
 	}
 });
 
-app.get('/sw.js', (req, res) => {
+app.get(/^\/sw\.v[\w.-]+\.js$/i, (req, res) => {
 	sendServiceWorker(res);
 });
 
@@ -4236,6 +4249,12 @@ app.get('/login', (req, res) => {
 	res.redirect('/');
 });
 
+// Silent logout endpoint - clears auth cookie and redirects to /
+app.get('/logout', (req, res) => {
+	clearAuthCookie(res);
+	res.redirect('/');
+});
+
 app.get(/^\/app\.v[\w.-]+\.js$/i, (req, res) => {
 	sendVersionedAsset(res, APP_BUNDLE_PATH, 'application/javascript; charset=utf-8');
 });
@@ -4246,6 +4265,18 @@ app.get(/^\/tailwind\.v[\w.-]+\.css$/i, (req, res) => {
 
 app.get(/^\/styles\.v[\w.-]+\.css$/i, (req, res) => {
 	sendVersionedAsset(res, STYLE_BUNDLE_PATH, 'text/css; charset=utf-8');
+});
+
+app.get(/^\/chart\.v[\w.-]+\.js$/i, (req, res) => {
+	sendVersionedAsset(res, CHART_JS_PATH, 'application/javascript; charset=utf-8');
+});
+
+app.get(/^\/chart\.v[\w.-]+\.css$/i, (req, res) => {
+	sendVersionedAsset(res, CHART_CSS_PATH, 'text/css; charset=utf-8');
+});
+
+app.get(/^\/login\.v[\w.-]+\.js$/i, (req, res) => {
+	sendVersionedAsset(res, LOGIN_JS_PATH, 'application/javascript; charset=utf-8');
 });
 
 // --- Proxy FIRST (so bodies aren't eaten by any parsers) ---
