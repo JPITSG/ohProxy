@@ -753,6 +753,15 @@ function safeText(v) {
 	return (v === null || v === undefined) ? '' : String(v);
 }
 
+function escapeHtml(v) {
+	return safeText(v)
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
 function shouldHideTitle(itemName) {
 	const key = safeText(itemName).trim().toLowerCase();
 	return key ? HIDE_TITLE_SET.has(key) : false;
@@ -3901,7 +3910,7 @@ function updateCard(card, w, afterImage, info) {
 		if (!labelParts.state) {
 			controls.classList.add('mt-3');
 			controls.innerHTML = `
-				<div class="stateValue text-sm text-slate-300 font-semibold">${safeText(st) || '—'}</div>
+				<div class="stateValue text-sm text-slate-300 font-semibold">${escapeHtml(st) || '—'}</div>
 			`;
 		} else {
 			controls.innerHTML = '';
@@ -4448,9 +4457,9 @@ async function refresh(showLoading) {
 			els.grid.innerHTML = `
 				<div class="glass rounded-2xl p-5 sm:col-span-2 lg:col-span-3">
 					<div class="font-semibold">Couldn't load sitemap page</div>
-					<div class="mt-2 text-sm text-slate-300">${safeText(e.message)}</div>
+					<div class="mt-2 text-sm text-slate-300">${escapeHtml(e.message)}</div>
 					<div class="mt-4 text-xs text-slate-500">
-						Try opening <code class="text-slate-300">${safeText(state.pageUrl)}</code> in the browser to see what openHAB returns.
+						Try opening <code class="text-slate-300">${escapeHtml(state.pageUrl)}</code> in the browser to see what openHAB returns.
 					</div>
 				</div>
 			`;

@@ -464,7 +464,7 @@ function ensureVersion(value, name, errors) {
 }
 
 function ensureLogPath(value, name, errors) {
-	ensureString(value, name, { allowEmpty: false }, errors);
+	ensureString(value, name, { allowEmpty: true }, errors); // Empty disables logging
 	if (typeof value !== 'string' || value.trim() === '') return;
 	if (!path.isAbsolute(value)) {
 		errors.push(`${name} must be an absolute path but currently is ${describeValue(value)}`);
@@ -1980,7 +1980,8 @@ function generateChartPoints(data) {
 
 function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode) {
 	const theme = mode === 'dark' ? 'dark' : 'light';
-	const unitDisplay = unit !== '?' ? unit : '';
+	const safeTitle = escapeHtml(title);
+	const unitDisplay = unit !== '?' ? escapeHtml(unit) : '';
 	const legendHtml = unitDisplay ? `<div class="chart-legend"><span class="legend-line"></span><span>${unitDisplay}</span></div>` : '';
 	const assetVersion = liveConfig.assetVersion || 'v1';
 
@@ -1989,14 +1990,14 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${title}</title>
+<title>${safeTitle}</title>
 <link rel="stylesheet" href="/chart.${assetVersion}.css">
 </head>
 <body>
 <div class="container">
 <div class="chart-card">
 <div class="chart-header">
-<div class="chart-title-group"><h2 class="chart-title">${title}</h2></div>
+<div class="chart-title-group"><h2 class="chart-title">${safeTitle}</h2></div>
 <div class="chart-header-right">${legendHtml}</div>
 </div>
 <div class="chart-container" id="chartContainer">
@@ -4410,7 +4411,12 @@ app.use('/icon', createProxyMiddleware({
 
 // Serve local images from public/images/ before proxying to openHAB
 app.use('/images', (req, res, next) => {
-	const localPath = path.join(PUBLIC_DIR, 'images', req.path);
+	const imagesDir = path.join(PUBLIC_DIR, 'images');
+	const localPath = path.normalize(path.join(imagesDir, req.path));
+	// Prevent path traversal - ensure resolved path is within images directory
+	if (!localPath.startsWith(imagesDir + path.sep) && localPath !== imagesDir) {
+		return next();
+	}
 	if (fs.existsSync(localPath) && fs.statSync(localPath).isFile()) {
 		return res.sendFile(localPath);
 	}

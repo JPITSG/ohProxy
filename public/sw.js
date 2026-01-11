@@ -4,7 +4,7 @@ const CACHE_NAME = 'ohproxy-shell-__JS_VERSION__-__CSS_VERSION__';
 const PRECACHE_URLS = [
 	'./',
 	'./index.html',
-	'./config.js',
+	// Note: config.js excluded - contains user-specific data, must not be cached
 	'./app.__JS_VERSION__.js',
 	'./tailwind.__CSS_VERSION__.css',
 	'./styles.__CSS_VERSION__.css',
@@ -42,6 +42,7 @@ function shouldHandleRequest(request, url) {
 	if (path.includes('/proxy')) return false;
 	if (path.includes('/search-index')) return false;
 	if (path.startsWith('/api/')) return false;
+	if (path.endsWith('/config.js')) return false; // User-specific, never cache
 	return true;
 }
 
