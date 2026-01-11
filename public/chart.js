@@ -1,30 +1,426 @@
-(function(){
-var p=new URLSearchParams(window.location.search);var m=p.get('mode');if(m==='dark'||m==='light'){document.documentElement.setAttribute('data-theme',m)}else{var sv=localStorage.getItem('theme');var d=window.matchMedia('(prefers-color-scheme:dark)').matches;document.documentElement.setAttribute('data-theme',sv||(d?'dark':'light'))}
-window.ChartRenderer=class{constructor(cid,sid){this.container=document.getElementById(cid);this.svg=document.getElementById(sid);this.tooltip=document.getElementById('tooltip');this.tooltipValue=document.getElementById('tooltipValue');this.tooltipLabel=document.getElementById('tooltipLabel');this.padding={top:25,right:45,bottom:60,left:35};this.points=[];this.init();window.addEventListener('resize',()=>this.render())}
-init(){this.render()}
-svg$(t,a){var e=document.createElementNS('http://www.w3.org/2000/svg',t);for(var k in a)e.setAttribute(k,a[k]);return e}
-render(){var rect=this.container.getBoundingClientRect();var w=rect.width,h=rect.height;var sm=w<500;var pad=sm?{top:15,right:45,bottom:40,left:22}:this.padding;var cw=w-pad.left-pad.right,ch=h-pad.top-pad.bottom;var iL=sm?10:25,iR=sm?10:25;var dw=cw-iL-iR;
-this.svg.innerHTML='';var $=(t,a)=>this.svg$(t,a);
-var defs=$('defs',{});var grad=$('linearGradient',{id:'areaGradient',x1:'0%',y1:'0%',x2:'0%',y2:'100%'});grad.appendChild($('stop',{offset:'0%',style:'stop-color:var(--chart-gradient-start)'}));grad.appendChild($('stop',{offset:'50%',style:'stop-color:var(--chart-gradient-start);stop-opacity:0.6'}));grad.appendChild($('stop',{offset:'100%',style:'stop-color:var(--chart-gradient-end)'}));defs.appendChild(grad);
-var hM=$('mask',{id:'hGridMask',maskUnits:'objectBoundingBox',maskContentUnits:'objectBoundingBox'});var hG=$('linearGradient',{id:'hGridGrad',x1:'0%',y1:'0%',x2:'100%',y2:'0%'});hG.innerHTML='<stop offset="0%" stop-color="white" stop-opacity="0"/><stop offset="3%" stop-color="white" stop-opacity="1"/><stop offset="97%" stop-color="white" stop-opacity="1"/><stop offset="100%" stop-color="white" stop-opacity="0"/>';defs.appendChild(hG);hM.appendChild($('rect',{x:'0',y:'0',width:'1',height:'1',fill:'url(#hGridGrad)'}));defs.appendChild(hM);
-var vM=$('mask',{id:'vGridMask',maskUnits:'objectBoundingBox',maskContentUnits:'objectBoundingBox'});var vG=$('linearGradient',{id:'vGridGrad',x1:'0%',y1:'0%',x2:'0%',y2:'100%'});vG.innerHTML='<stop offset="0%" stop-color="white" stop-opacity="0"/><stop offset="3%" stop-color="white" stop-opacity="1"/><stop offset="97%" stop-color="white" stop-opacity="1"/><stop offset="100%" stop-color="white" stop-opacity="0"/>';defs.appendChild(vG);vM.appendChild($('rect',{x:'0',y:'0',width:'1',height:'1',fill:'url(#vGridGrad)'}));defs.appendChild(vM);
-var cp=$('clipPath',{id:'chartClip'});cp.appendChild($('rect',{x:'0',y:'0',width:cw,height:ch}));defs.appendChild(cp);this.svg.appendChild(defs);
-var g=$('g',{transform:'translate('+pad.left+','+pad.top+')'});var hGG=$('g',{mask:'url(#hGridMask)'});var vGG=$('g',{mask:'url(#vGridMask)'});
-var yR=window._chartYMax-window._chartYMin;var nY=sm?5:6;var uS=window._chartUnit&&window._chartUnit!=='?'?' '+window._chartUnit:'';
-if(sm){for(var i=0;i<5;i++){var y=window._chartYMin+(yR*i/4);var yP=ch-(i/4)*ch;hGG.appendChild($('line',{class:'grid-line',x1:0,y1:yP,x2:cw,y2:yP}));var l=$('text',{class:'axis-label',x:-8,y:yP+4,'text-anchor':'end'});l.textContent=this.fmt(y)+uS;g.appendChild(l)}}else{var yS=this.nS(Math.abs(yR),nY);var sY=Math.floor(window._chartYMin/yS)*yS;for(var y=sY;y<=window._chartYMax+yS*0.1;y+=yS){if(y<window._chartYMin-yS*0.1)continue;var yP=ch-((y-window._chartYMin)/yR)*ch;if(yP>=-5&&yP<=ch+5){hGG.appendChild($('line',{class:'grid-line',x1:0,y1:yP,x2:cw,y2:yP}));var l=$('text',{class:'axis-label',x:-8,y:yP+4,'text-anchor':'end'});l.textContent=this.fmt(y)+uS;g.appendChild(l)}}}g.appendChild(hGG);
-var mX=Math.min(window._chartXLabels.length,Math.floor(dw/70));var xSt=Math.max(1,Math.ceil(window._chartXLabels.length/mX));window._chartXLabels.forEach((ld,i)=>{if(i%xSt!==0&&i!==window._chartXLabels.length-1)return;var lt=typeof ld==='object'?ld.text:ld;var lp=typeof ld==='object'?ld.pos:null;var xP=lp!==null?iL+(lp/100)*dw:iL+(window._chartXLabels.length>1?(i/(window._chartXLabels.length-1))*dw:dw/2);vGG.appendChild($('line',{class:'grid-line',x1:xP,y1:0,x2:xP,y2:ch}));var t=$('text',{class:'axis-label',x:xP,y:ch+25,'text-anchor':'middle'});t.textContent=lt;g.appendChild(t)});g.appendChild(vGG);
-this.points=[];var minP=null,maxP=null;for(var i=0;i<window._chartData.length;i++){var d=window._chartData[i];var pt={x:iL+(d.x/100)*dw,y:ch-((d.y-window._chartYMin)/yR)*ch,value:d.y,t:d.t,index:i};this.points.push(pt);if(!minP||pt.value<minP.value)minP=pt;if(!maxP||pt.value>maxP.value)maxP=pt}
-if(this.points.length>0){var lP=this.cP(this.points);var cG=$('g',{'clip-path':'url(#chartClip)'});var aP=lP+' L '+this.points[this.points.length-1].x+' '+ch+' L '+this.points[0].x+' '+ch+' Z';cG.appendChild($('path',{class:'chart-area',d:aP}));cG.appendChild($('path',{class:'chart-line-glow',d:lP}));cG.appendChild($('path',{class:'chart-line',d:lP}));g.appendChild(cG);
-if(!sm){this.circleData=[];var pG=$('g',{class:'data-points'});var gX=[];for(var i=0;i<window._chartXLabels.length;i++){var ld=window._chartXLabels[i];var lp=typeof ld==='object'?ld.pos:null;if(lp!==null)gX.push({x:iL+(lp/100)*dw,delay:1.2+i*0.05})}
-var mD=['1.0s','1.1s'];[minP,maxP].forEach((pt,idx)=>{var c=$('circle',{class:'data-point',cx:pt.x,cy:pt.y,r:5});c.style.animationDelay=mD[idx];c.dataset.idx=this.circleData.length;this.circleData.push(pt);pG.appendChild(c)});
-for(var i=1;i<this.points.length;i++){var pv=this.points[i-1],cr=this.points[i];var mnX=Math.min(pv.x,cr.x),mxX=Math.max(pv.x,cr.x);for(var j=gX.length-1;j>=0;j--){var gd=gX[j];if(gd.x>=mnX&&gd.x<=mxX){var f=(gd.x-pv.x)/(cr.x-pv.x);var iY=pv.y+f*(cr.y-pv.y);var iV=pv.value+f*(cr.value-pv.value);var iT=pv.t+f*(cr.t-pv.t);var c=$('circle',{class:'data-point',cx:gd.x,cy:iY,r:5});c.style.animationDelay=gd.delay+'s';c.dataset.idx=this.circleData.length;this.circleData.push({x:gd.x,y:iY,value:iV,t:iT});pG.appendChild(c);gX.splice(j,1)}}}
-pG.addEventListener('mouseenter',e=>{if(e.target.classList.contains('data-point'))this.sT(e,this.circleData[e.target.dataset.idx])},true);pG.addEventListener('mouseleave',e=>{if(e.target.classList.contains('data-point'))this.hT()},true);g.appendChild(pG)}}
-this.svg.appendChild(g)}
-cP(pts){if(pts.length<2)return'';var p=['M '+pts[0].x+' '+pts[0].y];for(var i=1;i<pts.length;i++)p.push('L '+pts[i].x+' '+pts[i].y);return p.join(' ')}
-nS(r,t){var rough=r/t;var mag=Math.pow(10,Math.floor(Math.log10(rough)));var res=rough/mag;var nice=res<=1.5?1:res<=3?2:res<=7?5:10;return nice*mag}
-fmt(n){if(n===0)return'0.0';if(Number.isInteger(n)||Math.abs(n-Math.round(n))<0.0001){var r=Math.round(n);if(Math.abs(r)>=100)return r.toFixed(0);return r.toFixed(1)}if(Math.abs(n)>=1000)return n.toFixed(0);if(Math.abs(n)>=100)return n.toFixed(0);if(Math.abs(n)>=10)return n.toFixed(1);if(Math.abs(n)>=1)return n.toFixed(1);if(Math.abs(n)>=0.1)return n.toFixed(2);return n.toFixed(2)}
-fmtTs(ts){var d=new Date(ts);var h=d.getHours(),mi=d.getMinutes();var time=h+':'+(mi<10?'0':'')+mi;var mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];return time+', '+mon+' '+d.getDate()}
-sT(e,pt){var r=this.container.getBoundingClientRect();var x=e.clientX-r.left,y=e.clientY-r.top;this.tooltipValue.textContent=this.fmt(pt.value)+(window._chartUnit&&window._chartUnit!=='?'?' '+window._chartUnit:'');this.tooltipLabel.textContent=pt.t?this.fmtTs(pt.t):'';var tx=x+15,ty=y-15;if(tx+120>r.width)tx=x-120;if(ty<10)ty=y+15;this.tooltip.style.left=tx+'px';this.tooltip.style.top=ty+'px';this.tooltip.classList.add('visible')}
-hT(){this.tooltip.classList.remove('visible')}};
-document.addEventListener('DOMContentLoaded',function(){new window.ChartRenderer('chartContainer','chartSvg')});
+(function() {
+	// Set theme from URL param, localStorage, or system preference
+	var params = new URLSearchParams(window.location.search);
+	var mode = params.get('mode');
+	if (mode === 'dark' || mode === 'light') {
+		document.documentElement.setAttribute('data-theme', mode);
+	} else {
+		var saved = localStorage.getItem('theme');
+		var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+		document.documentElement.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
+	}
+
+	window.ChartRenderer = class {
+		constructor(containerId, svgId) {
+			this.container = document.getElementById(containerId);
+			this.svg = document.getElementById(svgId);
+			this.tooltip = document.getElementById('tooltip');
+			this.tooltipValue = document.getElementById('tooltipValue');
+			this.tooltipLabel = document.getElementById('tooltipLabel');
+			this.padding = { top: 25, right: 45, bottom: 60, left: 35 };
+			this.points = [];
+			this.layout = {};
+			this.tapCircle = null;
+			this.hideTimer = null;
+			this.init();
+			window.addEventListener('resize', () => this.render());
+		}
+
+		init() {
+			this.render();
+			this.container.addEventListener('click', e => this.onClick(e));
+			this.container.addEventListener('touchend', e => this.onClick(e));
+		}
+
+		svg$(tag, attrs) {
+			var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+			for (var key in attrs) {
+				el.setAttribute(key, attrs[key]);
+			}
+			return el;
+		}
+
+		render() {
+			var rect = this.container.getBoundingClientRect();
+			var w = rect.width;
+			var h = rect.height;
+			var sm = w < 500;
+			var pad = sm ? { top: 15, right: 45, bottom: 40, left: 22 } : this.padding;
+			var cw = w - pad.left - pad.right;
+			var ch = h - pad.top - pad.bottom;
+			var iL = sm ? 10 : 25;
+			var iR = sm ? 10 : 25;
+			var dw = cw - iL - iR;
+
+			this.layout = { sm: sm, pad: pad, cw: cw, ch: ch, iL: iL, dw: dw };
+			this.svg.innerHTML = '';
+
+			var $ = (t, a) => this.svg$(t, a);
+
+			// Defs: gradient, masks, clip path
+			var defs = $('defs', {});
+
+			var grad = $('linearGradient', { id: 'areaGradient', x1: '0%', y1: '0%', x2: '0%', y2: '100%' });
+			grad.appendChild($('stop', { offset: '0%', style: 'stop-color:var(--chart-gradient-start)' }));
+			grad.appendChild($('stop', { offset: '50%', style: 'stop-color:var(--chart-gradient-start);stop-opacity:0.6' }));
+			grad.appendChild($('stop', { offset: '100%', style: 'stop-color:var(--chart-gradient-end)' }));
+			defs.appendChild(grad);
+
+			var hMask = $('mask', { id: 'hGridMask', maskUnits: 'objectBoundingBox', maskContentUnits: 'objectBoundingBox' });
+			var hGrad = $('linearGradient', { id: 'hGridGrad', x1: '0%', y1: '0%', x2: '100%', y2: '0%' });
+			hGrad.innerHTML = '<stop offset="0%" stop-color="white" stop-opacity="0"/><stop offset="3%" stop-color="white" stop-opacity="1"/><stop offset="97%" stop-color="white" stop-opacity="1"/><stop offset="100%" stop-color="white" stop-opacity="0"/>';
+			defs.appendChild(hGrad);
+			hMask.appendChild($('rect', { x: '0', y: '0', width: '1', height: '1', fill: 'url(#hGridGrad)' }));
+			defs.appendChild(hMask);
+
+			var vMask = $('mask', { id: 'vGridMask', maskUnits: 'objectBoundingBox', maskContentUnits: 'objectBoundingBox' });
+			var vGrad = $('linearGradient', { id: 'vGridGrad', x1: '0%', y1: '0%', x2: '0%', y2: '100%' });
+			vGrad.innerHTML = '<stop offset="0%" stop-color="white" stop-opacity="0"/><stop offset="3%" stop-color="white" stop-opacity="1"/><stop offset="97%" stop-color="white" stop-opacity="1"/><stop offset="100%" stop-color="white" stop-opacity="0"/>';
+			defs.appendChild(vGrad);
+			vMask.appendChild($('rect', { x: '0', y: '0', width: '1', height: '1', fill: 'url(#vGridGrad)' }));
+			defs.appendChild(vMask);
+
+			var clipPath = $('clipPath', { id: 'chartClip' });
+			clipPath.appendChild($('rect', { x: '0', y: '0', width: cw, height: ch }));
+			defs.appendChild(clipPath);
+
+			this.svg.appendChild(defs);
+
+			// Main group
+			var g = $('g', { transform: 'translate(' + pad.left + ',' + pad.top + ')' });
+			var hGridGroup = $('g', { mask: 'url(#hGridMask)' });
+			var vGridGroup = $('g', { mask: 'url(#vGridMask)' });
+
+			var yRange = window._chartYMax - window._chartYMin;
+			var numYLines = sm ? 5 : 6;
+			var unitSuffix = window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '';
+
+			// Y-axis grid and labels
+			if (sm) {
+				for (var i = 0; i < 5; i++) {
+					var y = window._chartYMin + (yRange * i / 4);
+					var yPos = ch - (i / 4) * ch;
+					hGridGroup.appendChild($('line', { class: 'grid-line', x1: 0, y1: yPos, x2: cw, y2: yPos }));
+					var label = $('text', { class: 'axis-label', x: -8, y: yPos + 4, 'text-anchor': 'end' });
+					label.textContent = this.fmt(y) + unitSuffix;
+					g.appendChild(label);
+				}
+			} else {
+				var yStep = this.niceStep(Math.abs(yRange), numYLines);
+				var startY = Math.floor(window._chartYMin / yStep) * yStep;
+				for (var y = startY; y <= window._chartYMax + yStep * 0.1; y += yStep) {
+					if (y < window._chartYMin - yStep * 0.1) continue;
+					var yPos = ch - ((y - window._chartYMin) / yRange) * ch;
+					if (yPos >= -5 && yPos <= ch + 5) {
+						hGridGroup.appendChild($('line', { class: 'grid-line', x1: 0, y1: yPos, x2: cw, y2: yPos }));
+						var label = $('text', { class: 'axis-label', x: -8, y: yPos + 4, 'text-anchor': 'end' });
+						label.textContent = this.fmt(y) + unitSuffix;
+						g.appendChild(label);
+					}
+				}
+			}
+			g.appendChild(hGridGroup);
+
+			// X-axis grid and labels
+			var maxXLabels = Math.min(window._chartXLabels.length, Math.floor(dw / 70));
+			var xStep = Math.max(1, Math.ceil(window._chartXLabels.length / maxXLabels));
+			window._chartXLabels.forEach((labelData, i) => {
+				if (i % xStep !== 0 && i !== window._chartXLabels.length - 1) return;
+				var labelText = typeof labelData === 'object' ? labelData.text : labelData;
+				var labelPos = typeof labelData === 'object' ? labelData.pos : null;
+				var xPos = labelPos !== null
+					? iL + (labelPos / 100) * dw
+					: iL + (window._chartXLabels.length > 1 ? (i / (window._chartXLabels.length - 1)) * dw : dw / 2);
+				vGridGroup.appendChild($('line', { class: 'grid-line', x1: xPos, y1: 0, x2: xPos, y2: ch }));
+				var text = $('text', { class: 'axis-label', x: xPos, y: ch + 25, 'text-anchor': 'middle' });
+				text.textContent = labelText;
+				g.appendChild(text);
+			});
+			g.appendChild(vGridGroup);
+
+			// Build points array
+			this.points = [];
+			var minPoint = null;
+			var maxPoint = null;
+			for (var i = 0; i < window._chartData.length; i++) {
+				var d = window._chartData[i];
+				var pt = {
+					x: iL + (d.x / 100) * dw,
+					y: ch - ((d.y - window._chartYMin) / yRange) * ch,
+					value: d.y,
+					t: d.t,
+					index: i
+				};
+				this.points.push(pt);
+				if (!minPoint || pt.value < minPoint.value) minPoint = pt;
+				if (!maxPoint || pt.value > maxPoint.value) maxPoint = pt;
+			}
+
+			// Draw chart if we have points
+			if (this.points.length > 0) {
+				var linePath = this.createPath(this.points);
+				var chartGroup = $('g', { 'clip-path': 'url(#chartClip)' });
+
+				// Area path
+				var areaPath = linePath + ' L ' + this.points[this.points.length - 1].x + ' ' + ch + ' L ' + this.points[0].x + ' ' + ch + ' Z';
+				chartGroup.appendChild($('path', { class: 'chart-area', d: areaPath }));
+				chartGroup.appendChild($('path', { class: 'chart-line-glow', d: linePath }));
+				chartGroup.appendChild($('path', { class: 'chart-line', d: linePath }));
+				g.appendChild(chartGroup);
+
+				// Data points (desktop only)
+				if (!sm) {
+					this.circleData = [];
+					var pointsGroup = $('g', { class: 'data-points' });
+
+					// Collect grid X positions for interpolated points
+					var gridXPositions = [];
+					for (var i = 0; i < window._chartXLabels.length; i++) {
+						var ld = window._chartXLabels[i];
+						var lp = typeof ld === 'object' ? ld.pos : null;
+						if (lp !== null) {
+							gridXPositions.push({ x: iL + (lp / 100) * dw, delay: 1.2 + i * 0.05 });
+						}
+					}
+
+					// Add min/max points
+					var delays = ['1.0s', '1.1s'];
+					[minPoint, maxPoint].forEach((pt, idx) => {
+						var circle = $('circle', { class: 'data-point', cx: pt.x, cy: pt.y, r: 5 });
+						circle.style.animationDelay = delays[idx];
+						circle.dataset.idx = this.circleData.length;
+						this.circleData.push(pt);
+						pointsGroup.appendChild(circle);
+					});
+
+					// Add interpolated points at grid lines
+					for (var i = 1; i < this.points.length; i++) {
+						var prev = this.points[i - 1];
+						var curr = this.points[i];
+						var minX = Math.min(prev.x, curr.x);
+						var maxX = Math.max(prev.x, curr.x);
+						for (var j = gridXPositions.length - 1; j >= 0; j--) {
+							var gd = gridXPositions[j];
+							if (gd.x >= minX && gd.x <= maxX) {
+								var t = (gd.x - prev.x) / (curr.x - prev.x);
+								var interpY = prev.y + t * (curr.y - prev.y);
+								var interpValue = prev.value + t * (curr.value - prev.value);
+								var interpTime = prev.t + t * (curr.t - prev.t);
+								var circle = $('circle', { class: 'data-point', cx: gd.x, cy: interpY, r: 5 });
+								circle.style.animationDelay = gd.delay + 's';
+								circle.dataset.idx = this.circleData.length;
+								this.circleData.push({ x: gd.x, y: interpY, value: interpValue, t: interpTime });
+								pointsGroup.appendChild(circle);
+								gridXPositions.splice(j, 1);
+							}
+						}
+					}
+
+					// Event listeners for desktop tooltips
+					pointsGroup.addEventListener('mouseenter', e => {
+						if (e.target.classList.contains('data-point')) {
+							this.showTooltip(e, this.circleData[e.target.dataset.idx]);
+						}
+					}, true);
+					pointsGroup.addEventListener('mouseleave', e => {
+						if (e.target.classList.contains('data-point')) {
+							this.hideTooltip();
+						}
+					}, true);
+
+					g.appendChild(pointsGroup);
+				}
+			}
+
+			this.svg.appendChild(g);
+		}
+
+		createPath(pts) {
+			if (pts.length < 2) return '';
+			var path = ['M ' + pts[0].x + ' ' + pts[0].y];
+			for (var i = 1; i < pts.length; i++) {
+				path.push('L ' + pts[i].x + ' ' + pts[i].y);
+			}
+			return path.join(' ');
+		}
+
+		niceStep(range, targetSteps) {
+			var rough = range / targetSteps;
+			var magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
+			var residual = rough / magnitude;
+			var nice = residual <= 1.5 ? 1 : residual <= 3 ? 2 : residual <= 7 ? 5 : 10;
+			return nice * magnitude;
+		}
+
+		fmt(n) {
+			if (n === 0) return '0.0';
+			if (Number.isInteger(n) || Math.abs(n - Math.round(n)) < 0.0001) {
+				var r = Math.round(n);
+				if (Math.abs(r) >= 100) return r.toFixed(0);
+				return r.toFixed(1);
+			}
+			if (Math.abs(n) >= 1000) return n.toFixed(0);
+			if (Math.abs(n) >= 100) return n.toFixed(0);
+			if (Math.abs(n) >= 10) return n.toFixed(1);
+			if (Math.abs(n) >= 1) return n.toFixed(1);
+			if (Math.abs(n) >= 0.1) return n.toFixed(2);
+			return n.toFixed(2);
+		}
+
+		fmtTimestamp(ts) {
+			var d = new Date(ts);
+			var h = d.getHours();
+			var mi = d.getMinutes();
+			var time = h + ':' + (mi < 10 ? '0' : '') + mi;
+			var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+			return time + ', ' + months[d.getMonth()] + ' ' + d.getDate();
+		}
+
+		onClick(e) {
+			if (!this.layout.sm) return;
+
+			var touch = e.changedTouches ? e.changedTouches[0] : e;
+			var rect = this.container.getBoundingClientRect();
+			var x = touch.clientX - rect.left - this.layout.pad.left;
+
+			if (x < 0 || x > this.layout.cw || this.points.length === 0) {
+				this.hideTooltip();
+				return;
+			}
+
+			// Find closest point by X position
+			var closest = null;
+			var minDist = Infinity;
+			for (var i = 0; i < this.points.length; i++) {
+				var dist = Math.abs(this.points[i].x - x);
+				if (dist < minDist) {
+					minDist = dist;
+					closest = this.points[i];
+				}
+			}
+
+			if (closest) {
+				this.showTapCircle(closest);
+				this.showMobileTooltip(closest);
+				if (this.hideTimer) clearTimeout(this.hideTimer);
+				this.hideTimer = setTimeout(() => this.hideTooltip(), 3000);
+			}
+		}
+
+		showTapCircle(pt) {
+			if (this.tapCircle) this.tapCircle.remove();
+			var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+			circle.setAttribute('cx', pt.x + this.layout.pad.left);
+			circle.setAttribute('cy', pt.y + this.layout.pad.top);
+			circle.setAttribute('r', '5');
+			circle.setAttribute('class', 'data-point');
+			circle.style.opacity = '1';
+			this.svg.appendChild(circle);
+			this.tapCircle = circle;
+		}
+
+		showTooltip(e, pt) {
+			var rect = this.container.getBoundingClientRect();
+			var x = e.clientX - rect.left;
+			var y = e.clientY - rect.top;
+
+			this.tooltipValue.textContent = this.fmt(pt.value) + (window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '');
+			this.tooltipLabel.textContent = pt.t ? this.fmtTimestamp(pt.t) : '';
+
+			var tx = x + 15;
+			var ty = y - 15;
+			if (tx + 120 > rect.width) tx = x - 120;
+			if (ty < 10) ty = y + 15;
+
+			this.tooltip.style.left = tx + 'px';
+			this.tooltip.style.top = ty + 'px';
+			this.tooltip.classList.add('visible');
+		}
+
+		showMobileTooltip(pt) {
+			this.tooltipValue.textContent = this.fmt(pt.value) + (window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '');
+			this.tooltipLabel.textContent = pt.t ? this.fmtTimestamp(pt.t) : '';
+
+			// Measure tooltip dimensions while hidden
+			this.tooltip.classList.remove('visible');
+			this.tooltip.style.visibility = 'hidden';
+			this.tooltip.style.display = 'block';
+
+			var rect = this.container.getBoundingClientRect();
+			var tooltipRect = this.tooltip.getBoundingClientRect();
+			var tw = tooltipRect.width;
+			var th = tooltipRect.height;
+
+			this.tooltip.style.display = '';
+			this.tooltip.style.visibility = '';
+
+			var cx = pt.x + this.layout.pad.left;
+			var cy = pt.y + this.layout.pad.top;
+
+			var circleR = 5;
+			var gap = 10;
+			var margin = 5;
+
+			// Calculate candidate positions: above, below, right, left of circle
+			var candidates = [
+				{ x: cx - tw / 2, y: cy - circleR - gap - th, pos: 'above' },
+				{ x: cx - tw / 2, y: cy + circleR + gap, pos: 'below' },
+				{ x: cx + circleR + gap, y: cy - th / 2, pos: 'right' },
+				{ x: cx - circleR - gap - tw, y: cy - th / 2, pos: 'left' }
+			];
+
+			// Score each candidate: prefer ones fully within bounds
+			var best = null;
+			var bestScore = -Infinity;
+
+			for (var i = 0; i < candidates.length; i++) {
+				var c = candidates[i];
+				var score = 0;
+
+				// Check bounds
+				var inLeft = c.x >= margin;
+				var inRight = c.x + tw <= rect.width - margin;
+				var inTop = c.y >= margin;
+				var inBottom = c.y + th <= rect.height - margin;
+
+				if (inLeft && inRight && inTop && inBottom) {
+					score = 100;
+				} else {
+					// Partial score based on how much is visible
+					if (inLeft) score += 10;
+					if (inRight) score += 10;
+					if (inTop) score += 10;
+					if (inBottom) score += 10;
+				}
+
+				// Prefer above/below over left/right
+				if (c.pos === 'above' || c.pos === 'below') score += 5;
+
+				if (score > bestScore) {
+					bestScore = score;
+					best = c;
+				}
+			}
+
+			// Clamp to container bounds
+			var tx = Math.max(margin, Math.min(best.x, rect.width - tw - margin));
+			var ty = Math.max(margin, Math.min(best.y, rect.height - th - margin));
+
+			this.tooltip.style.left = tx + 'px';
+			this.tooltip.style.top = ty + 'px';
+			this.tooltip.classList.add('visible');
+		}
+
+		hideTooltip() {
+			this.tooltip.classList.remove('visible');
+			if (this.tapCircle) {
+				this.tapCircle.remove();
+				this.tapCircle = null;
+			}
+		}
+	};
+
+	document.addEventListener('DOMContentLoaded', function() {
+		new window.ChartRenderer('chartContainer', 'chartSvg');
+	});
 })();
