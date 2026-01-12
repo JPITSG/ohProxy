@@ -1450,6 +1450,7 @@ function setChartIframeAnimState(iframe, chartUrl) {
 
 function resetChartAnimState() {
 	chartAnimSeen.clear();
+	chartHashes.clear();
 }
 
 
