@@ -55,7 +55,13 @@
 			var w = rect.width;
 			var h = rect.height;
 			var sm = w < 500;
-			var yAxisWidth = this.measureYAxisWidth(sm);
+
+			// Compute y-axis info once for this render
+			var rawYValues = this.getYAxisValues(sm);
+			var yAxisInfo = this.getYAxisRelevancy(rawYValues);
+			var unitSuffix = this.getUnitSuffix();
+			var yDecimals = this.getMajorityDecimals(yAxisInfo.values);
+			var yAxisWidth = this.measureYAxisWidthWith(yAxisInfo.values, unitSuffix, yDecimals, sm);
 			// Y-axis labels are at x=-margin with text-anchor:end
 			// Left spacing (viewport to label) = margin
 			// Gap (label to chart) = margin
@@ -100,12 +106,11 @@
 			var vGridGroup = $('g', {});
 
 			var yRange = window._chartYMax - window._chartYMin;
-			var unitSuffix = this.getUnitSuffix();
 
-			// Y-axis grid and labels - get values and calculate positions
-			var rawYValues = this.getYAxisValues(sm);
+			// Y-axis grid and labels - calculate positions from pre-computed values
 			var yValues = [];
 			var yPositions = [];
+			var yRelevantMap = [];
 
 			for (var i = 0; i < rawYValues.length; i++) {
 				var y = rawYValues[i];
@@ -116,23 +121,13 @@
 				if (yPos >= -5 && yPos <= ch + 5) {
 					yValues.push(y);
 					yPositions.push(yPos);
+					yRelevantMap.push(yAxisInfo.flags[i]);
 				}
 			}
-			// Precompute relevancy flags once (avoids repeated window._chart* reads)
-			var dMin = typeof window._chartDataMin === 'number' ? window._chartDataMin : window._chartYMin;
-			var dMax = typeof window._chartDataMax === 'number' ? window._chartDataMax : window._chartYMax;
-			var yRelevant = yValues.map(function(v) {
-				if (dMin === dMax) return true;
-				if (dMin > 0 && v < 0) return false;
-				if (dMax < 0 && v > 0) return false;
-				return true;
-			});
-			var yValuesInRange = yValues.filter(function(v, i) { return yRelevant[i]; });
-			var yDecimals = this.getMajorityDecimals(yValuesInRange.length > 0 ? yValuesInRange : yValues);
 			for (var i = 0; i < yValues.length; i++) {
 				hGridGroup.appendChild($('line', { class: 'grid-line', x1: 0, y1: yPositions[i], x2: cw, y2: yPositions[i] }));
 				var label = $('text', { class: 'axis-label', x: -margin, y: yPositions[i] + 4, 'text-anchor': 'end' });
-				label.textContent = yRelevant[i] ? this.fmt(yValues[i], yDecimals) + unitSuffix : '';
+				label.textContent = yRelevantMap[i] ? this.fmt(yValues[i], yDecimals) + unitSuffix : '';
 				g.appendChild(label);
 			}
 			g.appendChild(hGridGroup);
@@ -359,12 +354,21 @@
 			return window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '';
 		}
 
-		measureYAxisWidth(sm) {
-			var yValues = this.getYAxisValues(sm);
-			if (yValues.length === 0) return sm ? 30 : 40;
+		getYAxisRelevancy(yValues) {
+			var dMin = typeof window._chartDataMin === 'number' ? window._chartDataMin : window._chartYMin;
+			var dMax = typeof window._chartDataMax === 'number' ? window._chartDataMax : window._chartYMax;
+			var flags = yValues.map(function(v) {
+				if (dMin === dMax) return true;
+				if (dMin > 0 && v < 0) return false;
+				if (dMax < 0 && v > 0) return false;
+				return true;
+			});
+			var values = yValues.filter(function(v, i) { return flags[i]; });
+			return { flags: flags, values: values.length > 0 ? values : yValues };
+		}
 
-			var unitSuffix = this.getUnitSuffix();
-			var yDecimals = this.getMajorityDecimals(yValues);
+		measureYAxisWidthWith(relevantValues, unitSuffix, yDecimals, sm) {
+			if (relevantValues.length === 0) return sm ? 30 : 40;
 
 			// Create temp text element to measure
 			var tempText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -373,8 +377,8 @@
 			this.svg.appendChild(tempText);
 
 			var maxWidth = 0;
-			for (var i = 0; i < yValues.length; i++) {
-				tempText.textContent = this.fmt(yValues[i], yDecimals) + unitSuffix;
+			for (var i = 0; i < relevantValues.length; i++) {
+				tempText.textContent = this.fmt(relevantValues[i], yDecimals) + unitSuffix;
 				var bbox = tempText.getBBox();
 				if (bbox.width > maxWidth) maxWidth = bbox.width;
 			}
@@ -419,6 +423,9 @@
 				this.wasDragging = false;
 				return;
 			}
+
+			// Refresh containerRect in case iframe scrolled/repositioned
+			this.layout.containerRect = this.container.getBoundingClientRect();
 
 			var touch = e.changedTouches ? e.changedTouches[0] : e;
 			var closest = this.findClosestPoint(touch.clientX);
