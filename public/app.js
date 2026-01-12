@@ -1418,6 +1418,7 @@ let imageResizeTimer = null;
 let imageScrollTimer = null;
 let imageResizePending = false;
 
+
 function snapshotHistoryState() {
 	const stack = Array.isArray(state.stack)
 		? state.stack.map((entry) => ({
@@ -3190,6 +3191,7 @@ function updateCard(card, w, afterImage, info) {
 		if (!iframeEl) {
 			iframeEl = document.createElement('iframe');
 			iframeEl.className = 'chart-frame';
+			iframeEl.name = 'chart';
 			iframeEl.setAttribute('frameborder', '0');
 			iframeEl.setAttribute('scrolling', 'no');
 			frameContainer.appendChild(iframeEl);
@@ -3198,6 +3200,7 @@ function updateCard(card, w, afterImage, info) {
 		const fullUrl = '/' + chartUrl;
 		const urlChanged = iframeEl.dataset.chartUrl !== fullUrl;
 		if (urlChanged) {
+			iframeEl.name = 'chart';
 			iframeEl.dataset.chartUrl = fullUrl;
 			iframeEl.src = fullUrl;
 		}
@@ -4666,13 +4669,13 @@ function readIframeChartHash(iframe) {
 function buildChartReloadUrl(chartUrl, dataHash) {
 	try {
 		const url = new URL(chartUrl, window.location.origin);
-		url.searchParams.set('reloaded', 'true');
 		if (dataHash) url.searchParams.set('_t', dataHash);
 		return url.pathname + url.search;
 	} catch {
 		const sep = chartUrl.includes('?') ? '&' : '?';
 		const hashPart = dataHash ? `&_t=${encodeURIComponent(dataHash)}` : '';
-		return `${chartUrl}${sep}reloaded=true${hashPart}`;
+		if (!hashPart) return chartUrl;
+		return `${chartUrl}${sep}${hashPart.replace(/^&/, '')}`;
 	}
 }
 
@@ -4681,12 +4684,14 @@ function swapChartIframe(iframe, newSrc, baseUrl) {
 	const container = iframe.parentElement;
 	if (!container) {
 		iframe.dataset.chartUrl = baseUrl || newSrc;
+		iframe.name = 'noanim';
 		iframe.src = newSrc;
 		return;
 	}
 
 	const newIframe = document.createElement('iframe');
 	newIframe.className = iframe.className;
+	newIframe.name = 'noanim';
 	newIframe.setAttribute('frameborder', iframe.getAttribute('frameborder') || '0');
 	newIframe.setAttribute('scrolling', iframe.getAttribute('scrolling') || 'no');
 	if (iframe.getAttribute('allowfullscreen')) {
