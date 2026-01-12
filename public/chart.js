@@ -22,7 +22,6 @@
 			this.tooltip = document.getElementById('tooltip');
 			this.tooltipValue = document.getElementById('tooltipValue');
 			this.tooltipLabel = document.getElementById('tooltipLabel');
-			this.padding = { top: 25, right: 45, bottom: 60, left: 35 };
 			this.points = [];
 			this.layout = {};
 			this.tapCircle = null;
@@ -55,14 +54,25 @@
 			var w = rect.width;
 			var h = rect.height;
 			var sm = w < 500;
-			var pad = sm ? { top: 15, right: 45, bottom: 40, left: 22 } : this.padding;
+			var yAxisWidth = this.measureYAxisWidth(sm);
+			// Y-axis labels are at x=-margin with text-anchor:end
+			// Left spacing (viewport to label) = margin
+			// Gap (label to chart) = margin
+			// So: leftPad = margin + yAxisWidth + margin = 2*margin + yAxisWidth
+			var margin = Math.round(w * 0.02 * (sm ? 1.5 : 1)); // 2% of width, 50% larger on small viewports
+			var leftPad = yAxisWidth + 2 * margin;
+			var rightPad = margin;
+			var xAxisSpace = sm ? 18 : 25; // matches x-axis label offset
+			var topPad = sm ? margin + 5 : margin; // a little more on phone
+			var bottomPad = sm ? xAxisSpace + margin : xAxisSpace + Math.round(margin * 0.6);
+			var pad = { top: topPad, right: rightPad, bottom: bottomPad, left: leftPad };
 			var cw = w - pad.left - pad.right;
 			var ch = h - pad.top - pad.bottom;
-			var iL = sm ? 10 : 25;
-			var iR = sm ? 10 : 25;
+			var iL = 0;
+			var iR = 0;
 			var dw = cw - iL - iR;
 
-			this.layout = { sm: sm, pad: pad, cw: cw, ch: ch, iL: iL, dw: dw };
+			this.layout = { sm: sm, pad: pad, cw: cw, ch: ch, iL: iL, dw: dw, margin: margin };
 			this.svg.innerHTML = '';
 
 			var $ = (t, a) => this.svg$(t, a);
@@ -76,20 +86,6 @@
 			grad.appendChild($('stop', { offset: '100%', style: 'stop-color:var(--chart-gradient-end)' }));
 			defs.appendChild(grad);
 
-			var hMask = $('mask', { id: 'hGridMask', maskUnits: 'objectBoundingBox', maskContentUnits: 'objectBoundingBox' });
-			var hGrad = $('linearGradient', { id: 'hGridGrad', x1: '0%', y1: '0%', x2: '100%', y2: '0%' });
-			hGrad.innerHTML = '<stop offset="0%" stop-color="white" stop-opacity="0"/><stop offset="3%" stop-color="white" stop-opacity="1"/><stop offset="97%" stop-color="white" stop-opacity="1"/><stop offset="100%" stop-color="white" stop-opacity="0"/>';
-			defs.appendChild(hGrad);
-			hMask.appendChild($('rect', { x: '0', y: '0', width: '1', height: '1', fill: 'url(#hGridGrad)' }));
-			defs.appendChild(hMask);
-
-			var vMask = $('mask', { id: 'vGridMask', maskUnits: 'objectBoundingBox', maskContentUnits: 'objectBoundingBox' });
-			var vGrad = $('linearGradient', { id: 'vGridGrad', x1: '0%', y1: '0%', x2: '0%', y2: '100%' });
-			vGrad.innerHTML = '<stop offset="0%" stop-color="white" stop-opacity="0"/><stop offset="3%" stop-color="white" stop-opacity="1"/><stop offset="97%" stop-color="white" stop-opacity="1"/><stop offset="100%" stop-color="white" stop-opacity="0"/>';
-			defs.appendChild(vGrad);
-			vMask.appendChild($('rect', { x: '0', y: '0', width: '1', height: '1', fill: 'url(#vGridGrad)' }));
-			defs.appendChild(vMask);
-
 			var clipPath = $('clipPath', { id: 'chartClip' });
 			clipPath.appendChild($('rect', { x: '0', y: '0', width: cw, height: ch }));
 			defs.appendChild(clipPath);
@@ -98,8 +94,8 @@
 
 			// Main group
 			var g = $('g', { transform: 'translate(' + pad.left + ',' + pad.top + ')' });
-			var hGridGroup = $('g', { mask: 'url(#hGridMask)' });
-			var vGridGroup = $('g', { mask: 'url(#vGridMask)' });
+			var hGridGroup = $('g', {});
+			var vGridGroup = $('g', {});
 
 			var yRange = window._chartYMax - window._chartYMin;
 			var numYLines = sm ? 5 : 6;
@@ -141,7 +137,7 @@
 			var yDecimals = this.getMajorityDecimals(yValuesInRange.length > 0 ? yValuesInRange : yValues);
 			for (var i = 0; i < yValues.length; i++) {
 				hGridGroup.appendChild($('line', { class: 'grid-line', x1: 0, y1: yPositions[i], x2: cw, y2: yPositions[i] }));
-				var label = $('text', { class: 'axis-label', x: -8, y: yPositions[i] + 4, 'text-anchor': 'end' });
+				var label = $('text', { class: 'axis-label', x: -margin, y: yPositions[i] + 4, 'text-anchor': 'end' });
 				// Only show label if relevant to data range
 				label.textContent = isRelevant(yValues[i]) ? this.fmt(yValues[i], yDecimals) + unitSuffix : '';
 				g.appendChild(label);
@@ -155,11 +151,16 @@
 				if (i % xStep !== 0 && i !== window._chartXLabels.length - 1) return;
 				var labelText = typeof labelData === 'object' ? labelData.text : labelData;
 				var labelPos = typeof labelData === 'object' ? labelData.pos : null;
+				var isLast = i === window._chartXLabels.length - 1;
 				var xPos = labelPos !== null
 					? iL + (labelPos / 100) * dw
 					: iL + (window._chartXLabels.length > 1 ? (i / (window._chartXLabels.length - 1)) * dw : dw / 2);
 				vGridGroup.appendChild($('line', { class: 'grid-line', x1: xPos, y1: 0, x2: xPos, y2: ch }));
-				var text = $('text', { class: 'axis-label', x: xPos, y: ch + 25, 'text-anchor': 'middle' });
+				// On small viewports, right-align the last label to the chart edge
+				var anchor = (sm && isLast) ? 'end' : 'middle';
+				var labelX = (sm && isLast) ? cw : xPos;
+				var xLabelY = sm ? ch + 18 : ch + 25;
+				var text = $('text', { class: 'axis-label', x: labelX, y: xLabelY, 'text-anchor': anchor });
 				text.textContent = labelText;
 				g.appendChild(text);
 			});
@@ -191,9 +192,18 @@
 				// Area path
 				var areaPath = linePath + ' L ' + this.points[this.points.length - 1].x + ' ' + ch + ' L ' + this.points[0].x + ' ' + ch + ' Z';
 				chartGroup.appendChild($('path', { class: 'chart-area', d: areaPath }));
-				chartGroup.appendChild($('path', { class: 'chart-line-glow', d: linePath }));
-				chartGroup.appendChild($('path', { class: 'chart-line', d: linePath }));
+				var glowPath = $('path', { class: 'chart-line-glow', d: linePath });
+				var mainPath = $('path', { class: 'chart-line', d: linePath });
+				chartGroup.appendChild(glowPath);
+				chartGroup.appendChild(mainPath);
 				g.appendChild(chartGroup);
+
+				// Set stroke-dasharray dynamically for line animation
+				var pathLen = mainPath.getTotalLength();
+				glowPath.style.strokeDasharray = pathLen;
+				glowPath.style.strokeDashoffset = pathLen;
+				mainPath.style.strokeDasharray = pathLen;
+				mainPath.style.strokeDashoffset = pathLen;
 
 				// Data points (desktop only)
 				if (!sm) {
@@ -220,15 +230,15 @@
 						pointsGroup.appendChild(circle);
 					});
 
-					// Add interpolated points at grid lines
+					// Add interpolated points at grid lines (two-pointer, O(n+m))
+					var gridIdx = 0;
 					for (var i = 1; i < this.points.length; i++) {
 						var prev = this.points[i - 1];
 						var curr = this.points[i];
-						var minX = Math.min(prev.x, curr.x);
-						var maxX = Math.max(prev.x, curr.x);
-						for (var j = gridXPositions.length - 1; j >= 0; j--) {
-							var gd = gridXPositions[j];
-							if (gd.x >= minX && gd.x <= maxX) {
+						// Process grid positions within this segment
+						while (gridIdx < gridXPositions.length && gridXPositions[gridIdx].x <= curr.x) {
+							var gd = gridXPositions[gridIdx];
+							if (gd.x >= prev.x) {
 								var t = (gd.x - prev.x) / (curr.x - prev.x);
 								var interpY = prev.y + t * (curr.y - prev.y);
 								var interpValue = prev.value + t * (curr.value - prev.value);
@@ -238,8 +248,8 @@
 								circle.dataset.idx = this.circleData.length;
 								this.circleData.push({ x: gd.x, y: interpY, value: interpValue, t: interpTime });
 								pointsGroup.appendChild(circle);
-								gridXPositions.splice(j, 1);
 							}
+							gridIdx++;
 						}
 					}
 
@@ -287,18 +297,11 @@
 				return '0.0';
 			} else if (Number.isInteger(n) || Math.abs(n - Math.round(n)) < 0.0001) {
 				var r = Math.round(n);
-				if (Math.abs(r) >= 100) result = r.toFixed(0);
-				else result = r.toFixed(1);
-			} else if (Math.abs(n) >= 1000) {
-				result = n.toFixed(0);
+				result = Math.abs(r) >= 100 ? r.toFixed(0) : r.toFixed(1);
 			} else if (Math.abs(n) >= 100) {
 				result = n.toFixed(0);
-			} else if (Math.abs(n) >= 10) {
-				result = n.toFixed(1);
 			} else if (Math.abs(n) >= 1) {
 				result = n.toFixed(1);
-			} else if (Math.abs(n) >= 0.1) {
-				result = n.toFixed(2);
 			} else {
 				result = n.toFixed(2);
 			}
@@ -312,15 +315,10 @@
 		getDecimals(n) {
 			if (n === 0) return 1;
 			if (Number.isInteger(n) || Math.abs(n - Math.round(n)) < 0.0001) {
-				var r = Math.round(n);
-				if (Math.abs(r) >= 100) return 0;
-				return 1;
+				return Math.abs(Math.round(n)) >= 100 ? 0 : 1;
 			}
-			if (Math.abs(n) >= 1000) return 0;
 			if (Math.abs(n) >= 100) return 0;
-			if (Math.abs(n) >= 10) return 1;
 			if (Math.abs(n) >= 1) return 1;
-			if (Math.abs(n) >= 0.1) return 2;
 			return 2;
 		}
 
@@ -339,6 +337,47 @@
 				}
 			}
 			return majority;
+		}
+
+		measureYAxisWidth(sm) {
+			var yRange = window._chartYMax - window._chartYMin;
+			var numYLines = sm ? 5 : 6;
+			var unitSuffix = window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '';
+
+			// Calculate y values
+			var yValues = [];
+			if (sm) {
+				for (var i = 0; i < 5; i++) {
+					yValues.push(window._chartYMin + (yRange * i / 4));
+				}
+			} else {
+				var yStep = this.niceStep(Math.abs(yRange), numYLines);
+				var startY = Math.floor(window._chartYMin / yStep) * yStep;
+				for (var y = startY; y <= window._chartYMax + yStep * 0.1; y += yStep) {
+					if (y < window._chartYMin - yStep * 0.1) continue;
+					yValues.push(y);
+				}
+			}
+
+			if (yValues.length === 0) return sm ? 30 : 40;
+
+			var yDecimals = this.getMajorityDecimals(yValues);
+
+			// Create temp text element to measure
+			var tempText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+			tempText.setAttribute('class', 'axis-label');
+			tempText.style.visibility = 'hidden';
+			this.svg.appendChild(tempText);
+
+			var maxWidth = 0;
+			for (var i = 0; i < yValues.length; i++) {
+				tempText.textContent = this.fmt(yValues[i], yDecimals) + unitSuffix;
+				var bbox = tempText.getBBox();
+				if (bbox.width > maxWidth) maxWidth = bbox.width;
+			}
+
+			this.svg.removeChild(tempText);
+			return Math.ceil(maxWidth);
 		}
 
 		fmtTimestamp(ts) {
