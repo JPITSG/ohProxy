@@ -29,6 +29,7 @@
 			this.isTouching = false;
 			this.touchMoved = false;
 			this.wasDragging = false;
+			this.tooltipCache = { w: 0, h: 0, contentLen: 0 };
 			this.init();
 			window.addEventListener('resize', () => this.render());
 		}
@@ -72,7 +73,8 @@
 			var iR = 0;
 			var dw = cw - iL - iR;
 
-			this.layout = { sm: sm, pad: pad, cw: cw, ch: ch, iL: iL, dw: dw, margin: margin };
+			this.layout = { sm: sm, pad: pad, cw: cw, ch: ch, iL: iL, dw: dw, margin: margin, containerRect: rect };
+			this.tooltipCache = { w: 0, h: 0, contentLen: 0 }; // Reset cache on render
 			this.svg.innerHTML = '';
 
 			var $ = (t, a) => this.svg$(t, a);
@@ -98,48 +100,39 @@
 			var vGridGroup = $('g', {});
 
 			var yRange = window._chartYMax - window._chartYMin;
-			var numYLines = sm ? 5 : 6;
-			var unitSuffix = window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '';
+			var unitSuffix = this.getUnitSuffix();
 
-			// Y-axis grid and labels - collect values first for consistent formatting
+			// Y-axis grid and labels - get values and calculate positions
+			var rawYValues = this.getYAxisValues(sm);
 			var yValues = [];
 			var yPositions = [];
-			if (sm) {
-				for (var i = 0; i < 5; i++) {
-					yValues.push(window._chartYMin + (yRange * i / 4));
-					yPositions.push(ch - (i / 4) * ch);
-				}
-			} else {
-				var yStep = this.niceStep(Math.abs(yRange), numYLines);
-				var startY = Math.floor(window._chartYMin / yStep) * yStep;
-				for (var y = startY; y <= window._chartYMax + yStep * 0.1; y += yStep) {
-					if (y < window._chartYMin - yStep * 0.1) continue;
-					var yPos = ch - ((y - window._chartYMin) / yRange) * ch;
-					if (yPos >= -5 && yPos <= ch + 5) {
-						yValues.push(y);
-						yPositions.push(yPos);
-					}
+
+			for (var i = 0; i < rawYValues.length; i++) {
+				var y = rawYValues[i];
+				var yPos = sm
+					? ch - (i / (rawYValues.length - 1)) * ch
+					: ch - ((y - window._chartYMin) / yRange) * ch;
+				// Filter by position bounds (only relevant for desktop with niceStep)
+				if (yPos >= -5 && yPos <= ch + 5) {
+					yValues.push(y);
+					yPositions.push(yPos);
 				}
 			}
-			// Filter values for majority calculation - exclude clearly irrelevant labels
+			// Precompute relevancy flags once (avoids repeated window._chart* reads)
 			var dMin = typeof window._chartDataMin === 'number' ? window._chartDataMin : window._chartYMin;
 			var dMax = typeof window._chartDataMax === 'number' ? window._chartDataMax : window._chartYMax;
-			var isRelevant = function(v) {
-				// When data is flat (all same value), show all axis labels
+			var yRelevant = yValues.map(function(v) {
 				if (dMin === dMax) return true;
-				// Hide negative labels when all data is strictly positive (> 0)
 				if (dMin > 0 && v < 0) return false;
-				// Hide positive labels when all data is strictly negative (< 0)
 				if (dMax < 0 && v > 0) return false;
 				return true;
-			};
-			var yValuesInRange = yValues.filter(isRelevant);
+			});
+			var yValuesInRange = yValues.filter(function(v, i) { return yRelevant[i]; });
 			var yDecimals = this.getMajorityDecimals(yValuesInRange.length > 0 ? yValuesInRange : yValues);
 			for (var i = 0; i < yValues.length; i++) {
 				hGridGroup.appendChild($('line', { class: 'grid-line', x1: 0, y1: yPositions[i], x2: cw, y2: yPositions[i] }));
 				var label = $('text', { class: 'axis-label', x: -margin, y: yPositions[i] + 4, 'text-anchor': 'end' });
-				// Only show label if relevant to data range
-				label.textContent = isRelevant(yValues[i]) ? this.fmt(yValues[i], yDecimals) + unitSuffix : '';
+				label.textContent = yRelevant[i] ? this.fmt(yValues[i], yDecimals) + unitSuffix : '';
 				g.appendChild(label);
 			}
 			g.appendChild(hGridGroup);
@@ -198,12 +191,14 @@
 				chartGroup.appendChild(mainPath);
 				g.appendChild(chartGroup);
 
-				// Set stroke-dasharray dynamically for line animation
-				var pathLen = mainPath.getTotalLength();
-				glowPath.style.strokeDasharray = pathLen;
-				glowPath.style.strokeDashoffset = pathLen;
-				mainPath.style.strokeDasharray = pathLen;
-				mainPath.style.strokeDashoffset = pathLen;
+				// Set stroke-dasharray dynamically for line animation (only when animated)
+				if (document.documentElement.classList.contains('chart-animated')) {
+					var pathLen = mainPath.getTotalLength();
+					glowPath.style.strokeDasharray = pathLen;
+					glowPath.style.strokeDashoffset = pathLen;
+					mainPath.style.strokeDasharray = pathLen;
+					mainPath.style.strokeDashoffset = pathLen;
+				}
 
 				// Data points (desktop only)
 				if (!sm) {
@@ -216,12 +211,12 @@
 						var ld = window._chartXLabels[i];
 						var lp = typeof ld === 'object' ? ld.pos : null;
 						if (lp !== null) {
-							gridXPositions.push({ x: iL + (lp / 100) * dw, delay: 1.2 + i * 0.05 });
+							gridXPositions.push({ x: iL + (lp / 100) * dw, delay: 0.6 + i * 0.025 });
 						}
 					}
 
 					// Add min/max points
-					var delays = ['1.0s', '1.1s'];
+					var delays = ['0.5s', '0.55s'];
 					[minPoint, maxPoint].forEach((pt, idx) => {
 						var circle = $('circle', { class: 'data-point', cx: pt.x, cy: pt.y, r: 5 });
 						circle.style.animationDelay = delays[idx];
@@ -339,13 +334,11 @@
 			return majority;
 		}
 
-		measureYAxisWidth(sm) {
+		getYAxisValues(sm) {
 			var yRange = window._chartYMax - window._chartYMin;
 			var numYLines = sm ? 5 : 6;
-			var unitSuffix = window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '';
-
-			// Calculate y values
 			var yValues = [];
+
 			if (sm) {
 				for (var i = 0; i < 5; i++) {
 					yValues.push(window._chartYMin + (yRange * i / 4));
@@ -359,8 +352,18 @@
 				}
 			}
 
+			return yValues;
+		}
+
+		getUnitSuffix() {
+			return window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '';
+		}
+
+		measureYAxisWidth(sm) {
+			var yValues = this.getYAxisValues(sm);
 			if (yValues.length === 0) return sm ? 30 : 40;
 
+			var unitSuffix = this.getUnitSuffix();
 			var yDecimals = this.getMajorityDecimals(yValues);
 
 			// Create temp text element to measure
@@ -390,7 +393,7 @@
 		}
 
 		findClosestPoint(clientX) {
-			var rect = this.container.getBoundingClientRect();
+			var rect = this.layout.containerRect;
 			var x = clientX - rect.left - this.layout.pad.left;
 
 			if (x < 0 || x > this.layout.cw || this.points.length === 0) {
@@ -432,6 +435,9 @@
 
 		onTouchStart(e) {
 			if (!this.layout.sm || this.points.length === 0) return;
+
+			// Refresh containerRect in case iframe scrolled/repositioned
+			this.layout.containerRect = this.container.getBoundingClientRect();
 
 			var touch = e.touches[0];
 			var closest = this.findClosestPoint(touch.clientX);
@@ -485,7 +491,8 @@
 		}
 
 		showTooltip(e, pt) {
-			var rect = this.container.getBoundingClientRect();
+			// Refresh rect in case iframe scrolled/repositioned
+			var rect = this.layout.containerRect = this.container.getBoundingClientRect();
 			var x = e.clientX - rect.left;
 			var y = e.clientY - rect.top;
 
@@ -503,22 +510,38 @@
 		}
 
 		showMobileTooltip(pt) {
-			this.tooltipValue.textContent = this.fmt(pt.value) + (window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '');
-			this.tooltipLabel.textContent = pt.t ? this.fmtTimestamp(pt.t) : '';
+			var valueText = this.fmt(pt.value) + (window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '');
+			var labelText = pt.t ? this.fmtTimestamp(pt.t) : '';
+			this.tooltipValue.textContent = valueText;
+			this.tooltipLabel.textContent = labelText;
 
-			// Measure tooltip dimensions while hidden
-			this.tooltip.classList.remove('visible');
-			this.tooltip.style.visibility = 'hidden';
-			this.tooltip.style.display = 'block';
+			// Use cached dimensions if content length is similar (within 3 chars)
+			var contentLen = valueText.length + labelText.length;
+			var cache = this.tooltipCache;
+			var tw, th;
 
-			var rect = this.container.getBoundingClientRect();
-			var tooltipRect = this.tooltip.getBoundingClientRect();
-			var tw = tooltipRect.width;
-			var th = tooltipRect.height;
+			if (cache.w === 0 || Math.abs(contentLen - cache.contentLen) > 3) {
+				// Measure tooltip dimensions while hidden
+				this.tooltip.classList.remove('visible');
+				this.tooltip.style.visibility = 'hidden';
+				this.tooltip.style.display = 'block';
 
-			this.tooltip.style.display = '';
-			this.tooltip.style.visibility = '';
+				var tooltipRect = this.tooltip.getBoundingClientRect();
+				tw = tooltipRect.width;
+				th = tooltipRect.height;
 
+				this.tooltip.style.display = '';
+				this.tooltip.style.visibility = '';
+
+				cache.w = tw;
+				cache.h = th;
+				cache.contentLen = contentLen;
+			} else {
+				tw = cache.w;
+				th = cache.h;
+			}
+
+			var rect = this.layout.containerRect || this.container.getBoundingClientRect();
 			var cx = pt.x + this.layout.pad.left;
 			var cy = pt.y + this.layout.pad.top;
 
@@ -596,10 +619,8 @@
 		stats.classList.toggle('hidden', isOverflowing);
 	}
 
-	document.addEventListener('DOMContentLoaded', function() {
-		new window.ChartRenderer('chartContainer', 'chartSvg');
-		checkTitleOverflow();
-	});
-
+	// Script is at end of body, DOM is ready - instantiate immediately
+	new window.ChartRenderer('chartContainer', 'chartSvg');
+	checkTitleOverflow();
 	window.addEventListener('resize', checkTitleOverflow);
 })();
