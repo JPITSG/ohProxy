@@ -251,7 +251,7 @@ body {
 
 .chart-animated .chart-area {
 	opacity: 0;
-	animation: fadeIn 0.8s ease-out 0.3s forwards;
+	animation: fadeIn 0.5s ease-out 0.15s forwards;
 }
 
 .chart-line {
@@ -264,7 +264,7 @@ body {
 }
 
 .chart-animated .chart-line {
-	animation: drawLine 2s ease-out forwards;
+	animation: drawLine 1s ease-out forwards;
 }
 
 .chart-line-glow {
@@ -278,7 +278,7 @@ body {
 }
 
 .chart-animated .chart-line-glow {
-	animation: drawLine 2s ease-out forwards;
+	animation: drawLine 1s ease-out forwards;
 }
 
 @keyframes drawLine {
