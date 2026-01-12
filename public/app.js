@@ -1,5 +1,50 @@
 'use strict';
 
+// Global error handler - report JS errors to server
+(function() {
+	let lastErrorTime = 0;
+	const errorThrottleMs = 5000;
+
+	function reportError(message, url, line, col, error) {
+		const now = Date.now();
+		if (now - lastErrorTime < errorThrottleMs) return;
+		lastErrorTime = now;
+
+		const payload = {
+			message: String(message || '').slice(0, 2000),
+			url: String(url || '').slice(0, 500),
+			line: typeof line === 'number' ? line : 0,
+			col: typeof col === 'number' ? col : 0,
+			stack: error && error.stack ? String(error.stack).slice(0, 5000) : '',
+			userAgent: navigator.userAgent || '',
+		};
+
+		fetch('/api/jslog', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload),
+		}).catch(function() {});
+	}
+
+	window.onerror = function(message, url, line, col, error) {
+		reportError(message, url, line, col, error);
+	};
+
+	window.addEventListener('unhandledrejection', function(event) {
+		const reason = event.reason;
+		const message = reason instanceof Error ? reason.message : String(reason);
+		const stack = reason instanceof Error ? reason.stack : '';
+		reportError('Unhandled Promise rejection: ' + message, '', 0, 0, { stack: stack });
+	});
+
+	window.__logJsError = reportError;
+})();
+
+function logJsError(message, error) {
+	if (typeof window.__logJsError !== 'function') return;
+	window.__logJsError(message, '', 0, 0, error || {});
+}
+
 const els = {
 	title: document.getElementById('pageTitle'),
 	grid: document.getElementById('grid'),
@@ -235,7 +280,7 @@ function runCardCleanups(card) {
 	const cleanups = card && card._ohCleanups;
 	if (!Array.isArray(cleanups) || cleanups.length === 0) return;
 	for (const cleanup of cleanups.splice(0)) {
-		try { cleanup(); } catch {}
+		try { cleanup(); } catch (err) { logJsError('runCardCleanups failed', err); }
 	}
 }
 
@@ -336,7 +381,9 @@ function saveHomeSnapshot() {
 	};
 	try {
 		localStorage.setItem(HOME_CACHE_KEY, JSON.stringify(snapshot));
-	} catch {}
+	} catch (err) {
+		logJsError('saveHomeSnapshot failed', err);
+	}
 }
 
 function loadHomeSnapshot() {
@@ -348,7 +395,8 @@ function loadHomeSnapshot() {
 			return null;
 		}
 		return snapshot;
-	} catch {
+	} catch (err) {
+		logJsError('loadHomeSnapshot failed', err);
 		return null;
 	}
 }
@@ -712,7 +760,7 @@ function setTheme(mode, syncToServer = true) {
 		updateThemeMeta();
 	}
 	try { localStorage.setItem('ohTheme', isLight ? 'light' : 'dark'); }
-	catch {}
+	catch (err) { logJsError('setTheme localStorage failed', err); }
 	// Sync to server if settings have been loaded and this isn't the initial load
 	if (syncToServer && serverSettingsLoaded) {
 		saveSettingsToServer({ darkMode: !isLight });
@@ -753,7 +801,9 @@ function initTheme(forcedMode) {
 			const saved = localStorage.getItem('ohTheme');
 			if (saved === 'dark' || saved === 'light') mode = saved;
 		}
-	} catch {}
+	} catch (err) {
+		logJsError('initTheme failed', err);
+	}
 	setTheme(mode, false); // Don't sync to server on init
 	serverSettingsLoaded = true; // Settings already loaded from server via injection
 }
@@ -763,7 +813,9 @@ function initPaused() {
 		if (window.__OH_SESSION__ && window.__OH_SESSION__.paused === true) {
 			state.isPaused = true;
 		}
-	} catch {}
+	} catch (err) {
+		logJsError('initPaused failed', err);
+	}
 }
 
 async function saveSettingsToServer(settings) {
@@ -773,8 +825,8 @@ async function saveSettingsToServer(settings) {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(settings),
 		});
-	} catch {
-		// Ignore errors - settings will be local only
+	} catch (err) {
+		logJsError('saveSettingsToServer failed', err);
 	}
 }
 
@@ -1102,7 +1154,8 @@ function toRelativeRestLink(link) {
 	try {
 		const u = new URL(link, window.location.origin);
 		return stripLeadingSlash(u.pathname + u.search + u.hash);
-	} catch {
+	} catch (err) {
+		logJsError(`toRelativeRestLink failed for ${link}`, err);
 		return stripLeadingSlash(link);
 	}
 }
@@ -1119,7 +1172,8 @@ function toRelativeUrl(link) {
 	try {
 		const u = new URL(link, window.location.origin);
 		return stripLeadingSlash(u.pathname + u.search + u.hash);
-	} catch {
+	} catch (err) {
+		logJsError(`toRelativeUrl failed for ${link}`, err);
 		return stripLeadingSlash(link);
 	}
 }
@@ -1141,8 +1195,8 @@ function normalizeMediaUrl(url) {
 		if (state.ohOrigin && u.origin === state.ohOrigin) {
 			return stripLeadingSlash(path);
 		}
-	} catch {
-		// fall through
+	} catch (err) {
+		logJsError(`normalizeMediaUrl failed for ${url}`, err);
 	}
 	return stripLeadingSlash(url);
 }
@@ -1159,7 +1213,8 @@ function shouldBypassProxy(url) {
 			const entryPort = entry.port || '';
 			return host === entryHost && (!entryPort || port === entryPort);
 		});
-	} catch {
+	} catch (err) {
+		logJsError(`shouldBypassProxy failed for ${url}`, err);
 		return false;
 	}
 }
@@ -1198,17 +1253,21 @@ function appendProxyWidth(proxyUrl, width) {
 	let proxy;
 	try {
 		proxy = new URL(proxyUrl, window.location.origin);
-	} catch {
+	} catch (err) {
+		logJsError(`appendProxyWidth invalid proxyUrl ${proxyUrl}`, err);
 		return proxyUrl;
 	}
 	const encoded = proxy.searchParams.get('url');
 	if (!encoded) return proxyUrl;
 	let targetText = encoded;
-	try { targetText = decodeURIComponent(encoded); } catch {}
+	try { targetText = decodeURIComponent(encoded); } catch (err) {
+		logJsError('appendProxyWidth decodeURIComponent failed', err);
+	}
 	let target;
 	try {
 		target = new URL(targetText);
-	} catch {
+	} catch (err) {
+		logJsError(`appendProxyWidth invalid target ${targetText}`, err);
 		return proxyUrl;
 	}
 	if (!target.searchParams.has('width')) {
@@ -1429,7 +1488,8 @@ function getChartAnimKey(chartUrl) {
 		const period = url.searchParams.get('period') || '';
 		if (!item || !period) return null;
 		return `${item}|${period}`;
-	} catch {
+	} catch (err) {
+		logJsError(`getChartAnimKey failed for ${chartUrl}`, err);
 		return null;
 	}
 }
@@ -1801,7 +1861,7 @@ async function saveGlowConfigRules() {
 		// Re-render to apply visibility changes
 		render();
 	} catch (e) {
-		// Silent fail
+		logJsError('applyGlowConfig failed', e);
 	}
 }
 
@@ -2105,7 +2165,9 @@ async function fetchWithAuth(url, options) {
 				window.location.href = '/login';
 				return new Promise(() => {});
 			}
-		} catch {}
+		} catch (err) {
+			logJsError('fetchWithAuth account-deleted parse failed', err);
+		}
 		// Normal 401 - reload to show login prompt
 		window.location.reload();
 		// Return a never-resolving promise to prevent further processing
@@ -2119,7 +2181,8 @@ async function fetchJson(url) {
 	const text = await res.text();
 	try {
 		return JSON.parse(text);
-	} catch {
+	} catch (err) {
+		logJsError(`fetchJson JSON parse failed for ${url}`, err);
 		// openHAB should return JSON when using ?type=json, so if we’re here,
 		// show a useful error (no silent failures).
 		throw new Error(`Non-JSON response from ${url} (did you enable REST + ?type=json?)`);
@@ -2182,6 +2245,7 @@ async function refreshSearchStates(matches) {
 					stateMap.set(name, safeText(txt));
 				} catch (err) {
 					if (controller.signal.aborted) return;
+					logJsError(`syncSearchState fetch failed for ${name}`, err);
 				}
 			}
 		};
@@ -2204,7 +2268,8 @@ async function refreshSearchStates(matches) {
 			}
 		}
 		return updated;
-	} catch {
+	} catch (err) {
+		logJsError('syncSearchState failed', err);
 		return false;
 	} finally {
 		if (searchStateAbort === controller) {
@@ -2275,7 +2340,8 @@ async function fetchPageInternal(url, opts) {
 			}
 			// Fallback: unexpected format
 			return { delta: false, page: data.page || data };
-		} catch {
+		} catch (err) {
+			logJsError('fetchPageInternal WS delta failed', err);
 			// WS failed, fall through to XHR
 		}
 	}
@@ -2295,7 +2361,8 @@ async function fetchPageInternal(url, opts) {
 	let data;
 	try {
 		data = JSON.parse(text);
-	} catch {
+	} catch (err) {
+		logJsError(`fetchPageInternal JSON parse failed for ${deltaUrl.toString()}`, err);
 		throw new Error(`Non-JSON response from ${deltaUrl.toString()} (did you enable REST + ?type=json?)`);
 	}
 
@@ -2422,7 +2489,8 @@ async function fetchItemState(itemName) {
 		});
 		if (!res.ok) return null;
 		return await res.text();
-	} catch {
+	} catch (err) {
+		logJsError(`fetchItemState failed for ${itemName}`, err);
 		return null;
 	}
 }
@@ -3518,7 +3586,10 @@ function updateCard(card, w, afterImage, info) {
 				state.pendingRefresh = false;
 				if (disableEl) disableEl.disabled = true;
 				try { await sendCommand(itemName, command); await refresh(false); }
-				catch (e) { alert(e.message); }
+				catch (e) {
+					logJsError(`sendSelection failed for ${itemName}`, e);
+					alert(e.message);
+				}
 				finally {
 					if (disableEl) disableEl.disabled = false;
 					sending = false;
@@ -3711,7 +3782,10 @@ function updateCard(card, w, afterImage, info) {
 							haptic();
 							btn.disabled = true;
 							try { await sendCommand(itemName, cmd); await refresh(false); }
-							catch (e) { alert(e.message); }
+							catch (e) {
+								logJsError(`sendSwitchCommand failed for ${itemName}`, e);
+								alert(e.message);
+							}
 							finally { btn.disabled = false; }
 						};
 					}
@@ -3727,7 +3801,10 @@ function updateCard(card, w, afterImage, info) {
 					haptic();
 					btn.disabled = true;
 					try { await sendCommand(itemName, isOn ? 'OFF' : 'ON'); await refresh(false); }
-					catch (e) { alert(e.message); }
+					catch (e) {
+						logJsError(`sendSwitchCommand failed for ${itemName}`, e);
+						alert(e.message);
+					}
 					finally { btn.disabled = false; }
 				};
 				// Ensure card click handler is set for single switch
@@ -3764,7 +3841,10 @@ function updateCard(card, w, afterImage, info) {
 					haptic();
 					b.disabled = true;
 					try { await sendCommand(itemName, m.command); await refresh(false); }
-					catch (e) { alert(e.message); }
+					catch (e) {
+						logJsError(`sendSwitchCommand failed for ${itemName}`, e);
+						alert(e.message);
+					}
 					finally { b.disabled = false; }
 				};
 				inlineControls.appendChild(b);
@@ -3779,7 +3859,10 @@ function updateCard(card, w, afterImage, info) {
 				haptic();
 				btn.disabled = true;
 				try { await sendCommand(itemName, isOn ? 'OFF' : 'ON'); await refresh(false); }
-				catch (e) { alert(e.message); }
+				catch (e) {
+					logJsError(`sendSwitchCommand failed for ${itemName}`, e);
+					alert(e.message);
+				}
 				finally { btn.disabled = false; }
 			};
 			inlineControls.appendChild(btn);
@@ -3858,7 +3941,10 @@ function updateCard(card, w, afterImage, info) {
 			lastSentValue = value;
 			lastSentAt = Date.now();
 			try { await sendCommand(itemName, String(value), { optimistic }); }
-			catch (e) { console.error(e); }
+			catch (e) {
+				logJsError(`sendSliderValue failed for ${itemName}`, e);
+				console.error(e);
+			}
 		};
 
 		const queueSend = (value, immediate, options = {}) => {
@@ -3986,7 +4072,10 @@ function updateCard(card, w, afterImage, info) {
 			haptic();
 			const next = current > 0 ? 0 : 100;
 			try { await sendCommand(itemName, String(next)); await refresh(false); }
-			catch (e) { alert(e.message); }
+			catch (e) {
+				logJsError(`toggleSlider failed for ${itemName}`, e);
+				alert(e.message);
+			}
 		};
 		card.classList.add('cursor-pointer');
 		card.onclick = (e) => {
@@ -4006,7 +4095,10 @@ function updateCard(card, w, afterImage, info) {
 					haptic();
 					b.disabled = true;
 					try { await sendCommand(itemName, cmd); await refresh(false); }
-					catch (e) { alert(e.message); }
+					catch (e) {
+						logJsError(`sendRollerCommand failed for ${itemName}`, e);
+						alert(e.message);
+					}
 					finally { b.disabled = false; }
 				};
 				btns.appendChild(b);
@@ -4309,7 +4401,8 @@ async function loadDefaultSitemap() {
 	try {
 		const originSource = first?.link || first?.homepage?.link;
 		if (originSource) state.ohOrigin = new URL(originSource).origin;
-	} catch {
+	} catch (err) {
+		logJsError('loadDefaultSitemap origin parse failed', err);
 		state.ohOrigin = null;
 	}
 
@@ -4383,7 +4476,8 @@ async function fetchFullSitemap() {
 		state.sitemapCacheReady = true;
 		resetSitemapCacheRetry();
 		return true;
-	} catch {
+	} catch (err) {
+		logJsError('fetchFullSitemap failed', err);
 		if (!state.sitemapCacheReady && state.connectionOk) {
 			scheduleSitemapCacheRetry();
 		}
@@ -4416,7 +4510,8 @@ async function buildSearchIndex() {
 	let aggregated = null;
 	try {
 		aggregated = await fetchSearchIndexAggregate();
-	} catch {
+	} catch (err) {
+		logJsError('buildSearchIndex aggregate fetch failed', err);
 		aggregated = null;
 	}
 
@@ -4446,7 +4541,8 @@ async function buildSearchIndex() {
 		let page;
 		try {
 			page = await fetchJson(url);
-		} catch {
+		} catch (err) {
+			logJsError(`buildSearchIndex page fetch failed for ${url}`, err);
 			continue;
 		}
 
@@ -4559,6 +4655,7 @@ async function refresh(showLoading) {
 		setConnectionStatus(true);
 	} catch (e) {
 		console.error(e);
+		logJsError('refresh failed', e);
 		clearLoadingStatusTimer();
 
 		// Try sitemap cache (allows offline navigation)
@@ -4696,7 +4793,8 @@ function readIframeChartHash(iframe) {
 		const doc = iframe.contentDocument;
 		if (!doc || !doc.documentElement) return null;
 		return doc.documentElement.dataset.hash || null;
-	} catch {
+	} catch (err) {
+		logJsError('readIframeChartHash failed', err);
 		return null;
 	}
 }
@@ -4706,7 +4804,8 @@ function buildChartReloadUrl(chartUrl, dataHash) {
 		const url = new URL(chartUrl, window.location.origin);
 		if (dataHash) url.searchParams.set('_t', dataHash);
 		return url.pathname + url.search;
-	} catch {
+	} catch (err) {
+		logJsError(`buildChartReloadUrl failed for ${chartUrl}`, err);
 		const sep = chartUrl.includes('?') ? '&' : '?';
 		const hashPart = dataHash ? `&_t=${encodeURIComponent(dataHash)}` : '';
 		if (!hashPart) return chartUrl;
@@ -4837,7 +4936,7 @@ async function checkChartHashes() {
 					setBoundedCache(chartHashes, cacheKey, data.hash, MAX_CHART_HASHES);
 				}
 			} catch (e) {
-				// Ignore fetch errors
+				logJsError('checkChartHashes failed', e);
 			}
 		}
 	} finally {
@@ -4872,6 +4971,7 @@ async function checkHeartbeat() {
 		}
 	} catch (e) {
 		console.warn('Heartbeat failed:', e.message);
+		logJsError('checkHeartbeat failed', e);
 		setConnectionStatus(false, 'Connection lost');
 	} finally {
 		heartbeatInProgress = false;
@@ -5087,6 +5187,7 @@ let lastFocusState = null;
 let focusListenersInitialized = false;
 let externalFocusOverride = null;  // Set by postMessage from WebView2 container
 
+
 function isClientFocused() {
 	// Use external override if set, otherwise use visibilityState
 	if (externalFocusOverride !== null) return externalFocusOverride;
@@ -5181,6 +5282,14 @@ function connectWs() {
 					window.location.href = '/login';
 					return;
 				}
+				if (msg.event === 'pong' && msg.data) {
+					handleWsPong(msg.data);
+					return;
+				}
+				if (msg.event === 'chartHashResponse' && msg.data) {
+					handleWsChartHashResponse(msg.data);
+					return;
+				}
 				if (msg.event === 'backendStatus' && msg.data) {
 					// Backend (OpenHAB) connection status changed
 					if (msg.data.ok) {
@@ -5195,7 +5304,9 @@ function connectWs() {
 				} else if (msg.event === 'deltaResponse' && msg.data) {
 					handleWsDeltaResponse(msg.data);
 				}
-			} catch {}
+			} catch (err) {
+				logJsError('wsConnection onmessage failed', err);
+			}
 		};
 
 		wsConnection.onclose = (event) => {
@@ -5223,10 +5334,12 @@ function connectWs() {
 		wsConnection.onerror = (err) => {
 			// Only log here - onclose will handle fail count and reconnection
 			console.warn('WebSocket error:', err);
+			logJsError('WebSocket error', err);
 			// Check if server is reachable
 			checkHeartbeat();
 		};
-	} catch {
+	} catch (err) {
+		logJsError('connectWs failed', err);
 		wsConnected = false;
 		wsFailCount++;
 		scheduleWsReconnect();
@@ -5237,7 +5350,7 @@ function closeWs() {
 	clearWsConnectTimer();
 	clearPendingDeltaRequests();
 	if (wsConnection) {
-		try { wsConnection.close(); } catch {}
+		try { wsConnection.close(); } catch (err) { logJsError('closeWs failed', err); }
 		wsConnection = null;
 	}
 	wsConnected = false;
@@ -5286,16 +5399,22 @@ function restoreNormalPolling() {
 			let showPause = false;
 			if (pauseParam !== null) {
 				showPause = pauseParam !== 'false';
-				try { localStorage.setItem('ohPauseEnabled', showPause ? '1' : '0'); } catch {}
+				try { localStorage.setItem('ohPauseEnabled', showPause ? '1' : '0'); } catch (err) {
+					logJsError('init pause localStorage set failed', err);
+				}
 			} else {
 				try {
 					const saved = localStorage.getItem('ohPauseEnabled');
 					if (saved === '1') showPause = true;
-				} catch {}
+				} catch (err) {
+					logJsError('init pause localStorage get failed', err);
+				}
 			}
 			els.pause.classList.toggle('pause-hidden', !showPause);
 		}
-	} catch {}
+	} catch (err) {
+		logJsError('init failed', err);
+	}
 	// Show voice button if Speech Recognition API and microphone permission available
 	if (els.voice && (window.SpeechRecognition || window.webkitSpeechRecognition)) {
 		(async () => {
@@ -5629,7 +5748,8 @@ function restoreNormalPolling() {
 						if (data.response) {
 							speakText(data.response);
 						}
-					} catch {
+					} catch (err) {
+						logJsError('voice request failed', err);
 						if (voiceTimeoutId) {
 							clearTimeout(voiceTimeoutId);
 							voiceTimeoutId = null;
@@ -5643,6 +5763,7 @@ function restoreNormalPolling() {
 
 				recognition.onerror = (e) => {
 					console.log('Speech recognition error:', e.error);
+					logJsError(`speech recognition error: ${e.error || 'unknown'}`, e);
 					resetVoiceState();
 				};
 
@@ -5657,7 +5778,8 @@ function restoreNormalPolling() {
 
 				try {
 					recognition.start();
-				} catch {
+				} catch (err) {
+					logJsError('speech recognition start failed', err);
 					resetVoiceState();
 				}
 			});
@@ -5688,6 +5810,7 @@ function restoreNormalPolling() {
 		}
 	} catch (e) {
 		console.error(e);
+		logJsError('init bootstrap failed', e);
 		const snapshot = loadHomeSnapshot();
 		if (snapshot && applyHomeSnapshot(snapshot)) {
 			setStatus('');

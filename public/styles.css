@@ -1218,6 +1218,9 @@ body.theme-light.hover-device.slim #grid .glass:hover {
 	border-radius: 50%;
 	animation: resume-spin 1s linear infinite;
 }
+.slim .resume-spinner-ring {
+	animation: resume-spin 1s linear infinite !important;
+}
 @keyframes resume-spin {
 	to { transform: rotate(360deg); }
 }

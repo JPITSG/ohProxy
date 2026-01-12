@@ -216,6 +216,7 @@ const ACCESS_LOG = safeText(process.env.ACCESS_LOG || SERVER_CONFIG.accessLog);
 const ACCESS_LOG_LEVEL = safeText(process.env.ACCESS_LOG_LEVEL || SERVER_CONFIG.accessLogLevel || 'all')
 	.trim()
 	.toLowerCase();
+const JS_LOG_FILE = safeText(process.env.JS_LOG_FILE || SERVER_CONFIG.jsLogFile || '');
 const SLOW_QUERY_MS = configNumber(SERVER_CONFIG.slowQueryMs, 0);
 const AUTH_REALM = safeText(SERVER_AUTH.realm || 'openHAB Proxy');
 const AUTH_COOKIE_NAME = safeText(SERVER_AUTH.cookieName || 'AuthStore');
@@ -286,6 +287,11 @@ const authLockouts = new Map();
 
 function logMessage(message) {
 	writeLogLine(LOG_FILE, message);
+}
+
+function logJsError(message) {
+	if (!JS_LOG_FILE) return;
+	writeLogLine(JS_LOG_FILE, message);
 }
 
 function getLockoutKey(ip) {
@@ -4105,6 +4111,51 @@ app.get('/api/ping', (req, res) => {
 	res.setHeader('Content-Type', 'text/plain');
 	res.setHeader('Cache-Control', 'no-cache, no-store');
 	res.send('pong');
+});
+
+// JavaScript error logging endpoint (auth required)
+app.post('/api/jslog', express.json(), (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache, no-store');
+	// Require authentication
+	const session = req.ohProxySession;
+	if (!session) {
+		res.status(401).json({ error: 'Unauthorized' });
+		return;
+	}
+	// Check if JS logging is enabled
+	if (!JS_LOG_FILE) {
+		res.json({ ok: true, logged: false });
+		return;
+	}
+	// Sanitize and validate input
+	const body = req.body;
+	if (!body || typeof body !== 'object' || Array.isArray(body)) {
+		res.status(400).json({ error: 'Invalid request body' });
+		return;
+	}
+	const message = typeof body.message === 'string' ? body.message.slice(0, 2000) : '';
+	const url = typeof body.url === 'string' ? body.url.slice(0, 500) : '';
+	const line = typeof body.line === 'number' ? Math.floor(body.line) : 0;
+	const col = typeof body.col === 'number' ? Math.floor(body.col) : 0;
+	const stack = typeof body.stack === 'string' ? body.stack.slice(0, 5000) : '';
+	const userAgent = typeof body.userAgent === 'string' ? body.userAgent.slice(0, 300) : '';
+	if (!message && !stack) {
+		res.status(400).json({ error: 'No error message or stack provided' });
+		return;
+	}
+	// Build log entry
+	const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+	const user = session.username || 'anonymous';
+	const logParts = [`[JS] ${ip} ${user}`];
+	if (message) logParts.push(`msg="${message.replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ')}"`);
+	if (url) logParts.push(`url="${url}"`);
+	if (line) logParts.push(`line=${line}`);
+	if (col) logParts.push(`col=${col}`);
+	if (userAgent) logParts.push(`ua="${userAgent.replace(/"/g, '\\"')}"`);
+	if (stack) logParts.push(`stack="${stack.replace(/"/g, '\\"').replace(/[\r\n]+/g, '\\n')}"`);
+	logJsError(logParts.join(' '));
+	res.json({ ok: true, logged: true });
 });
 
 // Widget glow rules API (admin only)
