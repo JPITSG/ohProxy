@@ -2,7 +2,6 @@
 	// Set theme from URL param, localStorage, or system preference
 	var params = new URLSearchParams(window.location.search);
 	var mode = params.get('mode');
-	var reloaded = params.get('reloaded') === 'true';
 	if (mode === 'dark' || mode === 'light') {
 		document.documentElement.setAttribute('data-theme', mode);
 	} else {
@@ -10,8 +9,9 @@
 		var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 		document.documentElement.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
 	}
-	// Enable animations only on first load (not reloaded)
-	if (!reloaded) {
+	// Enable animations only when parent iframe has not opted out
+	var noAnim = window.name === 'noanim';
+	if (!noAnim) {
 		document.documentElement.classList.add('chart-animated');
 	}
 
