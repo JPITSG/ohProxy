@@ -729,6 +729,7 @@ function reloadChartIframes(mode) {
 		// Replace mode param in URL
 		const newUrl = currentUrl.replace(/([?&])mode=(light|dark)/, `$1mode=${mode}`);
 		if (newUrl !== currentUrl) {
+			setChartIframeAnimState(iframe, newUrl);
 			iframe.dataset.chartUrl = newUrl;
 			iframe.src = newUrl;
 		}
@@ -1417,6 +1418,39 @@ let imageResizeEpoch = 0;
 let imageResizeTimer = null;
 let imageScrollTimer = null;
 let imageResizePending = false;
+
+const chartAnimSeen = new Set();
+
+function getChartAnimKey(chartUrl) {
+	if (!chartUrl) return null;
+	try {
+		const url = new URL(chartUrl, window.location.origin);
+		const item = url.searchParams.get('item') || '';
+		const period = url.searchParams.get('period') || '';
+		if (!item || !period) return null;
+		return `${item}|${period}`;
+	} catch {
+		return null;
+	}
+}
+
+function setChartIframeAnimState(iframe, chartUrl) {
+	const key = getChartAnimKey(chartUrl);
+	if (!key) {
+		iframe.name = 'chart';
+		return;
+	}
+	if (chartAnimSeen.has(key)) {
+		iframe.name = 'noanim';
+	} else {
+		iframe.name = 'chart';
+		chartAnimSeen.add(key);
+	}
+}
+
+function resetChartAnimState() {
+	chartAnimSeen.clear();
+}
 
 
 function snapshotHistoryState() {
@@ -3191,7 +3225,6 @@ function updateCard(card, w, afterImage, info) {
 		if (!iframeEl) {
 			iframeEl = document.createElement('iframe');
 			iframeEl.className = 'chart-frame';
-			iframeEl.name = 'chart';
 			iframeEl.setAttribute('frameborder', '0');
 			iframeEl.setAttribute('scrolling', 'no');
 			frameContainer.appendChild(iframeEl);
@@ -3200,7 +3233,7 @@ function updateCard(card, w, afterImage, info) {
 		const fullUrl = '/' + chartUrl;
 		const urlChanged = iframeEl.dataset.chartUrl !== fullUrl;
 		if (urlChanged) {
-			iframeEl.name = 'chart';
+			setChartIframeAnimState(iframeEl, fullUrl);
 			iframeEl.dataset.chartUrl = fullUrl;
 			iframeEl.src = fullUrl;
 		}
@@ -4234,6 +4267,7 @@ async function pushPage(pageUrl, pageTitle) {
 	if (state.pageUrl) state.stack.push({ pageUrl: state.pageUrl, pageTitle: state.pageTitle });
 	state.pageUrl = ensureJsonParam(toRelativeRestLink(pageUrl));
 	state.pageTitle = pageTitle || 'openHAB';
+	resetChartAnimState();
 	updateNavButtons();
 	syncHistory(false);
 	queueScrollTop();
@@ -4684,14 +4718,14 @@ function swapChartIframe(iframe, newSrc, baseUrl) {
 	const container = iframe.parentElement;
 	if (!container) {
 		iframe.dataset.chartUrl = baseUrl || newSrc;
-		iframe.name = 'noanim';
+		setChartIframeAnimState(iframe, baseUrl || newSrc);
 		iframe.src = newSrc;
 		return;
 	}
 
 	const newIframe = document.createElement('iframe');
 	newIframe.className = iframe.className;
-	newIframe.name = 'noanim';
+	setChartIframeAnimState(newIframe, baseUrl || newSrc);
 	newIframe.setAttribute('frameborder', iframe.getAttribute('frameborder') || '0');
 	newIframe.setAttribute('scrolling', iframe.getAttribute('scrolling') || 'no');
 	if (iframe.getAttribute('allowfullscreen')) {
@@ -5393,6 +5427,7 @@ function restoreNormalPolling() {
 				if (prev?.pageUrl) {
 					state.pageUrl = prev.pageUrl;
 					state.pageTitle = prev.pageTitle || state.pageTitle;
+					resetChartAnimState();
 					updateNavButtons();
 					syncHistory(true);
 					queueScrollTop();
@@ -5425,6 +5460,7 @@ function restoreNormalPolling() {
 		state.pageUrl = next.pageUrl;
 		state.pageTitle = next.pageTitle || state.pageTitle;
 		state.stack = Array.isArray(next.stack) ? next.stack : [];
+		resetChartAnimState();
 		updateNavButtons();
 		queueScrollTop();
 		refresh(true);
