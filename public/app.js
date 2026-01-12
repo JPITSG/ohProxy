@@ -425,7 +425,7 @@ const BOUNCE_MAX_PX = 52;
 const BOUNCE_SCALE = 0.4;
 const BOUNCE_RETURN_MS = 180;
 const BOUNCE_HOLD_MS = 40;
-const BOUNCE_REFRESH_THRESHOLD = 0.9;
+const BOUNCE_REFRESH_THRESHOLD = 1.8;
 let bounceResetTimer = null;
 let bounceClearTimer = null;
 const bounceTouch = {
@@ -5139,6 +5139,15 @@ function connectWs() {
 				if (msg.event === 'account-deleted') {
 					// Account was deleted - redirect to login
 					window.location.href = '/login';
+					return;
+				}
+				if (msg.event === 'backendStatus' && msg.data) {
+					// Backend (OpenHAB) connection status changed
+					if (msg.data.ok) {
+						setConnectionStatus(true);
+					} else {
+						setConnectionStatus(false, msg.data.error || 'Backend unavailable');
+					}
 					return;
 				}
 				if (msg.event === 'update' && msg.data) {

@@ -1436,6 +1436,13 @@ const backgroundState = {
 
 const DEFAULT_PAGE_TITLE = 'openHAB';
 
+// --- Backend Connection Status ---
+const backendStatus = {
+	ok: true,
+	lastError: '',
+	lastChange: 0,
+};
+
 // --- WebSocket Push Infrastructure ---
 const wss = new WebSocket.Server({
 	noServer: true,
@@ -1461,9 +1468,13 @@ function handleWsConnection(ws, req) {
 	ws.clientState = { focused: true };  // Assume focused on connect; client will send actual state
 	ws.ohProxyUser = req.ohProxyUser || null;  // Track authenticated username
 
-	// Send welcome message
+	// Send welcome message and current backend status
 	try {
 		ws.send(JSON.stringify({ event: 'connected', data: { time: Date.now() } }));
+		ws.send(JSON.stringify({
+			event: 'backendStatus',
+			data: { ok: backendStatus.ok, error: backendStatus.lastError },
+		}));
 	} catch (e) {
 		logMessage(`[WS] Send error for ${clientIp}: ${e.message}`);
 	}
@@ -1542,6 +1553,21 @@ function wsBroadcast(event, data) {
 			} catch {}
 		}
 	}
+}
+
+function setBackendStatus(ok, errorMessage) {
+	if (backendStatus.ok === ok) return;
+
+	backendStatus.ok = ok;
+	backendStatus.lastError = ok ? '' : (errorMessage || 'OpenHAB unreachable');
+	backendStatus.lastChange = Date.now();
+
+	logMessage(`[Backend] Status: ${ok ? 'OK' : 'FAILED'}${backendStatus.lastError ? ' - ' + backendStatus.lastError : ''}`);
+
+	wsBroadcast('backendStatus', {
+		ok: backendStatus.ok,
+		error: backendStatus.lastError,
+	});
 }
 
 function parseAtmosphereUpdate(body) {
@@ -1755,6 +1781,7 @@ function connectAtmospherePage(pageId) {
 		res.on('end', async () => {
 			pageState.connection = null;
 			if (res.statusCode === 200 && body.trim()) {
+				setBackendStatus(true);
 				const update = parseAtmosphereUpdate(body);
 				if (update && update.changes.length > 0) {
 					// Filter to only items that actually changed
@@ -1786,6 +1813,8 @@ function connectAtmospherePage(pageId) {
 						}
 					}
 				}
+			} else if (res.statusCode >= 400) {
+				setBackendStatus(false, `HTTP ${res.statusCode}`);
 			}
 			// Reconnect for next update
 			if (wss.clients.size > 0) {
@@ -1798,8 +1827,10 @@ function connectAtmospherePage(pageId) {
 		pageState.connection = null;
 		// socket hang up and ECONNRESET are expected for long-polling, silently reconnect
 		const msg = err.message || err;
-		if (msg !== 'socket hang up' && err.code !== 'ECONNRESET') {
+		const isExpectedClose = msg === 'socket hang up' || err.code === 'ECONNRESET';
+		if (!isExpectedClose) {
 			logMessage(`[Atmosphere:${pageId}] Error: ${msg}`);
+			setBackendStatus(false, msg);
 		}
 		scheduleAtmospherePageReconnect(pageId, ATMOSPHERE_RECONNECT_MS);
 	});
@@ -2167,10 +2198,24 @@ function computeChartDataHash(rawData, period) {
 }
 
 function formatChartValue(n) {
-	if (n === 0) return '0';
-	if (Math.abs(n) >= 100) return n.toFixed(0);
-	if (Math.abs(n) >= 10) return n.toFixed(1);
-	return n.toFixed(1);
+	var result;
+	if (n === 0) {
+		return '0.0';
+	} else if (Number.isInteger(n) || Math.abs(n - Math.round(n)) < 0.0001) {
+		var r = Math.round(n);
+		result = Math.abs(r) >= 100 ? r.toFixed(0) : r.toFixed(1);
+	} else if (Math.abs(n) >= 100) {
+		result = n.toFixed(0);
+	} else if (Math.abs(n) >= 1) {
+		result = n.toFixed(1);
+	} else {
+		result = n.toFixed(2);
+	}
+	// Normalize negative zero to positive zero
+	if (result.charAt(0) === '-' && parseFloat(result) === 0) {
+		return result.substring(1);
+	}
+	return result;
 }
 
 function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg) {
@@ -2216,7 +2261,7 @@ window._chartYMin=${yMin};
 window._chartYMax=${yMax};
 window._chartDataMin=${dataMin};
 window._chartDataMax=${dataMax};
-window._chartUnit="${unit}";
+window._chartUnit=${JSON.stringify(unit)};
 </script>
 <script src="/chart.${assetVersion}.js"></script>
 </body>
@@ -2401,9 +2446,11 @@ async function fetchAllItems() {
 		// openHAB 1.x returns {"item":[...]}, openHAB 2.x+ returns [...]
 		const items = Array.isArray(data) ? data : (data.item || []);
 		if (!Array.isArray(items)) return [];
+		setBackendStatus(true);
 		return items.map(item => ({ name: item.name, state: item.state }));
 	} catch (e) {
 		logMessage(`[Polling] Failed to fetch items: ${e.message}`);
+		setBackendStatus(false, e.message);
 		return [];
 	}
 }
