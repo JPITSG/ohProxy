@@ -4986,6 +4986,7 @@ const FAST_CONNECTION_ENABLE_MS = 50;   // Enter fast mode below this
 const FAST_CONNECTION_DISABLE_MS = 80;  // Exit fast mode above this
 let pingSamples = [];
 let pingTimer = null;
+let forceFastMode = false;
 let fastConnectionActive = false;
 let pingNeedsPrefill = true;
 
@@ -5003,7 +5004,7 @@ function getRollingLatency() {
 }
 
 function isFastConnection() {
-	return fastConnectionActive;
+	return forceFastMode || fastConnectionActive;
 }
 
 function updateFastConnectionState() {
@@ -5028,6 +5029,7 @@ function updateFastConnectionState() {
 }
 
 function doPing() {
+	if (forceFastMode) return;
 	const controller = new AbortController();
 	const timeoutId = setTimeout(() => controller.abort(), PING_TIMEOUT_MS);
 	const start = performance.now();
@@ -5068,6 +5070,7 @@ const PING_START_DELAY_MS = 500;
 function startPing() {
 	stopPing();
 	invalidatePing();
+	if (forceFastMode) return;
 	doPing();
 	pingTimer = setInterval(doPing, PING_INTERVAL_MS);
 }
@@ -5075,6 +5078,7 @@ function startPing() {
 function startPingDelayed() {
 	stopPing();
 	invalidatePing();
+	if (forceFastMode) return;
 	if (pingStartDelayTimer) clearTimeout(pingStartDelayTimer);
 	pingStartDelayTimer = setTimeout(() => {
 		pingStartDelayTimer = null;
@@ -5384,6 +5388,7 @@ function restoreNormalPolling() {
 (async function init() {
 	try {
 		const params = new URLSearchParams(window.location.search);
+		forceFastMode = params.get('fast') === 'true';
 		state.isSlim = params.get('slim') === 'true';
 		const headerParam = (params.get('header') || '').toLowerCase();
 		state.headerMode = (headerParam === 'small' || headerParam === 'none') ? headerParam : 'full';

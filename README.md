@@ -432,6 +432,7 @@ module.exports = {
 | `slim` | `true` | Enable slim mode for minimal UI |
 | `header` | `full`, `small`, `none` | Header display mode |
 | `pause` | `true` | Show Pause/Resume button for polling |
+| `fast` | `true` | Force fast mode (skip cache) and disable ping latency checks |
 
 Examples:
 ```
@@ -439,6 +440,7 @@ https://your-proxy.com/?mode=dark
 https://your-proxy.com/?slim=true&header=none
 https://your-proxy.com/?mode=light&header=small
 https://your-proxy.com/?pause=true
+https://your-proxy.com/?fast=true
 ```
 
 ### Proxy Endpoint
