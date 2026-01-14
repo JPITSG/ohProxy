@@ -40,6 +40,8 @@
 			this.container.addEventListener('touchstart', e => this.onTouchStart(e), { passive: false });
 			this.container.addEventListener('touchmove', e => this.onTouchMove(e), { passive: false });
 			this.container.addEventListener('touchend', e => this.onTouchEnd(e));
+			this.container.addEventListener('mousemove', e => this.onMouseMove(e));
+			this.container.addEventListener('mouseleave', e => this.onMouseLeave(e));
 		}
 
 		svg$(tag, attrs) {
@@ -483,6 +485,39 @@
 				if (this.hideTimer) clearTimeout(this.hideTimer);
 				this.hideTimer = setTimeout(() => this.hideTooltip(), 2000);
 			}
+		}
+
+		onMouseMove(e) {
+			// Skip on mobile or during touch interaction
+			if (this.layout.sm || this.isTouching || this.points.length === 0) return;
+
+			// Refresh containerRect in case iframe scrolled/repositioned
+			this.layout.containerRect = this.container.getBoundingClientRect();
+
+			var closest = this.findClosestPoint(e.clientX);
+
+			if (closest) {
+				// Check if cursor is within 20px of the line
+				var rect = this.layout.containerRect;
+				var cursorY = e.clientY - rect.top - this.layout.pad.top;
+				var lineY = closest.y;
+				var dist = Math.abs(cursorY - lineY);
+
+				if (dist <= 20) {
+					if (this.hideTimer) clearTimeout(this.hideTimer);
+					this.showTapCircle(closest);
+					this.showMobileTooltip(closest);
+				} else {
+					this.hideTooltip();
+				}
+			} else {
+				this.hideTooltip();
+			}
+		}
+
+		onMouseLeave(e) {
+			if (this.layout.sm || this.isTouching) return;
+			this.hideTooltip();
 		}
 
 		showTapCircle(pt) {
