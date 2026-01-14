@@ -2224,7 +2224,7 @@ function formatChartValue(n) {
 	return result;
 }
 
-function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg) {
+function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg, dataCur, period) {
 	const theme = mode === 'dark' ? 'dark' : 'light';
 	const safeTitle = escapeHtml(title);
 	const unitDisplay = unit !== '?' ? escapeHtml(unit) : '';
@@ -2237,7 +2237,9 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 	const fmtAvg = typeof dataAvg === 'number' ? formatChartValue(dataAvg) + statUnit : '';
 	const fmtMin = typeof dataMin === 'number' ? formatChartValue(dataMin) + statUnit : '';
 	const fmtMax = typeof dataMax === 'number' ? formatChartValue(dataMax) + statUnit : '';
-	const statsHtml = fmtAvg ? `<div class="chart-stats" id="chartStats"><span class="stat-item"><span class="stat-label">Avg</span> <span class="stat-value">${fmtAvg}</span></span><span class="stat-item"><span class="stat-label">Min</span> <span class="stat-value">${fmtMin}</span></span><span class="stat-item"><span class="stat-label">Max</span> <span class="stat-value">${fmtMax}</span></span></div>` : '';
+	const fmtCur = (period === 'h' && typeof dataCur === 'number') ? formatChartValue(dataCur) + statUnit : '';
+	const curHtml = fmtCur ? `<span class="stat-item"><span class="stat-label">Cur</span> <span class="stat-value">${fmtCur}</span></span>` : '';
+	const statsHtml = fmtAvg ? `<div class="chart-stats" id="chartStats">${curHtml}<span class="stat-item"><span class="stat-label">Avg</span> <span class="stat-value">${fmtAvg}</span></span><span class="stat-item"><span class="stat-label">Min</span> <span class="stat-value">${fmtMin}</span></span><span class="stat-item"><span class="stat-label">Max</span> <span class="stat-value">${fmtMax}</span></span></div>` : '';
 
 	return `<!DOCTYPE html>
 <html lang="en" data-theme="${theme}"${dataHashAttr}>
@@ -2305,11 +2307,14 @@ function generateChart(item, period, mode, title) {
 		? chartData.reduce((sum, pt) => sum + pt.y, 0) / chartData.length
 		: null;
 
+	// Get current (latest) value from chart data
+	const dataCur = chartData.length > 0 ? chartData[chartData.length - 1].y : null;
+
 	// Compute data hash for cache invalidation
 	const dataHash = computeChartDataHash(rawData, period);
 
 	// Generate HTML
-	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg);
+	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg, dataCur, period);
 }
 
 async function fetchAllPages() {
