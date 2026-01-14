@@ -10,7 +10,7 @@
 		document.documentElement.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
 	}
 	// Enable animations only when parent iframe has not opted out
-	var noAnim = window.name === 'noanim';
+	var noAnim = window.name === 'noanim' || (window.frameElement && window.frameElement.name === 'noanim');
 	if (!noAnim) {
 		document.documentElement.classList.add('chart-animated');
 	}

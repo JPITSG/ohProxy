@@ -3170,7 +3170,7 @@ function updateCard(card, w, afterImage, info) {
 		controls.innerHTML = '';
 	} else {
 		for (const child of Array.from(controls.children)) {
-			if (!child.classList || !child.classList.contains('image-viewer-trigger')) {
+			if (!child.classList || (!child.classList.contains('image-viewer-trigger') && !child.classList.contains('chart-frame-container'))) {
 				child.remove();
 			}
 		}
