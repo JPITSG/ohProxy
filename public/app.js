@@ -5476,6 +5476,18 @@ function restoreNormalPolling() {
 		e.stopPropagation();
 		openGlowConfigModal(widget, card);
 	}, true);
+	// Disable pointer-events on iframes when ctrl/meta held so clicks pass through to cards
+	const setIframePointerEvents = (enabled) => {
+		const value = enabled ? '' : 'none';
+		document.querySelectorAll('#grid iframe').forEach(f => f.style.pointerEvents = value);
+	};
+	window.addEventListener('keydown', (e) => {
+		if (e.ctrlKey || e.metaKey) setIframePointerEvents(false);
+	}, { passive: true });
+	window.addEventListener('keyup', (e) => {
+		if (e.key === 'Control' || e.key === 'Meta') setIframePointerEvents(true);
+	}, { passive: true });
+	window.addEventListener('blur', () => setIframePointerEvents(true), { passive: true });
 	window.addEventListener('keydown', noteActivity, { passive: true });
 	window.addEventListener('resize', scheduleImageResizeRefresh, { passive: true });
 	window.addEventListener('orientationchange', scheduleImageResizeRefresh, { passive: true });
