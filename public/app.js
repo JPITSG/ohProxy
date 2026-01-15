@@ -3233,6 +3233,7 @@ function updateCard(card, w, afterImage, info) {
 		labelParts,
 		mediaUrl,
 		chartUrl,
+		chartHeight,
 		webviewUrl,
 		webviewHeight,
 		videoUrl,
