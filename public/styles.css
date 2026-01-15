@@ -1615,6 +1615,11 @@ body.theme-light .iframe-height-input:focus {
 		box-shadow: 0 0 10px var(--color-control-off-shadow-hover);
 	}
 }
+.proxy-cache-section {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
 .proxy-cache-input {
 	box-sizing: border-box;
 	width: 100%;
