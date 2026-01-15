@@ -175,6 +175,17 @@ const widgetVideoConfigMap = new Map();
 	}
 })();
 
+// Widget iframe configs: Map from widgetId to {height: number}
+const widgetIframeConfigMap = new Map();
+(function initWidgetIframeConfigs() {
+	const configs = Array.isArray(OH_CONFIG.widgetIframeConfigs) ? OH_CONFIG.widgetIframeConfigs : [];
+	for (const entry of configs) {
+		if (entry.widgetId) {
+			widgetIframeConfigMap.set(entry.widgetId, entry);
+		}
+	}
+})();
+
 // Get current user role from config
 function getUserRole() {
 	return OH_CONFIG.userRole || null;
@@ -1556,19 +1567,19 @@ function pushImageViewerHistory(url, refreshMs) {
 	history.pushState(payload, '', window.location.pathname);
 }
 
-// Glow Config Modal
-let glowConfigModal = null;
-let glowConfigWidgetKey = '';
-let glowConfigWidgetLabel = '';
+// Card Config Modal
+let cardConfigModal = null;
+let cardConfigWidgetKey = '';
+let cardConfigWidgetLabel = '';
 
-function ensureGlowConfigModal() {
-	if (glowConfigModal) return;
+function ensureCardConfigModal() {
+	if (cardConfigModal) return;
 	const wrap = document.createElement('div');
-	wrap.id = 'glowConfigModal';
-	wrap.className = 'glow-config-modal hidden';
+	wrap.id = 'cardConfigModal';
+	wrap.className = 'card-config-modal hidden';
 	wrap.innerHTML = `
-		<div class="glow-config-frame glass">
-			<div class="glow-config-body">
+		<div class="card-config-frame glass">
+			<div class="card-config-body">
 				<div class="default-sound-section" style="display:none;">
 					<div class="item-config-section-header">DEFAULT SOUND</div>
 					<div class="item-config-visibility">
@@ -1581,6 +1592,10 @@ function ensureGlowConfigModal() {
 							<span>Unmuted</span>
 						</label>
 					</div>
+				</div>
+				<div class="iframe-height-section" style="display:none;">
+					<div class="item-config-section-header">HEIGHT</div>
+					<input type="text" class="iframe-height-input" placeholder="empty = 16:9 ratio" inputmode="numeric">
 				</div>
 				<div class="item-config-section-header">VISIBILITY</div>
 				<div class="item-config-visibility">
@@ -1599,37 +1614,37 @@ function ensureGlowConfigModal() {
 				</div>
 				<div class="glow-rules-section">
 					<div class="item-config-section-header">GLOW RULES</div>
-					<div class="glow-config-rules"></div>
-					<button type="button" class="glow-config-add">+ Add Rule</button>
+					<div class="card-config-rules"></div>
+					<button type="button" class="card-config-add">+ Add Rule</button>
 				</div>
-				<div class="glow-config-footer">
-					<button type="button" class="glow-config-cancel">Close</button>
-					<button type="button" class="glow-config-save">Save</button>
+				<div class="card-config-footer">
+					<button type="button" class="card-config-cancel">Close</button>
+					<button type="button" class="card-config-save">Save</button>
 				</div>
 			</div>
 		</div>
 	`;
 	document.body.appendChild(wrap);
-	glowConfigModal = wrap;
+	cardConfigModal = wrap;
 
 	// Event listeners
-	wrap.querySelector('.glow-config-cancel').addEventListener('click', closeGlowConfigModal);
-	wrap.querySelector('.glow-config-save').addEventListener('click', async () => {
-		await saveGlowConfigRules();
-		closeGlowConfigModal();
+	wrap.querySelector('.card-config-cancel').addEventListener('click', closeCardConfigModal);
+	wrap.querySelector('.card-config-save').addEventListener('click', async () => {
+		await saveCardConfig();
+		closeCardConfigModal();
 	});
-	wrap.querySelector('.glow-config-add').addEventListener('click', addGlowRuleRow);
+	wrap.querySelector('.card-config-add').addEventListener('click', addGlowRuleRow);
 	wrap.addEventListener('click', (e) => {
-		if (e.target === wrap) closeGlowConfigModal();
+		if (e.target === wrap) closeCardConfigModal();
 	});
 	document.addEventListener('keydown', (e) => {
-		if (e.key === 'Escape' && glowConfigModal && !glowConfigModal.classList.contains('hidden')) {
-			closeGlowConfigModal();
+		if (e.key === 'Escape' && cardConfigModal && !cardConfigModal.classList.contains('hidden')) {
+			closeCardConfigModal();
 		}
 	});
 }
 
-function createGlowCustomSelect(options, initialValue, className) {
+function createCustomSelect(options, initialValue, className) {
 	const wrap = document.createElement('div');
 	wrap.className = `glow-select-wrap ${className}`;
 
@@ -1740,8 +1755,8 @@ function createGlowRuleRow(rule = {}) {
 		{ value: 'red', label: 'Red' },
 	];
 
-	const operatorSelect = createGlowCustomSelect(operatorOptions, rule.operator || '=', 'glow-operator-select');
-	const colorSelect = createGlowCustomSelect(colorOptions, rule.color || 'green', 'glow-color-select');
+	const operatorSelect = createCustomSelect(operatorOptions, rule.operator || '=', 'glow-operator-select');
+	const colorSelect = createCustomSelect(colorOptions, rule.color || 'green', 'glow-color-select');
 
 	const valueInput = document.createElement('input');
 	valueInput.type = 'text';
@@ -1764,35 +1779,49 @@ function createGlowRuleRow(rule = {}) {
 }
 
 function addGlowRuleRow() {
-	const rulesContainer = glowConfigModal.querySelector('.glow-config-rules');
+	const rulesContainer = cardConfigModal.querySelector('.card-config-rules');
 	rulesContainer.appendChild(createGlowRuleRow());
 }
 
-function openGlowConfigModal(widget, card) {
+function openCardConfigModal(widget, card) {
 	if (state.isSlim) return;
 	if (getUserRole() !== 'admin') return;
 	haptic();
-	ensureGlowConfigModal();
+	ensureCardConfigModal();
 	const wKey = widgetKey(widget);
-	glowConfigWidgetKey = wKey;
-	glowConfigWidgetLabel = widget?.label || widget?.item?.label || widget?.item?.name || wKey;
+	cardConfigWidgetKey = wKey;
+	cardConfigWidgetLabel = widget?.label || widget?.item?.label || widget?.item?.name || wKey;
 
 	// Load existing visibility
 	const visibility = widgetVisibilityMap.get(wKey) || 'all';
-	const visRadio = glowConfigModal.querySelector(`input[name="visibility"][value="${visibility}"]`);
+	const visRadio = cardConfigModal.querySelector(`input[name="visibility"][value="${visibility}"]`);
 	if (visRadio) visRadio.checked = true;
 
 	// Show/hide default sound section for video widgets
-	const isVideoWidget = (widget?.type || '').toLowerCase() === 'video';
-	const defaultSoundSection = glowConfigModal.querySelector('.default-sound-section');
+	const wType = (widget?.type || '').toLowerCase();
+	const isVideoWidget = wType === 'video';
+	const defaultSoundSection = cardConfigModal.querySelector('.default-sound-section');
 	if (defaultSoundSection) {
 		defaultSoundSection.style.display = isVideoWidget ? '' : 'none';
 		if (isVideoWidget) {
 			// Load existing video config
 			const videoConfig = widgetVideoConfigMap.get(wKey);
 			const defaultMutedValue = videoConfig?.defaultMuted !== false ? 'muted' : 'unmuted';
-			const soundRadio = glowConfigModal.querySelector(`input[name="defaultSound"][value="${defaultMutedValue}"]`);
+			const soundRadio = cardConfigModal.querySelector(`input[name="defaultSound"][value="${defaultMutedValue}"]`);
 			if (soundRadio) soundRadio.checked = true;
+		}
+	}
+
+	// Show/hide iframe height section for iframe cards (webview, video, chart)
+	const isIframeWidget = wType === 'video' || wType.includes('webview') || wType === 'chart';
+	const iframeHeightSection = cardConfigModal.querySelector('.iframe-height-section');
+	if (iframeHeightSection) {
+		iframeHeightSection.style.display = isIframeWidget ? '' : 'none';
+		const heightInput = iframeHeightSection.querySelector('.iframe-height-input');
+		if (heightInput) {
+			// Load existing iframe config
+			const iframeConfig = widgetIframeConfigMap.get(wKey);
+			heightInput.value = iframeConfig?.height ? String(iframeConfig.height) : '';
 		}
 	}
 
@@ -1801,13 +1830,13 @@ function openGlowConfigModal(widget, card) {
 	const isSection = !!widget?.__section;
 	const labelParts = splitLabelState(widget?.label || '');
 	const hasSubtext = !!labelParts.state;
-	const glowRulesSection = glowConfigModal.querySelector('.glow-rules-section');
+	const glowRulesSection = cardConfigModal.querySelector('.glow-rules-section');
 	if (glowRulesSection) {
 		glowRulesSection.style.display = (hasSubtext && !isSection) ? '' : 'none';
 	}
 
 	// Load existing rules
-	const rulesContainer = glowConfigModal.querySelector('.glow-config-rules');
+	const rulesContainer = cardConfigModal.querySelector('.card-config-rules');
 	rulesContainer.innerHTML = '';
 	const existingRules = widgetGlowRulesMap.get(wKey) || [];
 	if (existingRules.length) {
@@ -1819,38 +1848,48 @@ function openGlowConfigModal(widget, card) {
 		rulesContainer.appendChild(createGlowRuleRow());
 	}
 
-	glowConfigModal.classList.remove('hidden');
-	document.body.classList.add('glow-config-open');
+	cardConfigModal.classList.remove('hidden');
+	document.body.classList.add('card-config-open');
 }
 
-function closeGlowConfigModal() {
-	if (!glowConfigModal) return;
+function closeCardConfigModal() {
+	if (!cardConfigModal) return;
 	haptic();
 	// Remove dropdown menus from body
 	document.querySelectorAll('.glow-select-menu').forEach(m => m.remove());
-	glowConfigModal.classList.add('hidden');
-	document.body.classList.remove('glow-config-open');
-	glowConfigWidgetKey = '';
-	glowConfigWidgetLabel = '';
+	cardConfigModal.classList.add('hidden');
+	document.body.classList.remove('card-config-open');
+	cardConfigWidgetKey = '';
+	cardConfigWidgetLabel = '';
 }
 
-async function saveGlowConfigRules() {
-	if (!glowConfigModal || !glowConfigWidgetKey) return;
+async function saveCardConfig() {
+	if (!cardConfigModal || !cardConfigWidgetKey) return;
 
 	// Get visibility
-	const visRadio = glowConfigModal.querySelector('input[name="visibility"]:checked');
+	const visRadio = cardConfigModal.querySelector('input[name="visibility"]:checked');
 	const visibility = visRadio?.value || 'all';
 
 	// Get defaultMuted for video widgets (only if section is visible)
-	const defaultSoundSection = glowConfigModal.querySelector('.default-sound-section');
+	const defaultSoundSection = cardConfigModal.querySelector('.default-sound-section');
 	let defaultMuted;
 	if (defaultSoundSection && defaultSoundSection.style.display !== 'none') {
-		const soundRadio = glowConfigModal.querySelector('input[name="defaultSound"]:checked');
+		const soundRadio = cardConfigModal.querySelector('input[name="defaultSound"]:checked');
 		defaultMuted = soundRadio?.value === 'muted';
 	}
 
+	// Get iframeHeight for iframe cards (only if section is visible)
+	const iframeHeightSection = cardConfigModal.querySelector('.iframe-height-section');
+	let iframeHeight;
+	if (iframeHeightSection && iframeHeightSection.style.display !== 'none') {
+		const heightInput = iframeHeightSection.querySelector('.iframe-height-input');
+		const rawValue = heightInput?.value?.trim() || '';
+		// Pass empty string to clear, or the numeric value
+		iframeHeight = rawValue;
+	}
+
 	// Get glow rules
-	const rows = glowConfigModal.querySelectorAll('.glow-rule-row');
+	const rows = cardConfigModal.querySelectorAll('.glow-rule-row');
 	const rules = [];
 	for (const row of rows) {
 		const operator = row.querySelector('.glow-operator-select')?.dataset.value || '=';
@@ -1868,38 +1907,49 @@ async function saveGlowConfigRules() {
 		const resp = await fetch('/api/card-config', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ widgetId: glowConfigWidgetKey, rules, visibility, defaultMuted }),
+			body: JSON.stringify({ widgetId: cardConfigWidgetKey, rules, visibility, defaultMuted, iframeHeight }),
 		});
 		if (!resp.ok) return;
 
 		// Update local glow rules map
 		if (rules.length) {
-			widgetGlowRulesMap.set(glowConfigWidgetKey, rules);
+			widgetGlowRulesMap.set(cardConfigWidgetKey, rules);
 		} else {
-			widgetGlowRulesMap.delete(glowConfigWidgetKey);
+			widgetGlowRulesMap.delete(cardConfigWidgetKey);
 		}
 
 		// Update local visibility map
 		if (visibility !== 'all') {
-			widgetVisibilityMap.set(glowConfigWidgetKey, visibility);
+			widgetVisibilityMap.set(cardConfigWidgetKey, visibility);
 		} else {
-			widgetVisibilityMap.delete(glowConfigWidgetKey);
+			widgetVisibilityMap.delete(cardConfigWidgetKey);
 		}
 
 		// Update local video config map
 		if (defaultMuted !== undefined) {
 			if (defaultMuted) {
 				// Muted is default, remove entry
-				widgetVideoConfigMap.delete(glowConfigWidgetKey);
+				widgetVideoConfigMap.delete(cardConfigWidgetKey);
 			} else {
-				widgetVideoConfigMap.set(glowConfigWidgetKey, { widgetId: glowConfigWidgetKey, defaultMuted });
+				widgetVideoConfigMap.set(cardConfigWidgetKey, { widgetId: cardConfigWidgetKey, defaultMuted });
+			}
+		}
+
+		// Update local iframe config map
+		if (iframeHeight !== undefined) {
+			const heightNum = parseInt(iframeHeight, 10);
+			if (!heightNum || heightNum <= 0) {
+				// Empty or zero means use default, remove entry
+				widgetIframeConfigMap.delete(cardConfigWidgetKey);
+			} else {
+				widgetIframeConfigMap.set(cardConfigWidgetKey, { widgetId: cardConfigWidgetKey, height: heightNum });
 			}
 		}
 
 		// Apply glow to the card immediately
 		let card = null;
 		for (const node of document.querySelectorAll('.glass[data-widget-key]')) {
-			if (node.dataset.widgetKey === glowConfigWidgetKey) {
+			if (node.dataset.widgetKey === cardConfigWidgetKey) {
 				card = node;
 				break;
 			}
@@ -1908,7 +1958,7 @@ async function saveGlowConfigRules() {
 			clearGlow(card);
 			const meta = card.querySelector('.meta');
 			const stateValue = meta ? meta.textContent : '';
-			const glowColor = getWidgetGlowOverride(glowConfigWidgetKey, stateValue);
+			const glowColor = getWidgetGlowOverride(cardConfigWidgetKey, stateValue);
 			if (glowColor) {
 				applyGlowStyle(card, glowColor);
 			}
@@ -3055,10 +3105,15 @@ function getWidgetRenderInfo(w, afterImage) {
 	const webviewUrl = rawWebviewUrl
 		? (shouldBypassProxy(rawWebviewUrl) ? rawWebviewUrl : `/proxy?url=${encodeURIComponent(rawWebviewUrl)}`)
 		: '';
-	const webviewHeight = isWebview ? parseInt(w?.height, 10) || 0 : 0;
+	// Check for iframe config height override
+	const wKey = widgetKey(w);
+	const iframeConfig = widgetIframeConfigMap.get(wKey);
+	const iframeHeightOverride = iframeConfig?.height || 0;
+	const webviewHeight = isWebview ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const rawVideoUrl = isVideo ? safeText(w?.label || '') : '';
 	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}` : '';
-	const videoHeight = isVideo ? parseInt(w?.height, 10) || 0 : 0;
+	const videoHeight = isVideo ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
+	const chartHeight = isChart ? iframeHeightOverride : 0;
 	const mappingSig = mapping.map((m) => `${m.command}:${m.label}`).join('|');
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
@@ -3074,6 +3129,7 @@ function getWidgetRenderInfo(w, afterImage) {
 		mappingSig,
 		mediaUrl,
 		chartUrl,
+		String(chartHeight),
 		webviewUrl,
 		String(webviewHeight),
 		videoUrl,
@@ -3106,6 +3162,7 @@ function getWidgetRenderInfo(w, afterImage) {
 		labelParts,
 		mediaUrl,
 		chartUrl,
+		chartHeight,
 		webviewUrl,
 		webviewHeight,
 		videoUrl,
@@ -3342,12 +3399,20 @@ function updateCard(card, w, afterImage, info) {
 			controls.innerHTML = `<div class="text-sm text-slate-400">Chart not available</div>`;
 			return true;
 		}
-		// Use iframe for HTML charts with 16:9 aspect ratio
+		// Use iframe for HTML charts with 16:9 aspect ratio (or custom height if configured)
 		let frameContainer = controls.querySelector('.chart-frame-container');
 		if (!frameContainer) {
 			frameContainer = document.createElement('div');
 			frameContainer.className = 'chart-frame-container';
 			controls.appendChild(frameContainer);
+		}
+		// Apply height override if configured
+		if (chartHeight > 0) {
+			frameContainer.style.height = `${chartHeight}px`;
+			frameContainer.style.aspectRatio = '';
+		} else {
+			frameContainer.style.height = '';
+			frameContainer.style.aspectRatio = '16 / 9';
 		}
 		let iframeEl = frameContainer.querySelector('iframe.chart-frame');
 		if (!iframeEl) {
@@ -4342,7 +4407,7 @@ function render() {
 				header.addEventListener('click', (e) => {
 					if (e.ctrlKey || e.metaKey) {
 						e.preventDefault();
-						openGlowConfigModal(w, header);
+						openCardConfigModal(w, header);
 					}
 				});
 				fragment.appendChild(header);
@@ -5547,7 +5612,7 @@ function restoreNormalPolling() {
 		if (!widget) return;
 		e.preventDefault();
 		e.stopPropagation();
-		openGlowConfigModal(widget, card);
+		openCardConfigModal(widget, card);
 	}, true);
 	// Disable pointer-events on iframes when ctrl/meta held so clicks pass through to cards
 	const setIframePointerEvents = (enabled) => {

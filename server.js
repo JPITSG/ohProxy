@@ -280,6 +280,15 @@ const CHART_PERIOD_TTL = {
 const AI_CACHE_DIR = path.join(__dirname, 'cache', 'ai');
 const AI_STRUCTURE_MAP_WRITABLE = path.join(AI_CACHE_DIR, 'structuremap-writable.json');
 const ANTHROPIC_API_KEY = safeText(SERVER_CONFIG.apiKeys?.anthropic) || '';
+const WEATHERBIT_CONFIG = SERVER_CONFIG.weatherbit || {};
+const WEATHERBIT_API_KEY = safeText(WEATHERBIT_CONFIG.apiKey) || '';
+const WEATHERBIT_LATITUDE = safeText(WEATHERBIT_CONFIG.latitude) || '';
+const WEATHERBIT_LONGITUDE = safeText(WEATHERBIT_CONFIG.longitude) || '';
+const WEATHERBIT_UNITS = safeText(WEATHERBIT_CONFIG.units) || 'M';
+const WEATHERBIT_REFRESH_MS = configNumber(WEATHERBIT_CONFIG.refreshIntervalMs, 3600000);
+const WEATHERBIT_CACHE_DIR = path.join(__dirname, 'cache', 'weatherbit');
+const WEATHERBIT_FORECAST_FILE = path.join(WEATHERBIT_CACHE_DIR, 'forecast.json');
+const WEATHERBIT_ICONS_DIR = path.join(WEATHERBIT_CACHE_DIR, 'icons');
 const MYSQL_CONFIG = SERVER_CONFIG.mysql || {};
 const MYSQL_RECONNECT_DELAY_MS = 5000;
 let mysqlConnection = null;
@@ -2834,6 +2843,141 @@ function renderLoginHtml() {
 	return html;
 }
 
+function renderWeatherWidget(forecastData, mode) {
+	const isDark = mode === 'dark';
+	const bgColor = isDark ? '#23213a' : '#ffffff';
+	const cardBg = isDark ? '#16152a' : '#f5f7fa';
+	const textColor = isDark ? '#ffffff' : '#000000';
+	const rainColor = '#3498db';
+
+	const days = Array.isArray(forecastData?.data) ? forecastData.data.slice(0, 7) : [];
+	const cityName = safeText(forecastData?.city_name || '');
+	const unitSymbol = WEATHERBIT_UNITS === 'I' ? 'F' : 'C';
+
+	const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+	const forecastCards = days.map((day) => {
+		const date = new Date(day.datetime);
+		const dayName = dayNames[date.getDay()];
+		const icon = safeText(day.weather?.icon || 'c01d');
+		const highTemp = Math.round(day.high_temp || 0);
+		const lowTemp = Math.round(day.low_temp || 0);
+		const pop = day.pop || 0;
+		const rainOpacity = pop > 0 ? '0.9' : '0.3';
+		const rainTextColor = pop > 0 ? rainColor : 'inherit';
+
+		return `
+			<div class="forecast-day">
+				<div class="day-name">${dayName}</div>
+				<img class="weather-icon" src="/weather/icons/${icon}.png" alt="${safeText(day.weather?.description || '')}">
+				<div class="temps">
+					<div class="temp-high">${highTemp}°</div>
+					<div class="temp-low">${lowTemp}°</div>
+				</div>
+				<div class="rain-chance" style="opacity:${rainOpacity};color:${rainTextColor}">
+					<svg class="rain-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2c0-3.32-2.67-7.25-8-11.8z"/></svg>
+					<span>${pop}%</span>
+				</div>
+			</div>`;
+	}).join('');
+
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Weather Forecast${cityName ? ` - ${cityName}` : ''}</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+	height: 100%;
+	font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	background: ${bgColor};
+	color: ${textColor};
+}
+.weather-card {
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	padding: 15px;
+}
+.forecast-container {
+	display: flex;
+	gap: 10px;
+	overflow-x: auto;
+	padding: 5px;
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: none;
+	flex: 1;
+}
+.forecast-container::-webkit-scrollbar { display: none; }
+.forecast-day {
+	flex: 1;
+	min-width: 70px;
+	background: ${cardBg};
+	border-radius: 15px;
+	padding: 15px 10px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+}
+.day-name {
+	font-size: 14px;
+	font-weight: 600;
+	opacity: 0.7;
+}
+.weather-icon {
+	width: 45px;
+	height: 45px;
+}
+.temps {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	margin-top: 5px;
+}
+.temp-high {
+	font-size: 15px;
+	font-weight: 700;
+}
+.temp-low {
+	font-size: 12px;
+	opacity: 0.6;
+}
+.rain-chance {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	font-size: 11px;
+	margin-top: 8px;
+}
+.rain-icon {
+	width: 10px;
+	height: 10px;
+}
+@media (max-width: 560px) {
+	.forecast-day:nth-child(7) { display: none; }
+}
+@media (max-width: 480px) {
+	.forecast-day:nth-child(6) { display: none; }
+}
+@media (max-width: 400px) {
+	.forecast-day:nth-child(5) { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="weather-card">
+	<div class="forecast-container">
+		${forecastCards}
+	</div>
+</div>
+</body>
+</html>`;
+}
+
 function sendIndex(req, res) {
 	res.setHeader('Cache-Control', 'no-cache');
 	res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -4119,6 +4263,7 @@ app.get('/config.js', (req, res) => {
 		widgetGlowRules: sessions.getAllGlowRules(),
 		widgetVisibilityRules: sessions.getAllVisibilityRules(),
 		widgetVideoConfigs: sessions.getAllVideoConfigs(),
+		widgetIframeConfigs: sessions.getAllIframeConfigs(),
 		userRole: userRole,
 	})};`);
 });
@@ -4258,7 +4403,7 @@ app.post('/api/card-config', express.json(), (req, res) => {
 		return;
 	}
 
-	const { widgetId, rules, visibility, defaultMuted } = req.body || {};
+	const { widgetId, rules, visibility, defaultMuted, iframeHeight } = req.body || {};
 	if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200) {
 		res.status(400).json({ error: 'Missing or invalid widgetId' });
 		return;
@@ -4308,6 +4453,15 @@ app.post('/api/card-config', express.json(), (req, res) => {
 		return;
 	}
 
+	// Validate iframeHeight if provided (must be null, empty string, or positive integer)
+	if (iframeHeight !== undefined && iframeHeight !== null && iframeHeight !== '') {
+		const heightNum = parseInt(iframeHeight, 10);
+		if (isNaN(heightNum) || heightNum < 0 || heightNum > 10000) {
+			res.status(400).json({ error: 'iframeHeight must be empty or a positive integer (max 10000)' });
+			return;
+		}
+	}
+
 	// Save to database
 	try {
 		if (rules !== undefined) {
@@ -4319,7 +4473,12 @@ app.post('/api/card-config', express.json(), (req, res) => {
 		if (defaultMuted !== undefined) {
 			sessions.setVideoConfig(widgetId, defaultMuted);
 		}
-		res.json({ ok: true, widgetId, rules, visibility, defaultMuted });
+		if (iframeHeight !== undefined) {
+			// Convert to integer (0 or empty string means clear the config)
+			const heightNum = (iframeHeight === '' || iframeHeight === null) ? 0 : parseInt(iframeHeight, 10);
+			sessions.setIframeConfig(widgetId, heightNum);
+		}
+		res.json({ ok: true, widgetId, rules, visibility, defaultMuted, iframeHeight });
 	} catch (err) {
 		logMessage(`Failed to save card config: ${err.message || err}`, 'error');
 		res.status(500).json({ error: 'Failed to save config' });
@@ -4692,6 +4851,42 @@ app.get(/^\/icons\/apple-touch-icon\.v[\w.-]+\.png$/i, (req, res) => {
 	res.setHeader('Content-Type', 'image/png');
 	res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
 	res.sendFile(iconPath);
+});
+
+// Weather widget icons (served from cache)
+app.use('/weather/icons', express.static(WEATHERBIT_ICONS_DIR, {
+	maxAge: '1d',
+	setHeaders(res) {
+		res.setHeader('Cache-Control', 'public, max-age=86400');
+	},
+}));
+
+// Weather widget page
+app.get('/weather', (req, res) => {
+	if (req.ohProxyAuth !== 'authenticated') {
+		res.redirect('/');
+		return;
+	}
+
+	const mode = safeText(req.query?.mode || '').toLowerCase() === 'dark' ? 'dark' : 'light';
+
+	// Read cached forecast
+	let forecast = null;
+	try {
+		forecast = JSON.parse(fs.readFileSync(WEATHERBIT_FORECAST_FILE, 'utf8'));
+	} catch {
+		res.status(503).setHeader('Content-Type', 'text/html; charset=utf-8').send(`<!DOCTYPE html>
+<html><head><title>Weather</title></head>
+<body style="font-family:system-ui;padding:2rem;text-align:center;">
+<h1>Weather data not available</h1>
+<p>Weather data has not been fetched yet. Please check the server configuration.</p>
+</body></html>`);
+		return;
+	}
+
+	res.setHeader('Content-Type', 'text/html; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+	res.send(renderWeatherWidget(forecast, mode));
 });
 
 app.get(['/', '/index.html'], (req, res) => {
@@ -5563,6 +5758,102 @@ registerBackgroundTask('session-cleanup', SESSION_CLEANUP_MS, () => {
 		logMessage(`Session cleanup failed: ${err.message || err}`);
 	}
 });
+
+// Weatherbit weather data fetch
+function isWeatherbitConfigured() {
+	return !!(WEATHERBIT_API_KEY && WEATHERBIT_LATITUDE && WEATHERBIT_LONGITUDE);
+}
+
+function getWeatherbitCacheAgeMinutes() {
+	try {
+		const stats = fs.statSync(WEATHERBIT_FORECAST_FILE);
+		return Math.floor((Date.now() - stats.mtimeMs) / 60000);
+	} catch {
+		return Infinity;
+	}
+}
+
+async function fetchWeatherbitData() {
+	if (!isWeatherbitConfigured()) return;
+
+	// Check cache freshness - skip if less than 1 hour old
+	const cacheAgeMinutes = getWeatherbitCacheAgeMinutes();
+	if (cacheAgeMinutes < 60) {
+		logMessage(`[Weather] Using cached data (${cacheAgeMinutes} minutes old)`);
+		return;
+	}
+
+	// Ensure cache directories exist
+	try {
+		fs.mkdirSync(WEATHERBIT_CACHE_DIR, { recursive: true });
+		fs.mkdirSync(WEATHERBIT_ICONS_DIR, { recursive: true });
+	} catch (err) {
+		logMessage(`[Weather] Failed to create cache directory: ${err.message || err}`);
+		return;
+	}
+
+	logMessage('[Weather] Fetching forecast from Weatherbit API...');
+
+	try {
+		const url = `https://api.weatherbit.io/v2.0/forecast/daily?lat=${encodeURIComponent(WEATHERBIT_LATITUDE)}&lon=${encodeURIComponent(WEATHERBIT_LONGITUDE)}&key=${encodeURIComponent(WEATHERBIT_API_KEY)}&units=${encodeURIComponent(WEATHERBIT_UNITS)}&days=16`;
+		const response = await fetch(url, {
+			headers: { 'User-Agent': USER_AGENT },
+			signal: AbortSignal.timeout(30000),
+		});
+
+		if (!response.ok) {
+			logMessage(`[Weather] API request failed: ${response.status} ${response.statusText}`);
+			return;
+		}
+
+		const data = await response.json();
+		fs.writeFileSync(WEATHERBIT_FORECAST_FILE, JSON.stringify(data, null, 2));
+		logMessage(`[Weather] Forecast data cached successfully (${data.city_name || 'unknown location'})`);
+
+		// Cache weather icons
+		if (Array.isArray(data.data)) {
+			const icons = new Set(data.data.map((d) => d.weather?.icon).filter(Boolean));
+			for (const icon of icons) {
+				const iconPath = path.join(WEATHERBIT_ICONS_DIR, `${icon}.png`);
+				if (fs.existsSync(iconPath)) continue;
+
+				try {
+					const iconUrl = `https://www.weatherbit.io/static/img/icons/${icon}.png`;
+					const iconRes = await fetch(iconUrl, {
+						headers: { 'User-Agent': USER_AGENT },
+						signal: AbortSignal.timeout(10000),
+					});
+					if (iconRes.ok) {
+						const buffer = Buffer.from(await iconRes.arrayBuffer());
+						fs.writeFileSync(iconPath, buffer);
+						logMessage(`[Weather] Cached icon: ${icon}.png`);
+					}
+				} catch (iconErr) {
+					logMessage(`[Weather] Failed to cache icon ${icon}: ${iconErr.message || iconErr}`);
+				}
+			}
+		}
+	} catch (err) {
+		logMessage(`[Weather] API fetch failed: ${err.message || err}`);
+	}
+}
+
+// Schedule weatherbit refresh on even hours
+if (isWeatherbitConfigured()) {
+	// Run immediately on startup (will use cache if fresh)
+	fetchWeatherbitData();
+
+	// Calculate delay to next even hour
+	const now = Date.now();
+	const msToNextHour = 3600000 - (now % 3600000);
+	const minutesToNextHour = Math.ceil(msToNextHour / 60000);
+	logMessage(`[Weather] Next refresh scheduled in ${minutesToNextHour} minutes`);
+
+	setTimeout(() => {
+		fetchWeatherbitData();
+		setInterval(fetchWeatherbitData, 3600000);
+	}, msToNextHour);
+}
 
 // MySQL connection worker
 function getMysqlConnectionTarget() {

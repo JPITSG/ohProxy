@@ -72,6 +72,15 @@ function initDb() {
 		);
 	`);
 
+	// Create widget iframe config table (for custom heights on iframe cards)
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS widget_iframe_config (
+			widget_id TEXT PRIMARY KEY,
+			height INTEGER,
+			updated_at INTEGER DEFAULT (strftime('%s','now'))
+		);
+	`);
+
 	// Create server settings table (key-value store for persistent server state)
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS server_settings (
@@ -391,6 +400,57 @@ function setVideoConfig(widgetId, defaultMuted) {
 }
 
 // ============================================
+// Widget Iframe Config Functions
+// ============================================
+
+/**
+ * Get all iframe configs.
+ * @returns {Array} - Array of {widgetId, height} objects
+ */
+function getAllIframeConfigs() {
+	if (!db) initDb();
+	const rows = db.prepare('SELECT widget_id, height FROM widget_iframe_config').all();
+	return rows.map(row => ({
+		widgetId: row.widget_id,
+		height: row.height
+	}));
+}
+
+/**
+ * Get iframe config for a widget.
+ * @param {string} widgetId - The widget ID
+ * @returns {object|null} - {height: number} or null if not found
+ */
+function getIframeConfig(widgetId) {
+	if (!db) initDb();
+	const row = db.prepare('SELECT height FROM widget_iframe_config WHERE widget_id = ?').get(widgetId);
+	if (!row) return null;
+	return { height: row.height };
+}
+
+/**
+ * Set iframe config for a widget. If height is null/undefined/0, deletes the entry.
+ * @param {string} widgetId - The widget ID
+ * @param {number|null} height - Custom height in pixels, or null/0 to use default
+ * @returns {boolean} - True if successful
+ */
+function setIframeConfig(widgetId, height) {
+	if (!db) initDb();
+	const now = Math.floor(Date.now() / 1000);
+
+	if (!height || height <= 0) {
+		// No height means use default, remove the entry
+		db.prepare('DELETE FROM widget_iframe_config WHERE widget_id = ?').run(widgetId);
+	} else {
+		db.prepare(`
+			INSERT INTO widget_iframe_config (widget_id, height, updated_at) VALUES (?, ?, ?)
+			ON CONFLICT(widget_id) DO UPDATE SET height = excluded.height, updated_at = excluded.updated_at
+		`).run(widgetId, height, now);
+	}
+	return true;
+}
+
+// ============================================
 // User Management Functions
 // ============================================
 
@@ -539,6 +599,10 @@ module.exports = {
 	getAllVideoConfigs,
 	getVideoConfig,
 	setVideoConfig,
+	// Iframe config
+	getAllIframeConfigs,
+	getIframeConfig,
+	setIframeConfig,
 	// User management
 	getAllUsers,
 	getUser,
