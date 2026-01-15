@@ -1392,6 +1392,26 @@ let indexTemplate = null;
 let serviceWorkerTemplate = null;
 let loginTemplate = null;
 const backgroundTasks = [];
+const TASK_LAST_RUN_KEY = 'task_last_run_times';
+
+function loadTaskLastRunTimes() {
+	try {
+		const json = sessions.getServerSetting(TASK_LAST_RUN_KEY);
+		return json ? JSON.parse(json) : {};
+	} catch {
+		return {};
+	}
+}
+
+function saveTaskLastRunTime(taskName, timestamp) {
+	try {
+		const times = loadTaskLastRunTimes();
+		times[taskName] = timestamp;
+		sessions.setServerSetting(TASK_LAST_RUN_KEY, JSON.stringify(times));
+	} catch {
+		// Ignore save errors
+	}
+}
 
 function registerBackgroundTask(name, intervalMs, run) {
 	const task = {
@@ -1426,10 +1446,11 @@ function updateBackgroundTaskInterval(name, intervalMs) {
 	return true;
 }
 
-function scheduleBackgroundTask(task) {
+function scheduleBackgroundTask(task, delayMs) {
 	if (!task || !task.intervalMs || task.intervalMs <= 0) return;
 	if (task.timer) clearTimeout(task.timer);
-	task.timer = setTimeout(() => runBackgroundTask(task), task.intervalMs);
+	const delay = typeof delayMs === 'number' ? delayMs : task.intervalMs;
+	task.timer = setTimeout(() => runBackgroundTask(task), delay);
 }
 
 async function runBackgroundTask(task) {
@@ -1438,8 +1459,9 @@ async function runBackgroundTask(task) {
 	try {
 		await task.run();
 		task.lastRun = Date.now();
+		saveTaskLastRunTime(task.name, task.lastRun);
 	} catch (err) {
-		logMessage(`Background task ${task.name} failed: ${err.message || err}`);
+		logMessage(`[Tasks] ${task.name} failed: ${err.message || err}`);
 	} finally {
 		task.running = false;
 		scheduleBackgroundTask(task);
@@ -1472,8 +1494,25 @@ function startBackgroundTasks() {
 		const summary = disabled.map((t) => t.name).join(', ');
 		logMessage(`[Startup] Disabled tasks: ${summary}`);
 	}
+
+	// Load persisted last run times
+	const persistedTimes = loadTaskLastRunTimes();
+	const now = Date.now();
+
 	for (const task of enabled) {
-		runBackgroundTask(task);
+		const lastRun = persistedTimes[task.name] || 0;
+		task.lastRun = lastRun;
+		const elapsed = now - lastRun;
+		const remaining = task.intervalMs - elapsed;
+
+		if (remaining > 0) {
+			// Task ran recently, schedule for remaining time
+			logMessage(`[Tasks] ${task.name}: next run in ${formatInterval(remaining)}`);
+			scheduleBackgroundTask(task, remaining);
+		} else {
+			// Task is due, run immediately
+			runBackgroundTask(task);
+		}
 	}
 }
 
@@ -5910,22 +5949,9 @@ async function fetchWeatherbitData() {
 	}
 }
 
-// Schedule weatherbit refresh on even hours
-if (isWeatherbitConfigured()) {
-	// Run immediately on startup (will use cache if fresh)
-	fetchWeatherbitData();
-
-	// Calculate delay to next even hour
-	const now = Date.now();
-	const msToNextHour = 3600000 - (now % 3600000);
-	const minutesToNextHour = Math.ceil(msToNextHour / 60000);
-	logMessage(`[Weather] Next refresh scheduled in ${minutesToNextHour} minutes`);
-
-	setTimeout(() => {
-		fetchWeatherbitData();
-		setInterval(fetchWeatherbitData, 3600000);
-	}, msToNextHour);
-}
+// Schedule weatherbit refresh (1 hour interval)
+const WEATHERBIT_REFRESH_MS = isWeatherbitConfigured() ? 3600000 : 0;
+registerBackgroundTask('weatherbit', WEATHERBIT_REFRESH_MS, fetchWeatherbitData);
 
 // MySQL connection worker
 function getMysqlConnectionTarget() {
