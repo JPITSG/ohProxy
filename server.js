@@ -2845,8 +2845,6 @@ function renderLoginHtml() {
 
 function renderWeatherWidget(forecastData, mode) {
 	const isDark = mode === 'dark';
-	const bgColor = isDark ? '#23213a' : '#ffffff';
-	const cardBg = isDark ? '#16152a' : 'transparent';
 	const textColor = isDark ? '#ffffff' : '#000000';
 	const rainColor = '#3498db';
 
@@ -2914,7 +2912,7 @@ html, body {
 .forecast-day {
 	flex: 1;
 	min-width: 70px;
-	background: ${cardBg};
+	background: transparent;
 	border-radius: 15px;
 	padding: 15px 10px;
 	display: flex;
