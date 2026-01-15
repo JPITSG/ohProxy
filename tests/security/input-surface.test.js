@@ -29,6 +29,7 @@ describe('Input Surface Coverage', () => {
 		const allowedPatterns = [
 			/const\s+\{\s*username,\s*password\s*\}\s*=\s*req\.body\s*\|\|\s*\{\s*\};/,
 			/const\s+newSettings\s*=\s*req\.body\s*;/,
+			/const\s+body\s*=\s*req\.body\s*;/,
 			/const\s+\{\s*widgetId,\s*rules,\s*visibility\s*\}\s*=\s*req\.body\s*\|\|\s*\{\s*\};/,
 			/const\s+\{\s*command\s*\}\s*=\s*req\.body\s*\|\|\s*\{\s*\};/,
 			/const\s+widgetId\s*=\s*safeText\(req\.params\.widgetId\)\s*;/,

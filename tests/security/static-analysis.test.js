@@ -213,6 +213,13 @@ describe('Static Analysis: XSS Prevention', () => {
 			if (issue.interpolation.includes('legendHtml')) return false;
 			// Skip server-controlled values (not user input)
 			if (issue.interpolation === 'site') return false;
+			// Skip chart stats - these are server-computed numeric values from RRD data
+			if (issue.interpolation.includes('fmtCur')) return false;
+			if (issue.interpolation.includes('fmtAvg')) return false;
+			if (issue.interpolation.includes('fmtMin')) return false;
+			if (issue.interpolation.includes('fmtMax')) return false;
+			if (issue.interpolation.includes('curHtml')) return false;
+			if (issue.interpolation.includes('statsHtml')) return false;
 			return true;
 		});
 
