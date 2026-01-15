@@ -4118,6 +4118,7 @@ app.get('/config.js', (req, res) => {
 		webviewNoProxy: liveConfig.webviewNoProxy,
 		widgetGlowRules: sessions.getAllGlowRules(),
 		widgetVisibilityRules: sessions.getAllVisibilityRules(),
+		widgetVideoConfigs: sessions.getAllVideoConfigs(),
 		userRole: userRole,
 	})};`);
 });
@@ -4228,8 +4229,8 @@ app.post('/api/jslog', express.json(), (req, res) => {
 	res.json({ ok: true, logged: true });
 });
 
-// Widget glow rules API (admin only)
-app.get('/api/glow-rules/:widgetId', (req, res) => {
+// Widget card config API (admin only)
+app.get('/api/card-config/:widgetId', (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
 	// Admin only
@@ -4247,7 +4248,7 @@ app.get('/api/glow-rules/:widgetId', (req, res) => {
 	res.json({ widgetId, rules });
 });
 
-app.post('/api/glow-rules', express.json(), (req, res) => {
+app.post('/api/card-config', express.json(), (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
 	// Admin only
@@ -4257,7 +4258,7 @@ app.post('/api/glow-rules', express.json(), (req, res) => {
 		return;
 	}
 
-	const { widgetId, rules, visibility } = req.body || {};
+	const { widgetId, rules, visibility, defaultMuted } = req.body || {};
 	if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200) {
 		res.status(400).json({ error: 'Missing or invalid widgetId' });
 		return;
@@ -4301,6 +4302,12 @@ app.post('/api/glow-rules', express.json(), (req, res) => {
 		}
 	}
 
+	// Validate defaultMuted if provided
+	if (defaultMuted !== undefined && typeof defaultMuted !== 'boolean') {
+		res.status(400).json({ error: 'defaultMuted must be a boolean' });
+		return;
+	}
+
 	// Save to database
 	try {
 		if (rules !== undefined) {
@@ -4309,10 +4316,13 @@ app.post('/api/glow-rules', express.json(), (req, res) => {
 		if (visibility !== undefined) {
 			sessions.setVisibility(widgetId, visibility);
 		}
-		res.json({ ok: true, widgetId, rules, visibility });
+		if (defaultMuted !== undefined) {
+			sessions.setVideoConfig(widgetId, defaultMuted);
+		}
+		res.json({ ok: true, widgetId, rules, visibility, defaultMuted });
 	} catch (err) {
-		logMessage(`Failed to save glow rules: ${err.message || err}`, 'error');
-		res.status(500).json({ error: 'Failed to save rules' });
+		logMessage(`Failed to save card config: ${err.message || err}`, 'error');
+		res.status(500).json({ error: 'Failed to save config' });
 	}
 });
 

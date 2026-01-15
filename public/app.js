@@ -164,6 +164,17 @@ const widgetVisibilityMap = new Map();
 	}
 })();
 
+// Widget video configs: Map from widgetId to {defaultMuted: boolean}
+const widgetVideoConfigMap = new Map();
+(function initWidgetVideoConfigs() {
+	const configs = Array.isArray(OH_CONFIG.widgetVideoConfigs) ? OH_CONFIG.widgetVideoConfigs : [];
+	for (const entry of configs) {
+		if (entry.widgetId) {
+			widgetVideoConfigMap.set(entry.widgetId, entry);
+		}
+	}
+})();
+
 // Get current user role from config
 function getUserRole() {
 	return OH_CONFIG.userRole || null;
@@ -1558,6 +1569,19 @@ function ensureGlowConfigModal() {
 	wrap.innerHTML = `
 		<div class="glow-config-frame glass">
 			<div class="glow-config-body">
+				<div class="default-sound-section" style="display:none;">
+					<div class="item-config-section-header">DEFAULT SOUND</div>
+					<div class="item-config-visibility">
+						<label class="item-config-radio">
+							<input type="radio" name="defaultSound" value="muted" checked>
+							<span>Muted</span>
+						</label>
+						<label class="item-config-radio">
+							<input type="radio" name="defaultSound" value="unmuted">
+							<span>Unmuted</span>
+						</label>
+					</div>
+				</div>
 				<div class="item-config-section-header">VISIBILITY</div>
 				<div class="item-config-visibility">
 					<label class="item-config-radio">
@@ -1758,6 +1782,20 @@ function openGlowConfigModal(widget, card) {
 	const visRadio = glowConfigModal.querySelector(`input[name="visibility"][value="${visibility}"]`);
 	if (visRadio) visRadio.checked = true;
 
+	// Show/hide default sound section for video widgets
+	const isVideoWidget = (widget?.type || '').toLowerCase() === 'video';
+	const defaultSoundSection = glowConfigModal.querySelector('.default-sound-section');
+	if (defaultSoundSection) {
+		defaultSoundSection.style.display = isVideoWidget ? '' : 'none';
+		if (isVideoWidget) {
+			// Load existing video config
+			const videoConfig = widgetVideoConfigMap.get(wKey);
+			const defaultMutedValue = videoConfig?.defaultMuted !== false ? 'muted' : 'unmuted';
+			const soundRadio = glowConfigModal.querySelector(`input[name="defaultSound"][value="${defaultMutedValue}"]`);
+			if (soundRadio) soundRadio.checked = true;
+		}
+	}
+
 	// Check if widget should show glow rules
 	// Any widget with subtext (state in label like "Title [State]") can have glow rules
 	const isSection = !!widget?.__section;
@@ -1803,6 +1841,14 @@ async function saveGlowConfigRules() {
 	const visRadio = glowConfigModal.querySelector('input[name="visibility"]:checked');
 	const visibility = visRadio?.value || 'all';
 
+	// Get defaultMuted for video widgets (only if section is visible)
+	const defaultSoundSection = glowConfigModal.querySelector('.default-sound-section');
+	let defaultMuted;
+	if (defaultSoundSection && defaultSoundSection.style.display !== 'none') {
+		const soundRadio = glowConfigModal.querySelector('input[name="defaultSound"]:checked');
+		defaultMuted = soundRadio?.value === 'muted';
+	}
+
 	// Get glow rules
 	const rows = glowConfigModal.querySelectorAll('.glow-rule-row');
 	const rules = [];
@@ -1819,10 +1865,10 @@ async function saveGlowConfigRules() {
 	}
 
 	try {
-		const resp = await fetch('/api/glow-rules', {
+		const resp = await fetch('/api/card-config', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ widgetId: glowConfigWidgetKey, rules, visibility }),
+			body: JSON.stringify({ widgetId: glowConfigWidgetKey, rules, visibility, defaultMuted }),
 		});
 		if (!resp.ok) return;
 
@@ -1838,6 +1884,16 @@ async function saveGlowConfigRules() {
 			widgetVisibilityMap.set(glowConfigWidgetKey, visibility);
 		} else {
 			widgetVisibilityMap.delete(glowConfigWidgetKey);
+		}
+
+		// Update local video config map
+		if (defaultMuted !== undefined) {
+			if (defaultMuted) {
+				// Muted is default, remove entry
+				widgetVideoConfigMap.delete(glowConfigWidgetKey);
+			} else {
+				widgetVideoConfigMap.set(glowConfigWidgetKey, { widgetId: glowConfigWidgetKey, defaultMuted });
+			}
 		}
 
 		// Apply glow to the card immediately
@@ -3414,9 +3470,14 @@ function updateCard(card, w, afterImage, info) {
 			videoEl.className = 'video-stream w-full block';
 			videoEl.style.cssText = 'position:relative;z-index:15;';
 			videoEl.setAttribute('autoplay', '');
-			videoEl.setAttribute('muted', '');
 			videoEl.setAttribute('playsinline', '');
-			videoEl.muted = true;
+			// Apply video config for muted state
+			const videoConfig = widgetVideoConfigMap.get(wKey);
+			const shouldMute = videoConfig?.defaultMuted !== false; // Default to muted
+			if (shouldMute) {
+				videoEl.setAttribute('muted', '');
+			}
+			videoEl.muted = shouldMute;
 		}
 
 		// Video z-15 covers preview z-10 and spinner z-12 when playing
@@ -3492,6 +3553,9 @@ function updateCard(card, w, afterImage, info) {
 				videoEl.muted = !videoEl.muted;
 				updateMuteBtn();
 			});
+
+			// Set initial button state to match video muted state
+			updateMuteBtn();
 
 			// Show mute button when video starts playing
 			videoEl.addEventListener('playing', () => {

@@ -63,6 +63,15 @@ function initDb() {
 		);
 	`);
 
+	// Create widget video config table
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS widget_video_config (
+			widget_id TEXT PRIMARY KEY,
+			default_muted INTEGER DEFAULT 1,
+			updated_at INTEGER DEFAULT (strftime('%s','now'))
+		);
+	`);
+
 	// Create server settings table (key-value store for persistent server state)
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS server_settings (
@@ -331,6 +340,57 @@ function setVisibility(widgetId, visibility) {
 }
 
 // ============================================
+// Widget Video Config Functions
+// ============================================
+
+/**
+ * Get all video configs.
+ * @returns {Array} - Array of {widgetId, defaultMuted} objects
+ */
+function getAllVideoConfigs() {
+	if (!db) initDb();
+	const rows = db.prepare('SELECT widget_id, default_muted FROM widget_video_config').all();
+	return rows.map(row => ({
+		widgetId: row.widget_id,
+		defaultMuted: row.default_muted === 1
+	}));
+}
+
+/**
+ * Get video config for a widget.
+ * @param {string} widgetId - The widget ID
+ * @returns {object|null} - {defaultMuted: boolean} or null if not found
+ */
+function getVideoConfig(widgetId) {
+	if (!db) initDb();
+	const row = db.prepare('SELECT default_muted FROM widget_video_config WHERE widget_id = ?').get(widgetId);
+	if (!row) return null;
+	return { defaultMuted: row.default_muted === 1 };
+}
+
+/**
+ * Set video config for a widget. If defaultMuted is true (default), deletes the entry.
+ * @param {string} widgetId - The widget ID
+ * @param {boolean} defaultMuted - Whether video should start muted
+ * @returns {boolean} - True if successful
+ */
+function setVideoConfig(widgetId, defaultMuted) {
+	if (!db) initDb();
+	const now = Math.floor(Date.now() / 1000);
+
+	if (defaultMuted === true) {
+		// True is the default, remove the entry
+		db.prepare('DELETE FROM widget_video_config WHERE widget_id = ?').run(widgetId);
+	} else {
+		db.prepare(`
+			INSERT INTO widget_video_config (widget_id, default_muted, updated_at) VALUES (?, ?, ?)
+			ON CONFLICT(widget_id) DO UPDATE SET default_muted = excluded.default_muted, updated_at = excluded.updated_at
+		`).run(widgetId, defaultMuted ? 1 : 0, now);
+	}
+	return true;
+}
+
+// ============================================
 // User Management Functions
 // ============================================
 
@@ -475,6 +535,10 @@ module.exports = {
 	// Visibility
 	getAllVisibilityRules,
 	setVisibility,
+	// Video config
+	getAllVideoConfigs,
+	getVideoConfig,
+	setVideoConfig,
 	// User management
 	getAllUsers,
 	getUser,
