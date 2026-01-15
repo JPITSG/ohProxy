@@ -6039,9 +6039,8 @@ async function fetchWeatherbitData() {
 	}
 }
 
-// Schedule weatherbit refresh (1 hour interval)
-const WEATHERBIT_REFRESH_MS = isWeatherbitConfigured() ? 3600000 : 0;
-registerBackgroundTask('weatherbit', WEATHERBIT_REFRESH_MS, fetchWeatherbitData);
+// Schedule weatherbit refresh (uses WEATHERBIT_REFRESH_MS from config, 0 if not configured)
+registerBackgroundTask('weatherbit', isWeatherbitConfigured() ? WEATHERBIT_REFRESH_MS : 0, fetchWeatherbitData);
 
 // MySQL connection worker
 function getMysqlConnectionTarget() {
