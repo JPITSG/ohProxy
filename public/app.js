@@ -1631,8 +1631,7 @@ function ensureCardConfigModal() {
 				</div>
 				<div class="proxy-cache-section" style="display:none;">
 					<div class="item-config-section-header">CACHE</div>
-					<input type="text" class="proxy-cache-input" placeholder="empty = no cache" inputmode="numeric">
-					<div class="item-config-hint">seconds (e.g. 300 = 5 min)</div>
+					<input type="text" class="proxy-cache-input" placeholder="seconds, e.g. 300 = 5 min" inputmode="numeric">
 				</div>
 				<div class="item-config-section-header">VISIBILITY</div>
 				<div class="item-config-visibility">
