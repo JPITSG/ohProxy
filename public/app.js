@@ -5289,6 +5289,12 @@ function connectWs() {
 					window.location.href = '/login';
 					return;
 				}
+				if (msg.event === 'assetVersionChanged') {
+					// Server assets updated - reload to get new version
+					console.log('Asset version changed, reloading...');
+					window.location.reload();
+					return;
+				}
 				if (msg.event === 'pong' && msg.data) {
 					handleWsPong(msg.data);
 					return;

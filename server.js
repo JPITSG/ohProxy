@@ -1254,9 +1254,14 @@ function reloadLiveConfig() {
 	liveConfig.ohPass = safeText(newServer.openhab?.pass || '');
 	const oldIconVersion = liveConfig.iconVersion;
 	const oldIconSize = liveConfig.iconSize;
+	const oldAssetVersion = liveConfig.assetVersion;
 	liveConfig.iconVersion = safeText(newAssets.iconVersion);
 	liveConfig.userAgent = safeText(newServer.userAgent);
 	liveConfig.assetVersion = safeText(newAssets.assetVersion);
+	if (liveConfig.assetVersion && liveConfig.assetVersion !== oldAssetVersion) {
+		logMessage(`[Config] Asset version changed: ${oldAssetVersion} -> ${liveConfig.assetVersion}`);
+		wsBroadcast('assetVersionChanged', { version: liveConfig.assetVersion });
+	}
 	const appleTouchRaw = safeText(newAssets.appleTouchIconVersion);
 	liveConfig.appleTouchVersion = appleTouchRaw
 		? (appleTouchRaw.startsWith('v') ? appleTouchRaw : `v${appleTouchRaw}`)
