@@ -1125,7 +1125,7 @@ if (configErrors.length) {
 	process.exit(1);
 }
 
-logMessage('Starting ohProxy instance...');
+logMessage('[Startup] Starting ohProxy instance...');
 
 const LOCAL_CONFIG_PATH = path.join(__dirname, 'config.local.js');
 let lastConfigMtime = 0;
@@ -1343,7 +1343,7 @@ function reloadLiveConfig() {
 	}
 
 	syncAtmosphereNoUpdateMonitor();
-	logMessage('Config hot-reloaded successfully');
+	logMessage('[Config] Hot-reloaded successfully');
 	return false; // No restart required
 }
 
@@ -1352,7 +1352,7 @@ lastConfigMtime = readConfigLocalMtime();
 function scheduleConfigRestart() {
 	if (configRestartScheduled) return;
 	configRestartScheduled = true;
-	logMessage('Detected config.local.js change, scheduling restart.');
+	logMessage('[Config] Detected config.local.js change, scheduling restart.');
 }
 
 function handleConfigChange() {
@@ -3791,12 +3791,12 @@ async function refreshSitemapCache(options = {}) {
 	try {
 		body = await fetchOpenhab('/rest/sitemaps?type=json');
 	} catch (err) {
-		logMessage(`Sitemap cache refresh failed: ${err.message || err}`);
+		logMessage(`[Sitemap] Cache refresh failed: ${err.message || err}`);
 		return false;
 	}
 
 	if (!body || !body.ok) {
-		logMessage('Sitemap cache refresh failed: upstream error');
+		logMessage('[Sitemap] Cache refresh failed: upstream error');
 		return false;
 	}
 
@@ -3804,7 +3804,7 @@ async function refreshSitemapCache(options = {}) {
 	try {
 		data = JSON.parse(body.body);
 	} catch {
-		logMessage('Sitemap cache refresh failed: non-JSON response');
+		logMessage('[Sitemap] Cache refresh failed: non-JSON response');
 		return false;
 	}
 
@@ -3919,7 +3919,7 @@ app.use((req, res, next) => {
 		res.once('finish', () => {
 			const duration = Date.now() - start;
 			if (duration >= threshold) {
-				logMessage(`Slow request (${duration}ms): ${req.method} ${req.originalUrl}`);
+				logMessage(`[Perf] Slow request (${duration}ms): ${req.method} ${req.originalUrl}`);
 			}
 		});
 	}
@@ -4030,7 +4030,7 @@ app.post('/api/auth/login', express.json(), (req, res) => {
 	}
 	setAuthCookie(res, username, sessionId, users[username]);
 	clearSessionCookie(res); // Remove legacy ohSession cookie
-	logMessage(`HTML auth login success for user: ${username} from ${clientIp || 'unknown'}`);
+	logMessage(`[Auth] Login success for user: ${username} from ${clientIp || 'unknown'}`);
 	res.json({ success: true });
 });
 
@@ -5024,7 +5024,7 @@ app.get(/^\/(?:openhab\.app\/)?images\/(v\d+)\/(.+)$/i, async (req, res, next) =
 		res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
 		res.send(buffer);
 	} catch (err) {
-		logMessage(`Icon cache failed for ${rawRel}: ${err.message || err}`);
+		logMessage(`[Icons] Cache failed for ${rawRel}: ${err.message || err}`);
 		next();
 	}
 });
@@ -5694,7 +5694,7 @@ function pruneVideoPreviews() {
 			}
 		}
 	} catch (err) {
-		logMessage(`Video preview prune failed: ${err.message || err}`);
+		logMessage(`[RTSP] Preview prune failed: ${err.message || err}`);
 	}
 }
 
@@ -5707,12 +5707,12 @@ async function captureVideoPreviewsTask() {
 	try {
 		const response = await fetchOpenhab(`/rest/sitemaps/${sitemapName}?type=json`);
 		if (!response || !response.ok) {
-			logMessage(`Video preview: sitemap fetch failed (HTTP ${response?.status || 'unknown'})`);
+			logMessage(`[RTSP] Preview sitemap fetch failed (HTTP ${response?.status || 'unknown'})`);
 			return;
 		}
 		sitemapData = JSON.parse(response.body);
 	} catch (err) {
-		logMessage(`Video preview: failed to fetch/parse sitemap: ${err.message || err}`);
+		logMessage(`[RTSP] Preview failed to fetch/parse sitemap: ${err.message || err}`);
 		return;
 	}
 
@@ -5724,12 +5724,12 @@ async function captureVideoPreviewsTask() {
 		try {
 			const ok = await captureRtspPreview(url);
 			if (ok) {
-				logMessage(`Video preview: captured screenshot for ${url}`);
+				logMessage(`[RTSP] Preview captured screenshot for ${url}`);
 			} else {
-				logMessage(`Video preview: failed to capture ${url}`);
+				logMessage(`[RTSP] Preview failed to capture ${url}`);
 			}
 		} catch (err) {
-			logMessage(`Video preview: error capturing ${url}: ${err.message || err}`);
+			logMessage(`[RTSP] Preview error capturing ${url}: ${err.message || err}`);
 		}
 	}
 
@@ -5760,9 +5760,9 @@ setInterval(pruneAuthLockouts, AUTH_LOCKOUT_PRUNE_MS);
 try {
 	sessions.setMaxAgeDays(SESSION_MAX_AGE_DAYS);
 	sessions.initDb();
-	logMessage(`Sessions database initialized (max age: ${SESSION_MAX_AGE_DAYS} days)`);
+	logMessage(`[Sessions] Database initialized (max age: ${SESSION_MAX_AGE_DAYS} days)`);
 } catch (err) {
-	logMessage(`Failed to initialize sessions database: ${err.message || err}`);
+	logMessage(`[Sessions] Failed to initialize database: ${err.message || err}`);
 }
 
 // Daily session cleanup (24 hours)
@@ -5999,7 +5999,7 @@ function startHttpServer() {
 	server.on('upgrade', handleWsUpgrade);
 	server.listen(HTTP_PORT, HTTP_HOST || undefined, () => {
 		const host = HTTP_HOST || '0.0.0.0';
-		logMessage(`ohProxy listening (HTTP): http://${host}:${HTTP_PORT}`);
+		logMessage(`[Startup] Listening (HTTP): http://${host}:${HTTP_PORT}`);
 	});
 }
 
@@ -6025,14 +6025,14 @@ function startHttpsServer() {
 	server.listen(HTTPS_PORT, HTTPS_HOST || undefined, () => {
 		const host = HTTPS_HOST || '0.0.0.0';
 		const proto = HTTPS_HTTP2 ? 'h2' : 'https';
-		logMessage(`ohProxy listening (HTTPS${HTTPS_HTTP2 ? '+HTTP/2' : ''}): ${proto}://${host}:${HTTPS_PORT}`);
+		logMessage(`[Startup] Listening (HTTPS${HTTPS_HTTP2 ? '+HTTP/2' : ''}): ${proto}://${host}:${HTTPS_PORT}`);
 	});
 }
 
 if (HTTP_ENABLED) startHttpServer();
 if (HTTPS_ENABLED) startHttpsServer();
 
-logMessage(`Proxying openHAB from: ${OH_TARGET}`);
+logMessage(`[Startup] Proxying openHAB from: ${OH_TARGET}`);
 
 // --- IPC Socket for CLI communication ---
 const IPC_SOCKET_PATH = path.join(__dirname, 'ohproxy.sock');
