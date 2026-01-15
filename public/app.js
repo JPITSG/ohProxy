@@ -787,8 +787,9 @@ function setTheme(mode, syncToServer = true) {
 	if (syncToServer && serverSettingsLoaded) {
 		saveSettingsToServer({ darkMode: !isLight });
 	}
-	// Reload visible chart iframes with new theme mode
+	// Reload visible chart and webview iframes with new theme mode
 	reloadChartIframes(mode);
+	reloadWebviewIframes(mode);
 }
 
 function reloadChartIframes(mode) {
@@ -801,6 +802,19 @@ function reloadChartIframes(mode) {
 		if (newUrl !== currentUrl) {
 			setChartIframeAnimState(iframe, newUrl);
 			iframe.dataset.chartUrl = newUrl;
+			iframe.src = newUrl;
+		}
+	});
+}
+
+function reloadWebviewIframes(mode) {
+	const iframes = document.querySelectorAll('iframe.webview-frame');
+	iframes.forEach(iframe => {
+		const currentUrl = iframe.src || '';
+		if (!currentUrl) return;
+		// Replace mode param in URL
+		const newUrl = currentUrl.replace(/([?&])mode=(light|dark)/, `$1mode=${mode}`);
+		if (newUrl !== currentUrl) {
 			iframe.src = newUrl;
 		}
 	});
@@ -1250,6 +1264,13 @@ function imageWidgetUrl(widget) {
 
 function getThemeMode() {
 	return document.body.classList.contains('theme-light') ? 'light' : 'dark';
+}
+
+function appendModeParam(url, mode) {
+	if (!url) return url;
+	// Don't add if mode param already present
+	if (/[?&]mode=/.test(url)) return url;
+	return url + (url.includes('?') ? '&' : '?') + `mode=${mode}`;
 }
 
 function chartWidgetUrl(widget) {
@@ -3102,8 +3123,11 @@ function getWidgetRenderInfo(w, afterImage) {
 	const mediaUrl = isImage ? normalizeMediaUrl(imageWidgetUrl(w)) : '';
 	const chartUrl = isChart ? normalizeMediaUrl(chartWidgetUrl(w)) : '';
 	const rawWebviewUrl = isWebview ? safeText(w?.label || '') : '';
+	const themeMode = getThemeMode();
 	const webviewUrl = rawWebviewUrl
-		? (shouldBypassProxy(rawWebviewUrl) ? rawWebviewUrl : `/proxy?url=${encodeURIComponent(rawWebviewUrl)}`)
+		? (shouldBypassProxy(rawWebviewUrl)
+			? appendModeParam(rawWebviewUrl, themeMode)
+			: `/proxy?url=${encodeURIComponent(rawWebviewUrl)}&mode=${themeMode}`)
 		: '';
 	// Check for iframe config height override
 	const wKey = widgetKey(w);
@@ -3111,7 +3135,7 @@ function getWidgetRenderInfo(w, afterImage) {
 	const iframeHeightOverride = iframeConfig?.height || 0;
 	const webviewHeight = isWebview ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const rawVideoUrl = isVideo ? safeText(w?.label || '') : '';
-	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}` : '';
+	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}&mode=${themeMode}` : '';
 	const videoHeight = isVideo ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const chartHeight = isChart ? iframeHeightOverride : 0;
 	const mappingSig = mapping.map((m) => `${m.command}:${m.label}`).join('|');

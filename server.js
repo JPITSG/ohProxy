@@ -2846,7 +2846,7 @@ function renderLoginHtml() {
 function renderWeatherWidget(forecastData, mode) {
 	const isDark = mode === 'dark';
 	const bgColor = isDark ? '#23213a' : '#ffffff';
-	const cardBg = isDark ? '#16152a' : '#f5f7fa';
+	const cardBg = isDark ? '#16152a' : 'transparent';
 	const textColor = isDark ? '#ffffff' : '#000000';
 	const rainColor = '#3498db';
 
@@ -2892,7 +2892,7 @@ function renderWeatherWidget(forecastData, mode) {
 html, body {
 	height: 100%;
 	font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-	background: ${bgColor};
+	background: transparent;
 	color: ${textColor};
 }
 .weather-card {
@@ -4870,10 +4870,10 @@ app.get('/weather', (req, res) => {
 
 	const mode = safeText(req.query?.mode || '').toLowerCase() === 'dark' ? 'dark' : 'light';
 
-	// Read cached forecast
-	let forecast = null;
+	// Read cached weather data
+	let weatherData = null;
 	try {
-		forecast = JSON.parse(fs.readFileSync(WEATHERBIT_FORECAST_FILE, 'utf8'));
+		weatherData = JSON.parse(fs.readFileSync(WEATHERBIT_FORECAST_FILE, 'utf8'));
 	} catch {
 		res.status(503).setHeader('Content-Type', 'text/html; charset=utf-8').send(`<!DOCTYPE html>
 <html><head><title>Weather</title></head>
@@ -4883,6 +4883,9 @@ app.get('/weather', (req, res) => {
 </body></html>`);
 		return;
 	}
+
+	// Handle both old format (forecast only) and new format (forecast + current)
+	const forecast = weatherData.forecast || weatherData;
 
 	res.setHeader('Content-Type', 'text/html; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
@@ -5795,24 +5798,56 @@ async function fetchWeatherbitData() {
 	logMessage('[Weather] Fetching forecast from Weatherbit API...');
 
 	try {
-		const url = `https://api.weatherbit.io/v2.0/forecast/daily?lat=${encodeURIComponent(WEATHERBIT_LATITUDE)}&lon=${encodeURIComponent(WEATHERBIT_LONGITUDE)}&key=${encodeURIComponent(WEATHERBIT_API_KEY)}&units=${encodeURIComponent(WEATHERBIT_UNITS)}&days=16`;
-		const response = await fetch(url, {
+		// Fetch forecast
+		const forecastUrl = `https://api.weatherbit.io/v2.0/forecast/daily?lat=${encodeURIComponent(WEATHERBIT_LATITUDE)}&lon=${encodeURIComponent(WEATHERBIT_LONGITUDE)}&key=${encodeURIComponent(WEATHERBIT_API_KEY)}&units=${encodeURIComponent(WEATHERBIT_UNITS)}&days=16`;
+		const forecastResponse = await fetch(forecastUrl, {
 			headers: { 'User-Agent': USER_AGENT },
 			signal: AbortSignal.timeout(30000),
 		});
 
-		if (!response.ok) {
-			logMessage(`[Weather] API request failed: ${response.status} ${response.statusText}`);
+		if (!forecastResponse.ok) {
+			logMessage(`[Weather] Forecast API request failed: ${forecastResponse.status} ${forecastResponse.statusText}`);
 			return;
 		}
 
-		const data = await response.json();
-		fs.writeFileSync(WEATHERBIT_FORECAST_FILE, JSON.stringify(data, null, 2));
-		logMessage(`[Weather] Forecast data cached successfully (${data.city_name || 'unknown location'})`);
+		const forecast = await forecastResponse.json();
+		logMessage(`[Weather] Forecast fetched (${forecast.city_name || 'unknown location'})`);
+
+		// Fetch current weather
+		let current = null;
+		try {
+			logMessage('[Weather] Fetching current weather...');
+			const currentUrl = `https://api.weatherbit.io/v2.0/current?lat=${encodeURIComponent(WEATHERBIT_LATITUDE)}&lon=${encodeURIComponent(WEATHERBIT_LONGITUDE)}&key=${encodeURIComponent(WEATHERBIT_API_KEY)}&units=${encodeURIComponent(WEATHERBIT_UNITS)}`;
+			const currentResponse = await fetch(currentUrl, {
+				headers: { 'User-Agent': USER_AGENT },
+				signal: AbortSignal.timeout(30000),
+			});
+
+			if (currentResponse.ok) {
+				const currentData = await currentResponse.json();
+				if (currentData?.data?.[0]?.temp !== undefined) {
+					current = Math.round(currentData.data[0].temp);
+					logMessage(`[Weather] Current temperature: ${current}°`);
+				}
+			}
+		} catch (currentErr) {
+			logMessage(`[Weather] Failed to fetch current weather: ${currentErr.message || currentErr}`);
+		}
+
+		// Fall back to today's forecast temp if current fetch failed
+		if (current === null && forecast?.data?.[0]?.temp !== undefined) {
+			current = Math.round(forecast.data[0].temp);
+			logMessage(`[Weather] Using forecast temp as fallback: ${current}°`);
+		}
+
+		// Save combined data
+		const combined = { forecast, current };
+		fs.writeFileSync(WEATHERBIT_FORECAST_FILE, JSON.stringify(combined, null, 2));
+		logMessage(`[Weather] Data cached successfully`);
 
 		// Cache weather icons
-		if (Array.isArray(data.data)) {
-			const icons = new Set(data.data.map((d) => d.weather?.icon).filter(Boolean));
+		if (Array.isArray(forecast.data)) {
+			const icons = new Set(forecast.data.map((d) => d.weather?.icon).filter(Boolean));
 			for (const icon of icons) {
 				const iconPath = path.join(WEATHERBIT_ICONS_DIR, `${icon}.png`);
 				if (fs.existsSync(iconPath)) continue;
