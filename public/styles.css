@@ -614,6 +614,12 @@ body.theme-light .selection-card .select-menu-scroll::-webkit-scrollbar-thumb:ho
 	border: none;
 	border-radius: inherit;
 }
+/* Transparent background for all card iframes */
+.chart-frame,
+.webview-frame,
+.video-card iframe {
+	background: transparent;
+}
 .image-viewer-trigger {
 	cursor: zoom-in;
 }
