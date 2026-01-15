@@ -186,6 +186,17 @@ const widgetIframeConfigMap = new Map();
 	}
 })();
 
+// Widget proxy cache configs: Map from widgetId to {cacheSeconds: number}
+const widgetProxyCacheConfigMap = new Map();
+(function initWidgetProxyCacheConfigs() {
+	const configs = Array.isArray(OH_CONFIG.widgetProxyCacheConfigs) ? OH_CONFIG.widgetProxyCacheConfigs : [];
+	for (const entry of configs) {
+		if (entry.widgetId) {
+			widgetProxyCacheConfigMap.set(entry.widgetId, entry);
+		}
+	}
+})();
+
 // Get current user role from config
 function getUserRole() {
 	return OH_CONFIG.userRole || null;
@@ -1618,6 +1629,11 @@ function ensureCardConfigModal() {
 					<div class="item-config-section-header">HEIGHT</div>
 					<input type="text" class="iframe-height-input" placeholder="empty = 16:9 ratio" inputmode="numeric">
 				</div>
+				<div class="proxy-cache-section" style="display:none;">
+					<div class="item-config-section-header">CACHE</div>
+					<input type="text" class="proxy-cache-input" placeholder="empty = no cache" inputmode="numeric">
+					<div class="item-config-hint">seconds (e.g. 300 = 5 min)</div>
+				</div>
 				<div class="item-config-section-header">VISIBILITY</div>
 				<div class="item-config-visibility">
 					<label class="item-config-radio">
@@ -1846,6 +1862,20 @@ function openCardConfigModal(widget, card) {
 		}
 	}
 
+	// Show/hide proxy cache section for image widgets
+	const isImageWidget = wType.includes('image');
+	const proxyCacheSection = cardConfigModal.querySelector('.proxy-cache-section');
+	if (proxyCacheSection) {
+		proxyCacheSection.style.display = isImageWidget ? '' : 'none';
+		if (isImageWidget) {
+			const cacheInput = proxyCacheSection.querySelector('.proxy-cache-input');
+			if (cacheInput) {
+				const cacheConfig = widgetProxyCacheConfigMap.get(wKey);
+				cacheInput.value = cacheConfig?.cacheSeconds ? String(cacheConfig.cacheSeconds) : '';
+			}
+		}
+	}
+
 	// Check if widget should show glow rules
 	// Any widget with subtext (state in label like "Title [State]") can have glow rules
 	const isSection = !!widget?.__section;
@@ -1909,6 +1939,16 @@ async function saveCardConfig() {
 		iframeHeight = rawValue;
 	}
 
+	// Get proxyCacheSeconds for image cards (only if section is visible)
+	const proxyCacheSection = cardConfigModal.querySelector('.proxy-cache-section');
+	let proxyCacheSeconds;
+	if (proxyCacheSection && proxyCacheSection.style.display !== 'none') {
+		const cacheInput = proxyCacheSection.querySelector('.proxy-cache-input');
+		const rawValue = cacheInput?.value?.trim() || '';
+		// Pass empty string to clear, or the numeric value
+		proxyCacheSeconds = rawValue;
+	}
+
 	// Get glow rules
 	const rows = cardConfigModal.querySelectorAll('.glow-rule-row');
 	const rules = [];
@@ -1928,7 +1968,7 @@ async function saveCardConfig() {
 		const resp = await fetch('/api/card-config', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ widgetId: cardConfigWidgetKey, rules, visibility, defaultMuted, iframeHeight }),
+			body: JSON.stringify({ widgetId: cardConfigWidgetKey, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds }),
 		});
 		if (!resp.ok) return;
 
@@ -1964,6 +2004,17 @@ async function saveCardConfig() {
 				widgetIframeConfigMap.delete(cardConfigWidgetKey);
 			} else {
 				widgetIframeConfigMap.set(cardConfigWidgetKey, { widgetId: cardConfigWidgetKey, height: heightNum });
+			}
+		}
+
+		// Update local proxy cache config map
+		if (proxyCacheSeconds !== undefined) {
+			const cacheNum = parseInt(proxyCacheSeconds, 10);
+			if (!cacheNum || cacheNum <= 0) {
+				// Empty or zero means no caching, remove entry
+				widgetProxyCacheConfigMap.delete(cardConfigWidgetKey);
+			} else {
+				widgetProxyCacheConfigMap.set(cardConfigWidgetKey, { widgetId: cardConfigWidgetKey, cacheSeconds: cacheNum });
 			}
 		}
 
@@ -3120,7 +3171,11 @@ function getWidgetRenderInfo(w, afterImage) {
 	const mapping = normalizeMapping(w?.mapping);
 	const pageLink = widgetPageLink(w);
 	const labelParts = splitLabelState(label);
-	const mediaUrl = isImage ? normalizeMediaUrl(imageWidgetUrl(w)) : '';
+	const wKey = widgetKey(w);
+	// Check for proxy cache config and add cache param to image URL
+	const proxyCacheConfig = isImage ? widgetProxyCacheConfigMap.get(wKey) : null;
+	const cacheParam = proxyCacheConfig?.cacheSeconds ? `&cache=${proxyCacheConfig.cacheSeconds}` : '';
+	const mediaUrl = isImage ? normalizeMediaUrl(imageWidgetUrl(w)) + cacheParam : '';
 	const chartUrl = isChart ? normalizeMediaUrl(chartWidgetUrl(w)) : '';
 	const rawWebviewUrl = isWebview ? safeText(w?.label || '') : '';
 	const themeMode = getThemeMode();
@@ -3130,7 +3185,6 @@ function getWidgetRenderInfo(w, afterImage) {
 			: `/proxy?url=${encodeURIComponent(rawWebviewUrl)}&mode=${themeMode}`)
 		: '';
 	// Check for iframe config height override
-	const wKey = widgetKey(w);
 	const iframeConfig = widgetIframeConfigMap.get(wKey);
 	const iframeHeightOverride = iframeConfig?.height || 0;
 	const webviewHeight = isWebview ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
