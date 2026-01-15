@@ -45,6 +45,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+title\s*=\s*safeText\(req\.query\.title\s*\|\|\s*''\)\.trim\(\)\s*\|\|\s*item\s*;/,
 			/const\s+raw\s*=\s*req\.query\?\.url\s*;/,
 			/const\s+rawWidth\s*=\s*parseInt\(req\.query\.w,\s*10\)\s*;/,
+			/const\s+mode\s*=\s*safeText\(req\.query\?\.mode\s*\|\|\s*''\)\.toLowerCase\(\)\s*===\s*'dark'\s*\?\s*'dark'\s*:\s*'light'\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));

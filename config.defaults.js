@@ -182,6 +182,19 @@ module.exports = {
 			// Anthropic API key (for Claude AI integration).
 			anthropic: '',
 		},
+		// Weatherbit weather service configuration.
+		weatherbit: {
+			// Weatherbit API key (get from weatherbit.io).
+			apiKey: '',
+			// Location latitude (decimal, e.g. 51.5074).
+			latitude: '',
+			// Location longitude (decimal, e.g. -0.1278).
+			longitude: '',
+			// Temperature units ('M' = Celsius, 'I' = Fahrenheit).
+			units: 'M',
+			// Data refresh interval in milliseconds (default: 1 hour).
+			refreshIntervalMs: 3600000,
+		},
 	},
 
 	// Client-visible settings.
