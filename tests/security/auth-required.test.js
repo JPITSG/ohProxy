@@ -216,11 +216,11 @@ function createAuthTestApp(config = {}) {
 		res.json({ success: true });
 	});
 
-	app.get('/api/glow-rules/:widgetId', (req, res) => {
+	app.get('/api/card-config/:widgetId', (req, res) => {
 		res.json({ rules: {} });
 	});
 
-	app.post('/api/glow-rules', express.json(), (req, res) => {
+	app.post('/api/card-config', express.json(), (req, res) => {
 		res.json({ success: true });
 	});
 
@@ -323,8 +323,8 @@ describe('Authentication Required Tests - HTML Mode', () => {
 			{ method: 'GET', path: '/config.js', description: 'Client config' },
 			{ method: 'GET', path: '/api/settings', description: 'User settings GET' },
 			{ method: 'POST', path: '/api/settings', description: 'User settings POST', body: '{}' },
-			{ method: 'GET', path: '/api/glow-rules/test123', description: 'Glow rules GET' },
-			{ method: 'POST', path: '/api/glow-rules', description: 'Glow rules POST', body: '{}' },
+			{ method: 'GET', path: '/api/card-config/test123', description: 'Card config GET' },
+			{ method: 'POST', path: '/api/card-config', description: 'Card config POST', body: '{}' },
 			{ method: 'GET', path: '/search-index', description: 'Search index' },
 			{ method: 'GET', path: '/video-preview?url=rtsp://test', description: 'Video preview' },
 			{ method: 'GET', path: '/presence', description: 'GPS presence map' },

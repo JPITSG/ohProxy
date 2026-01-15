@@ -95,8 +95,8 @@ function createValidationTestApp() {
 		res.json({ settings: sanitized });
 	});
 
-	// Glow rules endpoint with validation
-	app.post('/api/glow-rules', express.json(), (req, res) => {
+	// Card config endpoint with validation
+	app.post('/api/card-config', express.json(), (req, res) => {
 		// Admin only check
 		if (req.user?.role !== 'admin') {
 			return res.status(403).json({ error: 'Admin access required' });
@@ -315,9 +315,9 @@ describe('Parameter Validation Security Tests', () => {
 		});
 	});
 
-	describe('/api/glow-rules - Admin and Validation', () => {
+	describe('/api/card-config - Admin and Validation', () => {
 		it('rejects non-admin users', async () => {
-			const res = await fetch(`${baseUrl}/api/glow-rules`, {
+			const res = await fetch(`${baseUrl}/api/card-config`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
 				body: JSON.stringify({ widgetId: 'test', rules: [] }),
@@ -326,7 +326,7 @@ describe('Parameter Validation Security Tests', () => {
 		});
 
 		it('rejects widgetId over 200 chars', async () => {
-			const res = await fetch(`${baseUrl}/api/glow-rules`, {
+			const res = await fetch(`${baseUrl}/api/card-config`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'Authorization': adminAuthHeader },
 				body: JSON.stringify({ widgetId: 'x'.repeat(201), rules: [] }),
@@ -335,7 +335,7 @@ describe('Parameter Validation Security Tests', () => {
 		});
 
 		it('rejects invalid operator', async () => {
-			const res = await fetch(`${baseUrl}/api/glow-rules`, {
+			const res = await fetch(`${baseUrl}/api/card-config`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'Authorization': adminAuthHeader },
 				body: JSON.stringify({ widgetId: 'test', rules: [{ operator: 'INVALID', color: 'green', value: '1' }] }),
@@ -344,7 +344,7 @@ describe('Parameter Validation Security Tests', () => {
 		});
 
 		it('rejects invalid color', async () => {
-			const res = await fetch(`${baseUrl}/api/glow-rules`, {
+			const res = await fetch(`${baseUrl}/api/card-config`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'Authorization': adminAuthHeader },
 				body: JSON.stringify({ widgetId: 'test', rules: [{ operator: '=', color: 'purple', value: '1' }] }),
@@ -353,7 +353,7 @@ describe('Parameter Validation Security Tests', () => {
 		});
 
 		it('rejects invalid visibility', async () => {
-			const res = await fetch(`${baseUrl}/api/glow-rules`, {
+			const res = await fetch(`${baseUrl}/api/card-config`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'Authorization': adminAuthHeader },
 				body: JSON.stringify({ widgetId: 'test', visibility: 'superuser' }),
@@ -362,7 +362,7 @@ describe('Parameter Validation Security Tests', () => {
 		});
 
 		it('accepts valid rules from admin', async () => {
-			const res = await fetch(`${baseUrl}/api/glow-rules`, {
+			const res = await fetch(`${baseUrl}/api/card-config`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'Authorization': adminAuthHeader },
 				body: JSON.stringify({ widgetId: 'test', rules: [{ operator: '=', color: 'green', value: 'ON' }], visibility: 'all' }),
