@@ -1453,9 +1453,14 @@ function scheduleBackgroundTask(task, delayMs) {
 	task.timer = setTimeout(() => runBackgroundTask(task), delay);
 }
 
+const TASK_LOG_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+
 async function runBackgroundTask(task) {
 	if (!task || task.running) return;
 	task.running = true;
+	if (task.intervalMs >= TASK_LOG_THRESHOLD_MS) {
+		logMessage(`[Tasks] ${task.name}: running`);
+	}
 	try {
 		await task.run();
 		task.lastRun = Date.now();
