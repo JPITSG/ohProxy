@@ -219,8 +219,9 @@ describe('Cookie Validation Security Tests', () => {
 		it('rejects tampered signature', async () => {
 			const expiry = Math.floor(Date.now() / 1000) + 3600;
 			let cookie = buildAuthCookieValue('testuser', 'session123', 'testpassword', TEST_COOKIE_KEY, expiry);
-			// Tamper with the last character
-			cookie = cookie.slice(0, -1) + (cookie.slice(-1) === 'a' ? 'b' : 'a');
+			// Tamper more aggressively by replacing several characters in the middle
+			const mid = Math.floor(cookie.length / 2);
+			cookie = cookie.slice(0, mid - 3) + 'XXXX' + cookie.slice(mid + 1);
 
 			const res = await fetch(`${baseUrl}/api/protected`, {
 				headers: { 'Cookie': `AuthStore=${cookie}` },
