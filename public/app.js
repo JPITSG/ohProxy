@@ -2357,6 +2357,9 @@ async function fetchPageInternal(url, opts) {
 		headers: { 'Accept': 'application/json' },
 		cache: 'no-store',
 	});
+	if (!res.ok) {
+		throw new Error(`HTTP ${res.status}`);
+	}
 	const text = await res.text();
 	let data;
 	try {
