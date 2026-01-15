@@ -1446,9 +1446,33 @@ async function runBackgroundTask(task) {
 	}
 }
 
+function formatInterval(ms) {
+	if (ms <= 0) return 'disabled';
+	if (ms < 1000) return `${ms}ms`;
+	const sec = Math.floor(ms / 1000);
+	if (sec < 60) return `${sec}s`;
+	const min = Math.floor(sec / 60);
+	if (min < 60) return `${min}m`;
+	const hrs = Math.floor(min / 60);
+	const remMin = min % 60;
+	if (hrs < 24) return remMin > 0 ? `${hrs}h ${remMin}m` : `${hrs}h`;
+	const days = Math.floor(hrs / 24);
+	const remHrs = hrs % 24;
+	return remHrs > 0 ? `${days}d ${remHrs}h` : `${days}d`;
+}
+
 function startBackgroundTasks() {
-	for (const task of backgroundTasks) {
-		if (task.intervalMs <= 0) continue;
+	const enabled = backgroundTasks.filter((t) => t.intervalMs > 0);
+	const disabled = backgroundTasks.filter((t) => t.intervalMs <= 0);
+	if (enabled.length > 0) {
+		const summary = enabled.map((t) => `${t.name} (${formatInterval(t.intervalMs)})`).join(', ');
+		logMessage(`[Startup] Scheduled tasks: ${summary}`);
+	}
+	if (disabled.length > 0) {
+		const summary = disabled.map((t) => t.name).join(', ');
+		logMessage(`[Startup] Disabled tasks: ${summary}`);
+	}
+	for (const task of enabled) {
 		runBackgroundTask(task);
 	}
 }
