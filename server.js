@@ -2886,10 +2886,25 @@ function renderWeatherWidget(forecastData, mode) {
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Weather Forecast${cityName ? ` - ${cityName}` : ''}</title>
 <style>
+@font-face {
+	font-family: 'Rubik';
+	font-style: normal;
+	font-weight: 300;
+	font-display: swap;
+	src: url('/fonts/rubik-300.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'Rubik';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('/fonts/rubik-400.woff2') format('woff2');
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body {
 	height: 100%;
-	font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	font-family: 'Rubik', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	font-weight: 300;
 	background: transparent;
 	color: ${textColor};
 }
@@ -2922,8 +2937,8 @@ html, body {
 	gap: 5px;
 }
 .day-name {
-	font-size: 14px;
-	font-weight: 600;
+	font-size: 1.125rem;
+	font-weight: 400;
 	opacity: 0.7;
 }
 .weather-icon {
@@ -2933,15 +2948,15 @@ html, body {
 .temps {
 	display: flex;
 	flex-direction: column;
-	align-items: center;
+	align-items: flex-end;
 	margin-top: 5px;
 }
 .temp-high {
-	font-size: 15px;
-	font-weight: 700;
+	font-size: .75rem;
+	font-weight: 300;
 }
 .temp-low {
-	font-size: 12px;
+	font-size: .75rem;
 	opacity: 0.6;
 }
 .rain-chance {
