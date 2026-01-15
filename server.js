@@ -289,6 +289,7 @@ const WEATHERBIT_REFRESH_MS = configNumber(WEATHERBIT_CONFIG.refreshIntervalMs, 
 const WEATHERBIT_CACHE_DIR = path.join(__dirname, 'cache', 'weatherbit');
 const WEATHERBIT_FORECAST_FILE = path.join(WEATHERBIT_CACHE_DIR, 'forecast.json');
 const WEATHERBIT_ICONS_DIR = path.join(WEATHERBIT_CACHE_DIR, 'icons');
+const PROXY_CACHE_DIR = path.join(__dirname, 'cache', 'proxy');
 const MYSQL_CONFIG = SERVER_CONFIG.mysql || {};
 const MYSQL_RECONNECT_DELAY_MS = 5000;
 let mysqlConnection = null;
@@ -2070,6 +2071,21 @@ function isChartCacheValid(cachePath, period) {
 	try {
 		const stat = fs.statSync(cachePath);
 		return (Date.now() - stat.mtimeMs) < ttl;
+	} catch {
+		return false;
+	}
+}
+
+// Proxy cache helpers
+function getProxyCachePath(url) {
+	const hash = crypto.createHash('md5').update(url).digest('hex').substring(0, 16);
+	return path.join(PROXY_CACHE_DIR, hash);
+}
+
+function isProxyCacheValid(cachePath, maxAgeSeconds) {
+	try {
+		const stat = fs.statSync(cachePath);
+		return (Date.now() - stat.mtimeMs) < maxAgeSeconds * 1000;
 	} catch {
 		return false;
 	}
@@ -4345,6 +4361,7 @@ app.get('/config.js', (req, res) => {
 		widgetVisibilityRules: sessions.getAllVisibilityRules(),
 		widgetVideoConfigs: sessions.getAllVideoConfigs(),
 		widgetIframeConfigs: sessions.getAllIframeConfigs(),
+		widgetProxyCacheConfigs: sessions.getAllProxyCacheConfigs(),
 		userRole: userRole,
 	})};`);
 });
@@ -4484,7 +4501,7 @@ app.post('/api/card-config', express.json(), (req, res) => {
 		return;
 	}
 
-	const { widgetId, rules, visibility, defaultMuted, iframeHeight } = req.body || {};
+	const { widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds } = req.body || {};
 	if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200) {
 		res.status(400).json({ error: 'Missing or invalid widgetId' });
 		return;
@@ -4543,6 +4560,15 @@ app.post('/api/card-config', express.json(), (req, res) => {
 		}
 	}
 
+	// Validate proxyCacheSeconds if provided (must be null, empty string, or positive integer 0-86400)
+	if (proxyCacheSeconds !== undefined && proxyCacheSeconds !== null && proxyCacheSeconds !== '') {
+		const cacheNum = parseInt(proxyCacheSeconds, 10);
+		if (isNaN(cacheNum) || cacheNum < 0 || cacheNum > 86400) {
+			res.status(400).json({ error: 'proxyCacheSeconds must be empty or an integer 0-86400' });
+			return;
+		}
+	}
+
 	// Save to database
 	try {
 		if (rules !== undefined) {
@@ -4559,7 +4585,12 @@ app.post('/api/card-config', express.json(), (req, res) => {
 			const heightNum = (iframeHeight === '' || iframeHeight === null) ? 0 : parseInt(iframeHeight, 10);
 			sessions.setIframeConfig(widgetId, heightNum);
 		}
-		res.json({ ok: true, widgetId, rules, visibility, defaultMuted, iframeHeight });
+		if (proxyCacheSeconds !== undefined) {
+			// Convert to integer (0 or empty string means disable caching)
+			const cacheNum = (proxyCacheSeconds === '' || proxyCacheSeconds === null) ? 0 : parseInt(proxyCacheSeconds, 10);
+			sessions.setProxyCacheConfig(widgetId, cacheNum);
+		}
+		res.json({ ok: true, widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds });
 	} catch (err) {
 		logMessage(`Failed to save card config: ${err.message || err}`, 'error');
 		res.status(500).json({ error: 'Failed to save config' });
@@ -5616,6 +5647,60 @@ app.get('/proxy', async (req, res, next) => {
 		const headers = {};
 		const accept = safeText(req.headers.accept);
 		if (accept) headers.Accept = accept;
+
+		// Check for cache parameter (seconds)
+		const cacheSeconds = parseInt(req.query.cache, 10);
+		const shouldCache = Number.isFinite(cacheSeconds) && cacheSeconds > 0;
+
+		if (shouldCache) {
+			// Caching mode - use buffered fetch
+			const targetUrl = target.toString();
+			const cachePath = getProxyCachePath(targetUrl);
+			const metaPath = `${cachePath}.meta`;
+
+			// Check if cached file exists and is valid
+			if (isProxyCacheValid(cachePath, cacheSeconds)) {
+				try {
+					const cachedData = fs.readFileSync(cachePath);
+					let contentType = 'application/octet-stream';
+					try {
+						contentType = fs.readFileSync(metaPath, 'utf8').trim() || contentType;
+					} catch {}
+					res.setHeader('Content-Type', contentType);
+					res.setHeader('Cache-Control', 'no-store');
+					res.setHeader('X-Proxy-Cache', 'hit');
+					res.send(cachedData);
+					return;
+				} catch (err) {
+					// Cache read failed, fall through to fetch
+				}
+			}
+
+			// Cache miss or stale - fetch and cache
+			try {
+				const result = await fetchBinaryFromUrl(targetUrl, headers);
+				if (result.ok && result.body) {
+					// Ensure cache directory exists
+					ensureDir(PROXY_CACHE_DIR);
+					// Save to cache
+					fs.writeFileSync(cachePath, result.body);
+					if (result.contentType) {
+						fs.writeFileSync(metaPath, result.contentType);
+					}
+				}
+				res.status(result.status || 502);
+				if (result.contentType) res.setHeader('Content-Type', result.contentType);
+				res.setHeader('Cache-Control', 'no-store');
+				res.setHeader('X-Proxy-Cache', 'miss');
+				res.send(result.body || '');
+			} catch (err) {
+				logMessage(`Cached proxy fetch failed for ${targetUrl}: ${err.message || err}`);
+				if (!res.headersSent) {
+					res.status(502).send('Proxy error');
+				}
+			}
+			return;
+		}
 
 		try {
 			// Use streaming proxy - works for both regular images and MJPEG streams

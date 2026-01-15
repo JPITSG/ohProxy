@@ -81,6 +81,15 @@ function initDb() {
 		);
 	`);
 
+	// Create widget proxy cache config table (for caching proxied images)
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS widget_proxy_cache (
+			widget_id TEXT PRIMARY KEY,
+			cache_seconds INTEGER NOT NULL,
+			updated_at INTEGER DEFAULT (strftime('%s','now'))
+		);
+	`);
+
 	// Create server settings table (key-value store for persistent server state)
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS server_settings (
@@ -451,6 +460,45 @@ function setIframeConfig(widgetId, height) {
 }
 
 // ============================================
+// Widget Proxy Cache Config Functions
+// ============================================
+
+/**
+ * Get all proxy cache configs.
+ * @returns {Array} - Array of {widgetId, cacheSeconds} objects
+ */
+function getAllProxyCacheConfigs() {
+	if (!db) initDb();
+	const rows = db.prepare('SELECT widget_id, cache_seconds FROM widget_proxy_cache').all();
+	return rows.map(row => ({
+		widgetId: row.widget_id,
+		cacheSeconds: row.cache_seconds
+	}));
+}
+
+/**
+ * Set proxy cache config for a widget. If cacheSeconds is 0/null/undefined, deletes the entry.
+ * @param {string} widgetId - The widget ID
+ * @param {number|null} cacheSeconds - Cache duration in seconds, or 0/null to disable
+ * @returns {boolean} - True if successful
+ */
+function setProxyCacheConfig(widgetId, cacheSeconds) {
+	if (!db) initDb();
+	const now = Math.floor(Date.now() / 1000);
+
+	if (!cacheSeconds || cacheSeconds <= 0) {
+		// No cache means disable, remove the entry
+		db.prepare('DELETE FROM widget_proxy_cache WHERE widget_id = ?').run(widgetId);
+	} else {
+		db.prepare(`
+			INSERT INTO widget_proxy_cache (widget_id, cache_seconds, updated_at) VALUES (?, ?, ?)
+			ON CONFLICT(widget_id) DO UPDATE SET cache_seconds = excluded.cache_seconds, updated_at = excluded.updated_at
+		`).run(widgetId, cacheSeconds, now);
+	}
+	return true;
+}
+
+// ============================================
 // User Management Functions
 // ============================================
 
@@ -603,6 +651,9 @@ module.exports = {
 	getAllIframeConfigs,
 	getIframeConfig,
 	setIframeConfig,
+	// Proxy cache config
+	getAllProxyCacheConfigs,
+	setProxyCacheConfig,
 	// User management
 	getAllUsers,
 	getUser,
