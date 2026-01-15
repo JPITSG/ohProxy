@@ -1618,10 +1618,10 @@ body.theme-light .iframe-height-input:focus {
 .proxy-cache-input {
 	box-sizing: border-box;
 	width: 100%;
-	height: var(--row-control-height);
+	height: 36px;
 	padding: 0 12px;
 	font-size: .75rem;
-	line-height: var(--row-control-height);
+	line-height: 36px;
 	color: var(--color-text-primary);
 	background: rgba(30, 33, 54, 0.7);
 	backdrop-filter: blur(6px);
