@@ -1627,11 +1627,11 @@ function ensureCardConfigModal() {
 				</div>
 				<div class="iframe-height-section" style="display:none;">
 					<div class="item-config-section-header">HEIGHT</div>
-					<input type="text" class="iframe-height-input" placeholder="empty = 16:9 ratio" inputmode="numeric">
+					<input type="text" class="iframe-height-input" placeholder="pixels" inputmode="numeric">
 				</div>
 				<div class="proxy-cache-section" style="display:none;">
 					<div class="item-config-section-header">CACHE</div>
-					<input type="text" class="proxy-cache-input" placeholder="seconds, e.g. 300 = 5 min" inputmode="numeric">
+					<input type="text" class="proxy-cache-input" placeholder="seconds" inputmode="numeric">
 				</div>
 				<div class="item-config-section-header">VISIBILITY</div>
 				<div class="item-config-visibility">
