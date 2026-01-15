@@ -153,6 +153,9 @@ module.exports = {
 			pollingIntervalBgMs: 2000,
 			// Warn if no Atmosphere item updates are received for this many ms (0 disables).
 			atmosphereNoUpdateWarnMs: 5000,
+			// Delay before marking backend as OK after recovery (ms; 0 disables).
+			// Gives OpenHAB time to fully initialize before clients refresh.
+			backendRecoveryDelayMs: 0,
 		},
 		// Video preview screenshot configuration.
 		videoPreview: {

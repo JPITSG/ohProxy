@@ -255,6 +255,10 @@ const WS_ATMOSPHERE_NO_UPDATE_WARN_MS = Math.max(
 	0,
 	configNumber(WEBSOCKET_CONFIG.atmosphereNoUpdateWarnMs, 5000)
 );
+const BACKEND_RECOVERY_DELAY_MS = Math.max(
+	0,
+	configNumber(WEBSOCKET_CONFIG.backendRecoveryDelayMs, 0)
+);
 const PREVIEW_CONFIG = SERVER_CONFIG.videoPreview || {};
 const VIDEO_PREVIEW_INTERVAL_MS = configNumber(PREVIEW_CONFIG.intervalMs, 900000);
 const VIDEO_PREVIEW_PRUNE_HOURS = configNumber(PREVIEW_CONFIG.pruneAfterHours, 24);
@@ -1153,6 +1157,7 @@ const liveConfig = {
 	wsPollingIntervalMs: WS_POLLING_INTERVAL_MS,
 	wsPollingIntervalBgMs: WS_POLLING_INTERVAL_BG_MS,
 	wsAtmosphereNoUpdateWarnMs: WS_ATMOSPHERE_NO_UPDATE_WARN_MS,
+	backendRecoveryDelayMs: BACKEND_RECOVERY_DELAY_MS,
 	rrdPath: RRD_PATH,
 };
 
@@ -1284,6 +1289,10 @@ function reloadLiveConfig() {
 	liveConfig.wsAtmosphereNoUpdateWarnMs = Math.max(
 		0,
 		configNumber(newWsConfig.atmosphereNoUpdateWarnMs, WS_ATMOSPHERE_NO_UPDATE_WARN_MS)
+	);
+	liveConfig.backendRecoveryDelayMs = Math.max(
+		0,
+		configNumber(newWsConfig.backendRecoveryDelayMs, 0)
 	);
 	const newPaths = newServer.paths || {};
 	liveConfig.rrdPath = safeText(newPaths.rrd) || '';
@@ -1561,19 +1570,57 @@ function wsBroadcast(event, data) {
 	}
 }
 
+let backendRecoveryTimer = null;
+
 function setBackendStatus(ok, errorMessage) {
-	if (backendStatus.ok === ok) return;
+	// If going to failed state, cancel any pending recovery and set immediately
+	if (!ok) {
+		if (backendRecoveryTimer) {
+			clearTimeout(backendRecoveryTimer);
+			backendRecoveryTimer = null;
+			logMessage('[Backend] Recovery cancelled - backend failed again');
+		}
+		if (backendStatus.ok === false) return; // Already failed
+		backendStatus.ok = false;
+		backendStatus.lastError = errorMessage || 'OpenHAB unreachable';
+		backendStatus.lastChange = Date.now();
+		logMessage(`[Backend] Status: FAILED - ${backendStatus.lastError}`);
+		wsBroadcast('backendStatus', {
+			ok: backendStatus.ok,
+			error: backendStatus.lastError,
+		});
+		return;
+	}
 
-	backendStatus.ok = ok;
-	backendStatus.lastError = ok ? '' : (errorMessage || 'OpenHAB unreachable');
-	backendStatus.lastChange = Date.now();
+	// Going to OK state - apply recovery delay if configured
+	if (backendStatus.ok === true) return; // Already OK
+	if (backendRecoveryTimer) return; // Recovery already pending
 
-	logMessage(`[Backend] Status: ${ok ? 'OK' : 'FAILED'}${backendStatus.lastError ? ' - ' + backendStatus.lastError : ''}`);
-
-	wsBroadcast('backendStatus', {
-		ok: backendStatus.ok,
-		error: backendStatus.lastError,
-	});
+	const delayMs = liveConfig.backendRecoveryDelayMs || 0;
+	if (delayMs > 0) {
+		logMessage(`[Backend] Recovery detected, waiting ${delayMs}ms before marking OK...`);
+		backendRecoveryTimer = setTimeout(() => {
+			backendRecoveryTimer = null;
+			backendStatus.ok = true;
+			backendStatus.lastError = '';
+			backendStatus.lastChange = Date.now();
+			logMessage('[Backend] Status: OK (after recovery delay)');
+			wsBroadcast('backendStatus', {
+				ok: backendStatus.ok,
+				error: backendStatus.lastError,
+			});
+		}, delayMs);
+	} else {
+		// No delay configured - set immediately
+		backendStatus.ok = true;
+		backendStatus.lastError = '';
+		backendStatus.lastChange = Date.now();
+		logMessage('[Backend] Status: OK');
+		wsBroadcast('backendStatus', {
+			ok: backendStatus.ok,
+			error: backendStatus.lastError,
+		});
+	}
 }
 
 function parseAtmosphereUpdate(body) {
@@ -1787,9 +1834,11 @@ function connectAtmospherePage(pageId) {
 		res.on('end', async () => {
 			pageState.connection = null;
 			if (res.statusCode === 200 && body.trim()) {
-				setBackendStatus(true);
 				const update = parseAtmosphereUpdate(body);
 				if (update && update.changes.length > 0) {
+					// Only mark backend OK when we receive actual item data
+					// (during OpenHAB startup, responses may be empty/malformed)
+					setBackendStatus(true);
 					// Filter to only items that actually changed
 					const actualChanges = filterChangedItems(update.changes);
 
@@ -2365,6 +2414,14 @@ async function connectAtmosphere() {
 
 		// Fetch all pages and subscribe to each
 		const { pages, sitemapName, needsSitemapRefresh } = await fetchAllPages();
+
+		// If no pages found, OpenHAB may still be starting - retry later
+		if (pages.length === 0) {
+			logMessage(`[Atmosphere] No pages found in sitemap, will retry in ${ATMOSPHERE_RECONNECT_MS}ms`);
+			setTimeout(() => connectAtmosphere(), ATMOSPHERE_RECONNECT_MS);
+			return;
+		}
+
 		atmosphereNeedsSitemapRefresh = needsSitemapRefresh;
 		lastAtmosphereSitemapName = sitemapName || '';
 
@@ -2456,7 +2513,10 @@ async function fetchAllItems() {
 		const data = JSON.parse(result.body);
 		// openHAB 1.x returns {"item":[...]}, openHAB 2.x+ returns [...]
 		const items = Array.isArray(data) ? data : (data.item || []);
-		if (!Array.isArray(items)) return [];
+		if (!Array.isArray(items) || items.length === 0) {
+			// OpenHAB responded but has no items - still starting up
+			return [];
+		}
 		setBackendStatus(true);
 		return items.map(item => ({ name: item.name, state: item.state }));
 	} catch (e) {
