@@ -106,6 +106,11 @@ function initDb() {
 		db.exec(`ALTER TABLE sessions ADD COLUMN last_ip TEXT DEFAULT NULL`);
 	} catch (e) { /* column already exists */ }
 
+	// Migration: add disabled column to users table
+	try {
+		db.exec(`ALTER TABLE users ADD COLUMN disabled INTEGER DEFAULT 0`);
+	} catch (e) { /* column already exists */ }
+
 	// Run cleanup on startup
 	cleanupSessions();
 
@@ -507,22 +512,23 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * Get all users.
- * @returns {Array} - Array of {username, role, createdAt} (no passwords)
+ * @returns {Array} - Array of {username, role, createdAt, disabled} (no passwords)
  */
 function getAllUsers() {
 	if (!db) initDb();
-	const rows = db.prepare('SELECT username, role, created_at FROM users').all();
+	const rows = db.prepare('SELECT username, role, created_at, disabled FROM users').all();
 	return rows.map(row => ({
 		username: row.username,
 		role: row.role,
-		createdAt: row.created_at
+		createdAt: row.created_at,
+		disabled: row.disabled === 1
 	}));
 }
 
 /**
  * Get a user by username.
  * @param {string} username
- * @returns {object|null} - {username, password, role, createdAt} or null
+ * @returns {object|null} - {username, password, role, createdAt, disabled} or null
  */
 function getUser(username) {
 	if (!db) initDb();
@@ -532,7 +538,8 @@ function getUser(username) {
 		username: row.username,
 		password: row.password,
 		role: row.role,
-		createdAt: row.created_at
+		createdAt: row.created_at,
+		disabled: row.disabled === 1
 	};
 }
 
@@ -599,6 +606,48 @@ function deleteUser(username) {
 	return result.changes > 0;
 }
 
+/**
+ * Disable a user.
+ * @param {string} username
+ * @returns {boolean} - True if user was found and disabled
+ */
+function disableUser(username) {
+	if (!db) initDb();
+	const result = db.prepare('UPDATE users SET disabled = 1 WHERE username = ?').run(username);
+	return result.changes > 0;
+}
+
+/**
+ * Enable a user.
+ * @param {string} username
+ * @returns {boolean} - True if user was found and enabled
+ */
+function enableUser(username) {
+	if (!db) initDb();
+	const result = db.prepare('UPDATE users SET disabled = 0 WHERE username = ?').run(username);
+	return result.changes > 0;
+}
+
+/**
+ * Disable all users.
+ * @returns {number} - Number of users disabled
+ */
+function disableAllUsers() {
+	if (!db) initDb();
+	const result = db.prepare('UPDATE users SET disabled = 1').run();
+	return result.changes;
+}
+
+/**
+ * Enable all users.
+ * @returns {number} - Number of users enabled
+ */
+function enableAllUsers() {
+	if (!db) initDb();
+	const result = db.prepare('UPDATE users SET disabled = 0').run();
+	return result.changes;
+}
+
 // ============================================
 // Server Settings Functions (Key-Value Store)
 // ============================================
@@ -661,6 +710,10 @@ module.exports = {
 	updateUserPassword,
 	updateUserRole,
 	deleteUser,
+	disableUser,
+	enableUser,
+	disableAllUsers,
+	enableAllUsers,
 	// Server settings
 	getServerSetting,
 	setServerSetting,
