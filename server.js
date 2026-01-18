@@ -2666,6 +2666,9 @@ function connectSSE() {
 		logMessage('[SSE] Connected to event stream');
 		setBackendStatus(true);
 
+		// Disable socket timeout for long-lived SSE connection
+		if (res.socket) res.socket.setTimeout(0);
+
 		let buffer = '';
 		res.setEncoding('utf8');
 
@@ -2745,6 +2748,8 @@ function connectSSE() {
 		scheduleSSEReconnect();
 	});
 
+	// SSE connections are long-lived, disable request timeout
+	req.setTimeout(0);
 	req.end();
 	sseConnection = req;
 }
