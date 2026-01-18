@@ -2570,7 +2570,8 @@ function flattenWidgets(list, out, ctx) {
 		if (w?.type === 'Frame') {
 			const label = sectionLabel(w);
 			if (label) out.push({ __section: true, label });
-			let kids = w.widget;
+			// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
+			let kids = w.widgets || w.widget;
 			if (kids) {
 				if (Array.isArray(kids)) {
 					// ok
@@ -2591,8 +2592,9 @@ function flattenWidgets(list, out, ctx) {
 
 function normalizeWidgets(page, ctx) {
 	// openHAB sitemap JSON structures vary a bit; handle a few shapes.
-	// Expecting something like: { id, title, widget: [ ... ] } or { widget: { item: [...] } }
-	let w = page?.widget;
+	// OH 1.x: { id, title, widget: [ ... ] } or { widget: { item: [...] } }
+	// OH 3.x: { id, title, widgets: [ ... ] }
+	let w = page?.widgets || page?.widget;
 
 	if (!w) return [];
 
@@ -2778,7 +2780,8 @@ function syncDeltaToCache(pageUrl, changes) {
 		}
 	};
 
-	updateWidgets(cachedPage?.widget);
+	// Support both OH 1.x 'widget' and OH 3.x 'widgets'
+	updateWidgets(cachedPage?.widgets || cachedPage?.widget);
 	// No need to call updatePageInCache - we modified the object in place
 }
 
@@ -2818,9 +2821,10 @@ function syncItemsToAllCachedPages(changes) {
 		}
 	};
 
-	// Update all cached pages
+	// Update all cached pages - support both OH 1.x 'widget' and OH 3.x 'widgets'
 	for (const page of state.sitemapCache.values()) {
-		if (page?.widget) updateWidgets(page.widget);
+		const widgetSource = page?.widgets || page?.widget;
+		if (widgetSource) updateWidgets(widgetSource);
 	}
 }
 
@@ -3155,6 +3159,7 @@ function getWidgetRenderInfo(w, afterImage) {
 	const isGroup = t.includes('group');
 	const isWebview = t.includes('webview');
 	const isVideo = t === 'video';
+	const isSelection = t.includes('selection');
 	const label = isImage || isVideo || isChart ? safeText(w?.label || '') : widgetLabel(w);
 	const st = widgetState(w);
 	const icon = widgetIconName(w);
@@ -3167,7 +3172,8 @@ function getWidgetRenderInfo(w, afterImage) {
 	);
 	const itemName = safeText(w?.item?.name || w?.itemName || '');
 	const shouldHide = shouldHideTitle(itemName || w?.itemName);
-	const mapping = normalizeMapping(w?.mapping);
+	// Support both OH 1.x 'mapping' and OH 3.x 'mappings'
+	const mapping = normalizeMapping(w?.mappings || w?.mapping);
 	const pageLink = widgetPageLink(w);
 	const labelParts = splitLabelState(label);
 	const wKey = widgetKey(w);
@@ -3228,6 +3234,7 @@ function getWidgetRenderInfo(w, afterImage) {
 		isGroup,
 		isWebview,
 		isVideo,
+		isSelection,
 		label,
 		st,
 		icon,
@@ -3275,6 +3282,7 @@ function updateCard(card, w, afterImage, info) {
 		isGroup,
 		isWebview,
 		isVideo,
+		isSelection,
 		label,
 		st,
 		icon,
@@ -3378,10 +3386,11 @@ function updateCard(card, w, afterImage, info) {
 	}
 	if (isText || isGroup) {
 		crossfadeText(metaEl, labelParts.state);
-	} else {
+	} else if (!isSelection && !isSwitchType) {
+		// Don't show meta text for Selection/Switch - their controls already show the value
 		metaEl.textContent = labelParts.state;
 	}
-	if (labelParts.state) card.classList.add('has-meta');
+	if (labelParts.state && !isSelection && !isSwitchType) card.classList.add('has-meta');
 	// Apply glow: custom rules override state glow and value glow
 	const wKey = widgetKey(w);
 	const customGlowColor = getWidgetGlowOverride(wKey, labelParts.state || st);

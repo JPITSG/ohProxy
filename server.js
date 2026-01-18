@@ -22,6 +22,10 @@ const CONFIG_PATH = path.join(__dirname, 'config.js');
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 
 function authHeader() {
+	// Prefer API token (Bearer) for OH 3.x, fall back to Basic Auth for OH 1.x/2.x
+	if (liveConfig.ohApiToken) {
+		return `Bearer ${liveConfig.ohApiToken}`;
+	}
 	if (!liveConfig.ohUser || !liveConfig.ohPass) return null;
 	const token = Buffer.from(`${liveConfig.ohUser}:${liveConfig.ohPass}`).toString('base64');
 	return `Basic ${token}`;
@@ -196,6 +200,7 @@ const ALLOW_SUBNETS = SERVER_CONFIG.allowSubnets;
 const OH_TARGET = safeText(process.env.OH_TARGET || SERVER_CONFIG.openhab?.target);
 const OH_USER = safeText(process.env.OH_USER || SERVER_CONFIG.openhab?.user || '');
 const OH_PASS = safeText(process.env.OH_PASS || SERVER_CONFIG.openhab?.pass || '');
+const OH_API_TOKEN = safeText(process.env.OH_API_TOKEN || SERVER_CONFIG.openhab?.apiToken || '');
 const OPENHAB_REQUEST_TIMEOUT_MS = configNumber(SERVER_CONFIG.openhab?.timeoutMs, 15000);
 const ICON_VERSION = safeText(process.env.ICON_VERSION || SERVER_CONFIG.assets?.iconVersion);
 const USER_AGENT = safeText(process.env.USER_AGENT || SERVER_CONFIG.userAgent);
@@ -248,7 +253,7 @@ const SITEMAP_REFRESH_MS = configNumber(
 	process.env.SITEMAP_REFRESH_MS || TASK_CONFIG.sitemapRefreshMs
 );
 const WEBSOCKET_CONFIG = SERVER_CONFIG.websocket || {};
-const WS_MODE = (WEBSOCKET_CONFIG.mode === 'atmosphere') ? 'atmosphere' : 'polling';
+const WS_MODE = ['atmosphere', 'sse'].includes(WEBSOCKET_CONFIG.mode) ? WEBSOCKET_CONFIG.mode : 'polling';
 const WS_POLLING_INTERVAL_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalMs) || 500;
 const WS_POLLING_INTERVAL_BG_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalBgMs) || 2000;
 const WS_ATMOSPHERE_NO_UPDATE_WARN_MS = Math.max(
@@ -1141,6 +1146,7 @@ const liveConfig = {
 	ohTarget: OH_TARGET,
 	ohUser: OH_USER,
 	ohPass: OH_PASS,
+	ohApiToken: OH_API_TOKEN,
 	iconVersion: ICON_VERSION,
 	userAgent: USER_AGENT,
 	assetVersion: ASSET_VERSION,
@@ -1262,6 +1268,7 @@ function reloadLiveConfig() {
 	liveConfig.ohTarget = safeText(newServer.openhab?.target);
 	liveConfig.ohUser = safeText(newServer.openhab?.user || '');
 	liveConfig.ohPass = safeText(newServer.openhab?.pass || '');
+	liveConfig.ohApiToken = safeText(newServer.openhab?.apiToken || '');
 	const oldIconVersion = liveConfig.iconVersion;
 	const oldIconSize = liveConfig.iconSize;
 	const oldAssetVersion = liveConfig.assetVersion;
@@ -1298,7 +1305,7 @@ function reloadLiveConfig() {
 
 	// WebSocket config - handle mode changes
 	const oldWsMode = liveConfig.wsMode;
-	liveConfig.wsMode = (newWsConfig.mode === 'atmosphere') ? 'atmosphere' : 'polling';
+	liveConfig.wsMode = ['atmosphere', 'sse'].includes(newWsConfig.mode) ? newWsConfig.mode : 'polling';
 	liveConfig.wsPollingIntervalMs = configNumber(newWsConfig.pollingIntervalMs) || 500;
 	liveConfig.wsPollingIntervalBgMs = configNumber(newWsConfig.pollingIntervalBgMs) || 2000;
 	liveConfig.wsAtmosphereNoUpdateWarnMs = Math.max(
@@ -1337,6 +1344,8 @@ function reloadLiveConfig() {
 		logMessage(`[WS] Mode changed from ${oldWsMode} to ${liveConfig.wsMode}, switching...`);
 		if (oldWsMode === 'atmosphere') {
 			stopAllAtmosphereConnections();
+		} else if (oldWsMode === 'sse') {
+			stopSSE();
 		} else {
 			stopPolling();
 		}
@@ -1709,22 +1718,26 @@ function setBackendStatus(ok, errorMessage) {
 function parseAtmosphereUpdate(body) {
 	try {
 		const data = JSON.parse(body);
-		if (!data || !data.widget) return null;
+		// Support both OH 1.x 'widget' and OH 3.x 'widgets' formats
+		const widgetSource = data?.widgets || data?.widget;
+		if (!data || !widgetSource) return null;
 		const changes = [];
 		function extractItems(widget) {
 			if (widget.item && widget.item.name && widget.item.state !== undefined) {
 				changes.push({ name: widget.item.name, state: widget.item.state });
 			}
-			if (Array.isArray(widget.widget)) {
-				widget.widget.forEach(extractItems);
-			} else if (widget.widget) {
-				extractItems(widget.widget);
+			// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
+			const children = widget.widgets || widget.widget;
+			if (Array.isArray(children)) {
+				children.forEach(extractItems);
+			} else if (children) {
+				extractItems(children);
 			}
 		}
-		if (Array.isArray(data.widget)) {
-			data.widget.forEach(extractItems);
-		} else if (data.widget) {
-			extractItems(data.widget);
+		if (Array.isArray(widgetSource)) {
+			widgetSource.forEach(extractItems);
+		} else if (widgetSource) {
+			extractItems(widgetSource);
 		}
 		if (changes.length === 0) return null;
 		return { type: 'items', changes };
@@ -1823,6 +1836,11 @@ let atmosphereNoUpdateTimer = null;
 let atmosphereNoUpdateWarned = false;
 let atmosphereLastItemUpdateAt = 0;
 let atmosphereMonitorStartedAt = 0;
+
+// SSE (Server-Sent Events) state for openHAB 3.x real-time updates
+let sseConnection = null;
+let sseReconnectTimer = null;
+const SSE_RECONNECT_MS = 5000;
 
 // Track item states to detect actual changes (not just openHAB reporting unchanged items)
 const itemStates = new Map(); // itemName -> state
@@ -2006,8 +2024,9 @@ function extractPageIds(data, pages = new Set()) {
 		pages.add(data.linkedPage.id);
 		extractPageIds(data.linkedPage, pages);
 	}
-	// Recurse into widgets
-	const widgets = Array.isArray(data.widget) ? data.widget : (data.widget ? [data.widget] : []);
+	// Recurse into widgets - support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
+	const widgetSource = data.widgets || data.widget;
+	const widgets = Array.isArray(widgetSource) ? widgetSource : (widgetSource ? [widgetSource] : []);
 	for (const w of widgets) {
 		extractPageIds(w, pages);
 	}
@@ -2029,8 +2048,9 @@ function extractRtspUrls(data, urls = new Set()) {
 			urls.add(label);
 		}
 	}
-	// Recurse into widgets
-	const widgets = Array.isArray(data.widget) ? data.widget : (data.widget ? [data.widget] : []);
+	// Recurse into widgets - support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
+	const widgetSource = data.widgets || data.widget;
+	const widgets = Array.isArray(widgetSource) ? widgetSource : (widgetSource ? [widgetSource] : []);
 	for (const w of widgets) {
 		extractRtspUrls(w, urls);
 	}
@@ -2568,6 +2588,198 @@ function stopAtmosphereIfUnneeded() {
 	}
 }
 
+// --- SSE Mode (openHAB 3.x) ---
+
+function handleSSEEvent(eventData) {
+	// Parse OH 3.x SSE event format:
+	// {"topic":"openhab/items/ItemName/statechanged","payload":"{\"type\":\"Decimal\",\"value\":\"123\",\"oldType\":\"Decimal\",\"oldValue\":\"456\"}","type":"ItemStateChangedEvent"}
+	try {
+		const data = JSON.parse(eventData);
+		if (!data.topic || !data.payload) return null;
+
+		// Extract item name from topic: openhab/items/{itemName}/statechanged
+		const topicMatch = data.topic.match(/^openhab\/items\/([^/]+)\/(statechanged|stateupdate)$/);
+		if (!topicMatch) return null;
+
+		const itemName = topicMatch[1];
+
+		// Parse the payload (which is a JSON string)
+		const payload = JSON.parse(data.payload);
+		const newState = payload.value;
+
+		if (newState === undefined) return null;
+
+		return { name: itemName, state: String(newState) };
+	} catch {
+		return null;
+	}
+}
+
+function connectSSE() {
+	if (sseConnection) {
+		try { sseConnection.destroy(); } catch {}
+		sseConnection = null;
+	}
+	if (sseReconnectTimer) {
+		clearTimeout(sseReconnectTimer);
+		sseReconnectTimer = null;
+	}
+
+	if (liveConfig.wsMode !== 'sse' || wss.clients.size === 0) return;
+
+	const target = new URL(liveConfig.ohTarget);
+	const isHttps = target.protocol === 'https:';
+	const client = isHttps ? https : http;
+	const basePath = target.pathname && target.pathname !== '/' ? target.pathname.replace(/\/$/, '') : '';
+
+	// Subscribe to item state changes via SSE
+	const reqPath = `${basePath}/rest/events?topics=openhab/items/*/statechanged`;
+
+	const headers = {
+		Accept: 'text/event-stream',
+		'Cache-Control': 'no-cache',
+		'User-Agent': liveConfig.userAgent,
+	};
+	const ah = authHeader();
+	if (ah) headers.Authorization = ah;
+
+	logMessage('[SSE] Connecting to openHAB 3.x event stream...');
+
+	const req = client.request({
+		method: 'GET',
+		hostname: target.hostname,
+		port: target.port || (isHttps ? 443 : 80),
+		path: reqPath,
+		headers,
+	}, (res) => {
+		if (res.statusCode !== 200) {
+			logMessage(`[SSE] Connection failed: HTTP ${res.statusCode}`);
+			setBackendStatus(false, `SSE HTTP ${res.statusCode}`);
+			scheduleSSEReconnect();
+			return;
+		}
+
+		logMessage('[SSE] Connected to event stream');
+		setBackendStatus(true);
+
+		let buffer = '';
+		res.setEncoding('utf8');
+
+		res.on('data', async (chunk) => {
+			buffer += chunk;
+
+			// Process complete SSE events (data: ... \n\n)
+			const lines = buffer.split('\n');
+			buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+			for (const line of lines) {
+				if (line.startsWith('data:')) {
+					const eventData = line.substring(5).trim();
+					if (!eventData) continue;
+
+					const change = handleSSEEvent(eventData);
+					if (change) {
+						// Check if state actually changed
+						const prevState = itemStates.get(change.name);
+						if (prevState !== change.state) {
+							itemStates.set(change.name, change.state);
+
+							// Check configured group items for calculated state changes
+							const groupChanges = [];
+							if (liveConfig.groupItems && liveConfig.groupItems.length > 0) {
+								for (const groupName of liveConfig.groupItems) {
+									if (change.name === groupName) continue;
+									const calculatedState = await calculateGroupState(groupName);
+									if (calculatedState !== null) {
+										const prevCalculated = groupItemCalculatedStates.get(groupName);
+										if (prevCalculated !== calculatedState) {
+											groupItemCalculatedStates.set(groupName, calculatedState);
+											groupChanges.push({ name: groupName, state: calculatedState });
+										}
+									}
+								}
+							}
+
+							const allChanges = [change, ...groupChanges];
+							if (wss.clients.size > 0) {
+								const transformedChanges = await applyGroupStateToItems(allChanges);
+								wsBroadcast('update', { type: 'items', changes: transformedChanges });
+							}
+						}
+					}
+				}
+			}
+		});
+
+		res.on('end', () => {
+			logMessage('[SSE] Connection closed by server');
+			sseConnection = null;
+			scheduleSSEReconnect();
+		});
+
+		res.on('error', (err) => {
+			logMessage(`[SSE] Stream error: ${err.message || err}`);
+			setBackendStatus(false, err.message || String(err));
+		});
+	});
+
+	req.on('error', (err) => {
+		const msg = err.message || err;
+		// ECONNRESET is common during server restarts
+		if (err.code !== 'ECONNRESET') {
+			logMessage(`[SSE] Connection error: ${msg}`);
+		}
+		setBackendStatus(false, msg);
+		sseConnection = null;
+		scheduleSSEReconnect();
+	});
+
+	req.on('timeout', () => {
+		logMessage('[SSE] Connection timeout');
+		req.destroy();
+		sseConnection = null;
+		scheduleSSEReconnect();
+	});
+
+	req.end();
+	sseConnection = req;
+}
+
+function scheduleSSEReconnect() {
+	if (sseReconnectTimer) return;
+	if (liveConfig.wsMode !== 'sse' || wss.clients.size === 0) return;
+
+	sseReconnectTimer = setTimeout(() => {
+		sseReconnectTimer = null;
+		if (liveConfig.wsMode === 'sse' && wss.clients.size > 0) {
+			connectSSE();
+		}
+	}, SSE_RECONNECT_MS);
+}
+
+function stopSSE() {
+	if (sseReconnectTimer) {
+		clearTimeout(sseReconnectTimer);
+		sseReconnectTimer = null;
+	}
+	if (sseConnection) {
+		try { sseConnection.destroy(); } catch {}
+		sseConnection = null;
+	}
+}
+
+function startSSEIfNeeded() {
+	if (wss.clients.size > 0 && !sseConnection && !sseReconnectTimer) {
+		connectSSE();
+	}
+}
+
+function stopSSEIfUnneeded() {
+	if (wss.clients.size === 0) {
+		stopSSE();
+	}
+}
+
 // --- Polling Mode ---
 let pollingTimer = null;
 let pollingActive = false;
@@ -2604,7 +2816,7 @@ function adjustPollingForFocus() {
 
 async function fetchAllItems() {
 	try {
-		const result = await fetchOpenhab('/rest/items?type=json');
+		const result = await fetchOpenhab('/rest/items');
 		if (!result.ok) {
 			throw new Error(`HTTP ${result.status}`);
 		}
@@ -2721,6 +2933,10 @@ function startWsPushIfNeeded() {
 		if (atmospherePages.size === 0) {
 			connectAtmosphere();
 		}
+	} else if (liveConfig.wsMode === 'sse') {
+		if (!sseConnection && !sseReconnectTimer) {
+			connectSSE();
+		}
 	} else {
 		if (!pollingActive) {
 			startPolling();
@@ -2733,6 +2949,8 @@ function stopWsPushIfUnneeded() {
 
 	if (liveConfig.wsMode === 'atmosphere') {
 		stopAllAtmosphereConnections();
+	} else if (liveConfig.wsMode === 'sse') {
+		stopSSE();
 	} else {
 		stopPolling();
 	}
@@ -3101,7 +3319,8 @@ function sendVersionedAsset(res, filePath, contentType) {
 }
 
 function normalizeWidgets(page) {
-	let w = page?.widget;
+	// Support both OH 1.x 'widget' and OH 3.x 'widgets'
+	let w = page?.widgets || page?.widget;
 	if (!w) return [];
 	if (!Array.isArray(w)) {
 		if (w && Array.isArray(w.item)) w = w.item;
@@ -3114,7 +3333,8 @@ function normalizeWidgets(page) {
 			if (item?.type === 'Frame') {
 				const label = safeText(item?.label || item?.item?.label || item?.item?.name || '');
 				out.push({ __frame: true, label });
-				let kids = item.widget;
+				// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
+				let kids = item.widgets || item.widget;
 				if (kids) {
 					if (!Array.isArray(kids)) {
 						if (Array.isArray(kids.item)) kids = kids.item;
@@ -3192,7 +3412,8 @@ function widgetPageLink(widget) {
 }
 
 function normalizeSearchWidgets(page, ctx) {
-	let w = page?.widget;
+	// Support both OH 1.x 'widget' and OH 3.x 'widgets' formats
+	let w = page?.widgets || page?.widget;
 	if (!w) return [];
 
 	if (!Array.isArray(w)) {
@@ -3207,7 +3428,8 @@ function normalizeSearchWidgets(page, ctx) {
 			if (item?.type === 'Frame') {
 				const label = sectionLabel(item);
 				if (label) out.push({ __section: true, label });
-				let kids = item.widget;
+				// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
+				let kids = item.widgets || item.widget;
 				if (kids) {
 					if (!Array.isArray(kids)) {
 						if (Array.isArray(kids.item)) kids = kids.item;
@@ -3302,7 +3524,9 @@ function mappingsSignature(mapping) {
 }
 
 function widgetSnapshot(widget) {
-	const mappingSig = mappingsSignature(widget?.mapping);
+	// Support both OH 1.x 'mapping' and OH 3.x 'mappings'
+	const widgetMapping = widget?.mappings || widget?.mapping;
+	const mappingSig = mappingsSignature(widgetMapping);
 	return {
 		key: deltaKey(widget),
 		id: safeText(widget?.widgetId || widget?.id || ''),
@@ -3318,7 +3542,7 @@ function widgetSnapshot(widget) {
 		),
 		icon: safeText(widget?.icon || widget?.item?.icon || widget?.item?.category || ''),
 		mappings: mappingSig,
-		mapping: mappingSig ? normalizeMappings(widget?.mapping) : [],
+		mapping: mappingSig ? normalizeMappings(widgetMapping) : [],
 	};
 }
 
@@ -3471,7 +3695,8 @@ async function applyGroupStateOverrides(page) {
 		}
 	};
 
-	await processWidgets(page?.widget);
+	// Support both OH 1.x 'widget' and OH 3.x 'widgets'
+	await processWidgets(page?.widgets || page?.widget);
 }
 
 // Compute delta response for a sitemap URL (used by both HTTP and WS)
@@ -4943,11 +5168,13 @@ app.get('/sitemap-full', async (req, res) => {
 							queue.push(rel);
 						}
 					}
-					// Recurse into nested widgets (Frames)
+					// Recurse into nested widgets (Frames) - support both OH 1.x and 3.x
 					if (w?.widget) findLinks(w.widget);
+					if (w?.widgets) findLinks(w.widgets);
 				}
 			};
-			findLinks(page?.widget);
+			// Support both OH 1.x 'widget' and OH 3.x 'widgets'
+			findLinks(page?.widgets || page?.widget);
 		}
 
 		res.setHeader('Cache-Control', 'no-store');
@@ -5981,6 +6208,7 @@ async function fetchWeatherbitData() {
 
 		// Fetch current weather
 		let current = null;
+		let currentDescription = null;
 		try {
 			logMessage('[Weather] Fetching current weather...');
 			const currentUrl = `https://api.weatherbit.io/v2.0/current?lat=${encodeURIComponent(WEATHERBIT_LATITUDE)}&lon=${encodeURIComponent(WEATHERBIT_LONGITUDE)}&key=${encodeURIComponent(WEATHERBIT_API_KEY)}&units=${encodeURIComponent(WEATHERBIT_UNITS)}`;
@@ -5993,21 +6221,23 @@ async function fetchWeatherbitData() {
 				const currentData = await currentResponse.json();
 				if (currentData?.data?.[0]?.temp !== undefined) {
 					current = Math.round(currentData.data[0].temp);
-					logMessage(`[Weather] Current temperature: ${current}°`);
+					currentDescription = currentData.data[0].weather?.description || null;
+					logMessage(`[Weather] Current temperature: ${current}° (${currentDescription || 'no description'})`);
 				}
 			}
 		} catch (currentErr) {
 			logMessage(`[Weather] Failed to fetch current weather: ${currentErr.message || currentErr}`);
 		}
 
-		// Fall back to today's forecast temp if current fetch failed
+		// Fall back to today's forecast if current fetch failed
 		if (current === null && forecast?.data?.[0]?.temp !== undefined) {
 			current = Math.round(forecast.data[0].temp);
-			logMessage(`[Weather] Using forecast temp as fallback: ${current}°`);
+			currentDescription = forecast.data[0].weather?.description || null;
+			logMessage(`[Weather] Using forecast as fallback: ${current}° (${currentDescription || 'no description'})`);
 		}
 
 		// Save combined data
-		const combined = { forecast, current };
+		const combined = { forecast, current, currentDescription };
 		fs.writeFileSync(WEATHERBIT_FORECAST_FILE, JSON.stringify(combined, null, 2));
 		logMessage(`[Weather] Data cached successfully`);
 
