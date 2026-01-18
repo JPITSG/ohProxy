@@ -2,9 +2,17 @@
 
 A modern, secure reverse proxy and web interface for [openHAB](https://www.openhab.org/). ohProxy provides a responsive Progressive Web App (PWA) with real-time updates, touch-optimized controls, and comprehensive security features.
 
-**Supported openHAB Versions:**
-- **openHAB 1.8.3** - Full support with Atmosphere long-polling for real-time updates
-- **openHAB 3.x / 4.x** - Full support with Server-Sent Events (SSE) for real-time updates
+**openHAB Compatibility:**
+
+| Version | Status | Real-time Mode | Notes |
+|---------|--------|----------------|-------|
+| 1.8.3 | ✅ Tested | Atmosphere | Confirmed working |
+| 2.x | ❓ Unknown | Atmosphere | Not yet tested |
+| 3.4 | ✅ Tested | SSE | Confirmed working |
+| 4.x | ❓ Unknown | SSE | Testing planned |
+| 5.x | ❓ Unknown | SSE | Testing planned |
+
+> **Note:** ohProxy has been developed and tested against openHAB 1.8.3 and 3.4. Compatibility with 2.x, 4.x, and 5.x is expected but not yet verified. Future work will focus on ensuring full support for openHAB 4.x and 5.x.
 
 ## Overview
 
@@ -173,7 +181,7 @@ ohProxy sits between your users and openHAB, providing:
 ### Prerequisites
 
 - Node.js 18+
-- **openHAB 1.8.3** with REST API enabled
+- **openHAB** with REST API enabled (tested with 1.8.3 and 3.4)
 - ImageMagick (for icon conversion)
 - (Optional) TLS certificates for HTTPS
 - (Optional) MySQL/MariaDB for GPS presence map
