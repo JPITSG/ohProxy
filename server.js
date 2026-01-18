@@ -815,16 +815,20 @@ function getBasicAuthCredentials(req) {
 }
 
 function loadAuthUsers() {
-	// Return users from database in same format as old file: {username: password}
+	// Return users from database: { users: {username: password}, disabledUsers: Set }
 	const allUsers = sessions.getAllUsers();
 	const users = {};
+	const disabledUsers = new Set();
 	for (const u of allUsers) {
 		const fullUser = sessions.getUser(u.username);
 		if (fullUser) {
 			users[u.username] = fullUser.password;
+			if (fullUser.disabled) {
+				disabledUsers.add(u.username);
+			}
 		}
 	}
-	return users;
+	return { users, disabledUsers };
 }
 
 function base64UrlEncode(value) {
@@ -3015,7 +3019,7 @@ function handleWsUpgrade(req, socket, head) {
 		}
 
 		// Load users
-		const users = loadAuthUsers();
+		const { users, disabledUsers } = loadAuthUsers();
 		if (!users || Object.keys(users).length === 0) {
 			logMessage('[WS] Auth config unavailable');
 			sendWsUpgradeError(socket, 500, 'Auth config unavailable');
@@ -3050,6 +3054,13 @@ function handleWsUpgrade(req, socket, head) {
 		if (!authenticatedUser) {
 			logMessage(`[WS] No valid auth from ${clientIp || 'unknown'}`);
 			sendWsUpgradeError(socket, 401, 'Unauthorized');
+			return;
+		}
+
+		// Check if user is disabled
+		if (disabledUsers.has(authenticatedUser)) {
+			logMessage(`[WS] Disabled user ${authenticatedUser} rejected`);
+			sendWsUpgradeError(socket, 500, '');
 			return;
 		}
 
@@ -4304,7 +4315,7 @@ app.post('/api/auth/login', express.json(), (req, res) => {
 	}
 
 	// Validate credentials
-	const users = loadAuthUsers();
+	const { users, disabledUsers } = loadAuthUsers();
 	if (!users || Object.keys(users).length === 0) {
 		res.status(500).json({ error: 'Auth config unavailable' });
 		return;
@@ -4324,6 +4335,12 @@ app.post('/api/auth/login', express.json(), (req, res) => {
 			return;
 		}
 		res.status(401).json({ error: 'Invalid credentials' });
+		return;
+	}
+
+	// Check if user is disabled
+	if (disabledUsers.has(username)) {
+		res.status(500).end();
 		return;
 	}
 
@@ -4354,7 +4371,7 @@ app.use((req, res, next) => {
 	}
 
 	// Auth is always required - handle based on auth mode
-	const users = loadAuthUsers();
+	const { users, disabledUsers } = loadAuthUsers();
 	if (!users || Object.keys(users).length === 0) {
 		res.status(500).type('text/plain').send('Auth config unavailable');
 		return;
@@ -4366,6 +4383,11 @@ app.use((req, res, next) => {
 		if (liveConfig.authCookieKey && liveConfig.authCookieName) {
 			const cookieResult = getAuthCookieUser(req, users, liveConfig.authCookieKey);
 			if (cookieResult) {
+				// Check if user is disabled
+				if (disabledUsers.has(cookieResult.user)) {
+					res.status(500).end();
+					return;
+				}
 				req.ohProxyAuth = 'authenticated';
 				req.ohProxyUser = cookieResult.user;
 				req._cookieResult = cookieResult; // Store for session middleware
@@ -4471,6 +4493,11 @@ app.use((req, res, next) => {
 	}
 	if (!authenticatedUser) {
 		sendAuthRequired(res);
+		return;
+	}
+	// Check if user is disabled
+	if (disabledUsers.has(authenticatedUser)) {
+		res.status(500).end();
 		return;
 	}
 	clearAuthFailures(lockKey);

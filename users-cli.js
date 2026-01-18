@@ -23,6 +23,8 @@ Commands:
   remove <username>                 Delete user and their sessions
   passwd <username> <newpassword>   Change user password
   role <username> <role>            Change user role
+  disable <username|*>              Disable user (* = all users)
+  enable <username|*>               Enable user (* = all users)
 
 Examples:
   node users-cli.js list
@@ -30,6 +32,8 @@ Examples:
   node users-cli.js passwd john newpass456
   node users-cli.js role john readonly
   node users-cli.js remove john
+  node users-cli.js disable john
+  node users-cli.js enable '*'
 `);
 }
 
@@ -44,12 +48,14 @@ function listUsers() {
 		console.log('No users found.');
 		return;
 	}
-	console.log('Username'.padEnd(20) + 'Role'.padEnd(12) + 'Created');
-	console.log('-'.repeat(55));
+	console.log('Username'.padEnd(20) + 'Role'.padEnd(12) + 'Status'.padEnd(10) + 'Created');
+	console.log('-'.repeat(65));
 	for (const user of users) {
+		const status = user.disabled ? 'disabled' : 'active';
 		console.log(
 			user.username.padEnd(20) +
 			user.role.padEnd(12) +
+			status.padEnd(10) +
 			formatDate(user.createdAt)
 		);
 	}
@@ -169,6 +175,44 @@ function changeRole(username, newRole) {
 	}
 }
 
+function disableUser(username) {
+	if (!username) {
+		console.error('Error: Username required (use * for all users)');
+		usage();
+		process.exit(1);
+	}
+	if (username === '*') {
+		const count = sessions.disableAllUsers();
+		console.log(`Disabled ${count} user(s)`);
+	} else {
+		if (sessions.disableUser(username)) {
+			console.log(`User '${username}' disabled`);
+		} else {
+			console.error(`Error: User '${username}' not found`);
+			process.exit(1);
+		}
+	}
+}
+
+function enableUser(username) {
+	if (!username) {
+		console.error('Error: Username required (use * for all users)');
+		usage();
+		process.exit(1);
+	}
+	if (username === '*') {
+		const count = sessions.enableAllUsers();
+		console.log(`Enabled ${count} user(s)`);
+	} else {
+		if (sessions.enableUser(username)) {
+			console.log(`User '${username}' enabled`);
+		} else {
+			console.error(`Error: User '${username}' not found`);
+			process.exit(1);
+		}
+	}
+}
+
 // Initialize DB
 sessions.initDb();
 
@@ -189,6 +233,12 @@ sessions.initDb();
 			break;
 		case 'role':
 			changeRole(args[1], args[2]);
+			break;
+		case 'disable':
+			disableUser(args[1]);
+			break;
+		case 'enable':
+			enableUser(args[1]);
 			break;
 		default:
 			usage();
