@@ -30,10 +30,13 @@ module.exports = {
 		openhab: {
 			// openHAB base URL (http/https URL, e.g. http://127.0.0.1:8080).
 			target: '',
-			// openHAB username (optional).
+			// openHAB username (optional, for Basic Auth).
 			user: '',
-			// openHAB password (optional).
+			// openHAB password (optional, for Basic Auth).
 			pass: '',
+			// openHAB 3.x API token (optional, takes precedence over user/pass).
+			// Generate via openHAB UI: Settings > API Security > Create new API token.
+			apiToken: '',
 		},
 		// MySQL database connection (optional).
 		mysql: {
@@ -143,9 +146,10 @@ module.exports = {
 		sessionMaxAgeDays: 14,
 		// WebSocket push configuration.
 		websocket: {
-			// WebSocket update mode ('polling' or 'atmosphere').
+			// WebSocket update mode ('polling', 'atmosphere', or 'sse').
 			// polling: Polls openHAB REST API at interval, compares states, sends only changes.
-			// atmosphere: Uses openHAB Atmosphere long-polling for real-time updates.
+			// atmosphere: Uses openHAB 1.x/2.x Atmosphere long-polling for real-time updates.
+			// sse: Uses openHAB 3.x Server-Sent Events for real-time updates.
 			mode: 'polling',
 			// Polling interval in ms when clients are focused (>=100).
 			pollingIntervalMs: 500,

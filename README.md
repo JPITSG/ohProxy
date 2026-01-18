@@ -1,8 +1,10 @@
 # ohProxy
 
-A modern, secure reverse proxy and web interface for [openHAB](https://www.openhab.org/) **1.8.3**. ohProxy provides a responsive Progressive Web App (PWA) with real-time updates, touch-optimized controls, and comprehensive security features.
+A modern, secure reverse proxy and web interface for [openHAB](https://www.openhab.org/). ohProxy provides a responsive Progressive Web App (PWA) with real-time updates, touch-optimized controls, and comprehensive security features.
 
-This project is designed specifically for **openHAB 1.8.3** and its REST API. It is not compatible with openHAB 2.x, 3.x, or 4.x which use a different REST API structure.
+**Supported openHAB Versions:**
+- **openHAB 1.8.3** - Full support with Atmosphere long-polling for real-time updates
+- **openHAB 3.x / 4.x** - Full support with Server-Sent Events (SSE) for real-time updates
 
 ## Overview
 
@@ -73,9 +75,10 @@ ohProxy sits between your users and openHAB, providing:
 
 ### Real-Time Updates
 
-#### Dual Update Modes
-- **Polling mode**: Configurable intervals for REST API polling
-- **Atmosphere mode**: openHAB's long-polling for instant updates
+#### Update Modes
+- **Polling mode**: Configurable intervals for REST API polling (works with all openHAB versions)
+- **Atmosphere mode**: openHAB 1.x/2.x long-polling for instant updates
+- **SSE mode**: openHAB 3.x/4.x Server-Sent Events for instant updates
 
 #### Smart Polling
 - **Active/Idle intervals**: Faster polling when user is active (default: 2s active, 10s idle)
@@ -252,14 +255,19 @@ module.exports = {
     },
     openhab: {
       target: 'http://localhost:8080',
+      // For openHAB 1.x/2.x: use Basic Auth
       user: '',  // or use OH_USER env var
       pass: '',  // or use OH_PASS env var
+      // For openHAB 3.x/4.x: use API token (takes precedence over user/pass)
+      apiToken: '',  // or use OH_API_TOKEN env var
     },
     allowSubnets: ['192.168.1.0/24', '10.0.0.0/8'],
     proxyAllowlist: ['camera.local:8080', 'example.com'],
   },
 };
 ```
+
+**Note:** For openHAB 3.x/4.x, generate an API token via the openHAB UI: Settings > API Security > Create new API token.
 
 ### Authentication Configuration
 
@@ -350,13 +358,21 @@ module.exports = {
 module.exports = {
   server: {
     websocket: {
-      mode: 'polling',           // 'polling' or 'atmosphere'
+      // Mode options:
+      // - 'polling': Works with ANY openHAB version (universal fallback)
+      // - 'atmosphere': openHAB 1.x/2.x real-time via Atmosphere long-polling
+      // - 'sse': openHAB 3.x/4.x real-time via Server-Sent Events
+      mode: 'polling',
       pollingIntervalMs: 500,    // Active polling interval
       pollingIntervalBgMs: 2000, // Background polling interval
     },
   },
 };
 ```
+
+**Recommended modes by openHAB version:**
+- openHAB 1.x/2.x: Use `'atmosphere'` for real-time updates, or `'polling'` as fallback
+- openHAB 3.x/4.x: Use `'sse'` for real-time updates, or `'polling'` as fallback
 
 ### MySQL Configuration
 
@@ -412,8 +428,9 @@ module.exports = {
 | Variable | Description |
 |----------|-------------|
 | `OH_TARGET` | openHAB target URL |
-| `OH_USER` | openHAB basic auth username |
-| `OH_PASS` | openHAB basic auth password |
+| `OH_USER` | openHAB basic auth username (OH 1.x/2.x) |
+| `OH_PASS` | openHAB basic auth password (OH 1.x/2.x) |
+| `OH_API_TOKEN` | openHAB API token (OH 3.x/4.x, takes precedence) |
 | `ICON_VERSION` | override icon cache version |
 | `USER_AGENT` | override proxy User-Agent |
 | `PROXY_LOG_LEVEL` | override proxy middleware log level |
@@ -604,7 +621,9 @@ node session-cli.js purge 7days    # Also: Nsecs, Nmins, Nhours
 
 ## Performance Tips
 
-1. **Use Atmosphere mode** when openHAB supports it for lower latency (`server.websocket.mode = 'atmosphere'`)
+1. **Use the appropriate real-time mode** for your openHAB version:
+   - openHAB 1.x/2.x: `server.websocket.mode = 'atmosphere'`
+   - openHAB 3.x/4.x: `server.websocket.mode = 'sse'`
 2. **Enable slim mode** for embedded displays or low-power devices
 3. **Tune polling intervals** based on your network and use case
 4. **Use service worker** (HTTPS required) for offline resilience
