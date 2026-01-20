@@ -806,14 +806,31 @@ function setTheme(mode, syncToServer = true) {
 function reloadChartIframes(mode) {
 	const iframes = document.querySelectorAll('iframe.chart-frame');
 	iframes.forEach(iframe => {
-		const currentUrl = iframe.dataset.chartUrl || iframe.src || '';
+		// Get actual current URL from contentWindow (src attribute doesn't update with location.replace)
+		let currentUrl;
+		try {
+			currentUrl = iframe.contentWindow.location.href;
+		} catch {
+			currentUrl = iframe.src || iframe.dataset.chartUrl || '';
+		}
+		if (!currentUrl || currentUrl === 'about:blank') {
+			currentUrl = iframe.src || iframe.dataset.chartUrl || '';
+		}
 		if (!currentUrl) return;
-		// Replace mode param in URL
-		const newUrl = currentUrl.replace(/([?&])mode=(light|dark)/, `$1mode=${mode}`);
+		// Replace mode param and strip hash (hash is content-based including colors, so invalid across modes)
+		const newUrl = currentUrl
+			.replace(/([?&])mode=(light|dark)/, `$1mode=${mode}`)
+			.replace(/&_h=[^&]*/, '');
 		if (newUrl !== currentUrl) {
+			// Use location.replace() to avoid adding browser history entry (same-origin iframes)
 			setChartIframeAnimState(iframe, newUrl);
 			iframe.dataset.chartUrl = newUrl;
-			iframe.src = newUrl;
+			try {
+				iframe.contentWindow.location.replace(newUrl);
+			} catch {
+				// Fallback if contentWindow access fails
+				iframe.src = newUrl;
+			}
 		}
 	});
 }
@@ -821,12 +838,27 @@ function reloadChartIframes(mode) {
 function reloadWebviewIframes(mode) {
 	const iframes = document.querySelectorAll('iframe.webview-frame');
 	iframes.forEach(iframe => {
-		const currentUrl = iframe.src || '';
+		// Get actual current URL from contentWindow (src attribute doesn't update with location.replace)
+		let currentUrl;
+		try {
+			currentUrl = iframe.contentWindow.location.href;
+		} catch {
+			currentUrl = iframe.src || '';
+		}
+		if (!currentUrl || currentUrl === 'about:blank') {
+			currentUrl = iframe.src || '';
+		}
 		if (!currentUrl) return;
 		// Replace mode param in URL
 		const newUrl = currentUrl.replace(/([?&])mode=(light|dark)/, `$1mode=${mode}`);
 		if (newUrl !== currentUrl) {
-			iframe.src = newUrl;
+			// Use location.replace() to avoid adding browser history entry (same-origin iframes via proxy)
+			try {
+				iframe.contentWindow.location.replace(newUrl);
+			} catch {
+				// Fallback if contentWindow access fails (cross-origin)
+				iframe.src = newUrl;
+			}
 		}
 	});
 }
@@ -2867,8 +2899,10 @@ function widgetKey(widget) {
 
 function splitLabelState(label) {
 	const raw = safeText(label);
-	const match = raw.match(/^(.*)\s*\[(.+)\]\s*$/);
-	if (!match) return { title: raw, state: '' };
+	// Strip trailing empty brackets [] (openHAB 4.x sends these when no state)
+	const cleaned = raw.replace(/\s*\[\]\s*$/, '');
+	const match = cleaned.match(/^(.*)\s*\[(.+)\]\s*$/);
+	if (!match) return { title: cleaned, state: '' };
 	return { title: match[1].trim(), state: match[2].trim() };
 }
 
