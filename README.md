@@ -9,10 +9,10 @@ A modern, secure reverse proxy and web interface for [openHAB](https://www.openh
 | 1.8.3 | ✅ Tested | Atmosphere | Confirmed working |
 | 2.x | ❓ Unknown | Atmosphere | Not yet tested |
 | 3.4 | ✅ Tested | SSE | Confirmed working |
-| 4.x | ❓ Unknown | SSE | Testing planned |
+| 4.3 | ✅ Tested | SSE | Confirmed working |
 | 5.x | ❓ Unknown | SSE | Testing planned |
 
-> **Note:** ohProxy has been developed and tested against openHAB 1.8.3 and 3.4. Compatibility with 2.x, 4.x, and 5.x is expected but not yet verified. Future work will focus on ensuring full support for openHAB 4.x and 5.x.
+> **Note:** ohProxy has been developed and tested against openHAB 1.8.3, 3.4, and 4.3. Compatibility with 2.x and 5.x is expected but not yet verified.
 
 ## Overview
 
@@ -181,7 +181,7 @@ ohProxy sits between your users and openHAB, providing:
 ### Prerequisites
 
 - Node.js 18+
-- **openHAB** with REST API enabled (tested with 1.8.3 and 3.4)
+- **openHAB** with REST API enabled (tested with 1.8.3, 3.4, and 4.3)
 - ImageMagick (for icon conversion)
 - (Optional) TLS certificates for HTTPS
 - (Optional) MySQL/MariaDB for GPS presence map
