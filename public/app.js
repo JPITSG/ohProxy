@@ -5761,7 +5761,7 @@ function restoreNormalPolling() {
 		// Network back - trigger refresh to verify and restore connection
 		refresh(false);
 	});
-	document.addEventListener('visibilitychange', async () => {
+	document.addEventListener('visibilitychange', () => {
 		if (document.visibilityState === 'hidden') {
 			if (resumeReloadArmed) return;
 			resumeReloadArmed = true;
@@ -5769,39 +5769,9 @@ function restoreNormalPolling() {
 			stopPing();
 			return;
 		}
-		resumeReloadArmed = false;
-		startPingDelayed();
-
-		// Show spinner on touch devices while resuming
-		const isTouch = isTouchDevice();
-		if (isTouch) {
-			// Clear any stale loading status
-			clearLoadingStatusTimer();
-			setStatus('');
-			// Load and render cached home page under the spinner
-			const snapshot = loadHomeSnapshot();
-			if (snapshot) {
-				applyHomeSnapshot(snapshot);
-				render();
-			}
-			// Remove resume-reset so grid is visible (blurred by spinner overlay)
-			setResumeResetUi(false);
-			showResumeSpinner(true);
-
-			// Reset connection state so we wait for a FRESH connection
-			state.connectionOk = false;
-			wsConnected = false;
-
-			// Start reconnection immediately
-			if (!state.isPaused) {
-				noteActivity();
-				refresh(false);
-				if (!wsConnection) connectWs();
-			}
-
-			// Wait for connection to be established (max 10s), then hide spinner
-			await waitForConnection();
-			showResumeSpinner(false);
+		// User returned - reload the page on touch devices
+		if (isTouchDevice()) {
+			window.location.reload();
 		} else {
 			setResumeResetUi(false);
 			if (!state.isPaused) {
