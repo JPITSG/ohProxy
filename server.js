@@ -5711,7 +5711,13 @@ app.get('/presence', async (req, res) => {
 			continue;
 		}
 		last = current;
-		markers.push([current[0], current[1], first ? 'red' : 'blue']);
+		const ts = row.timestamp ? (() => {
+			const d = new Date(row.timestamp);
+			const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+			const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+			return '<div class="tt-date">' + date + '</div><div class="tt-time">' + time + '</div>';
+		})() : '';
+		markers.push([current[0], current[1], first ? 'red' : 'blue', ts]);
 		first = false;
 	}
 
@@ -5725,14 +5731,23 @@ app.get('/presence', async (req, res) => {
 <meta charset="utf-8">
 <title>Map</title>
 <style>
+@font-face{font-family:'Rubik';src:url('/fonts/rubik-300.woff2') format('woff2');font-weight:300;font-style:normal;font-display:swap}
+@font-face{font-family:'Rubik';src:url('/fonts/rubik-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:'Rubik';src:url('/fonts/rubik-500.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
 .olControlAttribution{display:none!important}
 #map{position:absolute;top:0;left:0;right:0;bottom:0}
 body{margin:0;padding:0}
+.tooltip{position:absolute;background:#f1f2f9;border:1px solid #ccccd1;border-radius:10px;padding:0.5rem 0.75rem;font-size:11px;line-height:1.5;font-family:'Rubik',sans-serif;color:#0f172a;pointer-events:none;z-index:100;white-space:nowrap}
+.tooltip .tt-date{font-weight:500}
+.tooltip .tt-time{font-weight:300;margin-top:0.125rem}
+#hover-tooltip{display:none}
 </style>
 <script src="https://openlayers.org/api/OpenLayers.js"></script>
 </head>
 <body>
 <div id="map"></div>
+<div id="red-tooltip" class="tooltip"></div>
+<div id="hover-tooltip" class="tooltip"></div>
 <script>
 (function(){
 var markers=${markersJson};
@@ -5746,16 +5761,53 @@ var wgs84=new OpenLayers.Projection("EPSG:4326");
 var proj=map.getProjectionObject();
 var vector=new OpenLayers.Layer.Vector("Markers");
 
-markers.forEach(function(m){
-vector.addFeatures(new OpenLayers.Feature.Vector(
+markers.forEach(function(m,i){
+var feature=new OpenLayers.Feature.Vector(
 new OpenLayers.Geometry.Point(m[1],m[0]).transform(wgs84,proj),
-{},{externalGraphic:'/images/marker-'+m[2]+'.png',graphicHeight:41,graphicWidth:25,graphicXOffset:-12,graphicYOffset:-41}
-));
+{timestamp:m[3],index:i,color:m[2]},{externalGraphic:'/images/marker-'+m[2]+'.png',graphicHeight:41,graphicWidth:25,graphicXOffset:-12,graphicYOffset:-41}
+);
+vector.addFeatures(feature);
 });
 
 map.addLayer(vector);
+
 var red=markers[markers.length-1];
+var redTooltip=document.getElementById('red-tooltip');
+redTooltip.innerHTML=red[3];
+
+function updateRedTooltip(){
+var lonlat=new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj);
+var px=map.getPixelFromLonLat(lonlat);
+if(px){
+redTooltip.style.left=(px.x+15)+'px';
+redTooltip.style.top=(px.y-60)+'px';
+}
+}
+
+var hoverTooltip=document.getElementById('hover-tooltip');
+var hover=new OpenLayers.Control.SelectFeature(vector,{
+hover:true,
+onSelect:function(f){
+if(f.attributes.color==='blue'&&f.attributes.timestamp){
+hoverTooltip.innerHTML=f.attributes.timestamp;
+hoverTooltip.style.display='block';
+}
+},
+onUnselect:function(){hoverTooltip.style.display='none';}
+});
+map.addControl(hover);
+hover.activate();
+
+map.events.register('mousemove',map,function(e){
+hoverTooltip.style.left=(e.xy.x+15)+'px';
+hoverTooltip.style.top=(e.xy.y+15)+'px';
+});
+
+map.events.register('moveend',map,updateRedTooltip);
+map.events.register('zoomend',map,updateRedTooltip);
+
 map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),zoom);
+setTimeout(updateRedTooltip,100);
 })();
 </script>
 </body>
