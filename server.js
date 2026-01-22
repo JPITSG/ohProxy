@@ -6044,20 +6044,25 @@ app.get('/proxy', async (req, res, next) => {
 
 // --- Iframe wrapper for controlled reloads ---
 app.get('/iframe', (req, res) => {
+	const settings = req.ohProxySession?.settings || sessions.getDefaultSettings();
+	const isLight = settings.darkMode === false;
+	const bgColor = isLight ? '#f5f6fa' : '#020617';
 	const html = `<!DOCTYPE html>
 <html>
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+	<meta name="theme-color" content="${bgColor}">
 	<title>ohProxy</title>
 	<style>
 		* { margin: 0; padding: 0; box-sizing: border-box; }
-		html, body { width: 100%; height: 100%; overflow: hidden; }
+		html, body { width: 100%; height: 100%; overflow: hidden; background: ${bgColor}; }
 		iframe {
 			width: 100%;
 			height: 100%;
 			border: none;
 			display: block;
+			background: ${bgColor};
 		}
 		.reload-overlay {
 			position: fixed;
@@ -6105,6 +6110,7 @@ app.get('/iframe', (req, res) => {
 
 		const frame = document.getElementById('app-frame');
 		const overlay = document.getElementById('reload-overlay');
+		let retryTimer = null;
 
 		// Listen for messages from iframe
 		window.addEventListener('message', (event) => {
@@ -6112,16 +6118,30 @@ app.get('/iframe', (req, res) => {
 			if (event.data === 'iframe-reload') {
 				reloadApp();
 			} else if (event.data === 'iframe-ready') {
-				// Grid is populated - hide the blur overlay
+				// Grid is populated - clear retry timer and hide overlay
+				if (retryTimer) {
+					clearTimeout(retryTimer);
+					retryTimer = null;
+				}
 				overlay.classList.remove('active');
 			}
 		});
 
-		// Reload function - show blur overlay and reload iframe
+		// Reload function - show blur overlay and reload iframe with retry
 		function reloadApp() {
 			overlay.classList.add('active');
+			doReload();
+		}
+
+		function doReload() {
+			// Clear any existing retry timer
+			if (retryTimer) {
+				clearTimeout(retryTimer);
+			}
 			// Force iframe reload by resetting src with cache buster
 			frame.src = '/?_=' + Date.now();
+			// Retry after 5 seconds if no ready signal received
+			retryTimer = setTimeout(doReload, 5000);
 		}
 
 		// Handle orientation/resize
