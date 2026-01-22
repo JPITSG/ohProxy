@@ -134,6 +134,7 @@ See the [Wiki](https://github.com/JPITSG/ohProxy/wiki) for detailed documentatio
 
 - [Configuration](https://github.com/JPITSG/ohProxy/wiki/Configuration) - Server, authentication, security headers, WebSocket, MySQL
 - [Usage Guide](https://github.com/JPITSG/ohProxy/wiki/Usage-Guide) - URL parameters, proxy endpoints, streaming, GPS map
+- [CMD API](https://github.com/JPITSG/ohProxy/wiki/CMD-API) - Simple HTTP endpoint for sending commands to OpenHAB items
 - [CLI Tools](https://github.com/JPITSG/ohProxy/wiki/CLI-Tools) - User and session management
 - [Performance Tips](https://github.com/JPITSG/ohProxy/wiki/Performance-Tips) - Optimization recommendations
 - [Testing](https://github.com/JPITSG/ohProxy/wiki/Testing) - Running the test suite
