@@ -45,6 +45,16 @@ function logJsError(message, error) {
 	window.__logJsError(message, '', 0, 0, error || {});
 }
 
+function triggerReload() {
+	try {
+		if (window.parent !== window && window.parent.__ohProxyIframeWrapper) {
+			window.parent.postMessage('iframe-reload', '*');
+			return;
+		}
+	} catch (e) { /* cross-origin parent */ }
+	window.location.reload();
+}
+
 const els = {
 	title: document.getElementById('pageTitle'),
 	grid: document.getElementById('grid'),
@@ -410,6 +420,7 @@ function saveHomeSnapshot() {
 		rootPageTitle: state.rootPageTitle,
 		ohOrigin: state.ohOrigin,
 		rawWidgets: state.rawWidgets,
+		iconCache: Object.fromEntries(iconCache),
 		savedAt: Date.now(),
 	};
 	try {
@@ -446,6 +457,14 @@ function applyHomeSnapshot(snapshot) {
 	state.stack = [];
 	state.filter = '';
 	if (els.search) els.search.value = '';
+	// Restore icon cache from snapshot
+	if (snapshot.iconCache && typeof snapshot.iconCache === 'object') {
+		for (const [key, url] of Object.entries(snapshot.iconCache)) {
+			if (key && url && !iconCache.has(key)) {
+				iconCache.set(key, url);
+			}
+		}
+	}
 	updateNavButtons();
 	syncHistory(true);
 	return true;
@@ -2386,6 +2405,12 @@ async function fetchWithAuth(url, options) {
 			logJsError('fetchWithAuth account-deleted parse failed', err);
 		}
 		// Normal 401 - reload to show login prompt
+		try {
+			if (window.parent !== window && window.parent.__ohProxyIframeWrapper) {
+				window.parent.location.href = '/';
+				return new Promise(() => {});
+			}
+		} catch (e) { /* cross-origin parent */ }
 		window.location.reload();
 		// Return a never-resolving promise to prevent further processing
 		return new Promise(() => {});
@@ -4555,6 +4580,10 @@ function render() {
 		}
 		els.grid.innerHTML = '';
 		els.grid.appendChild(fragment);
+		// Signal parent iframe wrapper that grid is ready
+		if (window.parent !== window && els.grid.children.length > 0) {
+			window.parent.postMessage('iframe-ready', '*');
+		}
 	}
 
 	if (q && !state.searchIndexReady) {
@@ -5550,7 +5579,7 @@ function connectWs() {
 				if (msg.event === 'assetVersionChanged') {
 					// Server assets updated - reload to get new version
 					console.log('Asset version changed, reloading...');
-					window.location.reload();
+					triggerReload();
 					return;
 				}
 				if (msg.event === 'pong' && msg.data) {
@@ -5779,7 +5808,7 @@ function restoreNormalPolling() {
 		}
 		// User returned - reload the page on touch devices
 		if (isTouchDevice()) {
-			window.location.reload();
+			triggerReload();
 		} else {
 			setResumeResetUi(false);
 			if (!state.isPaused) {
@@ -5787,6 +5816,12 @@ function restoreNormalPolling() {
 				refresh(false);
 				if (!wsConnection) connectWs();
 			}
+		}
+	});
+	// Handle bfcache restoration (browser killed and reopened)
+	window.addEventListener('pageshow', (event) => {
+		if (event.persisted && isTouchDevice()) {
+			triggerReload();
 		}
 	});
 	window.addEventListener('popstate', (event) => {

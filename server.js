@@ -5012,17 +5012,17 @@ app.get('/manifest.webmanifest', (req, res) => {
 	const manifestPath = path.join(PUBLIC_DIR, 'manifest.webmanifest');
 	res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	const theme = safeText(req.query?.theme).toLowerCase();
-	if (theme !== 'light' && theme !== 'dark') {
-		res.sendFile(manifestPath);
-		return;
-	}
 	try {
 		const raw = fs.readFileSync(manifestPath, 'utf8');
 		const manifest = JSON.parse(raw);
-		const color = theme === 'light' ? '#f8fafc' : '#0f172a';
-		manifest.theme_color = color;
-		manifest.background_color = color;
+		// Use /iframe for homescreen apps to enable controlled reloads
+		manifest.start_url = '/iframe';
+		const theme = safeText(req.query?.theme).toLowerCase();
+		if (theme === 'light' || theme === 'dark') {
+			const color = theme === 'light' ? '#f8fafc' : '#0f172a';
+			manifest.theme_color = color;
+			manifest.background_color = color;
+		}
 		res.send(JSON.stringify(manifest));
 	} catch {
 		res.sendFile(manifestPath);
@@ -6040,6 +6040,102 @@ app.get('/proxy', async (req, res, next) => {
 		logMessage(`openHAB proxy failed for ${proxyPath}: ${err.message || err}`);
 		res.status(502).send('Proxy error');
 	}
+});
+
+// --- Iframe wrapper for controlled reloads ---
+app.get('/iframe', (req, res) => {
+	const html = `<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+	<title>ohProxy</title>
+	<style>
+		* { margin: 0; padding: 0; box-sizing: border-box; }
+		html, body { width: 100%; height: 100%; overflow: hidden; }
+		iframe {
+			width: 100%;
+			height: 100%;
+			border: none;
+			display: block;
+		}
+		.reload-overlay {
+			position: fixed;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			z-index: 100;
+			opacity: 0;
+			visibility: hidden;
+			pointer-events: none;
+			transition: opacity .2s ease, visibility .2s ease;
+			background: transparent;
+			backdrop-filter: blur(12px);
+			-webkit-backdrop-filter: blur(12px);
+		}
+		.reload-overlay.active {
+			opacity: 1;
+			visibility: visible;
+			pointer-events: auto;
+		}
+		.reload-spinner {
+			width: 48px;
+			height: 48px;
+			border: 5px solid #666;
+			border-top-color: white;
+			border-radius: 50%;
+			animation: reload-spin 1s linear infinite;
+		}
+		@keyframes reload-spin {
+			to { transform: rotate(360deg); }
+		}
+	</style>
+</head>
+<body>
+	<iframe id="app-frame" src="/"></iframe>
+	<div id="reload-overlay" class="reload-overlay">
+		<div class="reload-spinner"></div>
+	</div>
+	<script>
+		window.__ohProxyIframeWrapper = true;
+
+		const frame = document.getElementById('app-frame');
+		const overlay = document.getElementById('reload-overlay');
+
+		// Listen for messages from iframe
+		window.addEventListener('message', (event) => {
+			if (event.source !== frame.contentWindow) return;
+			if (event.data === 'iframe-reload') {
+				reloadApp();
+			} else if (event.data === 'iframe-ready') {
+				// Grid is populated - hide the blur overlay
+				overlay.classList.remove('active');
+			}
+		});
+
+		// Reload function - show blur overlay and reload iframe
+		function reloadApp() {
+			overlay.classList.add('active');
+			// Force iframe reload by resetting src with cache buster
+			frame.src = '/?_=' + Date.now();
+		}
+
+		// Handle orientation/resize
+		window.addEventListener('resize', () => {
+			// Force iframe to recalculate dimensions
+			frame.style.height = window.innerHeight + 'px';
+		});
+
+		// Initial size set
+		frame.style.height = window.innerHeight + 'px';
+	</script>
+</body>
+</html>`;
+	res.type('html').send(html);
 });
 
 // --- Static modern UI ---

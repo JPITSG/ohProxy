@@ -30,7 +30,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+\{\s*username,\s*password\s*\}\s*=\s*req\.body\s*\|\|\s*\{\s*\};/,
 			/const\s+newSettings\s*=\s*req\.body\s*;/,
 			/const\s+body\s*=\s*req\.body\s*;/,
-			/const\s+\{\s*widgetId,\s*rules,\s*visibility,\s*defaultMuted\s*\}\s*=\s*req\.body\s*\|\|\s*\{\s*\};/,
+			/const\s+\{\s*widgetId,\s*rules,\s*visibility,\s*defaultMuted,\s*iframeHeight,\s*proxyCacheSeconds\s*\}\s*=\s*req\.body\s*\|\|\s*\{\s*\};/,
 			/const\s+\{\s*command\s*\}\s*=\s*req\.body\s*\|\|\s*\{\s*\};/,
 			/const\s+widgetId\s*=\s*safeText\(req\.params\.widgetId\)\s*;/,
 			/const\s+theme\s*=\s*safeText\(req\.query\?\.theme\)\.toLowerCase\(\)\s*;/,
@@ -46,6 +46,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+raw\s*=\s*req\.query\?\.url\s*;/,
 			/const\s+rawWidth\s*=\s*parseInt\(req\.query\.w,\s*10\)\s*;/,
 			/const\s+mode\s*=\s*safeText\(req\.query\?\.mode\s*\|\|\s*''\)\.toLowerCase\(\)\s*===\s*'dark'\s*\?\s*'dark'\s*:\s*'light'\s*;/,
+			/const\s+cacheSeconds\s*=\s*parseInt\(req\.query\.cache,\s*10\)\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));
@@ -83,7 +84,7 @@ describe('Input Validation Coverage', () => {
 	it('validates GET query keys and values', () => {
 		const content = readFile(SERVER_FILE);
 
-		assert.ok(content.includes("theme !== 'light' && theme !== 'dark'"));
+		assert.ok(content.includes("theme === 'light' || theme === 'dark'"));
 		assert.ok(content.includes("normalized && normalized.includes('/rest/sitemaps/')"));
 		assert.ok(content.includes('rootPath = ensureJsonParam(rootPath)'));
 
