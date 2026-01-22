@@ -5521,12 +5521,17 @@ app.get('/video-preview', (req, res) => {
 	const hash = rtspUrlHash(url);
 	const filePath = path.join(VIDEO_PREVIEW_DIR, `${hash}.jpg`);
 
-	if (!fs.existsSync(filePath)) {
+	let stats;
+	try {
+		stats = fs.statSync(filePath);
+	} catch {
 		return res.status(404).type('text/plain').send('Preview not available');
 	}
 
 	res.type('image/jpeg');
-	res.set('Cache-Control', 'no-cache, max-age=300');
+	res.set('Cache-Control', 'no-cache, must-revalidate');
+	res.set('ETag', `"${stats.mtimeMs}"`);
+	res.set('Last-Modified', stats.mtime.toUTCString());
 	res.sendFile(filePath);
 });
 
