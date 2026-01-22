@@ -3407,8 +3407,10 @@ function widgetLabel(widget) {
 
 function splitLabelState(label) {
 	const raw = safeText(label);
-	const match = raw.match(/^(.*)\s*\[(.+)\]\s*$/);
-	if (!match) return { title: raw, state: '' };
+	// Strip trailing empty brackets [] (openHAB 3.x+ sends these when no state)
+	const cleaned = raw.replace(/\s*\[\]\s*$/, '');
+	const match = cleaned.match(/^(.*)\s*\[(.+)\]\s*$/);
+	if (!match) return { title: cleaned, state: '' };
 	return { title: match[1].trim(), state: match[2].trim() };
 }
 

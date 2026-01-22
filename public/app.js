@@ -1082,7 +1082,15 @@ function getGlowCandidates(widget) {
 	const frame = safeText(widget?.__frame || '');
 	if (frame) candidates.push(normalizeFrameName(frame));
 	const path = Array.isArray(widget?.__path) ? widget.__path : [];
-	if (path.length) candidates.push(normalizeFrameName(path[path.length - 1]));
+	// When searching, include all path elements so glow works for widgets
+	// nested under a glow-enabled section (e.g., "Cameras > Online > Battery Status")
+	if (state.filter.trim() && path.length) {
+		for (const seg of path) {
+			candidates.push(normalizeFrameName(seg));
+		}
+	} else if (path.length) {
+		candidates.push(normalizeFrameName(path[path.length - 1]));
+	}
 
 	if (!state.filter.trim()) {
 		const parts = splitLabelState(state.pageTitle || '');
