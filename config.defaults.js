@@ -168,6 +168,15 @@ module.exports = {
 			// Delete preview images older than this (hours; >=1).
 			pruneAfterHours: 24,
 		},
+		// Command API configuration.
+		cmdapi: {
+			// Enable /CMD endpoint (true/false).
+			enabled: false,
+			// Allowed subnets for /CMD requests (IPv4 CIDR list; empty blocks all).
+			allowedSubnets: [],
+			// Allowed items for /CMD requests (item names; '*' allows all; empty blocks all).
+			allowedItems: [],
+		},
 		// External binary paths.
 		binaries: {
 			// FFmpeg binary path (used for RTSP streaming and video previews).

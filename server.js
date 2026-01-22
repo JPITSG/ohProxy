@@ -297,6 +297,15 @@ const WEATHERBIT_ICONS_DIR = path.join(WEATHERBIT_CACHE_DIR, 'icons');
 const PROXY_CACHE_DIR = path.join(__dirname, 'cache', 'proxy');
 const MYSQL_CONFIG = SERVER_CONFIG.mysql || {};
 const MYSQL_RECONNECT_DELAY_MS = 5000;
+const CMDAPI_CONFIG = SERVER_CONFIG.cmdapi || {};
+const CMDAPI_ENABLED = CMDAPI_CONFIG.enabled === true;
+const CMDAPI_ALLOWED_SUBNETS = Array.isArray(CMDAPI_CONFIG.allowedSubnets)
+	? CMDAPI_CONFIG.allowedSubnets
+	: [];
+const CMDAPI_ALLOWED_ITEMS = Array.isArray(CMDAPI_CONFIG.allowedItems)
+	? CMDAPI_CONFIG.allowedItems
+	: [];
+const CMDAPI_TIMEOUT_MS = 10000;
 let mysqlConnection = null;
 let mysqlConnecting = false;
 let videoPreviewInitialCaptureDone = false;
@@ -666,6 +675,18 @@ function validateConfig() {
 	if (ensureObject(SERVER_CONFIG.videoPreview, 'server.videoPreview', errors)) {
 		ensureNumber(VIDEO_PREVIEW_INTERVAL_MS, 'server.videoPreview.intervalMs', { min: 0 }, errors);
 		ensureNumber(VIDEO_PREVIEW_PRUNE_HOURS, 'server.videoPreview.pruneAfterHours', { min: 1 }, errors);
+	}
+
+	if (ensureObject(SERVER_CONFIG.cmdapi, 'server.cmdapi', errors)) {
+		ensureBoolean(CMDAPI_CONFIG.enabled, 'server.cmdapi.enabled', errors);
+		ensureCidrList(CMDAPI_ALLOWED_SUBNETS, 'server.cmdapi.allowedSubnets', { allowEmpty: true }, errors);
+		if (ensureArray(CMDAPI_ALLOWED_ITEMS, 'server.cmdapi.allowedItems', { allowEmpty: true }, errors)) {
+			CMDAPI_ALLOWED_ITEMS.forEach((entry, index) => {
+				if (typeof entry !== 'string' || (!entry.trim() && entry !== '*')) {
+					errors.push(`server.cmdapi.allowedItems[${index}] must be a non-empty string or '*'`);
+				}
+			});
+		}
 	}
 
 	if (ensureArray(SERVER_CONFIG.proxyAllowlist, 'server.proxyAllowlist', { allowEmpty: false }, errors)) {
@@ -1179,6 +1200,9 @@ const liveConfig = {
 	wsAtmosphereNoUpdateWarnMs: WS_ATMOSPHERE_NO_UPDATE_WARN_MS,
 	backendRecoveryDelayMs: BACKEND_RECOVERY_DELAY_MS,
 	rrdPath: RRD_PATH,
+	cmdapiEnabled: CMDAPI_ENABLED,
+	cmdapiAllowedSubnets: CMDAPI_ALLOWED_SUBNETS,
+	cmdapiAllowedItems: CMDAPI_ALLOWED_ITEMS,
 };
 
 // Widget glow rules - migrate from JSON to SQLite on first run
@@ -1322,6 +1346,15 @@ function reloadLiveConfig() {
 	);
 	const newPaths = newServer.paths || {};
 	liveConfig.rrdPath = safeText(newPaths.rrd) || '';
+
+	// CMD API config
+	liveConfig.cmdapiEnabled = newServer.cmdapi?.enabled === true;
+	liveConfig.cmdapiAllowedSubnets = Array.isArray(newServer.cmdapi?.allowedSubnets)
+		? newServer.cmdapi.allowedSubnets
+		: [];
+	liveConfig.cmdapiAllowedItems = Array.isArray(newServer.cmdapi?.allowedItems)
+		? newServer.cmdapi.allowedItems
+		: [];
 
 	const iconVersionChanged = liveConfig.iconVersion !== oldIconVersion;
 	const iconSizeChanged = liveConfig.iconSize !== oldIconSize;
@@ -4048,6 +4081,47 @@ function sendOpenhabCommand(itemName, command) {
 	});
 }
 
+function sendCmdApiCommand(itemName, command) {
+	return new Promise((resolve, reject) => {
+		const target = new URL(liveConfig.ohTarget);
+		const isHttps = target.protocol === 'https:';
+		const basePath = target.pathname && target.pathname !== '/' ? target.pathname.replace(/\/$/, '') : '';
+		const reqPath = `${basePath}/rest/items/${encodeURIComponent(itemName)}`;
+		const client = isHttps ? https : http;
+		const headers = {
+			'Content-Type': 'text/plain',
+			'Accept': 'application/json',
+			'User-Agent': liveConfig.userAgent,
+		};
+		const ah = authHeader();
+		if (ah) headers.Authorization = ah;
+
+		const req = client.request({
+			method: 'POST',
+			hostname: target.hostname,
+			port: target.port || (isHttps ? 443 : 80),
+			path: reqPath,
+			headers,
+		}, (res) => {
+			let body = '';
+			res.setEncoding('utf8');
+			res.on('data', (chunk) => { body += chunk; });
+			res.on('end', () => resolve({
+				status: res.statusCode || 500,
+				ok: res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
+				body,
+			}));
+		});
+
+		req.setTimeout(CMDAPI_TIMEOUT_MS, () => {
+			req.destroy(new Error('CMD API request timed out'));
+		});
+		req.on('error', reject);
+		req.write(String(command));
+		req.end();
+	});
+}
+
 function callAnthropicApi(requestBody) {
 	return new Promise((resolve, reject) => {
 		if (!ANTHROPIC_API_KEY) {
@@ -4276,6 +4350,73 @@ app.use((req, res, next) => {
 		return;
 	}
 	next();
+});
+
+// /CMD endpoint - send commands to OpenHAB items (restricted to cmdapi.allowedSubnets)
+app.get('/CMD', async (req, res) => {
+	// Check if cmdapi is enabled
+	if (!liveConfig.cmdapiEnabled) {
+		res.status(404).json({ result: 'failed', error: 'CMD API not enabled' });
+		return;
+	}
+
+	// Check IP allowlist (separate from main allowSubnets)
+	const clientIp = getRemoteIp(req);
+	if (!clientIp || !ipInAnySubnet(clientIp, liveConfig.cmdapiAllowedSubnets)) {
+		logMessage(`[CMD] Blocked request from ${clientIp || 'unknown'} - not in allowed subnets`);
+		res.status(403).json({ result: 'failed', error: 'IP not allowed' });
+		return;
+	}
+
+	// Parse query string: /CMD?Item=state
+	const queryKeys = Object.keys(req.query);
+	if (queryKeys.length !== 1) {
+		res.status(400).json({ result: 'failed', error: 'Invalid query format - expected ?Item=state' });
+		return;
+	}
+
+	const itemName = queryKeys[0];
+	const state = safeText(req.query[itemName]);
+
+	// Validate item name (alphanumeric, underscore, hyphen, 1-100 chars)
+	if (!itemName || !/^[a-zA-Z0-9_-]{1,100}$/.test(itemName)) {
+		res.status(400).json({ result: 'failed', error: 'Invalid item name' });
+		return;
+	}
+
+	// Check if item is in allowlist
+	const allowedItems = liveConfig.cmdapiAllowedItems;
+	const itemAllowed = Array.isArray(allowedItems) && allowedItems.length > 0 &&
+		(allowedItems.includes('*') || allowedItems.includes(itemName));
+	if (!itemAllowed) {
+		logMessage(`[CMD] Blocked request for item ${itemName} - not in allowed items`);
+		res.status(403).json({ result: 'failed', error: 'Item not allowed' });
+		return;
+	}
+
+	// Validate state (non-empty, max 500 chars, no control characters)
+	if (!state || state.length > 500) {
+		res.status(400).json({ result: 'failed', error: 'Invalid state value' });
+		return;
+	}
+	if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(state)) {
+		res.status(400).json({ result: 'failed', error: 'Invalid characters in state' });
+		return;
+	}
+
+	try {
+		const result = await sendCmdApiCommand(itemName, state);
+		if (result.ok) {
+			logMessage(`[CMD] ${clientIp} -> ${itemName}=${state} -> success`);
+			res.json({ result: 'success' });
+		} else {
+			logMessage(`[CMD] ${clientIp} -> ${itemName}=${state} -> failed (${result.status})`);
+			res.json({ result: 'failed', error: `OpenHAB returned ${result.status}` });
+		}
+	} catch (err) {
+		logMessage(`[CMD] ${clientIp} -> ${itemName}=${state} -> error: ${err.message}`);
+		res.json({ result: 'failed', error: 'Request failed' });
+	}
 });
 
 // HTML auth login endpoint - must be before auth middleware
