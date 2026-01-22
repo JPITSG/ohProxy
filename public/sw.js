@@ -1,6 +1,7 @@
 'use strict';
 
 const CACHE_NAME = 'ohproxy-shell-__JS_VERSION__-__CSS_VERSION__';
+const ICON_CACHE_NAME = 'ohproxy-icons-v1';
 const PRECACHE_URLS = [
 	'./',
 	'./index.html',
@@ -28,7 +29,7 @@ self.addEventListener('activate', (event) => {
 	event.waitUntil(
 		caches.keys()
 			.then((keys) => Promise.all(keys
-				.filter((key) => key !== CACHE_NAME)
+				.filter((key) => key !== CACHE_NAME && key !== ICON_CACHE_NAME)
 				.map((key) => caches.delete(key))))
 			.then(() => self.clients.claim())
 	);
@@ -44,6 +45,12 @@ function shouldHandleRequest(request, url) {
 	if (path.startsWith('/api/')) return false;
 	if (path.endsWith('/config.js')) return false; // User-specific, never cache
 	return true;
+}
+
+function isIconRequest(url) {
+	const path = url.pathname;
+	return (path.startsWith('/images/') || path.startsWith('/openhab.app/images/')) &&
+		(path.endsWith('.png') || path.endsWith('.svg'));
 }
 
 self.addEventListener('fetch', (event) => {
@@ -67,6 +74,8 @@ self.addEventListener('fetch', (event) => {
 
 	if (!shouldHandleRequest(request, url)) return;
 
+	const cacheName = isIconRequest(url) ? ICON_CACHE_NAME : CACHE_NAME;
+
 	event.respondWith(
 		caches.match(request).then((cached) => {
 			if (cached) return cached;
@@ -74,7 +83,7 @@ self.addEventListener('fetch', (event) => {
 				.then((response) => {
 					if (response && response.ok) {
 						const copy = response.clone();
-						caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+						caches.open(cacheName).then((cache) => cache.put(request, copy));
 					}
 					return response;
 				})
