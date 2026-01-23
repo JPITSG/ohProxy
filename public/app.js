@@ -60,7 +60,9 @@ const els = {
 	grid: document.getElementById('grid'),
 	status: document.getElementById('status'),
 	statusBar: document.getElementById('statusBar'),
+	statusDotWrap: document.getElementById('statusDotWrap'),
 	statusDot: document.getElementById('statusDot'),
+	statusTooltip: document.getElementById('statusTooltip'),
 	statusText: document.getElementById('statusText'),
 	search: document.getElementById('search'),
 	back: document.getElementById('backBtn'),
@@ -704,6 +706,21 @@ function updateStatusBar() {
 		els.statusBar.classList.remove('status-ok', 'status-pending', 'status-fast');
 	}
 	updateErrorUiState();
+}
+
+function showStatusTooltip() {
+	if (!els.statusTooltip) return;
+	const latency = getRollingLatency();
+	const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
+	if (valueEl) {
+		valueEl.textContent = latency !== null ? latency + 'ms' : '--';
+	}
+	els.statusTooltip.classList.add('visible');
+}
+
+function hideStatusTooltip() {
+	if (!els.statusTooltip) return;
+	els.statusTooltip.classList.remove('visible');
 }
 
 function updateErrorUiState() {
@@ -5281,7 +5298,7 @@ function invalidatePing() {
 
 function getRollingLatency() {
 	if (pingSamples.length < PING_SAMPLE_COUNT) return null;
-	return Math.round(pingSamples.reduce((a, b) => a + b, 0) / pingSamples.length);
+	return Math.round(pingSamples.reduce((a, b) => a + b, 0) / pingSamples.length * 100) / 100;
 }
 
 function isFastConnection() {
@@ -5306,6 +5323,13 @@ function updateFastConnectionState() {
 	}
 	if (wasFast !== fastConnectionActive) {
 		updateStatusBar();
+	}
+	// Update tooltip if visible
+	if (els.statusTooltip && els.statusTooltip.classList.contains('visible')) {
+		const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
+		if (valueEl) {
+			valueEl.textContent = latency !== null ? latency + 'ms' : '--';
+		}
 	}
 }
 
@@ -5748,6 +5772,14 @@ function restoreNormalPolling() {
 	window.addEventListener('touchend', handleBounceTouchEnd, { passive: true });
 	window.addEventListener('touchcancel', handleBounceTouchEnd, { passive: true });
 	window.addEventListener('click', noteActivity, { passive: true });
+	// Status tooltip interactions
+	if (els.statusDotWrap) {
+		els.statusDotWrap.addEventListener('mouseenter', showStatusTooltip);
+		els.statusDotWrap.addEventListener('mouseleave', hideStatusTooltip);
+		els.statusDotWrap.addEventListener('touchstart', showStatusTooltip, { passive: true });
+		els.statusDotWrap.addEventListener('touchend', hideStatusTooltip, { passive: true });
+		els.statusDotWrap.addEventListener('touchcancel', hideStatusTooltip, { passive: true });
+	}
 	// Ctrl+click on cards opens item config modal
 	document.addEventListener('click', (e) => {
 		if (!(e.ctrlKey || e.metaKey) || state.isSlim) return;
