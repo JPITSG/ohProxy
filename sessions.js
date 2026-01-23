@@ -557,16 +557,22 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * Get all users.
- * @returns {Array} - Array of {username, role, createdAt, disabled} (no passwords)
+ * @returns {Array} - Array of {username, role, createdAt, disabled, lastActive} (no passwords)
  */
 function getAllUsers() {
 	if (!db) initDb();
-	const rows = db.prepare('SELECT username, role, created_at, disabled FROM users').all();
+	const rows = db.prepare(`
+		SELECT u.username, u.role, u.created_at, u.disabled, MAX(s.last_seen) as last_active
+		FROM users u
+		LEFT JOIN sessions s ON u.username = s.username
+		GROUP BY u.username
+	`).all();
 	return rows.map(row => ({
 		username: row.username,
 		role: row.role,
 		createdAt: row.created_at,
-		disabled: row.disabled === 1
+		disabled: row.disabled === 1,
+		lastActive: row.last_active
 	}));
 }
 

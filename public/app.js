@@ -2119,6 +2119,9 @@ function ensureImageViewer() {
 	wrap.innerHTML = `
 			<div class="image-viewer-frame glass">
 				<div class="image-viewer-actions">
+					<button type="button" class="image-viewer-download" aria-label="Download image">
+						<img src="icons/image-viewer-download.svg" alt="" aria-hidden="true" />
+					</button>
 					<button type="button" class="image-viewer-close" aria-label="Close image">
 						<img src="icons/image-viewer-close.svg" alt="" aria-hidden="true" />
 					</button>
@@ -2133,6 +2136,10 @@ function ensureImageViewer() {
 	imageViewerClose = wrap.querySelector('.image-viewer-close');
 	if (imageViewerClose) {
 		imageViewerClose.addEventListener('click', requestCloseImageViewer);
+	}
+	const imageViewerDownload = wrap.querySelector('.image-viewer-download');
+	if (imageViewerDownload) {
+		imageViewerDownload.addEventListener('click', downloadImageViewerImage);
 	}
 	if (imageViewerImg) {
 		imageViewerImg.addEventListener('load', () => {
@@ -2310,6 +2317,18 @@ function requestCloseImageViewer() {
 		return;
 	}
 	closeImageViewer();
+}
+
+function downloadImageViewerImage() {
+	if (!imageViewerUrl) return;
+	haptic();
+	const a = document.createElement('a');
+	a.href = imageViewerUrl;
+	const filename = imageViewerUrl.split('/').pop().split('?')[0] || 'image';
+	a.download = filename;
+	document.body.appendChild(a);
+	a.click();
+	document.body.removeChild(a);
 }
 
 function clearImageViewerTimer() {

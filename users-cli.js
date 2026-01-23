@@ -48,15 +48,16 @@ function listUsers() {
 		console.log('No users found.');
 		return;
 	}
-	console.log('Username'.padEnd(20) + 'Role'.padEnd(12) + 'Status'.padEnd(10) + 'Created');
-	console.log('-'.repeat(65));
+	console.log('Username'.padEnd(20) + 'Role'.padEnd(12) + 'Status'.padEnd(10) + 'Created'.padEnd(22) + 'Last Active');
+	console.log('-'.repeat(87));
 	for (const user of users) {
 		const status = user.disabled ? 'disabled' : 'active';
 		console.log(
 			user.username.padEnd(20) +
 			user.role.padEnd(12) +
 			status.padEnd(10) +
-			formatDate(user.createdAt)
+			formatDate(user.createdAt).padEnd(22) +
+			formatDate(user.lastActive)
 		);
 	}
 	console.log(`\nTotal: ${users.length} user(s)`);
