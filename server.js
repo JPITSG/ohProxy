@@ -6193,6 +6193,10 @@ app.get('/iframe', (req, res) => {
 	const settings = req.ohProxySession?.settings || sessions.getDefaultSettings();
 	const isLight = settings.darkMode === false;
 	const bgColor = isLight ? '#f5f6fa' : '#020617';
+	const clientConfig = liveConfig.clientConfig || {};
+	const minHiddenMs = typeof clientConfig.iframeReloadMinHiddenMs === 'number'
+		? clientConfig.iframeReloadMinHiddenMs
+		: 60000;
 	const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -6256,43 +6260,84 @@ app.get('/iframe', (req, res) => {
 
 		const frame = document.getElementById('app-frame');
 		const overlay = document.getElementById('reload-overlay');
+
+		// Config
+		const MIN_HIDDEN_MS = ${minHiddenMs};
+		const RELOAD_DEBOUNCE_MS = 1000;
+		const INITIAL_RETRY_MS = 3000;
+		const RETRY_MS = 5000;
+
+		// State
 		let retryTimer = null;
+		let isReloading = false;
+		let lastReloadTime = 0;
+		let lastHiddenTime = 0;
+		let isFirstLoad = true;
 
 		// Listen for messages from iframe
 		window.addEventListener('message', (event) => {
 			if (event.source !== frame.contentWindow) return;
 			if (event.data === 'iframe-reload') {
-				reloadApp();
+				requestReload('inner-app');
 			} else if (event.data === 'iframe-ready') {
-				// Grid is populated - clear retry timer and hide overlay
-				if (retryTimer) {
-					clearTimeout(retryTimer);
-					retryTimer = null;
-				}
-				overlay.classList.remove('active');
+				handleReady();
 			}
 		});
 
-		// Reload function - show blur overlay and reload iframe with retry
-		function reloadApp() {
+		// Handle iframe signaling it's ready
+		function handleReady() {
+			if (retryTimer) {
+				clearTimeout(retryTimer);
+				retryTimer = null;
+			}
+			isReloading = false;
+			isFirstLoad = false;
+			overlay.classList.remove('active');
+		}
+
+		// Guarded reload request - prevents concurrent/duplicate reloads
+		function requestReload(source) {
+			const now = Date.now();
+
+			// Guard: Already in reload cycle
+			if (isReloading) return;
+
+			// Guard: Debounce rapid requests
+			if (now - lastReloadTime < RELOAD_DEBOUNCE_MS) return;
+
+			// Proceed with reload
+			isReloading = true;
+			lastReloadTime = now;
 			overlay.classList.add('active');
 			doReload();
 		}
 
 		function doReload() {
-			// Clear any existing retry timer
 			if (retryTimer) {
 				clearTimeout(retryTimer);
 			}
 			// Force iframe reload by resetting src with cache buster
 			frame.src = '/?_=' + Date.now();
-			// Retry after 5 seconds if no ready signal received
-			retryTimer = setTimeout(doReload, 5000);
+			// First load uses shorter timeout (3s), retries use 5s
+			const timeout = isFirstLoad ? INITIAL_RETRY_MS : RETRY_MS;
+			retryTimer = setTimeout(doReload, timeout);
 		}
+
+		// Visibility change handler - wrapper-initiated reload
+		document.addEventListener('visibilitychange', () => {
+			if (document.visibilityState === 'hidden') {
+				lastHiddenTime = Date.now();
+				return;
+			}
+			// Becoming visible - check if we should reload
+			const hiddenDuration = lastHiddenTime ? Date.now() - lastHiddenTime : 0;
+			if (lastHiddenTime && hiddenDuration >= MIN_HIDDEN_MS) {
+				requestReload('visibility');
+			}
+		});
 
 		// Handle orientation/resize
 		window.addEventListener('resize', () => {
-			// Force iframe to recalculate dimensions
 			frame.style.height = window.innerHeight + 'px';
 		});
 

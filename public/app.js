@@ -294,6 +294,7 @@ const chartHashes = new Map(); // item|period|mode -> hash
 let searchStateAbort = null;
 let searchStateActiveToken = 0;
 let resumeReloadArmed = false;
+let lastHiddenTime = 0;
 let pageFadeToken = 0;
 let loadingTimer = null;
 let loadingToken = 0;
@@ -5802,15 +5803,22 @@ function restoreNormalPolling() {
 		if (document.visibilityState === 'hidden') {
 			if (resumeReloadArmed) return;
 			resumeReloadArmed = true;
-			setResumeResetUi(true);
+			lastHiddenTime = Date.now();
+			// Don't reset UI yet - wait until visible to check threshold
 			stopPing();
 			return;
 		}
-		// User returned - reload the page on touch devices
-		if (isTouchDevice()) {
+		// Reset armed flag on return
+		resumeReloadArmed = false;
+		// User returned - reload on touch devices if hidden long enough
+		const minHiddenMs = CLIENT_CONFIG.iframeReloadMinHiddenMs ?? 60000;
+		const hiddenDuration = lastHiddenTime ? Date.now() - lastHiddenTime : 0;
+		if (isTouchDevice() && hiddenDuration >= minHiddenMs) {
+			// Hidden long enough - reset to home and reload
+			setResumeResetUi(true);
 			triggerReload();
 		} else {
-			setResumeResetUi(false);
+			// Brief hide - resume where we left off
 			if (!state.isPaused) {
 				noteActivity();
 				refresh(false);
@@ -5821,7 +5829,12 @@ function restoreNormalPolling() {
 	// Handle bfcache restoration (browser killed and reopened)
 	window.addEventListener('pageshow', (event) => {
 		if (event.persisted && isTouchDevice()) {
-			triggerReload();
+			const minHiddenMs = CLIENT_CONFIG.iframeReloadMinHiddenMs ?? 60000;
+			const hiddenDuration = lastHiddenTime ? Date.now() - lastHiddenTime : 0;
+			if (hiddenDuration >= minHiddenMs) {
+				setResumeResetUi(true);
+				triggerReload();
+			}
 		}
 	});
 	window.addEventListener('popstate', (event) => {
