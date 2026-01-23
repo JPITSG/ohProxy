@@ -709,6 +709,26 @@ body.theme-light .image-viewer {
 .image-viewer-close:hover {
 	opacity: .9;
 }
+.image-viewer-download {
+	width: 2.5rem;
+	height: 2.5rem;
+	border: 0;
+	background: transparent;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	padding: 0;
+}
+.image-viewer-download img {
+	width: 100%;
+	height: 100%;
+	display: block;
+	object-fit: contain;
+}
+.image-viewer-download:hover {
+	opacity: .9;
+}
 body.image-viewer-open {
 	overflow: hidden;
 }
