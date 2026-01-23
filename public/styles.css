@@ -1533,6 +1533,13 @@ body.card-config-open {
 	color: var(--color-text-muted);
 }
 
+/* Section Glow Section */
+.section-glow-section {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
 /* Glow Rules Section */
 .glow-rules-section {
 	display: flex;

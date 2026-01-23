@@ -98,6 +98,15 @@ function initDb() {
 		);
 	`);
 
+	// Create widget section glow config table (for enabling valueColor glow per section)
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS widget_section_glow (
+			widget_id TEXT PRIMARY KEY,
+			glow_enabled INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER DEFAULT (strftime('%s','now'))
+		);
+	`);
+
 	// Migration: add IP columns if they don't exist
 	try {
 		db.exec(`ALTER TABLE sessions ADD COLUMN created_ip TEXT DEFAULT NULL`);
@@ -504,6 +513,42 @@ function setProxyCacheConfig(widgetId, cacheSeconds) {
 }
 
 // ============================================
+// Widget Section Glow Config Functions
+// ============================================
+
+/**
+ * Get all section glow configs (sections with glow enabled).
+ * @returns {Array} - Array of widgetIds that have glow enabled
+ */
+function getAllSectionGlowConfigs() {
+	if (!db) initDb();
+	const rows = db.prepare('SELECT widget_id FROM widget_section_glow WHERE glow_enabled = 1').all();
+	return rows.map(row => row.widget_id);
+}
+
+/**
+ * Set section glow config for a widget. If enabled is false, deletes the entry.
+ * @param {string} widgetId - The widget ID (section identifier)
+ * @param {boolean} enabled - Whether glow is enabled for this section
+ * @returns {boolean} - True if successful
+ */
+function setSectionGlowConfig(widgetId, enabled) {
+	if (!db) initDb();
+	const now = Math.floor(Date.now() / 1000);
+
+	if (!enabled) {
+		// Disabled is default, remove entry
+		db.prepare('DELETE FROM widget_section_glow WHERE widget_id = ?').run(widgetId);
+	} else {
+		db.prepare(`
+			INSERT INTO widget_section_glow (widget_id, glow_enabled, updated_at) VALUES (?, 1, ?)
+			ON CONFLICT(widget_id) DO UPDATE SET glow_enabled = 1, updated_at = excluded.updated_at
+		`).run(widgetId, now);
+	}
+	return true;
+}
+
+// ============================================
 // User Management Functions
 // ============================================
 
@@ -703,6 +748,9 @@ module.exports = {
 	// Proxy cache config
 	getAllProxyCacheConfigs,
 	setProxyCacheConfig,
+	// Section glow config
+	getAllSectionGlowConfigs,
+	setSectionGlowConfig,
 	// User management
 	getAllUsers,
 	getUser,
