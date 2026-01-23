@@ -698,37 +698,6 @@ function validateConfig() {
 	}
 
 	if (ensureObject(CLIENT_CONFIG, 'client', errors)) {
-		if (ensureArray(CLIENT_CONFIG.glowSections, 'client.glowSections', { allowEmpty: true }, errors)) {
-			CLIENT_CONFIG.glowSections.forEach((entry, index) => {
-				if (typeof entry !== 'string' || entry.trim() === '') {
-					errors.push(`client.glowSections[${index}] must be a string`);
-				}
-			});
-		}
-		if (ensureArray(CLIENT_CONFIG.stateGlowSections, 'client.stateGlowSections', { allowEmpty: true }, errors)) {
-			CLIENT_CONFIG.stateGlowSections.forEach((entry, index) => {
-				if (!isPlainObject(entry)) {
-					errors.push(`client.stateGlowSections[${index}] must be an object`);
-					return;
-				}
-				if (typeof entry.section !== 'string' || entry.section.trim() === '') {
-					errors.push(`client.stateGlowSections[${index}].section must be a string`);
-				}
-				if (!isPlainObject(entry.states)) {
-					errors.push(`client.stateGlowSections[${index}].states must be an object`);
-					return;
-				}
-				for (const [stateKey, colorValue] of Object.entries(entry.states)) {
-					if (typeof stateKey !== 'string' || stateKey.trim() === '') {
-						errors.push(`client.stateGlowSections[${index}].states must use non-empty string keys`);
-						break;
-					}
-					if (typeof colorValue !== 'string' || colorValue.trim() === '') {
-						errors.push(`client.stateGlowSections[${index}].states["${stateKey}"] must be a string`);
-					}
-				}
-			});
-		}
 		ensureNumber(CLIENT_CONFIG.pageFadeOutMs, 'client.pageFadeOutMs', { min: 0 }, errors);
 		ensureNumber(CLIENT_CONFIG.pageFadeInMs, 'client.pageFadeInMs', { min: 0 }, errors);
 		ensureNumber(CLIENT_CONFIG.loadingDelayMs, 'client.loadingDelayMs', { min: 0 }, errors);
@@ -4762,6 +4731,7 @@ app.get('/config.js', (req, res) => {
 		widgetVideoConfigs: sessions.getAllVideoConfigs(),
 		widgetIframeConfigs: sessions.getAllIframeConfigs(),
 		widgetProxyCacheConfigs: sessions.getAllProxyCacheConfigs(),
+		widgetSectionGlowConfigs: sessions.getAllSectionGlowConfigs(),
 		userRole: userRole,
 	})};`);
 });
@@ -4901,7 +4871,7 @@ app.post('/api/card-config', express.json(), (req, res) => {
 		return;
 	}
 
-	const { widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds } = req.body || {};
+	const { widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, sectionGlow } = req.body || {};
 	if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200) {
 		res.status(400).json({ error: 'Missing or invalid widgetId' });
 		return;
@@ -4969,6 +4939,12 @@ app.post('/api/card-config', express.json(), (req, res) => {
 		}
 	}
 
+	// Validate sectionGlow if provided
+	if (sectionGlow !== undefined && typeof sectionGlow !== 'boolean') {
+		res.status(400).json({ error: 'sectionGlow must be a boolean' });
+		return;
+	}
+
 	// Save to database
 	try {
 		if (rules !== undefined) {
@@ -4990,7 +4966,10 @@ app.post('/api/card-config', express.json(), (req, res) => {
 			const cacheNum = (proxyCacheSeconds === '' || proxyCacheSeconds === null) ? 0 : parseInt(proxyCacheSeconds, 10);
 			sessions.setProxyCacheConfig(widgetId, cacheNum);
 		}
-		res.json({ ok: true, widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds });
+		if (sectionGlow !== undefined) {
+			sessions.setSectionGlowConfig(widgetId, sectionGlow);
+		}
+		res.json({ ok: true, widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, sectionGlow });
 	} catch (err) {
 		logMessage(`Failed to save card config: ${err.message || err}`, 'error');
 		res.status(500).json({ error: 'Failed to save config' });

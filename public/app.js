@@ -174,6 +174,15 @@ const widgetVisibilityMap = new Map();
 	}
 })();
 
+// Widget section glow configs: Set of widgetIds (sections) with glow enabled
+const widgetSectionGlowSet = new Set();
+(function initWidgetSectionGlowConfigs() {
+	const configs = Array.isArray(OH_CONFIG.widgetSectionGlowConfigs) ? OH_CONFIG.widgetSectionGlowConfigs : [];
+	for (const widgetId of configs) {
+		if (widgetId) widgetSectionGlowSet.add(widgetId);
+	}
+})();
+
 // Widget video configs: Map from widgetId to {defaultMuted: boolean}
 const widgetVideoConfigMap = new Map();
 (function initWidgetVideoConfigs() {
@@ -972,29 +981,6 @@ function normalizeFrameName(name) {
 	return safeText(name).trim().toLowerCase();
 }
 
-let glowSectionSet = null;
-let glowSectionAll = false;
-
-function getGlowSectionConfig() {
-	if (glowSectionSet) return { set: glowSectionSet, all: glowSectionAll };
-	const raw = CLIENT_CONFIG.glowSections;
-	const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-	const set = new Set();
-	let all = false;
-	for (const entry of list) {
-		const normalized = normalizeFrameName(entry);
-		if (!normalized) continue;
-		if (normalized === '*') {
-			all = true;
-			continue;
-		}
-		set.add(normalized);
-	}
-	glowSectionSet = set;
-	glowSectionAll = all;
-	return { set, all };
-}
-
 function stripLeadingSlash(path) {
 	if (!path) return path;
 	return path[0] === '/' ? path.slice(1) : path;
@@ -1087,12 +1073,10 @@ function colorToRgba(color, alpha) {
 }
 
 function isGlowContext(widget) {
-	const { set, all } = getGlowSectionConfig();
-	if (all) return true;
-	if (!set.size) return false;
+	if (!widgetSectionGlowSet.size) return false;
 	const candidates = getGlowCandidates(widget);
 	for (const candidate of candidates) {
-		if (set.has(candidate)) return true;
+		if (widgetSectionGlowSet.has(candidate)) return true;
 	}
 	return false;
 }
@@ -1119,53 +1103,6 @@ function getGlowCandidates(widget) {
 	}
 
 	return candidates.filter(Boolean);
-}
-
-let stateGlowRules = null;
-
-function normalizeStateKey(value) {
-	return safeText(value).trim().toLowerCase();
-}
-
-function getStateGlowConfig() {
-	if (stateGlowRules) return stateGlowRules;
-	const raw = CLIENT_CONFIG.stateGlowSections;
-	const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-	const rules = [];
-	for (const entry of list) {
-		if (!entry || typeof entry !== 'object') continue;
-		const section = normalizeFrameName(entry.section);
-		if (!section) continue;
-		const states = entry.states;
-		if (!states || typeof states !== 'object') continue;
-		const stateMap = new Map();
-		for (const [key, color] of Object.entries(states)) {
-			const stateKey = normalizeStateKey(key);
-			const colorValue = safeText(color).trim();
-			if (!stateKey || !colorValue) continue;
-			stateMap.set(stateKey, colorValue);
-		}
-		if (stateMap.size) rules.push({ section, states: stateMap });
-	}
-	rules.sort((a, b) => b.section.length - a.section.length);
-	stateGlowRules = rules;
-	return rules;
-}
-
-function getStateGlowColor(widget, stateValue) {
-	const rules = getStateGlowConfig();
-	if (!rules.length) return '';
-	const normalizedState = normalizeStateKey(stateValue);
-	if (!normalizedState) return '';
-	const candidates = getGlowCandidates(widget);
-	for (const candidate of candidates) {
-		for (const rule of rules) {
-			if (!candidate.startsWith(rule.section)) continue;
-			const color = rule.states.get(normalizedState);
-			if (color) return color;
-		}
-	}
-	return '';
 }
 
 function applyGlowStyle(card, color) {
@@ -1663,6 +1600,7 @@ function pushImageViewerHistory(url, refreshMs) {
 let cardConfigModal = null;
 let cardConfigWidgetKey = '';
 let cardConfigWidgetLabel = '';
+let cardConfigSectionLabel = ''; // Normalized section label for section glow
 
 function ensureCardConfigModal() {
 	if (cardConfigModal) return;
@@ -1707,6 +1645,19 @@ function ensureCardConfigModal() {
 						<input type="radio" name="visibility" value="admin">
 						<span>Admin</span>
 					</label>
+				</div>
+				<div class="section-glow-section" style="display:none;">
+					<div class="item-config-section-header">RESPECT OPENHAB GLOW RULES</div>
+					<div class="item-config-visibility">
+						<label class="item-config-radio">
+							<input type="radio" name="sectionGlow" value="no" checked>
+							<span>No</span>
+						</label>
+						<label class="item-config-radio">
+							<input type="radio" name="sectionGlow" value="yes">
+							<span>Yes</span>
+						</label>
+					</div>
 				</div>
 				<div class="glow-rules-section">
 					<div class="item-config-section-header">GLOW RULES</div>
@@ -1935,9 +1886,23 @@ function openCardConfigModal(widget, card) {
 		}
 	}
 
+	// Show/hide section glow option for section headers (__section widgets)
+	const isSection = !!widget?.__section;
+	const sectionGlowSection = cardConfigModal.querySelector('.section-glow-section');
+	cardConfigSectionLabel = ''; // Reset
+	if (sectionGlowSection) {
+		sectionGlowSection.style.display = isSection ? '' : 'none';
+		if (isSection) {
+			// Use normalized section label for lookup and storage
+			cardConfigSectionLabel = normalizeFrameName(widget?.label || '');
+			const isEnabled = widgetSectionGlowSet.has(cardConfigSectionLabel);
+			const glowRadio = cardConfigModal.querySelector(`input[name="sectionGlow"][value="${isEnabled ? 'yes' : 'no'}"]`);
+			if (glowRadio) glowRadio.checked = true;
+		}
+	}
+
 	// Check if widget should show glow rules
 	// Any widget with subtext (state in label like "Title [State]") can have glow rules
-	const isSection = !!widget?.__section;
 	const labelParts = splitLabelState(widget?.label || '');
 	const hasSubtext = !!labelParts.state;
 	const glowRulesSection = cardConfigModal.querySelector('.glow-rules-section');
@@ -2008,6 +1973,14 @@ async function saveCardConfig() {
 		proxyCacheSeconds = rawValue;
 	}
 
+	// Get sectionGlow for section links (only if section is visible)
+	const sectionGlowSection = cardConfigModal.querySelector('.section-glow-section');
+	let sectionGlow;
+	if (sectionGlowSection && sectionGlowSection.style.display !== 'none') {
+		const glowRadio = cardConfigModal.querySelector('input[name="sectionGlow"]:checked');
+		sectionGlow = glowRadio?.value === 'yes';
+	}
+
 	// Get glow rules
 	const rows = cardConfigModal.querySelectorAll('.glow-rule-row');
 	const rules = [];
@@ -2024,12 +1997,22 @@ async function saveCardConfig() {
 	}
 
 	try {
+		// Save widget config (rules, visibility, etc.)
 		const resp = await fetch('/api/card-config', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ widgetId: cardConfigWidgetKey, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds }),
 		});
 		if (!resp.ok) return;
+
+		// Save section glow separately (uses section label as identifier)
+		if (sectionGlow !== undefined && cardConfigSectionLabel) {
+			await fetch('/api/card-config', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ widgetId: cardConfigSectionLabel, sectionGlow }),
+			});
+		}
 
 		// Update local glow rules map
 		if (rules.length) {
@@ -2074,6 +2057,15 @@ async function saveCardConfig() {
 				widgetProxyCacheConfigMap.delete(cardConfigWidgetKey);
 			} else {
 				widgetProxyCacheConfigMap.set(cardConfigWidgetKey, { widgetId: cardConfigWidgetKey, cacheSeconds: cacheNum });
+			}
+		}
+
+		// Update local section glow set (uses section label as key)
+		if (sectionGlow !== undefined && cardConfigSectionLabel) {
+			if (sectionGlow) {
+				widgetSectionGlowSet.add(cardConfigSectionLabel);
+			} else {
+				widgetSectionGlowSet.delete(cardConfigSectionLabel);
 			}
 		}
 
@@ -3459,15 +3451,13 @@ function updateCard(card, w, afterImage, info) {
 		metaEl.textContent = labelParts.state;
 	}
 	if (labelParts.state && !isSelection && !isSwitchType) card.classList.add('has-meta');
-	// Apply glow: custom rules override state glow and value glow
+	// Apply glow: custom rules override valueColor glow
 	const wKey = widgetKey(w);
 	const customGlowColor = getWidgetGlowOverride(wKey, labelParts.state || st);
 	if (customGlowColor) {
 		applyGlowStyle(card, customGlowColor);
-	} else {
-		const stateGlowColor = getStateGlowColor(w, labelParts.state || st);
-		if (stateGlowColor) applyGlowStyle(card, stateGlowColor);
-		else if (valueColor) applyGlow(card, valueColor, w);
+	} else if (valueColor) {
+		applyGlow(card, valueColor, w);
 	}
 
 	if (isImage || isChart || isWebview || isVideo) {
