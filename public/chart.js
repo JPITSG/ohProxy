@@ -81,7 +81,7 @@
 			var iR = 0;
 			var dw = cw - iL - iR;
 
-			this.layout = { sm: sm, pad: pad, cw: cw, ch: ch, iL: iL, dw: dw, margin: margin, containerRect: rect };
+			this.layout = { sm: sm, pad: pad, cw: cw, ch: ch, iL: iL, dw: dw, margin: margin, containerRect: rect, yDecimals: yDecimals };
 			this.tooltipCache = { w: 0, h: 0, contentLen: 0 }; // Reset cache on render
 			this.svg.innerHTML = '';
 
@@ -328,6 +328,18 @@
 					majority = parseInt(d, 10);
 				}
 			}
+			// Ensure decimals are sufficient to distinguish values
+			if (values.length > 1) {
+				var maxDecimals = 4;
+				while (majority < maxDecimals) {
+					var formatted = new Set();
+					for (var i = 0; i < values.length; i++) {
+						formatted.add(values[i].toFixed(majority));
+					}
+					if (formatted.size >= Math.min(values.length, 2)) break;
+					majority++;
+				}
+			}
 			return majority;
 		}
 
@@ -538,7 +550,8 @@
 			var x = e.clientX - rect.left;
 			var y = e.clientY - rect.top;
 
-			this.tooltipValue.textContent = this.fmt(pt.value) + (window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '');
+			var decimals = this.layout.yDecimals;
+			this.tooltipValue.textContent = this.fmt(pt.value, decimals) + (window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '');
 			this.tooltipLabel.textContent = pt.t ? this.fmtTimestamp(pt.t) : '';
 
 			var tx = x + 15;
@@ -552,7 +565,8 @@
 		}
 
 		showMobileTooltip(pt) {
-			var valueText = this.fmt(pt.value) + (window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '');
+			var decimals = this.layout.yDecimals;
+			var valueText = this.fmt(pt.value, decimals) + (window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '');
 			var labelText = pt.t ? this.fmtTimestamp(pt.t) : '';
 			this.tooltipValue.textContent = valueText;
 			this.tooltipLabel.textContent = labelText;
