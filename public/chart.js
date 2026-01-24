@@ -42,6 +42,18 @@
 			this.container.addEventListener('touchend', e => this.onTouchEnd(e));
 			this.container.addEventListener('mousemove', e => this.onMouseMove(e));
 			this.container.addEventListener('mouseleave', e => this.onMouseLeave(e));
+
+			// Min/Max stat hover listeners
+			var statMin = document.getElementById('statMin');
+			var statMax = document.getElementById('statMax');
+			if (statMin) {
+				statMin.addEventListener('mouseenter', () => this.showStatTooltip(this.minPoint));
+				statMin.addEventListener('mouseleave', () => this.hideTooltip());
+			}
+			if (statMax) {
+				statMax.addEventListener('mouseenter', () => this.showStatTooltip(this.maxPoint));
+				statMax.addEventListener('mouseleave', () => this.hideTooltip());
+			}
 		}
 
 		svg$(tag, attrs) {
@@ -173,6 +185,8 @@
 				if (!minPoint || pt.value < minPoint.value) minPoint = pt;
 				if (!maxPoint || pt.value > maxPoint.value) maxPoint = pt;
 			}
+			this.minPoint = minPoint;
+			this.maxPoint = maxPoint;
 
 			// Draw chart if we have points
 			if (this.points.length > 0) {
@@ -649,6 +663,27 @@
 			// Clamp to container bounds
 			var tx = Math.max(margin, Math.min(best.x, rect.width - tw - margin));
 			var ty = Math.max(margin, Math.min(best.y, rect.height - th - margin));
+
+			this.tooltip.style.left = tx + 'px';
+			this.tooltip.style.top = ty + 'px';
+			this.tooltip.classList.add('visible');
+		}
+
+		showStatTooltip(pt) {
+			if (!pt) return;
+			var rect = this.layout.containerRect || this.container.getBoundingClientRect();
+			var decimals = this.layout.yDecimals;
+
+			this.tooltipValue.textContent = this.fmt(pt.value, decimals) + (window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '');
+			this.tooltipLabel.textContent = pt.t ? this.fmtTimestamp(pt.t) : '';
+
+			// Position tooltip near the point on the chart
+			var tx = this.layout.pad.left + pt.x + 15;
+			var ty = this.layout.pad.top + pt.y - 15;
+
+			// Bounds checking
+			if (tx + 120 > rect.width) tx = this.layout.pad.left + pt.x - 120;
+			if (ty < 10) ty = this.layout.pad.top + pt.y + 15;
 
 			this.tooltip.style.left = tx + 'px';
 			this.tooltip.style.top = ty + 'px';

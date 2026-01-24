@@ -2412,7 +2412,7 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 	const fmtMax = typeof dataMax === 'number' ? formatChartValue(dataMax) + statUnit : '';
 	const fmtCur = (period === 'h' && typeof dataCur === 'number') ? formatChartValue(dataCur) + statUnit : '';
 	const curHtml = fmtCur ? `<span class="stat-item"><span class="stat-label">Cur</span> <span class="stat-value">${fmtCur}</span></span>` : '';
-	const statsHtml = fmtAvg ? `<div class="chart-stats" id="chartStats">${curHtml}<span class="stat-item"><span class="stat-label">Avg</span> <span class="stat-value">${fmtAvg}</span></span><span class="stat-item"><span class="stat-label">Min</span> <span class="stat-value">${fmtMin}</span></span><span class="stat-item"><span class="stat-label">Max</span> <span class="stat-value">${fmtMax}</span></span></div>` : '';
+	const statsHtml = fmtAvg ? `<div class="chart-stats" id="chartStats">${curHtml}<span class="stat-item"><span class="stat-label">Avg</span> <span class="stat-value">${fmtAvg}</span></span><span class="stat-item" id="statMin"><span class="stat-label">Min</span> <span class="stat-value">${fmtMin}</span></span><span class="stat-item" id="statMax"><span class="stat-label">Max</span> <span class="stat-value">${fmtMax}</span></span></div>` : '';
 
 	return `<!DOCTYPE html>
 <html lang="en" data-theme="${theme}"${dataHashAttr}>
