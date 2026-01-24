@@ -292,9 +292,9 @@ module.exports = {
 		activityThrottleMs: 250,
 		// Items with hidden titles (item names; case-insensitive; empty allowed).
 		hideTitleItems: [],
-		// Minimum time app must be hidden before visibility-triggered reload (ms; >=0).
+		// Minimum time app must be hidden before touch-device reload (ms; >=0).
 		// Prevents unnecessary reloads when quickly switching apps.
-		iframeReloadMinHiddenMs: 60000,
+		touchReloadMinHiddenMs: 60000,
 
 		// === Voice ===
 		// Voice response timeout (ms; >=0).
