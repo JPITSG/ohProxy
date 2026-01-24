@@ -5862,6 +5862,7 @@ app.get('/presence', async (req, res) => {
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-500.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
 .olControlAttribution{display:none!important}
+@media(pointer:coarse){.olControlZoom{display:none!important}}
 #map{position:absolute;top:0;left:0;right:0;bottom:0}
 body{margin:0;padding:0}
 .tooltip{position:absolute;background:#f1f2f9;border:1px solid #ccccd1;border-radius:10px;padding:0.5rem 0.75rem;font-size:11px;line-height:1.5;font-family:'Rubik',sans-serif;color:#0f172a;pointer-events:none;z-index:100;white-space:nowrap}
@@ -5930,6 +5931,7 @@ hoverTooltip.style.left=(e.xy.x+15)+'px';
 hoverTooltip.style.top=(e.xy.y+15)+'px';
 });
 
+map.events.register('move',map,updateRedTooltip);
 map.events.register('moveend',map,updateRedTooltip);
 map.events.register('zoomend',map,updateRedTooltip);
 
