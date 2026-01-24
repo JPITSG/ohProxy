@@ -46,12 +46,6 @@ function logJsError(message, error) {
 }
 
 function triggerReload() {
-	try {
-		if (window.parent !== window && window.parent.__ohProxyIframeWrapper) {
-			window.parent.postMessage('iframe-reload', '*');
-			return;
-		}
-	} catch (e) { /* cross-origin parent */ }
 	window.location.reload();
 }
 
@@ -2557,7 +2551,7 @@ function pageCacheKey(url) {
 
 // Track in-flight fetch requests to prevent concurrent fetches for same URL
 const fetchPageInflight = new Map();
-const FETCH_PAGE_TIMEOUT_MS = 15000; // Timeout for page fetches to prevent deadlocks
+const FETCH_PAGE_TIMEOUT_MS = 5000; // Timeout for page fetches to prevent deadlocks
 
 // Clear all in-flight fetches on network state change to prevent deadlocks
 function clearInflightFetches() {
@@ -4607,10 +4601,6 @@ function render() {
 		}
 		els.grid.innerHTML = '';
 		els.grid.appendChild(fragment);
-		// Signal parent iframe wrapper that grid is ready
-		if (window.parent !== window && els.grid.children.length > 0) {
-			window.parent.postMessage('iframe-ready', '*');
-		}
 	}
 
 	if (q && !state.searchIndexReady) {
@@ -5426,8 +5416,8 @@ let wsConnection = null;
 let wsConnected = false;
 let wsReconnectTimer = null;
 let wsFailCount = 0;
-const WS_RECONNECT_MS = 5000;
-const WS_CONNECT_TIMEOUT_MS = 10000;
+const WS_RECONNECT_MS = 1000;
+const WS_CONNECT_TIMEOUT_MS = 5000;
 const WS_FALLBACK_POLL_MS = 30000;
 const WS_MAX_FAILURES = 5; // Stop trying WebSocket after this many consecutive failures
 let wsConnectTimer = null;
@@ -5435,7 +5425,7 @@ let wsConnectToken = 0;
 let wsTimedOutToken = 0;
 let wsDeltaRequestId = 0;
 const wsDeltaPending = new Map(); // requestId -> { resolve, reject, timer }
-const WS_DELTA_TIMEOUT_MS = 10000;
+const WS_DELTA_TIMEOUT_MS = 5000;
 
 function fetchDeltaViaWs(url, since) {
 	return new Promise((resolve, reject) => {
@@ -5852,7 +5842,7 @@ function restoreNormalPolling() {
 		// Reset armed flag on return
 		resumeReloadArmed = false;
 		// User returned - reload on touch devices if hidden long enough
-		const minHiddenMs = CLIENT_CONFIG.iframeReloadMinHiddenMs ?? 60000;
+		const minHiddenMs = CLIENT_CONFIG.touchReloadMinHiddenMs ?? 60000;
 		const hiddenDuration = lastHiddenTime ? Date.now() - lastHiddenTime : 0;
 		if (isTouchDevice() && hiddenDuration >= minHiddenMs) {
 			// Hidden long enough - reset to home and reload
@@ -5870,7 +5860,7 @@ function restoreNormalPolling() {
 	// Handle bfcache restoration (browser killed and reopened)
 	window.addEventListener('pageshow', (event) => {
 		if (event.persisted && isTouchDevice()) {
-			const minHiddenMs = CLIENT_CONFIG.iframeReloadMinHiddenMs ?? 60000;
+			const minHiddenMs = CLIENT_CONFIG.touchReloadMinHiddenMs ?? 60000;
 			const hiddenDuration = lastHiddenTime ? Date.now() - lastHiddenTime : 0;
 			if (hiddenDuration >= minHiddenMs) {
 				setResumeResetUi(true);
