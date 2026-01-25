@@ -1599,7 +1599,7 @@ wss.on('headers', (headers) => {
 });
 
 function handleWsConnection(ws, req) {
-	const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+	const clientIp = getRemoteIp(req) || 'unknown';
 	logMessage(`[WS] Client connected from ${clientIp}, total: ${wss.clients.size}`);
 
 	ws.isAlive = true;
@@ -4860,7 +4860,7 @@ app.post('/api/jslog', express.json(), (req, res) => {
 		return;
 	}
 	// Build log entry
-	const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+	const ip = getRemoteIp(req) || 'unknown';
 	const user = session.username || 'anonymous';
 	const logParts = [`[JS] ${ip} ${user}`];
 	if (message) logParts.push(`msg="${message.replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ')}"`);
@@ -6008,7 +6008,7 @@ app.get('/proxy', async (req, res, next) => {
 		// RTSP stream - convert to MP4 via FFmpeg
 		if (target.protocol === 'rtsp:') {
 			const rtspUrl = target.toString();
-			const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+			const clientIp = getRemoteIp(req) || 'unknown';
 			const username = req.ohProxyUser || 'anonymous';
 			const streamId = ++rtspStreamIdCounter;
 
