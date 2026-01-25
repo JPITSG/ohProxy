@@ -1229,6 +1229,17 @@ body:not(.theme-light) .status-tooltip-value {
 	color: #fafafa;
 }
 
+.status-tooltip-value.loading::after {
+	content: '.';
+	animation: loading-dots 1.2s infinite steps(1);
+}
+
+@keyframes loading-dots {
+	0% { content: '.'; }
+	33% { content: '..'; }
+	66% { content: '...'; }
+}
+
 /* Light theme overrides */
 body.theme-light .bg-grid {
 	opacity: .25;

@@ -707,7 +707,13 @@ function showStatusTooltip() {
 	const latency = getRollingLatency();
 	const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
 	if (valueEl) {
-		valueEl.textContent = latency !== null ? latency + 'ms' : '--';
+		if (latency !== null) {
+			valueEl.textContent = latency + 'ms';
+			valueEl.classList.remove('loading');
+		} else {
+			valueEl.textContent = '';
+			valueEl.classList.add('loading');
+		}
 	}
 	els.statusTooltip.classList.add('visible');
 }
@@ -5287,7 +5293,7 @@ async function checkHeartbeat() {
 
 // --- Ping / Latency Tracking ---
 const PING_INTERVAL_MS = 5000;
-const PING_TIMEOUT_MS = 100;
+const PING_TIMEOUT_MS = 1000;
 const PING_SAMPLE_COUNT = 5;
 const FAST_CONNECTION_ENABLE_MS = 50;   // Enter fast mode below this
 const FAST_CONNECTION_DISABLE_MS = 80;  // Exit fast mode above this
@@ -5303,6 +5309,14 @@ function invalidatePing() {
 	fastConnectionActive = false;
 	pingNeedsPrefill = true;
 	if (wasFast) updateStatusBar();
+	// Update tooltip if visible
+	if (els.statusTooltip && els.statusTooltip.classList.contains('visible')) {
+		const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
+		if (valueEl) {
+			valueEl.textContent = '';
+			valueEl.classList.add('loading');
+		}
+	}
 }
 
 function getRollingLatency() {
@@ -5337,7 +5351,13 @@ function updateFastConnectionState() {
 	if (els.statusTooltip && els.statusTooltip.classList.contains('visible')) {
 		const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
 		if (valueEl) {
-			valueEl.textContent = latency !== null ? latency + 'ms' : '--';
+			if (latency !== null) {
+				valueEl.textContent = latency + 'ms';
+				valueEl.classList.remove('loading');
+			} else {
+				valueEl.textContent = '';
+				valueEl.classList.add('loading');
+			}
 		}
 	}
 }
@@ -5854,6 +5874,7 @@ function restoreNormalPolling() {
 				noteActivity();
 				refresh(false);
 				if (!wsConnection) connectWs();
+				startPingDelayed();
 			}
 		}
 	});
