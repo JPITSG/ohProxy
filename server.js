@@ -197,6 +197,8 @@ const HTTPS_CERT_FILE = safeText(HTTPS_CONFIG.certFile);
 const HTTPS_KEY_FILE = safeText(HTTPS_CONFIG.keyFile);
 const HTTPS_HTTP2 = typeof HTTPS_CONFIG.http2 === 'boolean' ? HTTPS_CONFIG.http2 : false;
 const ALLOW_SUBNETS = SERVER_CONFIG.allowSubnets;
+const TRUST_PROXY = SERVER_CONFIG.trustProxy === true;
+const DENY_XFF_SUBNETS = SERVER_CONFIG.denyXFFSubnets;
 const OH_TARGET = safeText(process.env.OH_TARGET || SERVER_CONFIG.openhab?.target);
 const OH_USER = safeText(process.env.OH_USER || SERVER_CONFIG.openhab?.user || '');
 const OH_PASS = safeText(process.env.OH_PASS || SERVER_CONFIG.openhab?.pass || '');
@@ -492,8 +494,9 @@ function ensureCidrList(value, name, { allowEmpty = false } = {}, errors) {
 	});
 }
 
-function ensureAllowSubnets(value, name, errors) {
-	if (!ensureArray(value, name, { allowEmpty: false }, errors)) return;
+function ensureAllowSubnets(value, name, errors, options = {}) {
+	const allowEmpty = options.allowEmpty === true;
+	if (!ensureArray(value, name, { allowEmpty }, errors)) return;
 	value.forEach((entry, index) => {
 		if (!isValidAllowSubnet(entry)) {
 			errors.push(`${name}[${index}] must be IPv4 CIDR or 0.0.0.0 but currently is ${describeValue(entry)}`);
@@ -585,6 +588,10 @@ function validateConfig() {
 	}
 
 	ensureAllowSubnets(ALLOW_SUBNETS, 'server.allowSubnets', errors);
+	if (typeof TRUST_PROXY !== 'boolean') {
+		errors.push(`server.trustProxy must be true or false but currently is ${describeValue(SERVER_CONFIG.trustProxy)}`);
+	}
+	ensureAllowSubnets(DENY_XFF_SUBNETS, 'server.denyXFFSubnets', errors, { allowEmpty: true });
 
 	if (ensureObject(SERVER_CONFIG.openhab, 'server.openhab', errors)) {
 		ensureUrl(OH_TARGET, 'server.openhab.target', errors);
@@ -751,8 +758,22 @@ function normalizeRemoteIp(value) {
 	return raw;
 }
 
-function getRemoteIp(req) {
+// Returns the direct socket connection IP (for allowSubnets checks)
+function getSocketIp(req) {
 	return normalizeRemoteIp(req?.socket?.remoteAddress || '');
+}
+
+// Returns X-Forwarded-For client IP when trustProxy enabled (for logging, auth tracking)
+function getRemoteIp(req) {
+	if (liveConfig.trustProxy) {
+		const xff = req?.headers?.['x-forwarded-for'];
+		if (xff) {
+			// X-Forwarded-For: "client, proxy1, proxy2" - take first IP
+			const clientIp = safeText(xff).split(',')[0].trim();
+			if (clientIp) return normalizeRemoteIp(clientIp);
+		}
+	}
+	return getSocketIp(req);
 }
 
 function ipToLong(ip) {
@@ -1135,6 +1156,8 @@ let configRestartTriggered = false;
 // Live config - values that can be hot-reloaded without restart
 const liveConfig = {
 	allowSubnets: ALLOW_SUBNETS,
+	trustProxy: TRUST_PROXY,
+	denyXFFSubnets: DENY_XFF_SUBNETS,
 	proxyAllowlist: PROXY_ALLOWLIST,
 	webviewNoProxy: WEBVIEW_NO_PROXY,
 	ohTarget: OH_TARGET,
@@ -1260,6 +1283,8 @@ function reloadLiveConfig() {
 	const newWsConfig = newServer.websocket || {};
 
 	liveConfig.allowSubnets = newServer.allowSubnets;
+	liveConfig.trustProxy = newServer.trustProxy === true;
+	liveConfig.denyXFFSubnets = newServer.denyXFFSubnets;
 	liveConfig.proxyAllowlist = normalizeProxyAllowlist(newServer.proxyAllowlist);
 	liveConfig.webviewNoProxy = normalizeProxyAllowlist(newServer.webviewNoProxy);
 	liveConfig.ohTarget = safeText(newServer.openhab?.target);
@@ -2971,6 +2996,7 @@ function sendWsUpgradeError(socket, statusCode, statusText) {
 
 function handleWsUpgrade(req, socket, head) {
 	const pathname = new URL(req.url, 'http://localhost').pathname;
+	const socketIp = getSocketIp(req);
 	const clientIp = getRemoteIp(req);
 	const clientExts = req.headers['sec-websocket-extensions'] || 'none';
 	logMessage(`[WS] Upgrade request from ${clientIp || 'unknown'} for ${pathname}, extensions: ${clientExts}`);
@@ -2981,12 +3007,25 @@ function handleWsUpgrade(req, socket, head) {
 		return;
 	}
 
-	// Check allowSubnets (unless allow-all configured)
+	// Check allowSubnets using socket IP (unless allow-all configured)
 	const allowAll = Array.isArray(liveConfig.allowSubnets) && liveConfig.allowSubnets.some((entry) => isAllowAllSubnet(entry));
-	if (!allowAll && (!clientIp || !ipInAnySubnet(clientIp, liveConfig.allowSubnets))) {
-		logMessage(`[WS] Blocked upgrade from ${clientIp || 'unknown'} - not in allowSubnets`);
+	if (!allowAll && (!socketIp || !ipInAnySubnet(socketIp, liveConfig.allowSubnets))) {
+		logMessage(`[WS] Blocked upgrade from ${clientIp || 'unknown'} (socket: ${socketIp || 'unknown'}) - not in allowSubnets`);
 		sendWsUpgradeError(socket, 403, 'Forbidden');
 		return;
+	}
+
+	// Check denyXFFSubnets - only when X-Forwarded-For header is present
+	if (liveConfig.trustProxy && Array.isArray(liveConfig.denyXFFSubnets) && liveConfig.denyXFFSubnets.length > 0) {
+		const xff = req.headers?.['x-forwarded-for'];
+		if (xff) {
+			const xffIp = normalizeRemoteIp(safeText(xff).split(',')[0].trim());
+			if (xffIp && ipInAnySubnet(xffIp, liveConfig.denyXFFSubnets)) {
+				logMessage(`[WS] Blocked upgrade from denied XFF subnet ${xffIp}`);
+				sendWsUpgradeError(socket, 403, 'Forbidden');
+				return;
+			}
+		}
 	}
 
 	// Always require authentication
@@ -4287,12 +4326,28 @@ app.use((req, res, next) => {
 	next();
 });
 app.use((req, res, next) => {
-	if (Array.isArray(liveConfig.allowSubnets) && liveConfig.allowSubnets.some((entry) => isAllowAllSubnet(entry))) return next();
-	const ip = getRemoteIp(req);
-	if (!ip || !ipInAnySubnet(ip, liveConfig.allowSubnets)) {
-		logMessage(`Blocked request from ${ip || 'unknown'} for ${req.method} ${req.originalUrl}`);
-		res.status(403).type('text/plain').send('Forbidden');
-		return;
+	// Check allowSubnets using socket IP
+	const allowAll = Array.isArray(liveConfig.allowSubnets) && liveConfig.allowSubnets.some((entry) => isAllowAllSubnet(entry));
+	if (!allowAll) {
+		const socketIp = getSocketIp(req);
+		if (!socketIp || !ipInAnySubnet(socketIp, liveConfig.allowSubnets)) {
+			const clientIp = getRemoteIp(req);
+			logMessage(`Blocked request from ${clientIp || 'unknown'} (socket: ${socketIp || 'unknown'}) for ${req.method} ${req.originalUrl}`);
+			res.status(403).type('text/plain').send('Forbidden');
+			return;
+		}
+	}
+	// Check denyXFFSubnets - only when X-Forwarded-For header is present
+	if (liveConfig.trustProxy && Array.isArray(liveConfig.denyXFFSubnets) && liveConfig.denyXFFSubnets.length > 0) {
+		const xff = req.headers?.['x-forwarded-for'];
+		if (xff) {
+			const xffIp = normalizeRemoteIp(safeText(xff).split(',')[0].trim());
+			if (xffIp && ipInAnySubnet(xffIp, liveConfig.denyXFFSubnets)) {
+				logMessage(`Blocked request from denied XFF subnet ${xffIp} for ${req.method} ${req.originalUrl}`);
+				res.status(403).type('text/plain').send('Forbidden');
+				return;
+			}
+		}
 	}
 	next();
 });
