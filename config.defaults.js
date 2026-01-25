@@ -75,6 +75,12 @@ module.exports = {
 		},
 		// Access control for the wrapper server (IPv4 CIDR list; required, use 0.0.0.0/0 to allow all).
 		allowSubnets: [],
+		// Trust X-Forwarded-For header for client IP (true/false).
+		// Only enable when behind a trusted reverse proxy (e.g., HAProxy, nginx).
+		trustProxy: false,
+		// Block requests when X-Forwarded-For header contains an IP in these subnets (IPv4 CIDR list).
+		// Only checked when trustProxy is enabled and X-Forwarded-For header is present.
+		denyXFFSubnets: [],
 
 		// === Security Headers ===
 		securityHeaders: {
