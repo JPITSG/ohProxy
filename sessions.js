@@ -389,18 +389,6 @@ function getAllVideoConfigs() {
 }
 
 /**
- * Get video config for a widget.
- * @param {string} widgetId - The widget ID
- * @returns {object|null} - {defaultMuted: boolean} or null if not found
- */
-function getVideoConfig(widgetId) {
-	if (!db) initDb();
-	const row = db.prepare('SELECT default_muted FROM widget_video_config WHERE widget_id = ?').get(widgetId);
-	if (!row) return null;
-	return { defaultMuted: row.default_muted === 1 };
-}
-
-/**
  * Set video config for a widget. If defaultMuted is true (default), deletes the entry.
  * @param {string} widgetId - The widget ID
  * @param {boolean} defaultMuted - Whether video should start muted
@@ -437,18 +425,6 @@ function getAllIframeConfigs() {
 		widgetId: row.widget_id,
 		height: row.height
 	}));
-}
-
-/**
- * Get iframe config for a widget.
- * @param {string} widgetId - The widget ID
- * @returns {object|null} - {height: number} or null if not found
- */
-function getIframeConfig(widgetId) {
-	if (!db) initDb();
-	const row = db.prepare('SELECT height FROM widget_iframe_config WHERE widget_id = ?').get(widgetId);
-	if (!row) return null;
-	return { height: row.height };
 }
 
 /**
@@ -745,11 +721,9 @@ module.exports = {
 	setVisibility,
 	// Video config
 	getAllVideoConfigs,
-	getVideoConfig,
 	setVideoConfig,
 	// Iframe config
 	getAllIframeConfigs,
-	getIframeConfig,
 	setIframeConfig,
 	// Proxy cache config
 	getAllProxyCacheConfigs,

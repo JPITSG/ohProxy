@@ -2582,18 +2582,6 @@ function stopAllAtmosphereConnections() {
 	stopAtmosphereNoUpdateMonitor();
 }
 
-function startAtmosphereIfNeeded() {
-	if (wss.clients.size > 0 && atmospherePages.size === 0) {
-		connectAtmosphere();
-	}
-}
-
-function stopAtmosphereIfUnneeded() {
-	if (wss.clients.size === 0) {
-		stopAllAtmosphereConnections();
-	}
-}
-
 // --- SSE Mode (openHAB 3.x) ---
 
 function handleSSEEvent(eventData) {
@@ -2776,18 +2764,6 @@ function stopSSE() {
 	if (sseConnection) {
 		try { sseConnection.destroy(); } catch {}
 		sseConnection = null;
-	}
-}
-
-function startSSEIfNeeded() {
-	if (wss.clients.size > 0 && !sseConnection && !sseReconnectTimer) {
-		connectSSE();
-	}
-}
-
-function stopSSEIfUnneeded() {
-	if (wss.clients.size === 0) {
-		stopSSE();
 	}
 }
 
