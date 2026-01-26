@@ -54,6 +54,11 @@
 				statMax.addEventListener('mouseenter', () => this.showStatTooltip(this.maxPoint));
 				statMax.addEventListener('mouseleave', () => this.hideTooltip());
 			}
+			var statCur = document.getElementById('statCur');
+			if (statCur) {
+				statCur.addEventListener('mouseenter', () => this.showStatTooltip(this.curPoint));
+				statCur.addEventListener('mouseleave', () => this.hideTooltip());
+			}
 		}
 
 		svg$(tag, attrs) {
@@ -187,6 +192,7 @@
 			}
 			this.minPoint = minPoint;
 			this.maxPoint = maxPoint;
+			this.curPoint = this.points.length > 0 ? this.points[this.points.length - 1] : null;
 
 			// Draw chart if we have points
 			if (this.points.length > 0) {
