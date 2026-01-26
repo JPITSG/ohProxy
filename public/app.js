@@ -45,6 +45,13 @@ function logJsError(message, error) {
 	window.__logJsError(message, '', 0, 0, error || {});
 }
 
+// Feature detection for CSS aspect-ratio (Chrome 88+, Safari 15+, Firefox 89+)
+const supportsAspectRatio = (function() {
+	const el = document.createElement('div');
+	el.style.aspectRatio = '1 / 1';
+	return el.style.aspectRatio === '1 / 1';
+})();
+
 function triggerReload() {
 	window.location.reload();
 }
@@ -3591,9 +3598,17 @@ function updateCard(card, w, afterImage, info) {
 		if (chartHeight > 0) {
 			frameContainer.style.height = `${chartHeight}px`;
 			frameContainer.style.aspectRatio = '';
+			frameContainer.style.paddingBottom = '';
 		} else {
 			frameContainer.style.height = '';
-			frameContainer.style.aspectRatio = '16 / 9';
+			if (supportsAspectRatio) {
+				frameContainer.style.aspectRatio = '16 / 9';
+				frameContainer.style.paddingBottom = '';
+			} else {
+				// Fallback for older browsers (Chrome <88)
+				frameContainer.style.aspectRatio = '';
+				frameContainer.style.paddingBottom = '56.25%';
+			}
 		}
 		let iframeEl = frameContainer.querySelector('iframe.chart-frame');
 		if (!iframeEl) {
