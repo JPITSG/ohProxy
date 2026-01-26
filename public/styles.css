@@ -601,9 +601,20 @@ body.theme-light .selection-card .select-menu-scroll::-webkit-scrollbar-thumb:ho
 .chart-frame-container {
 	position: relative;
 	width: 100%;
-	aspect-ratio: 16 / 9;
 	overflow: hidden;
 	border-radius: inherit;
+}
+/* Modern browsers: use aspect-ratio */
+@supports (aspect-ratio: 16 / 9) {
+	.chart-frame-container {
+		aspect-ratio: 16 / 9;
+	}
+}
+/* Fallback for older browsers (Chrome <88) */
+@supports not (aspect-ratio: 16 / 9) {
+	.chart-frame-container {
+		padding-bottom: 56.25%; /* 9/16 = 0.5625 */
+	}
 }
 .chart-frame {
 	position: absolute;
