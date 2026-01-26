@@ -156,6 +156,12 @@ body {
 	gap: 0.25rem;
 }
 
+#statMin,
+#statMax,
+#statCur {
+	cursor: pointer;
+}
+
 .stat-label {
 	color: var(--chart-line);
 	font-size: 0.8125rem;
