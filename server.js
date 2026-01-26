@@ -5028,7 +5028,7 @@ app.post('/api/voice', express.json(), async (req, res) => {
 
 	// Check if AI is configured
 	if (!ANTHROPIC_API_KEY) {
-		logMessage(`Voice command from ${username}: "${trimmed}" - AI not configured`);
+		logMessage(`[Voice] [${username}] "${trimmed}" - AI not configured`);
 		res.status(503).json({ error: 'Voice AI not configured' });
 		return;
 	}
@@ -5036,14 +5036,14 @@ app.post('/api/voice', express.json(), async (req, res) => {
 	// Load structure map
 	const structureMap = getAiStructureMap();
 	if (!structureMap) {
-		logMessage(`Voice command from ${username}: "${trimmed}" - structure map not found`);
+		logMessage(`[Voice] [${username}] "${trimmed}" - structure map not found`);
 		res.status(503).json({ error: 'Voice AI structure map not found. Run ai-cli.js genstructuremap first.' });
 		return;
 	}
 
 	const itemList = structureMap.request?.messages?.[0]?.content;
 	if (!itemList) {
-		logMessage(`Voice command from ${username}: "${trimmed}" - invalid structure map`);
+		logMessage(`[Voice] [${username}] "${trimmed}" - invalid structure map`);
 		res.status(503).json({ error: 'Invalid structure map format' });
 		return;
 	}
@@ -5097,7 +5097,7 @@ Rules:
 		// Extract text content
 		const textContent = aiResponse.content?.find(c => c.type === 'text');
 		if (!textContent?.text) {
-			logMessage(`Voice command from ${username}: "${trimmed}" - empty AI response`);
+			logMessage(`[Voice] [${username}] "${trimmed}" - empty AI response`);
 			res.status(502).json({ error: 'Empty response from AI' });
 			return;
 		}
@@ -5107,7 +5107,7 @@ Rules:
 		try {
 			parsed = JSON.parse(textContent.text);
 		} catch {
-			logMessage(`Voice command from ${username}: "${trimmed}" - invalid AI JSON`);
+			logMessage(`[Voice] [${username}] "${trimmed}" - invalid AI JSON`);
 			res.status(502).json({ error: 'Invalid response from AI' });
 			return;
 		}
@@ -5136,11 +5136,16 @@ Rules:
 			}
 		}
 
-		// Log summary
+		// Log summary with cost
 		const actionSummary = results.length > 0
 			? results.map(r => `${r.item}=${r.command}(${r.success ? 'ok' : 'fail'})`).join(', ')
 			: 'none';
-		logMessage(`Voice [${username}]: "${trimmed}" -> understood=${parsed.understood}, actions=[${actionSummary}]`);
+		const inputTokens = aiResponse.usage?.input_tokens || 0;
+		const outputTokens = aiResponse.usage?.output_tokens || 0;
+		const inputCost = (inputTokens / 1000000) * 0.25;  // Haiku: $0.25/1M input
+		const outputCost = (outputTokens / 1000000) * 1.25; // Haiku: $1.25/1M output
+		const totalCost = inputCost + outputCost;
+		logMessage(`[Voice] [${username}] "${trimmed}" -> understood=${parsed.understood}, actions=[${actionSummary}], tokens=${inputTokens}+${outputTokens}, cost=$${totalCost.toFixed(6)}`);
 
 		res.json({
 			success: true,
@@ -5150,7 +5155,7 @@ Rules:
 		});
 
 	} catch (err) {
-		logMessage(`Voice command from ${username}: "${trimmed}" - error: ${err.message}`);
+		logMessage(`[Voice] [${username}] "${trimmed}" - error: ${err.message}`);
 		res.status(502).json({ error: 'AI processing failed' });
 	}
 });
