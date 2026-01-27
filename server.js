@@ -2144,10 +2144,10 @@ function isProxyCacheValid(cachePath, maxAgeSeconds) {
 
 // Chart generation (ported from genchart.py)
 function deduceUnit(title) {
-	const t = title.toLowerCase();
 	if (/\skwh(\s|$)/i.test(title)) return 'kWh';
-	if (/\s%(\s|$)/.test(title)) return '%';
-	if (/\s°c(\s|$)/i.test(title)) return '°C';
+	if (/\s%%?(\s|$)/.test(title)) return '%';
+	// Match various degree-like characters: ° (U+00B0), º (U+00BA), ˚ (U+02DA), or just C
+	if (/\s[°º˚]?c(\s|$)/i.test(title)) return '°C';
 	if (/\smbar(\s|$)/i.test(title)) return 'mbar';
 	if (/\sl\/min(\s|$)/i.test(title)) return 'l/min';
 	if (/\sm3(\s|$)/i.test(title)) return 'm³';
@@ -2492,8 +2492,23 @@ function generateChart(item, period, mode, title) {
 	// Deduce unit from title
 	let unit = deduceUnit(title);
 	let cleanTitle = title;
-	if (unit !== '?' && cleanTitle.trim().endsWith(unit)) {
-		cleanTitle = cleanTitle.trim().slice(0, -unit.length).trim();
+	if (unit !== '?') {
+		// Remove unit pattern(s) from end of title - handles variations like "Humidity %" and "Humidity %%"
+		const unitPatterns = {
+			'%': /\s*%%?\s*$/,
+			'°C': /\s*[°º˚]?c\s*$/i,
+			'kWh': /\s*kwh\s*$/i,
+			'mbar': /\s*mbar\s*$/i,
+			'l/min': /\s*l\/min\s*$/i,
+			'm³': /\s*m3\s*$/i,
+			'V': /\s*v\s*$/i,
+			'W': /\s*w\s*$/i,
+			'lm/m²': /\s*lm\/m2\s*$/i,
+		};
+		const pattern = unitPatterns[unit];
+		if (pattern) {
+			cleanTitle = cleanTitle.replace(pattern, '').trim();
+		}
 	}
 
 	// Generate chart components
