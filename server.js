@@ -5188,9 +5188,10 @@ app.get('/manifest.webmanifest', (req, res) => {
 		const manifest = JSON.parse(raw);
 		const theme = safeText(req.query?.theme).toLowerCase();
 		if (theme === 'light' || theme === 'dark') {
-			const color = theme === 'light' ? '#f8fafc' : '#0f172a';
-			manifest.theme_color = color;
-			manifest.background_color = color;
+			const themeColor = theme === 'light' ? '#e4e5e9' : '#131420';
+			const bgColor = theme === 'light' ? '#dbdde9' : '#131420';
+			manifest.theme_color = themeColor;
+			manifest.background_color = bgColor;
 		}
 		res.send(JSON.stringify(manifest));
 	} catch {
