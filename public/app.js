@@ -53,7 +53,101 @@ const supportsAspectRatio = (function() {
 })();
 
 function triggerReload() {
+	showResumeSpinner(true);
 	window.location.reload();
+}
+
+const SOFT_RESET_TIMEOUT_MS = 1000; // Short timeout per attempt
+
+async function softReset() {
+	showResumeSpinner(true);
+
+	// Show cached home snapshot behind the blur (if available)
+	const snapshot = loadHomeSnapshot();
+	if (snapshot && applyHomeSnapshot(snapshot)) {
+		render();
+		window.scrollTo(0, 0);
+	}
+
+	// Clear transient state for fresh start
+	state.searchWidgets = null;
+	state.searchIndexReady = false;
+	state.searchFrames = [];
+	state.sitemapCache.clear();
+	state.sitemapCacheReady = false;
+
+	// Stop existing connections/timers
+	stopPolling();
+	stopPing();
+	closeWs();
+
+	// Aggressive retry loop
+	while (true) {
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), SOFT_RESET_TIMEOUT_MS);
+
+		try {
+			// Fetch sitemap list
+			const res = await fetch('rest/sitemaps?type=json', {
+				signal: controller.signal,
+				headers: { 'Accept': 'application/json' },
+			});
+			clearTimeout(timeoutId);
+
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const data = await res.json();
+
+			// Parse sitemap (same logic as loadDefaultSitemap)
+			let sitemaps = [];
+			if (Array.isArray(data)) sitemaps = data;
+			else if (Array.isArray(data?.sitemaps)) sitemaps = data.sitemaps;
+			else if (Array.isArray(data?.sitemaps?.sitemap)) sitemaps = data.sitemaps.sitemap;
+			else if (Array.isArray(data?.sitemap)) sitemaps = data.sitemap;
+			else if (data?.sitemap && typeof data.sitemap === 'object') sitemaps = [data.sitemap];
+			else if (data?.sitemaps && typeof data.sitemaps === 'object') sitemaps = [data.sitemaps];
+
+			const first = Array.isArray(sitemaps) ? sitemaps[0] : null;
+			const name = first?.name || first?.id || first?.homepage?.link?.split('/').pop();
+			if (!name) throw new Error('No sitemap name');
+
+			state.sitemapName = name;
+			const nameEnc = encodeURIComponent(name);
+			let pageLink = first?.homepage?.link;
+			if (!pageLink && typeof first?.link === 'string') {
+				const rel = toRelativeRestLink(first.link);
+				if (rel.includes('/rest/sitemaps/')) {
+					pageLink = rel.endsWith(`/${nameEnc}`) ? rel : `${rel.replace(/\/$/, '')}/${nameEnc}`;
+				} else {
+					pageLink = rel;
+				}
+			}
+			if (!pageLink) pageLink = `rest/sitemaps/${nameEnc}/${nameEnc}`;
+
+			state.pageUrl = ensureJsonParam(toRelativeRestLink(pageLink));
+			state.pageTitle = first?.label || first?.title || name;
+			state.rootPageUrl = state.pageUrl;
+			state.rootPageTitle = state.pageTitle;
+
+			// Success - now refresh to get widgets
+			setConnectionStatus(true);
+			await refresh(true);
+			showResumeSpinner(false);
+
+			// Restart background services
+			if (!state.isPaused) {
+				startPolling();
+				startPingDelayed();
+				connectWs();
+			}
+			fetchFullSitemap().catch(() => {});
+			return; // Done!
+
+		} catch (e) {
+			clearTimeout(timeoutId);
+			// Immediate retry - no delay
+			continue;
+		}
+	}
 }
 
 const els = {
@@ -2447,7 +2541,7 @@ async function fetchWithAuth(url, options) {
 				return new Promise(() => {});
 			}
 		} catch (e) { /* cross-origin parent */ }
-		window.location.reload();
+		triggerReload();
 		// Return a never-resolving promise to prevent further processing
 		return new Promise(() => {});
 	}
@@ -3041,9 +3135,6 @@ function iconCandidates(icon) {
 		cands.push(`openhab.app/images/${ICON_VERSION}/${icon}.png`);
 		cands.push(`openhab.app/images/${ICON_VERSION}/${icon}.svg`);
 	}
-	// final fallback icon
-	cands.push(`images/${ICON_VERSION}/group.png`);
-	cands.push(`openhab.app/images/${ICON_VERSION}/group.png`);
 	return cands;
 }
 
@@ -3509,10 +3600,16 @@ function updateCard(card, w, afterImage, info) {
 	} else {
 		if (iconWrap) iconWrap.classList.remove('hidden');
 		if (iconImg) {
-			const iconKey = `${icon || 'group'}`;
-			if (iconImg.dataset.iconKey !== iconKey) {
-				iconImg.dataset.iconKey = iconKey;
-				loadBestIcon(iconImg, iconCandidates(icon));
+			if (icon) {
+				if (iconImg.dataset.iconKey !== icon) {
+					iconImg.dataset.iconKey = icon;
+					loadBestIcon(iconImg, iconCandidates(icon));
+				}
+			} else {
+				// No icon defined - clear and hide
+				iconImg.dataset.iconKey = '';
+				iconImg.removeAttribute('src');
+				iconImg.classList.remove('icon-ready');
 			}
 		}
 	}
@@ -5452,7 +5549,7 @@ let wsConnected = false;
 let wsReconnectTimer = null;
 let wsFailCount = 0;
 const WS_RECONNECT_MS = 1000;
-const WS_CONNECT_TIMEOUT_MS = 5000;
+const WS_CONNECT_TIMEOUT_MS = 1000;
 const WS_FALLBACK_POLL_MS = 30000;
 const WS_MAX_FAILURES = 5; // Stop trying WebSocket after this many consecutive failures
 let wsConnectTimer = null;
@@ -5865,24 +5962,31 @@ function restoreNormalPolling() {
 		// Network back - trigger refresh to verify and restore connection
 		refresh(false);
 	});
-	document.addEventListener('visibilitychange', () => {
-		if (document.visibilityState === 'hidden') {
-			if (resumeReloadArmed) return;
-			resumeReloadArmed = true;
-			lastHiddenTime = Date.now();
-			// Don't reset UI yet - wait until visible to check threshold
-			stopPing();
-			return;
-		}
-		// Reset armed flag on return
+	// Helper to calculate time since page was last active
+	function getHiddenDuration() {
+		const now = Date.now();
+		// Prefer lastHiddenTime, fall back to lastActivity
+		if (lastHiddenTime) return now - lastHiddenTime;
+		if (state.lastActivity) return now - state.lastActivity;
+		return 0;
+	}
+
+	function markPageHidden() {
+		if (resumeReloadArmed) return;
+		resumeReloadArmed = true;
+		lastHiddenTime = Date.now();
+		// Also update lastActivity as backup timestamp
+		state.lastActivity = lastHiddenTime;
+		stopPing();
+	}
+
+	function handlePageVisible() {
 		resumeReloadArmed = false;
-		// User returned - reload on touch devices if hidden long enough
 		const minHiddenMs = CLIENT_CONFIG.touchReloadMinHiddenMs ?? 60000;
-		const hiddenDuration = lastHiddenTime ? Date.now() - lastHiddenTime : 0;
+		const hiddenDuration = getHiddenDuration();
 		if (isTouchDevice() && hiddenDuration >= minHiddenMs) {
-			// Hidden long enough - reset to home and reload
-			setResumeResetUi(true);
-			triggerReload();
+			// Hidden long enough - soft reset to home
+			softReset();
 		} else {
 			// Brief hide - resume where we left off
 			if (!state.isPaused) {
@@ -5892,15 +5996,32 @@ function restoreNormalPolling() {
 				startPingDelayed();
 			}
 		}
+	}
+
+	// Initialize lastHiddenTime if page loads while hidden
+	if (document.visibilityState === 'hidden') {
+		lastHiddenTime = Date.now();
+		resumeReloadArmed = true;
+	}
+
+	document.addEventListener('visibilitychange', () => {
+		if (document.visibilityState === 'hidden') {
+			markPageHidden();
+		} else {
+			handlePageVisible();
+		}
 	});
+
+	// pagehide is more reliable than visibilitychange on some mobile browsers
+	window.addEventListener('pagehide', () => markPageHidden());
+
 	// Handle bfcache restoration (browser killed and reopened)
 	window.addEventListener('pageshow', (event) => {
 		if (event.persisted && isTouchDevice()) {
 			const minHiddenMs = CLIENT_CONFIG.touchReloadMinHiddenMs ?? 60000;
-			const hiddenDuration = lastHiddenTime ? Date.now() - lastHiddenTime : 0;
+			const hiddenDuration = getHiddenDuration();
 			if (hiddenDuration >= minHiddenMs) {
-				setResumeResetUi(true);
-				triggerReload();
+				softReset();
 			}
 		}
 	});
@@ -6167,11 +6288,39 @@ function restoreNormalPolling() {
 	updateNavButtons();
 
 	try {
-		await loadDefaultSitemap();
-		syncHistory(true);
-		// Fetch full sitemap for instant navigation (don't await, runs in background)
-		fetchFullSitemap().catch(() => {});
-		await refresh(true);
+		if (window.__OH_HOMEPAGE__) {
+			// Use embedded homepage data - no fetch needed
+			const hp = window.__OH_HOMEPAGE__;
+			state.sitemapName = hp.sitemapName;
+			state.pageUrl = hp.pageUrl;
+			state.rootPageUrl = hp.pageUrl;
+			state.pageTitle = hp.pageTitle;
+			state.rootPageTitle = hp.pageTitle;
+			state.rawWidgets = hp.widgets;
+
+			syncHistory(true);
+			setConnectionStatus(true);
+			render();
+
+			// Use embedded sitemap cache if available, otherwise fetch
+			if (window.__OH_SITEMAP_CACHE__?.pages) {
+				const cache = window.__OH_SITEMAP_CACHE__;
+				state.sitemapCache.clear();
+				for (const [url, page] of Object.entries(cache.pages)) {
+					state.sitemapCache.set(url, page);
+				}
+				state.sitemapCacheReady = true;
+			} else {
+				fetchFullSitemap().catch(() => {});
+			}
+		} else {
+			// Fallback: fetch sitemap data
+			await loadDefaultSitemap();
+			syncHistory(true);
+			fetchFullSitemap().catch(() => {});
+			await refresh(true);
+		}
+
 		if (!state.isPaused) {
 			startPolling();
 			connectWs();

@@ -85,7 +85,7 @@ function normalizeWidgets(page) {
 		for (const item of list) {
 			if (item?.type === 'Frame') {
 				const label = safeText(item?.label || item?.item?.label || item?.item?.name || '');
-				out.push({ __frame: true, label });
+				out.push({ __section: true, label });
 				let kids = item.widget;
 				if (kids) {
 					if (!Array.isArray(kids)) {
@@ -115,8 +115,8 @@ function buildSnapshot(page) {
 	const structureParts = [];
 
 	for (const w of list) {
-		if (w && w.__frame) {
-			structureParts.push(`frame:${safeText(w.label)}`);
+		if (w && w.__section) {
+			structureParts.push(`section:${safeText(w.label)}`);
 			continue;
 		}
 		if (!w) continue;
@@ -326,9 +326,9 @@ describe('Widget Snapshot Helpers', () => {
 			assert.strictEqual(widgets[1].label, 'B');
 		});
 
-		it('adds frame marker for Frame type', () => {
+		it('adds section marker for Frame type', () => {
 			const widgets = normalizeWidgets({ widget: { type: 'Frame', label: 'Section', widget: [] } });
-			assert.strictEqual(widgets[0].__frame, true);
+			assert.strictEqual(widgets[0].__section, true);
 			assert.strictEqual(widgets[0].label, 'Section');
 		});
 
@@ -348,7 +348,7 @@ describe('Widget Snapshot Helpers', () => {
 		it('preserves order with mixed entries', () => {
 			const widgets = normalizeWidgets({ widget: [{ label: 'A' }, { type: 'Frame', label: 'F', widget: [{ label: 'B' }] }, { label: 'C' }] });
 			assert.strictEqual(widgets[0].label, 'A');
-			assert.strictEqual(widgets[1].__frame, true);
+			assert.strictEqual(widgets[1].__section, true);
 			assert.strictEqual(widgets[2].label, 'B');
 			assert.strictEqual(widgets[3].label, 'C');
 		});
@@ -356,7 +356,7 @@ describe('Widget Snapshot Helpers', () => {
 		it('handles frame with no children', () => {
 			const widgets = normalizeWidgets({ widget: { type: 'Frame', label: 'Section' } });
 			assert.strictEqual(widgets.length, 1);
-			assert.strictEqual(widgets[0].__frame, true);
+			assert.strictEqual(widgets[0].__section, true);
 		});
 	});
 

@@ -3171,6 +3171,8 @@ function renderIndexHtml(options) {
 	html = html.replace(/__STATUS_CLASS__/g, escapeHtml(opts.statusClass || 'status-pending'));
 	html = html.replace(/__AUTH_INFO__/g, inlineJson(opts.authInfo || {}));
 	html = html.replace(/__SESSION_SETTINGS__/g, inlineJson(opts.sessionSettings || {}));
+	html = html.replace(/__HOMEPAGE_DATA__/g, opts.homepageData ? inlineJson(opts.homepageData) : 'null');
+	html = html.replace(/__SITEMAP_CACHE__/g, opts.sitemapCache ? inlineJson(opts.sitemapCache) : 'null');
 	const themeClass = opts.sessionSettings?.darkMode === false ? 'theme-light' : 'theme-dark';
 	html = html.replace(/__THEME_CLASS__/g, themeClass);
 	return html;
@@ -3341,12 +3343,146 @@ html, body {
 </html>`;
 }
 
-function sendIndex(req, res) {
+const HOMEPAGE_DATA_TIMEOUT_MS = 500;
+const SITEMAP_CACHE_TIMEOUT_MS = 2000;
+
+async function getFullSitemapData(sitemapName) {
+	if (!sitemapName) return null;
+
+	const rootPath = `/rest/sitemaps/${encodeURIComponent(sitemapName)}/${encodeURIComponent(sitemapName)}?type=json`;
+	const queue = [rootPath];
+	const seenPages = new Set();
+	const pages = {};
+	const startTime = Date.now();
+
+	while (queue.length) {
+		// Check timeout
+		if (Date.now() - startTime > SITEMAP_CACHE_TIMEOUT_MS) {
+			break;
+		}
+
+		const rawUrl = queue.shift();
+		if (!rawUrl) continue;
+		const normalized = normalizeOpenhabPath(rawUrl);
+		if (!normalized) continue;
+		const url = ensureJsonParam(normalized);
+		if (!url || !url.includes('/rest/sitemaps/')) continue;
+		if (seenPages.has(url)) continue;
+		seenPages.add(url);
+
+		let page;
+		try {
+			const body = await fetchOpenhab(url);
+			if (!body.ok) continue;
+			page = JSON.parse(body.body);
+		} catch {
+			continue;
+		}
+
+		// Apply group state overrides
+		await applyGroupStateOverrides(page);
+
+		// Store the page data indexed by URL
+		pages[url] = page;
+
+		// Find linked pages and add to queue
+		const findLinks = (widgets) => {
+			if (!widgets) return;
+			let list;
+			if (Array.isArray(widgets)) {
+				list = widgets;
+			} else if (Array.isArray(widgets.item)) {
+				list = widgets.item;
+			} else if (widgets.item) {
+				list = [widgets.item];
+			} else {
+				list = [widgets];
+			}
+			for (const w of list) {
+				if (!w) continue;
+				const link = w?.linkedPage?.link || w?.link;
+				if (link && typeof link === 'string' && link.includes('/rest/sitemaps/')) {
+					const rel = normalizeOpenhabPath(link);
+					if (rel && !seenPages.has(ensureJsonParam(rel))) {
+						queue.push(rel);
+					}
+				}
+				if (w?.widget) findLinks(w.widget);
+				if (w?.widgets) findLinks(w.widgets);
+			}
+		};
+		findLinks(page?.widgets || page?.widget);
+	}
+
+	if (Object.keys(pages).length === 0) return null;
+	return { pages, root: rootPath };
+}
+
+async function getHomepageData(req) {
+	const sitemapName = backgroundState.sitemap.name;
+	if (!sitemapName || !backgroundState.sitemap.ok) return null;
+
+	try {
+		const result = await Promise.race([
+			fetchOpenhab(`/rest/sitemaps/${encodeURIComponent(sitemapName)}/${encodeURIComponent(sitemapName)}?type=json`),
+			new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), HOMEPAGE_DATA_TIMEOUT_MS)),
+		]);
+		if (!result.ok) return null;
+
+		const page = JSON.parse(result.body);
+		const widgets = normalizeWidgets(page);
+
+		// Apply visibility filtering
+		const userRole = req.ohProxyUser ? (sessions.getUser(req.ohProxyUser)?.role || 'normal') : 'normal';
+		const visibilityRules = sessions.getAllVisibilityRules();
+		const visibilityMap = new Map(visibilityRules.map((r) => [r.widgetId, r.visibility]));
+
+		const visibleWidgets = widgets.filter((w) => {
+			if (userRole === 'admin') return true;
+			if (w?.__section) return true;
+			const wKey = serverWidgetKey(w);
+			const vis = visibilityMap.get(wKey) || 'all';
+			if (vis === 'all') return true;
+			if (vis === 'admin') return false;
+			if (vis === 'normal') return userRole === 'normal' || userRole === 'readonly';
+			return true;
+		});
+
+		return {
+			sitemapName,
+			pageUrl: `/rest/sitemaps/${encodeURIComponent(sitemapName)}/${encodeURIComponent(sitemapName)}?type=json`,
+			pageTitle: page.title || sitemapName,
+			widgets: visibleWidgets,
+		};
+	} catch {
+		return null;
+	}
+}
+
+async function sendIndex(req, res) {
 	res.setHeader('Cache-Control', 'no-cache');
 	res.setHeader('Content-Type', 'text/html; charset=utf-8');
 	const status = getInitialStatusInfo(req);
 	status.authInfo = getAuthInfo(req);
 	status.sessionSettings = req.ohProxySession?.settings || sessions.getDefaultSettings();
+
+	// Embed homepage and sitemap data for authenticated users
+	if (req.ohProxyAuth === 'authenticated') {
+		// Ensure sitemap cache is populated (may not be ready on cold start)
+		if (!backgroundState.sitemap.name || !backgroundState.sitemap.ok) {
+			await refreshSitemapCache({ skipAtmosphereResubscribe: true });
+		}
+		const sitemapName = backgroundState.sitemap.name;
+		if (sitemapName) {
+			const [homepageData, sitemapCache] = await Promise.all([
+				getHomepageData(req),
+				getFullSitemapData(sitemapName),
+			]);
+			status.homepageData = homepageData;
+			status.sitemapCache = sitemapCache;
+		}
+	}
+
 	res.send(renderIndexHtml(status));
 }
 
@@ -3380,7 +3516,7 @@ function normalizeWidgets(page) {
 		for (const item of list) {
 			if (item?.type === 'Frame') {
 				const label = safeText(item?.label || item?.item?.label || item?.item?.name || '');
-				out.push({ __frame: true, label });
+				out.push({ __section: true, label });
 				// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
 				let kids = item.widgets || item.widget;
 				if (kids) {
