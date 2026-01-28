@@ -832,19 +832,34 @@ function updateStatusBar() {
 	updateErrorUiState();
 }
 
-function showStatusTooltip() {
+function positionStatusTooltip(e) {
 	if (!els.statusTooltip) return;
-	const latency = getRollingLatency();
+	// Position tooltip below and slightly left of cursor
+	const x = e.clientX - els.statusTooltip.offsetWidth - 16;
+	const y = e.clientY + 24;
+	els.statusTooltip.style.left = x + 'px';
+	els.statusTooltip.style.top = y + 'px';
+}
+
+function showStatusTooltip(e) {
+	if (!els.statusTooltip) return;
 	const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
 	if (valueEl) {
-		if (latency !== null) {
-			valueEl.textContent = latency + 'ms';
+		if (isLanClient === true) {
+			valueEl.textContent = 'LAN';
 			valueEl.classList.remove('loading');
 		} else {
-			valueEl.textContent = '';
-			valueEl.classList.add('loading');
+			const latency = getRollingLatency();
+			if (latency !== null) {
+				valueEl.textContent = latency + 'ms';
+				valueEl.classList.remove('loading');
+			} else {
+				valueEl.textContent = '';
+				valueEl.classList.add('loading');
+			}
 		}
 	}
+	if (e && e.clientX !== undefined) positionStatusTooltip(e);
 	els.statusTooltip.classList.add('visible');
 }
 
@@ -5499,8 +5514,8 @@ function invalidatePing() {
 	fastConnectionActive = false;
 	pingNeedsPrefill = true;
 	if (wasFast) updateStatusBar();
-	// Update tooltip if visible
-	if (els.statusTooltip && els.statusTooltip.classList.contains('visible')) {
+	// Update tooltip if visible (skip if LAN client - already showing "LAN")
+	if (!isLanClient && els.statusTooltip && els.statusTooltip.classList.contains('visible')) {
 		const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
 		if (valueEl) {
 			valueEl.textContent = '';
@@ -5537,8 +5552,8 @@ function updateFastConnectionState() {
 	if (wasFast !== fastConnectionActive) {
 		updateStatusBar();
 	}
-	// Update tooltip if visible
-	if (els.statusTooltip && els.statusTooltip.classList.contains('visible')) {
+	// Update tooltip if visible (skip if LAN client - already showing "LAN")
+	if (!isLanClient && els.statusTooltip && els.statusTooltip.classList.contains('visible')) {
 		const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
 		if (valueEl) {
 			if (latency !== null) {
@@ -6013,6 +6028,7 @@ function restoreNormalPolling() {
 	// Status tooltip interactions
 	if (els.statusDotWrap) {
 		els.statusDotWrap.addEventListener('mouseenter', showStatusTooltip);
+		els.statusDotWrap.addEventListener('mousemove', positionStatusTooltip);
 		els.statusDotWrap.addEventListener('mouseleave', hideStatusTooltip);
 		els.statusDotWrap.addEventListener('touchstart', showStatusTooltip, { passive: true });
 		els.statusDotWrap.addEventListener('touchend', hideStatusTooltip, { passive: true });
