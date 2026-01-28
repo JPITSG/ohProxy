@@ -5489,6 +5489,7 @@ const FAST_CONNECTION_DISABLE_MS = 80;  // Exit fast mode above this
 let pingSamples = [];
 let pingTimer = null;
 let forceFastMode = false;
+let isLanClient = null;  // null = unknown, true = LAN, false = WAN (set by server via WS)
 let fastConnectionActive = false;
 let pingNeedsPrefill = true;
 
@@ -5514,7 +5515,7 @@ function getRollingLatency() {
 }
 
 function isFastConnection() {
-	return forceFastMode || fastConnectionActive;
+	return forceFastMode || isLanClient === true || fastConnectionActive;
 }
 
 function updateFastConnectionState() {
@@ -5833,6 +5834,23 @@ function connectWs() {
 					}
 					return;
 				}
+				if (msg.event === 'lanStatus' && msg.data) {
+					// Server indicates whether client is on LAN or WAN
+					const wasLan = isLanClient;
+					isLanClient = msg.data.isLan === true;
+					if (isLanClient) {
+						// LAN client: skip ping, assume fast connection
+						stopPing();
+						if (!wasLan) updateStatusBar();
+					} else {
+						// WAN client: use ping to measure connection speed
+						if (wasLan !== false) {
+							invalidatePing();
+							startPingDelayed();
+						}
+					}
+					return;
+				}
 				if (msg.event === 'update' && msg.data) {
 					applyWsUpdate(msg.data);
 				} else if (msg.event === 'deltaResponse' && msg.data) {
@@ -5851,6 +5869,7 @@ function connectWs() {
 			if (timedOut) wsTimedOutToken = 0;
 			wsConnected = false;
 			wsConnection = null;
+			isLanClient = null;  // Reset LAN status; will be set on reconnect
 			// Don't count as failure if paused (intentional stop) or clean close
 			if (!state.isPaused && !timedOut && (!wasConnected || event.code === 1002 || event.code === 1006)) {
 				wsFailCount++;
