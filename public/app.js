@@ -81,7 +81,8 @@ async function softReset() {
 	stopPing();
 	closeWs();
 
-	// Aggressive retry loop
+	// Aggressive retry loop with backoff after 60s
+	const softResetStart = Date.now();
 	while (true) {
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), SOFT_RESET_TIMEOUT_MS);
@@ -92,7 +93,6 @@ async function softReset() {
 				signal: controller.signal,
 				headers: { 'Accept': 'application/json' },
 			});
-			clearTimeout(timeoutId);
 
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data = await res.json();
@@ -143,9 +143,13 @@ async function softReset() {
 			return; // Done!
 
 		} catch (e) {
+			const elapsed = Date.now() - softResetStart;
+			if (elapsed > 60000) {
+				const jitter = Math.random() * 2000;
+				await new Promise(r => setTimeout(r, 5000 + jitter));
+			}
+		} finally {
 			clearTimeout(timeoutId);
-			// Immediate retry - no delay
-			continue;
 		}
 	}
 }
@@ -1711,7 +1715,7 @@ function pushImageViewerHistory(url, refreshMs) {
 			refreshMs: Number.isFinite(Number(refreshMs)) ? Number(refreshMs) : null,
 		},
 	};
-	history.pushState(payload, '', window.location.pathname);
+	history.pushState(payload, '', window.location.pathname + window.location.search + window.location.hash);
 }
 
 // Card Config Modal
@@ -2518,6 +2522,17 @@ function syncAuthFromHeaders(res) {
 	if (changed) updateStatusBar();
 }
 
+function pendingUntilAbort(signal) {
+	const mkAbortErr = () => typeof DOMException !== 'undefined'
+		? new DOMException('Aborted', 'AbortError')
+		: Object.assign(new Error('Aborted'), { name: 'AbortError' });
+	return new Promise((_, reject) => {
+		if (!signal) return; // stays pending (same as before)
+		if (signal.aborted) return reject(mkAbortErr());
+		signal.addEventListener('abort', () => reject(mkAbortErr()), { once: true });
+	});
+}
+
 async function fetchWithAuth(url, options) {
 	const res = await fetch(url, options);
 	syncAuthFromHeaders(res);
@@ -2529,7 +2544,7 @@ async function fetchWithAuth(url, options) {
 			const data = await clone.json();
 			if (data?.error === 'account-deleted') {
 				window.location.href = '/login';
-				return new Promise(() => {});
+				return pendingUntilAbort(options?.signal);
 			}
 		} catch (err) {
 			logJsError('fetchWithAuth account-deleted parse failed', err);
@@ -2538,12 +2553,11 @@ async function fetchWithAuth(url, options) {
 		try {
 			if (window.parent !== window && window.parent.__ohProxyIframeWrapper) {
 				window.parent.location.href = '/';
-				return new Promise(() => {});
+				return pendingUntilAbort(options?.signal);
 			}
 		} catch (e) { /* cross-origin parent */ }
 		triggerReload();
-		// Return a never-resolving promise to prevent further processing
-		return new Promise(() => {});
+		return pendingUntilAbort(options?.signal);
 	}
 	return res;
 }
@@ -2658,7 +2672,9 @@ function pageCacheKey(url) {
 
 // Track in-flight fetch requests to prevent concurrent fetches for same URL
 const fetchPageInflight = new Map();
-const FETCH_PAGE_TIMEOUT_MS = 5000; // Timeout for page fetches to prevent deadlocks
+const WS_DELTA_TIMEOUT_MS = 1500; // Fast timeout, falls back to XHR
+const XHR_DELTA_TIMEOUT_MS = 3000; // Timeout for XHR fallback
+const FETCH_PAGE_TIMEOUT_MS = WS_DELTA_TIMEOUT_MS + XHR_DELTA_TIMEOUT_MS + 500; // Outer safety net
 
 // Clear all in-flight fetches on network state change to prevent deadlocks
 function clearInflightFetches() {
@@ -2725,20 +2741,32 @@ async function fetchPageInternal(url, opts) {
 		deltaUrl.searchParams.set('since', since);
 	}
 
-	const res = await fetchWithAuth(deltaUrl.toString(), {
-		headers: { 'Accept': 'application/json' },
-		cache: 'no-store',
-	});
-	if (!res.ok) {
-		throw new Error(`HTTP ${res.status}`);
-	}
-	const text = await res.text();
+	const xhrController = new AbortController();
+	const xhrTimer = setTimeout(() => xhrController.abort(), XHR_DELTA_TIMEOUT_MS);
 	let data;
 	try {
-		data = JSON.parse(text);
+		const res = await fetchWithAuth(deltaUrl.toString(), {
+			headers: { 'Accept': 'application/json' },
+			cache: 'no-store',
+			signal: xhrController.signal,
+		});
+		if (!res.ok) {
+			throw new Error(`HTTP ${res.status}`);
+		}
+		const text = await res.text();
+		try {
+			data = JSON.parse(text);
+		} catch (parseErr) {
+			logJsError(`fetchPageInternal JSON parse failed for ${deltaUrl.toString()}`, parseErr);
+			throw new Error(`Non-JSON response from ${deltaUrl.toString()} (did you enable REST + ?type=json?)`);
+		}
 	} catch (err) {
-		logJsError(`fetchPageInternal JSON parse failed for ${deltaUrl.toString()}`, err);
-		throw new Error(`Non-JSON response from ${deltaUrl.toString()} (did you enable REST + ?type=json?)`);
+		if (err?.name === 'AbortError') {
+			throw new Error('XHR delta timeout');
+		}
+		throw err;
+	} finally {
+		clearTimeout(xhrTimer);
 	}
 
 	if (data && data.delta === true) {
@@ -4007,8 +4035,6 @@ function updateCard(card, w, afterImage, info) {
 			const sendSelection = async (command, disableEl) => {
 				if (!command || safeText(command) === safeText(st) || sending) return;
 				sending = true;
-				state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
-				state.pendingRefresh = false;
 				if (disableEl) disableEl.disabled = true;
 				try { await sendCommand(itemName, command); await refresh(false); }
 				catch (e) {
@@ -4030,13 +4056,24 @@ function updateCard(card, w, afterImage, info) {
 					fakeSelect.textContent = opt ? opt.textContent : safeText(select.value);
 				};
 				syncFake();
-				select.onfocus = () => { state.suppressRefreshCount += 1; };
-				select.onblur = () => releaseRefresh();
+				let released = false;
+				select.onfocus = () => {
+					state.suppressRefreshCount += 1;
+					released = false;
+				};
+				select.onblur = () => {
+					if (!released) releaseRefresh();
+				};
 				select.onclick = () => haptic();
 				select.onchange = async () => {
 					haptic();
 					syncFake();
-					await sendSelection(select.value, select);
+					released = true;
+					try {
+						await sendSelection(select.value, select);
+					} finally {
+						releaseRefresh();
+					}
 				};
 				selectWrap.appendChild(fakeSelect);
 				select.classList.add('select-overlay');
@@ -4768,10 +4805,11 @@ function syncHistory(replace) {
 		pageTitle: state.pageTitle,
 		stack: state.stack,
 	};
+	const historyUrl = window.location.pathname + window.location.search + window.location.hash;
 	if (replace) {
-		history.replaceState(payload, '', window.location.pathname);
+		history.replaceState(payload, '', historyUrl);
 	} else {
-		history.pushState(payload, '', window.location.pathname);
+		history.pushState(payload, '', historyUrl);
 	}
 }
 
@@ -5383,22 +5421,31 @@ function stopChartHashCheck() {
 
 // --- Heartbeat Check ---
 let heartbeatInProgress = false;
+const HEARTBEAT_TIMEOUT_MS = 5000;
 
 async function checkHeartbeat() {
 	if (heartbeatInProgress) return;
 	heartbeatInProgress = true;
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), HEARTBEAT_TIMEOUT_MS);
 	try {
-		const res = await fetch('/api/heartbeat', { cache: 'no-store' });
+		const res = await fetch('/api/heartbeat', { cache: 'no-store', signal: controller.signal });
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
 		// Connection is alive - ensure we're not in error state
 		if (!state.connectionOk) {
 			setConnectionStatus(true);
 		}
 	} catch (e) {
-		console.warn('Heartbeat failed:', e.message);
-		logJsError('checkHeartbeat failed', e);
-		setConnectionStatus(false, 'Connection lost');
+		if (e.name === 'AbortError') {
+			console.warn('Heartbeat timed out');
+			setConnectionStatus(false, 'Connection timeout');
+		} else {
+			console.warn('Heartbeat failed:', e.message);
+			logJsError('checkHeartbeat failed', e);
+			setConnectionStatus(false, 'Connection lost');
+		}
 	} finally {
+		clearTimeout(timeoutId);
 		heartbeatInProgress = false;
 	}
 }
@@ -5557,7 +5604,6 @@ let wsConnectToken = 0;
 let wsTimedOutToken = 0;
 let wsDeltaRequestId = 0;
 const wsDeltaPending = new Map(); // requestId -> { resolve, reject, timer }
-const WS_DELTA_TIMEOUT_MS = 5000;
 
 function fetchDeltaViaWs(url, since) {
 	return new Promise((resolve, reject) => {

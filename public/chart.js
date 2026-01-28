@@ -124,7 +124,9 @@
 			var hGridGroup = $('g', {});
 			var vGridGroup = $('g', {});
 
-			var yRange = window._chartYMax - window._chartYMin;
+			var rawRange = window._chartYMax - window._chartYMin;
+			var isFlat = !Number.isFinite(rawRange) || Math.abs(rawRange) < 1e-10;
+			var yRange = isFlat ? 1 : rawRange; // Avoid division by zero, but use isFlat for positioning
 
 			// Y-axis grid and labels - calculate positions from pre-computed values
 			var yValues = [];
@@ -133,9 +135,16 @@
 
 			for (var i = 0; i < rawYValues.length; i++) {
 				var y = rawYValues[i];
-				var yPos = sm
-					? ch - (i / (rawYValues.length - 1)) * ch
-					: ch - ((y - window._chartYMin) / yRange) * ch;
+				var yPos;
+				if (isFlat) {
+					yPos = ch / 2;
+				} else if (sm) {
+					yPos = rawYValues.length > 1
+						? ch - (i / (rawYValues.length - 1)) * ch
+						: ch / 2;
+				} else {
+					yPos = ch - ((y - window._chartYMin) / yRange) * ch;
+				}
 				// Filter by position bounds (only relevant for desktop with niceStep)
 				if (yPos >= -5 && yPos <= ch + 5) {
 					yValues.push(y);
@@ -181,7 +190,7 @@
 				var d = window._chartData[i];
 				var pt = {
 					x: iL + (d.x / 100) * dw,
-					y: ch - ((d.y - window._chartYMin) / yRange) * ch,
+					y: isFlat ? ch / 2 : ch - ((d.y - window._chartYMin) / yRange) * ch,
 					value: d.y,
 					t: d.t,
 					index: i
@@ -294,6 +303,8 @@
 		}
 
 		niceStep(range, targetSteps) {
+			// Guard against zero/tiny range to prevent infinite loops
+			if (!range || !Number.isFinite(range) || range < 1e-10) return 1;
 			var rough = range / targetSteps;
 			var magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
 			var residual = rough / magnitude;
@@ -367,6 +378,12 @@
 			var yRange = window._chartYMax - window._chartYMin;
 			var numYLines = sm ? 5 : 6;
 			var yValues = [];
+
+			// Handle flat data (constant values) - threshold aligned with isFlat in render()
+			if (!Number.isFinite(yRange) || Math.abs(yRange) < 1e-10) {
+				yValues.push(window._chartYMin);
+				return yValues;
+			}
 
 			if (sm) {
 				for (var i = 0; i < 5; i++) {
