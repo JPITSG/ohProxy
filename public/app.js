@@ -3332,12 +3332,14 @@ function resetLabelRow(labelRow, labelStack, navHint, preserve = null) {
 	}
 }
 
-function animateSliderValue(input, targetValue, durationMs = 400) {
+function animateSliderValue(input, targetValue, valueBubble = null, positionCallback = null, durationMs = 400) {
 	if (!input) return;
 	const startValue = Number(input.value);
 	const endValue = Number(targetValue);
 	if (startValue === endValue || !Number.isFinite(startValue) || !Number.isFinite(endValue)) {
 		input.value = targetValue;
+		if (valueBubble) valueBubble.textContent = targetValue + '%';
+		if (positionCallback) positionCallback();
 		return;
 	}
 	const startTime = performance.now();
@@ -3348,6 +3350,8 @@ function animateSliderValue(input, targetValue, durationMs = 400) {
 		const eased = 1 - Math.pow(1 - progress, 3);
 		const currentValue = Math.round(startValue + (endValue - startValue) * eased);
 		input.value = currentValue;
+		if (valueBubble) valueBubble.textContent = currentValue + '%';
+		if (positionCallback) positionCallback();
 		if (progress < 1) {
 			requestAnimationFrame(animate);
 		}
@@ -4563,11 +4567,35 @@ function updateCard(card, w, afterImage, info) {
 		input.addEventListener('mouseup', endDrag);
 		input.addEventListener('blur', endDrag);
 
+		const valueBubble = document.createElement('span');
+		valueBubble.className = 'slider-bubble';
+		valueBubble.textContent = current + '%';
 		inlineSlider.appendChild(input);
+		inlineSlider.appendChild(valueBubble);
+
+		// Position bubble above thumb (account for thumb width ~16px)
+		const positionBubble = () => {
+			const val = Number(input.value);
+			const min = Number(input.min) || 0;
+			const max = Number(input.max) || 100;
+			const pct = (val - min) / (max - min);
+			const thumbWidth = 16;
+			const trackWidth = input.offsetWidth - thumbWidth;
+			const offset = thumbWidth / 2 + pct * trackWidth;
+			valueBubble.style.left = offset + 'px';
+		};
+		// Defer initial positioning until element is rendered
+		requestAnimationFrame(positionBubble);
+
+		// Update label and position when slider value changes
+		input.addEventListener('input', () => {
+			valueBubble.textContent = input.value + '%';
+			positionBubble();
+		});
 
 		// Animate slider from previous value to current value
 		if (startValue !== current) {
-			animateSliderValue(input, current);
+			animateSliderValue(input, current, valueBubble, positionBubble);
 		}
 
 		const toggleSlider = async () => {
