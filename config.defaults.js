@@ -147,6 +147,8 @@ module.exports = {
 		accessLog: '',
 		// JavaScript error log file path (absolute; empty disables).
 		jsLogFile: '',
+		// Enable JavaScript error logging (boolean; false disables client reporting).
+		jsLogEnabled: false,
 		// Access log verbosity (all or 400+).
 		accessLogLevel: 'all',
 		// Proxy middleware logging level (silent|error|warn|info|debug).

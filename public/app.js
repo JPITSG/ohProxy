@@ -2,10 +2,12 @@
 
 // Global error handler - report JS errors to server
 (function() {
+	const jsLogEnabled = window.__OH_CONFIG__?.jsLogEnabled === true;
 	let lastErrorTime = 0;
 	const errorThrottleMs = 5000;
 
 	function reportError(message, url, line, col, error) {
+		if (!jsLogEnabled) return;
 		const now = Date.now();
 		if (now - lastErrorTime < errorThrottleMs) return;
 		lastErrorTime = now;
@@ -64,7 +66,8 @@ async function softReset() {
 
 	// Show cached home snapshot behind the blur (if available)
 	const snapshot = loadHomeSnapshot();
-	if (snapshot && applyHomeSnapshot(snapshot)) {
+	const snapshotApplied = snapshot && applyHomeSnapshot(snapshot);
+	if (snapshotApplied) {
 		render();
 		window.scrollTo(0, 0);
 	}
@@ -81,7 +84,28 @@ async function softReset() {
 	stopPing();
 	closeWs();
 
-	// Aggressive retry loop with backoff after 60s
+	// Fast path: if snapshot provided valid rootPageUrl, skip sitemap fetch
+	if (snapshotApplied && state.rootPageUrl) {
+		state.pageUrl = state.rootPageUrl;
+		try {
+			setConnectionStatus(true);
+			await refresh(true);
+			showResumeSpinner(false);
+
+			// Restart background services
+			if (!state.isPaused) {
+				startPolling();
+				resumePingPending = true;
+				connectWs();
+			}
+			fetchFullSitemap().catch(() => {});
+			return; // Done!
+		} catch (e) {
+			// Fast path failed, fall through to sitemap fetch
+		}
+	}
+
+	// Fallback: fetch sitemap with aggressive retry loop (backoff after 60s)
 	const softResetStart = Date.now();
 	while (true) {
 		const controller = new AbortController();
@@ -136,7 +160,7 @@ async function softReset() {
 			// Restart background services
 			if (!state.isPaused) {
 				startPolling();
-				startPingDelayed();
+				resumePingPending = true;
 				connectWs();
 			}
 			fetchFullSitemap().catch(() => {});
@@ -404,6 +428,7 @@ const chartHashes = new Map(); // item|period|mode -> hash
 let searchStateAbort = null;
 let searchStateActiveToken = 0;
 let resumeReloadArmed = false;
+let resumePingPending = false;
 let lastHiddenTime = 0;
 let pageFadeToken = 0;
 let loadingTimer = null;
@@ -5100,6 +5125,11 @@ async function refresh(showLoading) {
 			clearLoadingStatusTimer();
 			setConnectionStatus(true);
 			saveHomeSnapshot();
+			// After soft reset, start ping once first delta succeeds
+			if (resumePingPending) {
+				resumePingPending = false;
+				startPingDelayed(RESUME_PING_DELAY_MS);
+			}
 			return;
 		}
 		const page = result.page;
@@ -5559,6 +5589,7 @@ function doPing() {
 
 let pingStartDelayTimer = null;
 const PING_START_DELAY_MS = 500;
+const RESUME_PING_DELAY_MS = 5000;
 
 function startPing() {
 	stopPing();
@@ -5568,7 +5599,7 @@ function startPing() {
 	pingTimer = setInterval(doPing, PING_INTERVAL_MS);
 }
 
-function startPingDelayed() {
+function startPingDelayed(delayMs = PING_START_DELAY_MS) {
 	stopPing();
 	invalidatePing();
 	if (forceFastMode) return;
@@ -5576,7 +5607,7 @@ function startPingDelayed() {
 	pingStartDelayTimer = setTimeout(() => {
 		pingStartDelayTimer = null;
 		startPing();
-	}, PING_START_DELAY_MS);
+	}, delayMs);
 }
 
 function stopPing() {
@@ -5728,6 +5759,7 @@ function getWsUrl() {
 function connectWs() {
 	if (wsConnection) return;
 	if (state.isPaused) return;
+	if (CLIENT_CONFIG.websocketDisabled === true) return;
 	if (wsFailCount >= WS_MAX_FAILURES) return;
 
 	try {
