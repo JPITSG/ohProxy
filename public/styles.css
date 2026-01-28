@@ -1200,10 +1200,9 @@ body.theme-light .status-bar.status-fast .status-dot {
 
 /* Status tooltip - matches chart.css tooltip styling exactly */
 .status-tooltip {
-	position: absolute;
-	top: 100%;
-	right: 0;
-	margin-top: 8px;
+	position: fixed;
+	top: 0;
+	left: 0;
 	background: #f1f2f9;
 	border: 1px solid #ccccd1;
 	border-radius: 10px;
