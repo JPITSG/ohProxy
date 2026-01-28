@@ -224,6 +224,7 @@ const ACCESS_LOG_LEVEL = safeText(process.env.ACCESS_LOG_LEVEL || SERVER_CONFIG.
 	.trim()
 	.toLowerCase();
 const JS_LOG_FILE = safeText(process.env.JS_LOG_FILE || SERVER_CONFIG.jsLogFile || '');
+const JS_LOG_ENABLED = SERVER_CONFIG.jsLogEnabled === true;
 const SLOW_QUERY_MS = configNumber(SERVER_CONFIG.slowQueryMs, 0);
 const AUTH_REALM = safeText(SERVER_AUTH.realm || 'openHAB Proxy');
 const AUTH_COOKIE_NAME = safeText(SERVER_AUTH.cookieName || 'AuthStore');
@@ -320,7 +321,7 @@ function logMessage(message) {
 }
 
 function logJsError(message) {
-	if (!JS_LOG_FILE) return;
+	if (!liveConfig.jsLogEnabled || !JS_LOG_FILE) return;
 	writeLogLine(JS_LOG_FILE, message);
 }
 
@@ -1195,6 +1196,7 @@ const liveConfig = {
 	cmdapiEnabled: CMDAPI_ENABLED,
 	cmdapiAllowedSubnets: CMDAPI_ALLOWED_SUBNETS,
 	cmdapiAllowedItems: CMDAPI_ALLOWED_ITEMS,
+	jsLogEnabled: JS_LOG_ENABLED,
 };
 
 // Widget glow rules - migrate from JSON to SQLite on first run
@@ -1349,6 +1351,9 @@ function reloadLiveConfig() {
 	liveConfig.cmdapiAllowedItems = Array.isArray(newServer.cmdapi?.allowedItems)
 		? newServer.cmdapi.allowedItems
 		: [];
+
+	// JS logging config
+	liveConfig.jsLogEnabled = newServer.jsLogEnabled === true;
 
 	const iconVersionChanged = liveConfig.iconVersion !== oldIconVersion;
 	const iconSizeChanged = liveConfig.iconSize !== oldIconSize;
@@ -4906,6 +4911,7 @@ app.get('/config.js', (req, res) => {
 
 	res.send(`window.__OH_CONFIG__=${JSON.stringify({
 		iconVersion: liveConfig.iconVersion,
+		jsLogEnabled: liveConfig.jsLogEnabled,
 		client: clientConfig,
 		webviewNoProxy: liveConfig.webviewNoProxy,
 		widgetGlowRules: sessions.getAllGlowRules(),
