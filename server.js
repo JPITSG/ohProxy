@@ -1610,6 +1610,10 @@ function handleWsConnection(ws, req) {
 	ws.isAlive = true;
 	ws.clientState = { focused: true };  // Assume focused on connect; client will send actual state
 	ws.ohProxyUser = req.ohProxyUser || null;  // Track authenticated username
+	ws.clientIp = clientIp;  // Track for LAN status detection
+
+	// Determine if client is on LAN (in allowSubnets)
+	const isLan = clientIp !== 'unknown' && ipInAnySubnet(clientIp, liveConfig.allowSubnets);
 
 	// Send welcome message and current backend status
 	try {
@@ -1618,6 +1622,7 @@ function handleWsConnection(ws, req) {
 			event: 'backendStatus',
 			data: { ok: backendStatus.ok, error: backendStatus.lastError },
 		}));
+		ws.send(JSON.stringify({ event: 'lanStatus', data: { isLan } }));
 	} catch (e) {
 		logMessage(`[WS] Send error for ${clientIp}: ${e.message}`);
 	}
