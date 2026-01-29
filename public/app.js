@@ -267,16 +267,23 @@ function reportGps() {
 		if (state.proxyAuth !== 'authenticated') return;
 		if (!navigator.geolocation) return;
 		navigator.geolocation.getCurrentPosition(
-			(pos) => {
+			async (pos) => {
 				try {
+					const payload = {
+						lat: pos.coords.latitude,
+						lon: pos.coords.longitude,
+						accuracy: pos.coords.accuracy,
+					};
+					try {
+						if (navigator.getBattery) {
+							const battery = await navigator.getBattery();
+							payload.batt = Math.round(battery.level * 100);
+						}
+					} catch (_) {}
 					fetch('/api/gps', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							lat: pos.coords.latitude,
-							lon: pos.coords.longitude,
-							accuracy: pos.coords.accuracy,
-						}),
+						body: JSON.stringify(payload),
 					}).catch(() => {});
 				} catch (_) {}
 			},

@@ -5067,6 +5067,7 @@ app.post('/api/gps', express.json(), (req, res) => {
 	const rawLat = typeof body.lat === 'number' && Number.isFinite(body.lat) ? body.lat : null;
 	const rawLon = typeof body.lon === 'number' && Number.isFinite(body.lon) ? body.lon : null;
 	const accuracy = typeof body.accuracy === 'number' && Number.isFinite(body.accuracy) ? Math.round(body.accuracy) : null;
+	const batt = typeof body.batt === 'number' && Number.isFinite(body.batt) && body.batt >= 0 && body.batt <= 100 ? Math.round(body.batt) : null;
 	if (rawLat === null || rawLon === null) {
 		res.status(400).json({ error: 'Invalid coordinates' });
 		return;
@@ -5097,8 +5098,8 @@ app.post('/api/gps', express.json(), (req, res) => {
 	const conn = getMysqlConnection();
 	if (conn) {
 		conn.query(
-			'INSERT INTO log_gps (username, lat, lon, distancehome) VALUES (?, ?, ?, ?)',
-			[username, lat, lon, distanceHome],
+			'INSERT INTO log_gps (username, lat, lon, distancehome, batt) VALUES (?, ?, ?, ?, ?)',
+			[username, lat, lon, distanceHome, batt],
 			(err) => {
 				if (err) logMessage(`[GPS] DB insert failed: ${err.message || err}`);
 			}
