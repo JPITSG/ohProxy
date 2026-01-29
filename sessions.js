@@ -120,6 +120,11 @@ function initDb() {
 		db.exec(`ALTER TABLE users ADD COLUMN disabled INTEGER DEFAULT 0`);
 	} catch (e) { /* column already exists */ }
 
+	// Migration: add trackgps column to users table
+	try {
+		db.exec(`ALTER TABLE users ADD COLUMN trackgps INTEGER DEFAULT 0`);
+	} catch (e) { /* column already exists */ }
+
 	// Run cleanup on startup
 	cleanupSessions();
 
@@ -538,7 +543,7 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_-]{1,20}$/;
 function getAllUsers() {
 	if (!db) initDb();
 	const rows = db.prepare(`
-		SELECT u.username, u.role, u.created_at, u.disabled, MAX(s.last_seen) as last_active
+		SELECT u.username, u.role, u.created_at, u.disabled, u.trackgps, MAX(s.last_seen) as last_active
 		FROM users u
 		LEFT JOIN sessions s ON u.username = s.username
 		GROUP BY u.username
@@ -548,6 +553,7 @@ function getAllUsers() {
 		role: row.role,
 		createdAt: row.created_at,
 		disabled: row.disabled === 1,
+		trackgps: row.trackgps === 1,
 		lastActive: row.last_active
 	}));
 }
@@ -566,7 +572,8 @@ function getUser(username) {
 		password: row.password,
 		role: row.role,
 		createdAt: row.created_at,
-		disabled: row.disabled === 1
+		disabled: row.disabled === 1,
+		trackgps: row.trackgps === 1
 	};
 }
 
@@ -675,6 +682,19 @@ function enableAllUsers() {
 	return result.changes;
 }
 
+/**
+ * Update GPS tracking flag for a user.
+ * @param {string} username
+ * @param {boolean} enabled
+ * @returns {boolean} - True if user was found and updated
+ */
+function updateUserTrackGps(username, enabled) {
+	if (!db) initDb();
+	const result = db.prepare('UPDATE users SET trackgps = ? WHERE username = ?')
+		.run(enabled ? 1 : 0, username);
+	return result.changes > 0;
+}
+
 // ============================================
 // Server Settings Functions (Key-Value Store)
 // ============================================
@@ -742,6 +762,7 @@ module.exports = {
 	enableUser,
 	disableAllUsers,
 	enableAllUsers,
+	updateUserTrackGps,
 	// Server settings
 	getServerSetting,
 	setServerSetting,

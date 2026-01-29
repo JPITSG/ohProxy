@@ -25,6 +25,7 @@ Commands:
   role <username> <role>            Change user role
   disable <username|*>              Disable user (* = all users)
   enable <username|*>               Enable user (* = all users)
+  gps <username> <true|false>       Enable/disable GPS tracking
 
 Examples:
   node users-cli.js list
@@ -34,6 +35,7 @@ Examples:
   node users-cli.js remove john
   node users-cli.js disable john
   node users-cli.js enable '*'
+  node users-cli.js gps john true
 `);
 }
 
@@ -48,14 +50,16 @@ function listUsers() {
 		console.log('No users found.');
 		return;
 	}
-	console.log('Username'.padEnd(20) + 'Role'.padEnd(12) + 'Status'.padEnd(10) + 'Created'.padEnd(22) + 'Last Active');
-	console.log('-'.repeat(87));
+	console.log('Username'.padEnd(20) + 'Role'.padEnd(12) + 'Status'.padEnd(10) + 'GPS'.padEnd(5) + 'Created'.padEnd(22) + 'Last Active');
+	console.log('-'.repeat(92));
 	for (const user of users) {
 		const status = user.disabled ? 'disabled' : 'active';
+		const gps = user.trackgps ? 'on' : 'off';
 		console.log(
 			user.username.padEnd(20) +
 			user.role.padEnd(12) +
 			status.padEnd(10) +
+			gps.padEnd(5) +
 			formatDate(user.createdAt).padEnd(22) +
 			formatDate(user.lastActive)
 		);
@@ -214,6 +218,24 @@ function enableUser(username) {
 	}
 }
 
+function setGps(username, value) {
+	if (!username || value === undefined) {
+		console.error('Error: Username and true/false required');
+		usage();
+		process.exit(1);
+	}
+	if (value !== 'true' && value !== 'false') {
+		console.error('Error: GPS value must be true or false');
+		process.exit(1);
+	}
+	if (sessions.updateUserTrackGps(username, value === 'true')) {
+		console.log(`GPS tracking ${value === 'true' ? 'enabled' : 'disabled'} for '${username}'`);
+	} else {
+		console.error(`Error: User '${username}' not found`);
+		process.exit(1);
+	}
+}
+
 // Initialize DB
 sessions.initDb();
 
@@ -240,6 +262,9 @@ sessions.initDb();
 			break;
 		case 'enable':
 			enableUser(args[1]);
+			break;
+		case 'gps':
+			setGps(args[1], args[2]);
 			break;
 		default:
 			usage();
