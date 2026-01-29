@@ -85,6 +85,7 @@ async function softReset() {
 	stopPolling();
 	stopPing();
 	closeWs();
+	setConnectionStatus(false);
 
 	// Fast path: if snapshot provided valid rootPageUrl, skip sitemap fetch
 	if (snapshotApplied && state.rootPageUrl) {
