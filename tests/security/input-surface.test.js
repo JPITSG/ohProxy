@@ -27,28 +27,33 @@ describe('Input Surface Coverage', () => {
 		const content = readFile(SERVER_FILE);
 		const inputLines = findInputLines(content);
 		const allowedPatterns = [
-			/const\s+\{\s*username,\s*password\s*\}\s*=\s*req\.body\s*\|\|\s*\{\s*\};/,
+			/if\s*\(!isPlainObject\(req\.query\)\)/,
+			/const\s+\{\s*username,\s*password\s*\}\s*=\s*req\.body\s*;/,
+			/if\s*\(!isPlainObject\(req\.body\)\)/,
 			/const\s+newSettings\s*=\s*req\.body\s*;/,
 			/const\s+body\s*=\s*req\.body\s*;/,
-			/const\s+\{\s*widgetId,\s*rules,\s*visibility,\s*defaultMuted,\s*iframeHeight,\s*proxyCacheSeconds,\s*sectionGlow\s*\}\s*=\s*req\.body\s*\|\|\s*\{\s*\};/,
-			/const\s+\{\s*command\s*\}\s*=\s*req\.body\s*\|\|\s*\{\s*\};/,
-			/const\s+widgetId\s*=\s*safeText\(req\.params\.widgetId\)\s*;/,
-			/const\s+theme\s*=\s*safeText\(req\.query\?\.theme\)\.toLowerCase\(\)\s*;/,
-			/const\s+rawRoot\s*=\s*safeText\(req\.query\?\.root\s*\|\|\s*''\)\s*;/,
-			/const\s+rawSitemap\s*=\s*safeText\(req\.query\?\.sitemap\s*\|\|\s*''\)\s*;/,
-			/const\s+delta\s*=\s*safeText\(req\.query\?\.delta\s*\|\|\s*''\)\s*;/,
-			/const\s+url\s*=\s*safeText\(req\.query\.url\)\.trim\(\)\s*;/,
-			/const\s+item\s*=\s*safeText\(req\.query\.item\s*\|\|\s*''\)\.trim\(\)\s*;/,
-			/const\s+period\s*=\s*safeText\(req\.query\.period\s*\|\|\s*''\)\.trim\(\)\s*;/,
-			/const\s+mode\s*=\s*safeText\(req\.query\.mode\s*\|\|\s*''\)\.trim\(\)\.toLowerCase\(\)\s*\|\|\s*'dark'\s*;/,
-			/const\s+title\s*=\s*safeText\(req\.query\.title\s*\|\|\s*''\)\.trim\(\)\s*;/,
-			/const\s+title\s*=\s*safeText\(req\.query\.title\s*\|\|\s*''\)\.trim\(\)\s*\|\|\s*item\s*;/,
+			/const\s+rawWidgetId\s*=\s*req\.params\.widgetId\s*;/,
+			/const\s+\{\s*widgetId,\s*rules,\s*visibility,\s*defaultMuted,\s*iframeHeight,\s*proxyCacheSeconds,\s*sectionGlow\s*\}\s*=\s*req\.body\s*;/,
+			/const\s+\{\s*command\s*\}\s*=\s*req\.body\s*;/,
+			/const\s+rawTheme\s*=\s*req\.query\?\.theme\s*;/,
+			/const\s+rawRoot\s*=\s*typeof\s+req\.query\?\.root\s*===\s*'string'\s*\?\s*req\.query\.root\s*:\s*''\s*;/,
+			/const\s+rawSitemap\s*=\s*typeof\s+req\.query\?\.sitemap\s*===\s*'string'\s*\?\s*req\.query\.sitemap\s*:\s*''\s*;/,
+			/const\s+rawMode\s*=\s*typeof\s+req\.query\?\.mode\s*===\s*'string'\s*\?\s*req\.query\.mode\s*:\s*''\s*;/,
+			/const\s+rawDelta\s*=\s*req\.query\?\.delta\s*;/,
+			/const\s+rawUrl\s*=\s*req\.query\?\.url\s*;/,
+			/const\s+rawItem\s*=\s*req\.query\?\.item\s*;/,
+			/const\s+rawPeriod\s*=\s*req\.query\?\.period\s*;/,
+			/const\s+rawMode\s*=\s*req\.query\?\.mode\s*;/,
+			/const\s+rawTitle\s*=\s*req\.query\?\.title\s*;/,
 			/const\s+raw\s*=\s*req\.query\?\.url\s*;/,
-			/const\s+rawWidth\s*=\s*parseInt\(req\.query\.w,\s*10\)\s*;/,
-			/const\s+mode\s*=\s*safeText\(req\.query\?\.mode\s*\|\|\s*''\)\.toLowerCase\(\)\s*===\s*'dark'\s*\?\s*'dark'\s*:\s*'light'\s*;/,
-			/const\s+cacheSeconds\s*=\s*parseInt\(req\.query\.cache,\s*10\)\s*;/,
+			/if\s*\(req\.query\?\.w\s*!==\s*undefined\s*&&\s*typeof\s+req\.query\.w\s*!==\s*'string'\s*\)/,
+			/const\s+rawWidth\s*=\s*parseOptionalInt\(req\.query\?\.w,\s*\{\s*min:\s*0,\s*max:\s*10000\s*\}\)\s*;/,
+			/if\s*\(req\.query\?\.w\s*!==\s*undefined\s*&&\s*!Number\.isFinite\(rawWidth\)\s*\)/,
+			/if\s*\(req\.query\?\.cache\s*!==\s*undefined\s*&&\s*typeof\s+req\.query\.cache\s*!==\s*'string'\s*\)/,
+			/const\s+cacheSeconds\s*=\s*parseOptionalInt\(req\.query\?\.cache,\s*\{\s*min:\s*0,\s*max:\s*86400\s*\}\)\s*;/,
+			/if\s*\(req\.query\?\.cache\s*!==\s*undefined\s*&&\s*!Number\.isFinite\(cacheSeconds\)\s*\)/,
 			/const\s+queryKeys\s*=\s*Object\.keys\(req\.query\)\s*;/,
-			/const\s+state\s*=\s*safeText\(req\.query\[itemName\]\)\s*;/,
+			/const\s+rawState\s*=\s*req\.query\[itemName\]\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));
@@ -62,18 +67,21 @@ describe('Input Validation Coverage', () => {
 	it('validates POST body keys and values', () => {
 		const content = readFile(SERVER_FILE);
 
-		assert.ok(content.includes("!username || typeof username !== 'string' || !/^[a-zA-Z0-9_-]{1,20}$/.test(username)"));
-		assert.ok(content.includes("!password || typeof password !== 'string' || password.length > 200"));
+		assert.ok(content.includes("!username || typeof username !== 'string' || hasAnyControlChars(username) || !/^[a-zA-Z0-9_-]{1,20}$/.test(username)"));
+		assert.ok(content.includes("!password || typeof password !== 'string' || hasAnyControlChars(password) || password.length > 200"));
 
 		assert.ok(content.includes('const allowedKeys = ['));
 		const requiredKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode', 'paused'];
 		for (const key of requiredKeys) {
 			assert.ok(content.includes(`'${key}'`), `Missing settings whitelist key: ${key}`);
 		}
-		assert.ok(content.includes("typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean'"));
+		assert.ok(content.includes("const boolKeys = new Set(['slimMode', 'compactView', 'showLabels', 'darkMode', 'paused'])"));
+		assert.ok(content.includes("const size = parseOptionalInt(val, { min: 8, max: 32 });"));
+		assert.ok(content.includes("theme !== 'light' && theme !== 'dark'"));
 
 		assert.ok(content.includes('widgetId.length > 200'));
 		assert.ok(content.includes('Array.isArray(rules)'));
+		assert.ok(content.includes('rules.length > 100'));
 		assert.ok(content.includes("const validOperators = ['=', '!=', '>', '<', '>=', '<=', 'contains', '!contains', 'startsWith', 'endsWith', '*'];"));
 		assert.ok(content.includes("const validColors = ['green', 'orange', 'red'];"));
 		assert.ok(content.includes("const validVisibilities = ['all', 'normal', 'admin'];"));
@@ -98,7 +106,7 @@ describe('Input Validation Coverage', () => {
 		assert.ok(content.includes("if (!['h', 'D', 'W', 'M', 'Y'].includes(period))"));
 		assert.ok(content.includes("if (!['light', 'dark'].includes(mode))"));
 
-		assert.ok(content.includes('rawWidth >= 0 && rawWidth <= 10000'));
+		assert.ok(content.includes('parseOptionalInt(req.query?.w, { min: 0, max: 10000 })'));
 
 		assert.ok(content.includes("target.protocol !== 'rtsp:'"));
 	});

@@ -14,8 +14,34 @@ const express = require('express');
 
 const { basicAuthHeader, TEST_USERS } = require('../test-helpers');
 
+const ANY_CONTROL_CHARS_RE = /[\x00-\x1F\x7F]/;
+
 function safeText(value) {
 	return value === null || value === undefined ? '' : String(value);
+}
+
+function hasAnyControlChars(value) {
+	return ANY_CONTROL_CHARS_RE.test(value);
+}
+
+function parseOptionalInt(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+	if (value === '' || value === null || value === undefined) return null;
+	if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) {
+		if (value < min || value > max) return NaN;
+		return value;
+	}
+	if (typeof value === 'string') {
+		const trimmed = value.trim();
+		if (!/^\d+$/.test(trimmed)) return NaN;
+		const num = Number(trimmed);
+		if (!Number.isFinite(num) || num < min || num > max) return NaN;
+		return num;
+	}
+	return NaN;
+}
+
+function isValidSitemapName(value) {
+	return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
 }
 
 function normalizeOpenhabPath(raw) {
@@ -27,6 +53,7 @@ function normalizeOpenhabPath(raw) {
 
 function createQueryStringTestApp() {
 	const app = express();
+	app.set('query parser', 'simple');
 	const USERS = TEST_USERS;
 	const PROXY_ALLOWLIST = [
 		{ host: 'camera.local', port: '554' },
@@ -63,7 +90,10 @@ function createQueryStringTestApp() {
 
 	// Manifest endpoint - theme param validation
 	app.get('/manifest.webmanifest', (req, res) => {
-		const theme = safeText(req.query?.theme).toLowerCase();
+		const rawTheme = req.query?.theme;
+		const theme = (typeof rawTheme === 'string' && !hasAnyControlChars(rawTheme))
+			? rawTheme.toLowerCase()
+			: '';
 		if (theme !== 'light' && theme !== 'dark') {
 			// Returns default manifest (theme not applied)
 			return res.json({ theme_applied: false, theme_color: '#default' });
@@ -74,19 +104,21 @@ function createQueryStringTestApp() {
 
 	// Search index endpoint - root and sitemap param validation
 	app.get('/search-index', (req, res) => {
-		const rawRoot = safeText(req.query?.root || '');
-		const rawSitemap = safeText(req.query?.sitemap || '');
+		const rawRoot = typeof req.query?.root === 'string' ? req.query.root : '';
+		const rawSitemap = typeof req.query?.sitemap === 'string' ? req.query.sitemap : '';
+		const rootInput = rawRoot && !hasAnyControlChars(rawRoot) && rawRoot.length <= 512 ? rawRoot : '';
+		const sitemapInput = rawSitemap && !hasAnyControlChars(rawSitemap) && rawSitemap.length <= 64 ? rawSitemap : '';
 		let rootPath = '';
 
-		if (rawRoot) {
-			const normalized = normalizeOpenhabPath(rawRoot);
+		if (rootInput && !rootInput.includes('..') && !rootInput.includes('\\')) {
+			const normalized = normalizeOpenhabPath(rootInput);
 			if (normalized && normalized.includes('/rest/sitemaps/')) {
 				rootPath = normalized;
 			}
 		}
 
-		if (!rootPath && rawSitemap) {
-			const nameEnc = encodeURIComponent(rawSitemap);
+		if (!rootPath && sitemapInput && isValidSitemapName(sitemapInput)) {
+			const nameEnc = encodeURIComponent(sitemapInput);
 			rootPath = `/rest/sitemaps/${nameEnc}/${nameEnc}`;
 		}
 
@@ -99,7 +131,14 @@ function createQueryStringTestApp() {
 
 	// REST delta endpoint - delta param validation
 	app.get('/rest/sitemaps/:name', (req, res) => {
-		const delta = safeText(req.query?.delta || '');
+		const rawDelta = req.query?.delta;
+		if (typeof rawDelta !== 'string') {
+			return res.json({ delta: false, data: 'full response' });
+		}
+		const delta = rawDelta.trim();
+		if (hasAnyControlChars(delta)) {
+			return res.json({ delta: false, data: 'full response' });
+		}
 		if (delta !== '1' && delta !== 'true') {
 			return res.json({ delta: false, data: 'full response' });
 		}
@@ -110,10 +149,14 @@ function createQueryStringTestApp() {
 	app.get('/proxy', (req, res) => {
 		const raw = req.query?.url;
 
-		if (raw) {
-			const candidate = Array.isArray(raw) ? raw[0] : raw;
-			const text = safeText(candidate).trim();
-			if (!text) return res.status(400).send('Invalid proxy target');
+		if (raw !== undefined) {
+			if (typeof raw !== 'string') {
+				return res.status(400).send('Invalid proxy target');
+			}
+			const text = raw.trim();
+			if (!text || text.length > 2048 || hasAnyControlChars(text)) {
+				return res.status(400).send('Invalid proxy target');
+			}
 
 			let target;
 			try {
@@ -121,6 +164,9 @@ function createQueryStringTestApp() {
 			} catch {
 				let decoded = text;
 				try { decoded = decodeURIComponent(text); } catch {}
+				if (!decoded || decoded.length > 2048 || hasAnyControlChars(decoded)) {
+					return res.status(400).send('Invalid proxy target');
+				}
 				try {
 					target = new URL(decoded);
 				} catch {
@@ -131,14 +177,23 @@ function createQueryStringTestApp() {
 			if (!['http:', 'https:', 'rtsp:'].includes(target.protocol)) {
 				return res.status(400).send('Invalid proxy target');
 			}
+			if (target.port && (!/^\d+$/.test(target.port) || Number(target.port) < 1 || Number(target.port) > 65535)) {
+				return res.status(400).send('Invalid proxy target');
+			}
 			if (!isProxyTargetAllowed(target, PROXY_ALLOWLIST)) {
 				return res.status(403).send('Proxy target not allowed');
 			}
 
 			// Validate viewport width (w param) for RTSP streams
 			if (target.protocol === 'rtsp:') {
-				const rawWidth = parseInt(req.query.w, 10);
-				const viewportWidth = (Number.isFinite(rawWidth) && rawWidth >= 0 && rawWidth <= 10000) ? rawWidth : 0;
+				if (req.query?.w !== undefined && typeof req.query.w !== 'string') {
+					return res.status(400).send('Invalid viewport width');
+				}
+				const rawWidth = parseOptionalInt(req.query?.w, { min: 0, max: 10000 });
+				if (req.query?.w !== undefined && !Number.isFinite(rawWidth)) {
+					return res.status(400).send('Invalid viewport width');
+				}
+				const viewportWidth = Number.isFinite(rawWidth) ? rawWidth : 0;
 				return res.json({ ok: true, protocol: 'rtsp', viewportWidth });
 			}
 
@@ -253,22 +308,18 @@ describe('Query String Parameter Validation Tests', () => {
 			assert.ok(data.rootPath.includes('/rest/sitemaps/default/default'));
 		});
 
-		it('URL encodes sitemap name with special chars', async () => {
+		it('rejects sitemap name with spaces', async () => {
 			const res = await fetch(`${baseUrl}/search-index?sitemap=test%20space`, {
 				headers: { 'Authorization': authHeader },
 			});
-			const data = await res.json();
-			assert.strictEqual(res.status, 200);
-			assert.ok(data.rootPath.includes('test%20space'));
+			assert.strictEqual(res.status, 400);
 		});
 
 		it('rejects path traversal in root', async () => {
 			const res = await fetch(`${baseUrl}/search-index?root=/rest/sitemaps/../../../etc/passwd`, {
 				headers: { 'Authorization': authHeader },
 			});
-			// Should still include /rest/sitemaps/ so it passes, but the path is normalized
-			const data = await res.json();
-			assert.ok(data.rootPath.includes('/rest/sitemaps/'));
+			assert.strictEqual(res.status, 400);
 		});
 
 		it('rejects missing both params', async () => {
@@ -366,31 +417,38 @@ describe('Query String Parameter Validation Tests', () => {
 			assert.strictEqual(data.viewportWidth, 800);
 		});
 
-		it('clamps width to 0 for negative values', async () => {
+		it('accepts RTSP URL with credentials', async () => {
+			const url = encodeURIComponent('rtsp://user:pass@camera.local:554/stream');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}&w=800`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.viewportWidth, 800);
+		});
+
+		it('rejects negative width values', async () => {
 			const url = encodeURIComponent('rtsp://camera.local:554/stream');
 			const res = await fetch(`${baseUrl}/proxy?url=${url}&w=-100`, {
 				headers: { 'Authorization': authHeader },
 			});
-			const data = await res.json();
-			assert.strictEqual(data.viewportWidth, 0);
+			assert.strictEqual(res.status, 400);
 		});
 
-		it('clamps width to 0 for values over 10000', async () => {
+		it('rejects width values over 10000', async () => {
 			const url = encodeURIComponent('rtsp://camera.local:554/stream');
 			const res = await fetch(`${baseUrl}/proxy?url=${url}&w=99999`, {
 				headers: { 'Authorization': authHeader },
 			});
-			const data = await res.json();
-			assert.strictEqual(data.viewportWidth, 0);
+			assert.strictEqual(res.status, 400);
 		});
 
-		it('handles non-numeric width (defaults to 0)', async () => {
+		it('rejects non-numeric width', async () => {
 			const url = encodeURIComponent('rtsp://camera.local:554/stream');
 			const res = await fetch(`${baseUrl}/proxy?url=${url}&w=abc`, {
 				headers: { 'Authorization': authHeader },
 			});
-			const data = await res.json();
-			assert.strictEqual(data.viewportWidth, 0);
+			assert.strictEqual(res.status, 400);
 		});
 
 		it('accepts width at boundary (10000)', async () => {
