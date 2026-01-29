@@ -4907,11 +4907,13 @@ app.get('/config.js', (req, res) => {
 	res.setHeader('Cache-Control', 'no-cache');
 	const clientConfig = liveConfig.clientConfig && typeof liveConfig.clientConfig === 'object' ? liveConfig.clientConfig : {};
 
-	// Get user role if authenticated
+	// Get user role and GPS tracking flag if authenticated
 	let userRole = null;
+	let trackGps = false;
 	if (req.ohProxyUser) {
 		const user = sessions.getUser(req.ohProxyUser);
 		userRole = user?.role || null;
+		if (user?.trackgps) trackGps = true;
 	}
 
 	res.send(`window.__OH_CONFIG__=${JSON.stringify({
@@ -4926,6 +4928,7 @@ app.get('/config.js', (req, res) => {
 		widgetProxyCacheConfigs: sessions.getAllProxyCacheConfigs(),
 		widgetSectionGlowConfigs: sessions.getAllSectionGlowConfigs(),
 		userRole: userRole,
+		trackGps: trackGps,
 	})};`);
 });
 
@@ -5032,6 +5035,71 @@ app.post('/api/jslog', express.json(), (req, res) => {
 	if (userAgent) logParts.push(`ua="${userAgent.replace(/"/g, '\\"')}"`);
 	if (stack) logParts.push(`stack="${stack.replace(/"/g, '\\"').replace(/[\r\n]+/g, '\\n')}"`);
 	logJsError(logParts.join(' '));
+	res.json({ ok: true, logged: true });
+});
+
+// GPS reporting API
+app.post('/api/gps', express.json(), (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache, no-store');
+	const session = req.ohProxySession;
+	if (!session) {
+		res.status(401).json({ error: 'Unauthorized' });
+		return;
+	}
+	const username = req.ohProxyUser;
+	if (!username) {
+		res.status(401).json({ error: 'Unauthorized' });
+		return;
+	}
+	// Reject users who don't have GPS tracking enabled
+	const user = sessions.getUser(username);
+	if (!user || !user.trackgps) {
+		res.status(403).json({ error: 'GPS tracking not enabled' });
+		return;
+	}
+	// Validate body
+	const body = req.body;
+	if (!body || typeof body !== 'object' || Array.isArray(body)) {
+		res.status(400).json({ error: 'Invalid request body' });
+		return;
+	}
+	const rawLat = typeof body.lat === 'number' && Number.isFinite(body.lat) ? body.lat : null;
+	const rawLon = typeof body.lon === 'number' && Number.isFinite(body.lon) ? body.lon : null;
+	const accuracy = typeof body.accuracy === 'number' && Number.isFinite(body.accuracy) ? Math.round(body.accuracy) : null;
+	if (rawLat === null || rawLon === null) {
+		res.status(400).json({ error: 'Invalid coordinates' });
+		return;
+	}
+	// Snap to home coordinates if within 150m
+	const gpsConfig = SERVER_CONFIG.gps || {};
+	const homeLat = parseFloat(gpsConfig.homeLat);
+	const homeLon = parseFloat(gpsConfig.homeLon);
+	let lat = rawLat;
+	let lon = rawLon;
+	if (Number.isFinite(homeLat) && Number.isFinite(homeLon)) {
+		const toRad = (deg) => deg * Math.PI / 180;
+		const R = 6371000;
+		const dLat = toRad(rawLat - homeLat);
+		const dLon = toRad(rawLon - homeLon);
+		const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(homeLat)) * Math.cos(toRad(rawLat)) * Math.sin(dLon / 2) ** 2;
+		const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+		if (dist <= 150) {
+			lat = homeLat;
+			lon = homeLon;
+		}
+	}
+	logMessage(`[GPS] user=${username} lat=${lat.toFixed(7)} lon=${lon.toFixed(7)} accuracy=${accuracy}m ip=${req.ohProxyClientIp}`);
+	const conn = getMysqlConnection();
+	if (conn) {
+		conn.query(
+			'INSERT INTO log_gps (username, lat, lon) VALUES (?, ?, ?)',
+			[username, lat, lon],
+			(err) => {
+				if (err) logMessage(`[GPS] DB insert failed: ${err.message || err}`);
+			}
+		);
+	}
 	res.json({ ok: true, logged: true });
 });
 
@@ -6000,7 +6068,12 @@ app.get('/presence', async (req, res) => {
 		return res.status(503).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
 	}
 
-	const query = 'SELECT * FROM log_gps ORDER BY id DESC LIMIT 20';
+	const username = req.ohProxyUser;
+	if (!username) {
+		return res.status(401).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
+	}
+
+	const query = 'SELECT * FROM log_gps WHERE username = ? ORDER BY id DESC LIMIT 20';
 
 	const QUERY_TIMEOUT_MS = 10000;
 
@@ -6011,7 +6084,7 @@ app.get('/presence', async (req, res) => {
 				reject(new Error('Query timeout'));
 			}, QUERY_TIMEOUT_MS);
 
-			conn.query(query, (err, results) => {
+			conn.query(query, [username], (err, results) => {
 				clearTimeout(timeout);
 				if (err) reject(err);
 				else resolve(results);
