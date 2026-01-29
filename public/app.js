@@ -65,6 +65,7 @@ let _spinnerLock = false;
 async function softReset() {
 	_spinnerLock = true;
 	showResumeSpinner(true);
+	reportGps();
 
 	// Show cached home snapshot behind the blur (if available)
 	const snapshot = loadHomeSnapshot();
@@ -258,6 +259,32 @@ const AUTH_INFO = (window.__OH_AUTH__ && typeof window.__OH_AUTH__ === 'object')
 
 state.proxyAuth = typeof AUTH_INFO.auth === 'string' ? AUTH_INFO.auth.toLowerCase() : '';
 state.proxyUser = typeof AUTH_INFO.user === 'string' ? AUTH_INFO.user : '';
+
+function reportGps() {
+	try {
+		if (!OH_CONFIG.trackGps) return;
+		if (!isTouchDevice()) return;
+		if (state.proxyAuth !== 'authenticated') return;
+		if (!navigator.geolocation) return;
+		navigator.geolocation.getCurrentPosition(
+			(pos) => {
+				try {
+					fetch('/api/gps', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							lat: pos.coords.latitude,
+							lon: pos.coords.longitude,
+							accuracy: pos.coords.accuracy,
+						}),
+					}).catch(() => {});
+				} catch (_) {}
+			},
+			() => {},
+			{ enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+		);
+	} catch (_) {}
+}
 
 function configNumber(value, fallback) {
 	const num = Number(value);
@@ -6478,6 +6505,8 @@ function restoreNormalPolling() {
 			connectWs();
 			startPingDelayed();
 		}
+
+		reportGps();
 	} catch (e) {
 		console.error(e);
 		logJsError('init bootstrap failed', e);

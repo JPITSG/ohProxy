@@ -207,6 +207,14 @@ module.exports = {
 			allowedItems: [],
 		},
 
+		// === GPS ===
+		gps: {
+			// Home latitude (decimal; empty disables home snapping).
+			homeLat: '',
+			// Home longitude (decimal; empty disables home snapping).
+			homeLon: '',
+		},
+
 		// === System ===
 		binaries: {
 			// FFmpeg binary path (used for RTSP streaming and video previews).
