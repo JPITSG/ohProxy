@@ -69,8 +69,8 @@ function addUser(username, password, role = 'normal') {
 		usage();
 		process.exit(1);
 	}
-	if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
-		console.error('Error: Username can only contain a-z, A-Z, 0-9, underscore, and hyphen');
+	if (!/^[a-zA-Z0-9_-]{1,20}$/.test(username)) {
+		console.error('Error: Username can only contain a-z, A-Z, 0-9, underscore, and hyphen (max 20 chars)');
 		process.exit(1);
 	}
 	if (!['admin', 'normal', 'readonly'].includes(role)) {

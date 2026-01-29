@@ -529,7 +529,7 @@ function setSectionGlowConfig(widgetId, enabled) {
 // ============================================
 
 const VALID_ROLES = ['admin', 'normal', 'readonly'];
-const USERNAME_REGEX = /^[a-zA-Z0-9_-]+$/;
+const USERNAME_REGEX = /^[a-zA-Z0-9_-]{1,20}$/;
 
 /**
  * Get all users.

@@ -62,7 +62,7 @@ function createValidationTestApp() {
 		const { username, password } = req.body || {};
 
 		// Validate username format
-		if (!username || typeof username !== 'string' || !/^[a-zA-Z0-9_-]{1,50}$/.test(username)) {
+		if (!username || typeof username !== 'string' || !/^[a-zA-Z0-9_-]{1,20}$/.test(username)) {
 			return res.status(400).json({ error: 'Invalid username format' });
 		}
 
@@ -244,13 +244,22 @@ describe('Parameter Validation Security Tests', () => {
 			assert.strictEqual(res.status, 400);
 		});
 
-		it('rejects username over 50 chars', async () => {
+		it('rejects username over 20 chars', async () => {
 			const res = await fetch(`${baseUrl}/api/auth/login`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
-				body: JSON.stringify({ username: 'a'.repeat(51), password: 'test' }),
+				body: JSON.stringify({ username: 'a'.repeat(21), password: 'test' }),
 			});
 			assert.strictEqual(res.status, 400);
+		});
+
+		it('accepts username of exactly 20 chars', async () => {
+			const res = await fetch(`${baseUrl}/api/auth/login`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+				body: JSON.stringify({ username: 'a'.repeat(20), password: 'test' }),
+			});
+			assert.notStrictEqual(res.status, 400);
 		});
 
 		it('rejects username with spaces', async () => {
