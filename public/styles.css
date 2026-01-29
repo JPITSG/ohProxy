@@ -1,13 +1,15 @@
 /* Frosted Glass Theme for ohProxy */
 /* Based on: https://github.com/wessamlauf/homeassistant-frosted-glass-themes */
 
-/* Rubik font */
+/* Rubik font - with metric overrides for WebView2 vertical centering */
 @font-face {
 	font-family: 'Rubik';
 	font-style: normal;
 	font-weight: 300;
 	font-display: swap;
 	src: url('/fonts/rubik-300.woff2') format('woff2');
+	ascent-override: 95%;
+	descent-override: 25%;
 }
 @font-face {
 	font-family: 'Rubik';
@@ -15,6 +17,8 @@
 	font-weight: 400;
 	font-display: swap;
 	src: url('/fonts/rubik-400.woff2') format('woff2');
+	ascent-override: 95%;
+	descent-override: 25%;
 }
 @font-face {
 	font-family: 'Rubik';
@@ -22,6 +26,8 @@
 	font-weight: 500;
 	font-display: swap;
 	src: url('/fonts/rubik-500.woff2') format('woff2');
+	ascent-override: 95%;
+	descent-override: 25%;
 }
 
 :root {
