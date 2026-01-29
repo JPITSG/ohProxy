@@ -60,8 +60,10 @@ function triggerReload() {
 }
 
 const SOFT_RESET_TIMEOUT_MS = 1000; // Short timeout per attempt
+let _spinnerLock = false;
 
 async function softReset() {
+	_spinnerLock = true;
 	showResumeSpinner(true);
 
 	// Show cached home snapshot behind the blur (if available)
@@ -90,6 +92,7 @@ async function softReset() {
 		try {
 			setConnectionStatus(true);
 			await refresh(true);
+			_spinnerLock = false;
 			showResumeSpinner(false);
 
 			// Restart background services
@@ -155,6 +158,7 @@ async function softReset() {
 			// Success - now refresh to get widgets
 			setConnectionStatus(true);
 			await refresh(true);
+			_spinnerLock = false;
 			showResumeSpinner(false);
 
 			// Restart background services
@@ -765,10 +769,13 @@ async function handleBounceTouchEnd() {
 
 	// Pull-to-refresh: show spinner, force full refresh, hide after 1s
 	if (shouldRefresh) {
+		_spinnerLock = true;
 		showResumeSpinner(true);
 		refresh(true);
 		await new Promise(r => setTimeout(r, 1000));
+		_spinnerLock = false;
 		showResumeSpinner(false);
+		updateErrorUiState();
 	}
 }
 
@@ -873,6 +880,9 @@ function updateErrorUiState() {
 	document.documentElement.classList.toggle('error-state', isError);
 	if (els.search) els.search.disabled = isError;
 	updateNavButtons();
+	if (!_spinnerLock) {
+		showResumeSpinner(isError);
+	}
 }
 
 function setConnectionStatus(ok, message) {
