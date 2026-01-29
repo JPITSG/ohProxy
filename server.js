@@ -20,6 +20,8 @@ const sessions = require('./sessions');
 
 const CONFIG_PATH = path.join(__dirname, 'config.js');
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
+const CONTROL_CHARS_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+const ANY_CONTROL_CHARS_RE = /[\x00-\x1F\x7F]/;
 
 function authHeader() {
 	// Prefer API token (Bearer) for OH 3.x, fall back to Basic Auth for OH 1.x/2.x
@@ -40,6 +42,51 @@ function stripIconVersion(pathname) {
 
 function safeText(value) {
 	return value === null || value === undefined ? '' : String(value);
+}
+
+function isPlainObject(value) {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+	const proto = Object.getPrototypeOf(value);
+	return proto === Object.prototype || proto === null;
+}
+
+function hasAnyControlChars(value) {
+	return ANY_CONTROL_CHARS_RE.test(value);
+}
+
+function stripControlChars(value) {
+	return safeText(value).replace(CONTROL_CHARS_RE, '');
+}
+
+function normalizeHeaderValue(value, maxLen = 1000) {
+	if (typeof value !== 'string') return '';
+	const cleaned = value.replace(/[\r\n]+/g, '').trim();
+	if (!cleaned) return '';
+	return cleaned.length > maxLen ? cleaned.slice(0, maxLen) : cleaned;
+}
+
+function parseOptionalInt(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+	if (value === '' || value === null || value === undefined) return null;
+	if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) {
+		if (value < min || value > max) return NaN;
+		return value;
+	}
+	if (typeof value === 'string') {
+		const trimmed = value.trim();
+		if (!/^\d+$/.test(trimmed)) return NaN;
+		const num = Number(trimmed);
+		if (!Number.isFinite(num) || num < min || num > max) return NaN;
+		return num;
+	}
+	return NaN;
+}
+
+function isValidSha1(value) {
+	return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
+}
+
+function isValidSitemapName(value) {
+	return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
 }
 
 function formatLogTimestamp(date) {
@@ -171,6 +218,20 @@ function isProxyTargetAllowed(url, allowlist) {
 		if (entry.port === port) return true;
 	}
 	return false;
+}
+
+function redactUrlCredentials(value) {
+	const text = safeText(value);
+	if (!text) return '';
+	try {
+		const url = new URL(text);
+		if (!url.username && !url.password) return text;
+		url.username = '';
+		url.password = '';
+		return url.toString();
+	} catch {
+		return text.replace(/\/\/[^@/]+@/g, '//');
+	}
 }
 
 function hashString(value) {
@@ -4449,7 +4510,12 @@ async function getCachedIcon(cachePath, sourcePath, sourceExt) {
 }
 
 const app = express();
+app.set('query parser', 'simple');
 app.disable('x-powered-by');
+const jsonParserSmall = express.json({ limit: '4kb', strict: true, type: 'application/json' });
+const jsonParserMedium = express.json({ limit: '16kb', strict: true, type: 'application/json' });
+const jsonParserLarge = express.json({ limit: '64kb', strict: true, type: 'application/json' });
+const urlencodedParserSmall = express.urlencoded({ extended: false, limit: '4kb' });
 app.use(morgan('combined', {
 	skip: (req, res) => shouldSkipAccessLog(res),
 	stream: {
@@ -4530,6 +4596,10 @@ app.get('/CMD', async (req, res) => {
 	}
 
 	// Parse query string: /CMD?Item=state
+	if (!isPlainObject(req.query)) {
+		res.status(400).json({ result: 'failed', error: 'Invalid query format' });
+		return;
+	}
 	const queryKeys = Object.keys(req.query);
 	if (queryKeys.length !== 1) {
 		res.status(400).json({ result: 'failed', error: 'Invalid query format - expected ?Item=state' });
@@ -4537,7 +4607,12 @@ app.get('/CMD', async (req, res) => {
 	}
 
 	const itemName = queryKeys[0];
-	const state = safeText(req.query[itemName]);
+	const rawState = req.query[itemName];
+	if (typeof rawState !== 'string') {
+		res.status(400).json({ result: 'failed', error: 'Invalid state value' });
+		return;
+	}
+	const state = rawState;
 
 	// Validate item name (alphanumeric, underscore, hyphen, 1-100 chars)
 	if (!itemName || !/^[a-zA-Z0-9_-]{1,100}$/.test(itemName)) {
@@ -4560,7 +4635,7 @@ app.get('/CMD', async (req, res) => {
 		res.status(400).json({ result: 'failed', error: 'Invalid state value' });
 		return;
 	}
-	if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(state)) {
+	if (hasAnyControlChars(state)) {
 		res.status(400).json({ result: 'failed', error: 'Invalid characters in state' });
 		return;
 	}
@@ -4581,7 +4656,7 @@ app.get('/CMD', async (req, res) => {
 });
 
 // HTML auth login endpoint - must be before auth middleware
-app.post('/api/auth/login', express.json(), (req, res) => {
+app.post('/api/auth/login', jsonParserSmall, (req, res) => {
 	// Only available in HTML auth mode
 	if (liveConfig.authMode !== 'html') {
 		res.status(404).type('text/plain').send('Not found');
@@ -4594,16 +4669,20 @@ app.post('/api/auth/login', express.json(), (req, res) => {
 		return;
 	}
 
-	const { username, password } = req.body || {};
+	if (!isPlainObject(req.body)) {
+		res.status(400).json({ error: 'Invalid request body' });
+		return;
+	}
+	const { username, password } = req.body;
 
 	// Validate username format (alphanumeric, underscore, dash, 1-20 chars)
-	if (!username || typeof username !== 'string' || !/^[a-zA-Z0-9_-]{1,20}$/.test(username)) {
+	if (!username || typeof username !== 'string' || hasAnyControlChars(username) || !/^[a-zA-Z0-9_-]{1,20}$/.test(username)) {
 		res.status(400).json({ error: 'Invalid username format' });
 		return;
 	}
 
 	// Validate password is a string with reasonable length
-	if (!password || typeof password !== 'string' || password.length > 200) {
+	if (!password || typeof password !== 'string' || hasAnyControlChars(password) || password.length > 200) {
 		res.status(400).json({ error: 'Invalid password format' });
 		return;
 	}
@@ -4944,7 +5023,7 @@ app.get('/api/settings', (req, res) => {
 	res.json(session.settings || sessions.getDefaultSettings());
 });
 
-app.post('/api/settings', express.json(), (req, res) => {
+app.post('/api/settings', jsonParserSmall, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
 	const session = req.ohProxySession;
@@ -4953,20 +5032,50 @@ app.post('/api/settings', express.json(), (req, res) => {
 		return;
 	}
 	const newSettings = req.body;
-	if (!newSettings || typeof newSettings !== 'object' || Array.isArray(newSettings)) {
+	if (!isPlainObject(newSettings)) {
 		res.status(400).json({ error: 'Invalid settings' });
 		return;
 	}
 	// Whitelist allowed settings keys
 	const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode', 'paused'];
+	const allowedKeySet = new Set(allowedKeys);
+	const incomingKeys = Object.keys(newSettings);
+	if (incomingKeys.some((key) => !allowedKeySet.has(key))) {
+		res.status(400).json({ error: 'Invalid settings key' });
+		return;
+	}
 	const sanitized = {};
-	for (const key of allowedKeys) {
-		if (key in newSettings) {
-			const val = newSettings[key];
-			// Only allow primitive values (string, number, boolean)
-			if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
-				sanitized[key] = val;
+	const boolKeys = new Set(['slimMode', 'compactView', 'showLabels', 'darkMode', 'paused']);
+	for (const key of incomingKeys) {
+		const val = newSettings[key];
+		if (boolKeys.has(key)) {
+			if (typeof val !== 'boolean') {
+				res.status(400).json({ error: `Invalid value for ${key}` });
+				return;
 			}
+			sanitized[key] = val;
+			continue;
+		}
+		if (key === 'theme') {
+			if (typeof val !== 'string' || hasAnyControlChars(val)) {
+				res.status(400).json({ error: 'Invalid theme value' });
+				return;
+			}
+			const theme = val.trim().toLowerCase();
+			if (theme !== 'light' && theme !== 'dark') {
+				res.status(400).json({ error: 'Invalid theme value' });
+				return;
+			}
+			sanitized[key] = theme;
+			continue;
+		}
+		if (key === 'fontSize') {
+			const size = parseOptionalInt(val, { min: 8, max: 32 });
+			if (!Number.isFinite(size)) {
+				res.status(400).json({ error: 'Invalid fontSize value' });
+				return;
+			}
+			sanitized[key] = size;
 		}
 	}
 	// Merge with existing settings
@@ -4994,7 +5103,7 @@ app.get('/api/ping', (req, res) => {
 });
 
 // JavaScript error logging endpoint (auth required)
-app.post('/api/jslog', express.json(), (req, res) => {
+app.post('/api/jslog', jsonParserLarge, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache, no-store');
 	// Require authentication
@@ -5010,16 +5119,40 @@ app.post('/api/jslog', express.json(), (req, res) => {
 	}
 	// Sanitize and validate input
 	const body = req.body;
-	if (!body || typeof body !== 'object' || Array.isArray(body)) {
+	if (!isPlainObject(body)) {
 		res.status(400).json({ error: 'Invalid request body' });
 		return;
 	}
-	const message = typeof body.message === 'string' ? body.message.slice(0, 2000) : '';
-	const url = typeof body.url === 'string' ? body.url.slice(0, 500) : '';
+	if ('message' in body && typeof body.message !== 'string') {
+		res.status(400).json({ error: 'Invalid message' });
+		return;
+	}
+	if ('url' in body && typeof body.url !== 'string') {
+		res.status(400).json({ error: 'Invalid url' });
+		return;
+	}
+	if ('stack' in body && typeof body.stack !== 'string') {
+		res.status(400).json({ error: 'Invalid stack' });
+		return;
+	}
+	if ('userAgent' in body && typeof body.userAgent !== 'string') {
+		res.status(400).json({ error: 'Invalid userAgent' });
+		return;
+	}
+	if ('line' in body && typeof body.line !== 'number') {
+		res.status(400).json({ error: 'Invalid line' });
+		return;
+	}
+	if ('col' in body && typeof body.col !== 'number') {
+		res.status(400).json({ error: 'Invalid col' });
+		return;
+	}
+	const message = typeof body.message === 'string' ? stripControlChars(body.message).slice(0, 2000) : '';
+	const url = typeof body.url === 'string' ? stripControlChars(body.url).slice(0, 500) : '';
 	const line = typeof body.line === 'number' ? Math.floor(body.line) : 0;
 	const col = typeof body.col === 'number' ? Math.floor(body.col) : 0;
-	const stack = typeof body.stack === 'string' ? body.stack.slice(0, 5000) : '';
-	const userAgent = typeof body.userAgent === 'string' ? body.userAgent.slice(0, 300) : '';
+	const stack = typeof body.stack === 'string' ? stripControlChars(body.stack).slice(0, 5000) : '';
+	const userAgent = typeof body.userAgent === 'string' ? stripControlChars(body.userAgent).slice(0, 300) : '';
 	if (!message && !stack) {
 		res.status(400).json({ error: 'No error message or stack provided' });
 		return;
@@ -5039,7 +5172,7 @@ app.post('/api/jslog', express.json(), (req, res) => {
 });
 
 // GPS reporting API
-app.post('/api/gps', express.json(), (req, res) => {
+app.post('/api/gps', jsonParserMedium, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache, no-store');
 	const session = req.ohProxySession;
@@ -5060,18 +5193,34 @@ app.post('/api/gps', express.json(), (req, res) => {
 	}
 	// Validate body
 	const body = req.body;
-	if (!body || typeof body !== 'object' || Array.isArray(body)) {
+	if (!isPlainObject(body)) {
 		res.status(400).json({ error: 'Invalid request body' });
 		return;
 	}
-	const rawLat = typeof body.lat === 'number' && Number.isFinite(body.lat) ? body.lat : null;
-	const rawLon = typeof body.lon === 'number' && Number.isFinite(body.lon) ? body.lon : null;
-	const accuracy = typeof body.accuracy === 'number' && Number.isFinite(body.accuracy) ? Math.round(body.accuracy) : null;
-	const batt = typeof body.batt === 'number' && Number.isFinite(body.batt) && body.batt >= 0 && body.batt <= 100 ? Math.round(body.batt) : null;
-	if (rawLat === null || rawLon === null) {
+	if (typeof body.lat !== 'number' || typeof body.lon !== 'number') {
 		res.status(400).json({ error: 'Invalid coordinates' });
 		return;
 	}
+	const rawLat = Number.isFinite(body.lat) ? body.lat : null;
+	const rawLon = Number.isFinite(body.lon) ? body.lon : null;
+	if (rawLat === null || rawLon === null || rawLat < -90 || rawLat > 90 || rawLon < -180 || rawLon > 180) {
+		res.status(400).json({ error: 'Invalid coordinates' });
+		return;
+	}
+	if ('accuracy' in body && typeof body.accuracy !== 'number') {
+		res.status(400).json({ error: 'Invalid accuracy' });
+		return;
+	}
+	if ('batt' in body && typeof body.batt !== 'number') {
+		res.status(400).json({ error: 'Invalid battery value' });
+		return;
+	}
+	const accuracy = typeof body.accuracy === 'number' && Number.isFinite(body.accuracy) && body.accuracy >= 0 && body.accuracy <= 10000
+		? Math.round(body.accuracy)
+		: null;
+	const batt = typeof body.batt === 'number' && Number.isFinite(body.batt) && body.batt >= 0 && body.batt <= 100
+		? Math.round(body.batt)
+		: null;
 	// Snap to home coordinates if within 150m
 	const gpsConfig = SERVER_CONFIG.gps || {};
 	const homeLat = parseFloat(gpsConfig.homeLat);
@@ -5118,8 +5267,13 @@ app.get('/api/card-config/:widgetId', (req, res) => {
 		res.status(403).json({ error: 'Admin access required' });
 		return;
 	}
-	const widgetId = safeText(req.params.widgetId);
-	if (!widgetId) {
+	const rawWidgetId = req.params.widgetId;
+	if (typeof rawWidgetId !== 'string') {
+		res.status(400).json({ error: 'Missing widgetId' });
+		return;
+	}
+	const widgetId = safeText(rawWidgetId);
+	if (!widgetId || widgetId.length > 200 || hasAnyControlChars(widgetId)) {
 		res.status(400).json({ error: 'Missing widgetId' });
 		return;
 	}
@@ -5127,7 +5281,7 @@ app.get('/api/card-config/:widgetId', (req, res) => {
 	res.json({ widgetId, rules });
 });
 
-app.post('/api/card-config', express.json(), (req, res) => {
+app.post('/api/card-config', jsonParserLarge, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
 	// Admin only
@@ -5137,8 +5291,13 @@ app.post('/api/card-config', express.json(), (req, res) => {
 		return;
 	}
 
-	const { widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, sectionGlow } = req.body || {};
-	if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200) {
+	if (!isPlainObject(req.body)) {
+		res.status(400).json({ error: 'Invalid request body' });
+		return;
+	}
+
+	const { widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, sectionGlow } = req.body;
+	if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200 || hasAnyControlChars(widgetId)) {
 		res.status(400).json({ error: 'Missing or invalid widgetId' });
 		return;
 	}
@@ -5149,12 +5308,22 @@ app.post('/api/card-config', express.json(), (req, res) => {
 			res.status(400).json({ error: 'Rules must be an array' });
 			return;
 		}
+		if (rules.length > 100) {
+			res.status(400).json({ error: 'Too many rules' });
+			return;
+		}
 
 		const validOperators = ['=', '!=', '>', '<', '>=', '<=', 'contains', '!contains', 'startsWith', 'endsWith', '*'];
 		const validColors = ['green', 'orange', 'red'];
+		const allowedRuleKeys = new Set(['operator', 'color', 'value']);
 		for (const rule of rules) {
-			if (!rule || typeof rule !== 'object') {
+			if (!isPlainObject(rule)) {
 				res.status(400).json({ error: 'Each rule must be an object' });
+				return;
+			}
+			const ruleKeys = Object.keys(rule);
+			if (ruleKeys.some((key) => !allowedRuleKeys.has(key))) {
+				res.status(400).json({ error: 'Invalid rule key' });
 				return;
 			}
 			if (!validOperators.includes(rule.operator)) {
@@ -5169,13 +5338,30 @@ app.post('/api/card-config', express.json(), (req, res) => {
 				res.status(400).json({ error: 'Value required for non-wildcard operator' });
 				return;
 			}
+			if (rule.value !== undefined && rule.value !== null) {
+				const valueType = typeof rule.value;
+				if (valueType === 'string') {
+					if (rule.value.length > 200 || hasAnyControlChars(rule.value)) {
+						res.status(400).json({ error: 'Invalid rule value' });
+						return;
+					}
+				} else if (valueType === 'number') {
+					if (!Number.isFinite(rule.value)) {
+						res.status(400).json({ error: 'Invalid rule value' });
+						return;
+					}
+				} else if (valueType !== 'boolean') {
+					res.status(400).json({ error: 'Invalid rule value' });
+					return;
+				}
+			}
 		}
 	}
 
 	// Validate visibility if provided
 	if (visibility !== undefined) {
 		const validVisibilities = ['all', 'normal', 'admin'];
-		if (!validVisibilities.includes(visibility)) {
+		if (typeof visibility !== 'string' || hasAnyControlChars(visibility) || !validVisibilities.includes(visibility)) {
 			res.status(400).json({ error: `Invalid visibility: ${visibility}` });
 			return;
 		}
@@ -5188,20 +5374,30 @@ app.post('/api/card-config', express.json(), (req, res) => {
 	}
 
 	// Validate iframeHeight if provided (must be null, empty string, or positive integer)
-	if (iframeHeight !== undefined && iframeHeight !== null && iframeHeight !== '') {
-		const heightNum = parseInt(iframeHeight, 10);
-		if (isNaN(heightNum) || heightNum < 0 || heightNum > 10000) {
+	let heightNum = null;
+	if (iframeHeight !== undefined) {
+		const parsed = parseOptionalInt(iframeHeight, { min: 0, max: 10000 });
+		if (parsed === null) {
+			heightNum = 0;
+		} else if (!Number.isFinite(parsed)) {
 			res.status(400).json({ error: 'iframeHeight must be empty or a positive integer (max 10000)' });
 			return;
+		} else {
+			heightNum = parsed;
 		}
 	}
 
 	// Validate proxyCacheSeconds if provided (must be null, empty string, or positive integer 0-86400)
-	if (proxyCacheSeconds !== undefined && proxyCacheSeconds !== null && proxyCacheSeconds !== '') {
-		const cacheNum = parseInt(proxyCacheSeconds, 10);
-		if (isNaN(cacheNum) || cacheNum < 0 || cacheNum > 86400) {
+	let cacheNum = null;
+	if (proxyCacheSeconds !== undefined) {
+		const parsed = parseOptionalInt(proxyCacheSeconds, { min: 0, max: 86400 });
+		if (parsed === null) {
+			cacheNum = 0;
+		} else if (!Number.isFinite(parsed)) {
 			res.status(400).json({ error: 'proxyCacheSeconds must be empty or an integer 0-86400' });
 			return;
+		} else {
+			cacheNum = parsed;
 		}
 	}
 
@@ -5223,13 +5419,9 @@ app.post('/api/card-config', express.json(), (req, res) => {
 			sessions.setVideoConfig(widgetId, defaultMuted);
 		}
 		if (iframeHeight !== undefined) {
-			// Convert to integer (0 or empty string means clear the config)
-			const heightNum = (iframeHeight === '' || iframeHeight === null) ? 0 : parseInt(iframeHeight, 10);
 			sessions.setIframeConfig(widgetId, heightNum);
 		}
 		if (proxyCacheSeconds !== undefined) {
-			// Convert to integer (0 or empty string means disable caching)
-			const cacheNum = (proxyCacheSeconds === '' || proxyCacheSeconds === null) ? 0 : parseInt(proxyCacheSeconds, 10);
 			sessions.setProxyCacheConfig(widgetId, cacheNum);
 		}
 		if (sectionGlow !== undefined) {
@@ -5242,12 +5434,16 @@ app.post('/api/card-config', express.json(), (req, res) => {
 	}
 });
 
-app.post('/api/voice', express.json(), async (req, res) => {
+app.post('/api/voice', jsonParserSmall, async (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
 
-	const { command } = req.body || {};
-	if (!command || typeof command !== 'string' || command.length > 500) {
+	if (!isPlainObject(req.body)) {
+		res.status(400).json({ error: 'Invalid request body' });
+		return;
+	}
+	const { command } = req.body;
+	if (!command || typeof command !== 'string' || command.length > 500 || hasAnyControlChars(command)) {
 		res.status(400).json({ error: 'Missing or invalid command' });
 		return;
 	}
@@ -5406,7 +5602,10 @@ app.get('/manifest.webmanifest', (req, res) => {
 	try {
 		const raw = fs.readFileSync(manifestPath, 'utf8');
 		const manifest = JSON.parse(raw);
-		const theme = safeText(req.query?.theme).toLowerCase();
+		const rawTheme = req.query?.theme;
+		const theme = (typeof rawTheme === 'string' && !hasAnyControlChars(rawTheme))
+			? rawTheme.toLowerCase()
+			: '';
 		if (theme === 'light' || theme === 'dark') {
 			const themeColor = theme === 'light' ? '#e4e5e9' : '#131420';
 			const bgColor = theme === 'light' ? '#dbdde9' : '#131420';
@@ -5420,19 +5619,21 @@ app.get('/manifest.webmanifest', (req, res) => {
 });
 
 app.get('/search-index', async (req, res) => {
-	const rawRoot = safeText(req.query?.root || '');
-	const rawSitemap = safeText(req.query?.sitemap || '');
+	const rawRoot = typeof req.query?.root === 'string' ? req.query.root : '';
+	const rawSitemap = typeof req.query?.sitemap === 'string' ? req.query.sitemap : '';
+	const rootInput = rawRoot && !hasAnyControlChars(rawRoot) && rawRoot.length <= 512 ? rawRoot : '';
+	const sitemapInput = rawSitemap && !hasAnyControlChars(rawSitemap) && rawSitemap.length <= 64 ? rawSitemap : '';
 	let rootPath = '';
 
-	if (rawRoot) {
-		const normalized = normalizeOpenhabPath(rawRoot);
+	if (rootInput && !rootInput.includes('..') && !rootInput.includes('\\')) {
+		const normalized = normalizeOpenhabPath(rootInput);
 		if (normalized && normalized.includes('/rest/sitemaps/')) {
 			rootPath = normalized;
 		}
 	}
 
-	if (!rootPath && rawSitemap) {
-		const nameEnc = encodeURIComponent(rawSitemap);
+	if (!rootPath && sitemapInput && isValidSitemapName(sitemapInput)) {
+		const nameEnc = encodeURIComponent(sitemapInput);
 		rootPath = `/rest/sitemaps/${nameEnc}/${nameEnc}`;
 	}
 
@@ -5522,19 +5723,21 @@ app.get('/search-index', async (req, res) => {
 // Return full sitemap structure with all pages indexed by URL
 app.get('/sitemap-full', async (req, res) => {
 	try {
-		const rawRoot = safeText(req.query?.root || '');
-		const rawSitemap = safeText(req.query?.sitemap || '');
+		const rawRoot = typeof req.query?.root === 'string' ? req.query.root : '';
+		const rawSitemap = typeof req.query?.sitemap === 'string' ? req.query.sitemap : '';
+		const rootInput = rawRoot && !hasAnyControlChars(rawRoot) && rawRoot.length <= 512 ? rawRoot : '';
+		const sitemapInput = rawSitemap && !hasAnyControlChars(rawSitemap) && rawSitemap.length <= 64 ? rawSitemap : '';
 		let rootPath = '';
 
-		if (rawRoot) {
-			const normalized = normalizeOpenhabPath(rawRoot);
+		if (rootInput && !rootInput.includes('..') && !rootInput.includes('\\')) {
+			const normalized = normalizeOpenhabPath(rootInput);
 			if (normalized && normalized.includes('/rest/sitemaps/')) {
 				rootPath = normalized;
 			}
 		}
 
-		if (!rootPath && rawSitemap) {
-			const nameEnc = encodeURIComponent(rawSitemap);
+		if (!rootPath && sitemapInput && isValidSitemapName(sitemapInput)) {
+			const nameEnc = encodeURIComponent(sitemapInput);
 			rootPath = `/rest/sitemaps/${nameEnc}/${nameEnc}`;
 		}
 
@@ -5631,7 +5834,8 @@ app.get('/weather', (req, res) => {
 		return;
 	}
 
-	const mode = safeText(req.query?.mode || '').toLowerCase() === 'dark' ? 'dark' : 'light';
+	const rawMode = typeof req.query?.mode === 'string' ? req.query.mode : '';
+	const mode = (rawMode && !hasAnyControlChars(rawMode) && rawMode.toLowerCase() === 'dark') ? 'dark' : 'light';
 
 	// Read cached weather data
 	let weatherData = null;
@@ -5695,7 +5899,7 @@ app.get('/logout', (req, res) => {
 	res.redirect('/');
 });
 
-app.post('/logout', express.urlencoded({ extended: false }), (req, res) => {
+app.post('/logout', urlencodedParserSmall, (req, res) => {
 	if (liveConfig.authMode === 'html' && !validateCsrfToken(req)) {
 		res.status(403).type('text/plain').send('Invalid CSRF token');
 		return;
@@ -5781,14 +5985,18 @@ app.get(/^\/(?:openhab\.app\/)?images\/(v\d+)\/(.+)$/i, async (req, res, next) =
 
 app.use('/rest', async (req, res, next) => {
 	if (req.method !== 'GET') return next();
-	const delta = safeText(req.query?.delta || '');
+	const rawDelta = req.query?.delta;
+	if (typeof rawDelta !== 'string') return next();
+	const delta = rawDelta.trim();
+	if (hasAnyControlChars(delta)) return next();
 	if (delta !== '1' && delta !== 'true') return next();
 	if (!req.path.startsWith('/sitemaps/')) return next();
 	res.setHeader('Cache-Control', 'no-store');
 
 	const rawQuery = req.originalUrl.split('?')[1] || '';
 	const params = new URLSearchParams(rawQuery);
-	const since = params.get('since') || '';
+	const sinceRaw = params.get('since') || '';
+	const since = isValidSha1(sinceRaw) ? sinceRaw : '';
 	params.delete('delta');
 	params.delete('since');
 	if (!params.has('type')) params.set('type', 'json');
@@ -5886,8 +6094,12 @@ app.use('/images', (req, res, next) => {
 
 // Video preview endpoint
 app.get('/video-preview', (req, res) => {
-	const url = safeText(req.query.url).trim();
-	if (!url) {
+	const rawUrl = req.query?.url;
+	if (typeof rawUrl !== 'string') {
+		return res.status(400).type('text/plain').send('Missing URL');
+	}
+	const url = rawUrl.trim();
+	if (!url || url.length > 2048 || hasAnyControlChars(url)) {
 		return res.status(400).type('text/plain').send('Missing URL');
 	}
 
@@ -5896,7 +6108,16 @@ app.get('/video-preview', (req, res) => {
 	try {
 		target = new URL(url);
 	} catch {
-		return res.status(400).type('text/plain').send('Invalid URL');
+		let decoded = url;
+		try { decoded = decodeURIComponent(url); } catch {}
+		if (!decoded || decoded.length > 2048 || hasAnyControlChars(decoded)) {
+			return res.status(400).type('text/plain').send('Invalid URL');
+		}
+		try {
+			target = new URL(decoded);
+		} catch {
+			return res.status(400).type('text/plain').send('Invalid URL');
+		}
 	}
 
 	if (target.protocol !== 'rtsp:') {
@@ -5928,10 +6149,26 @@ app.get('/video-preview', (req, res) => {
 // Chart endpoint - generates interactive HTML charts from RRD data
 app.get('/chart', (req, res) => {
 	// Extract and validate parameters
-	const item = safeText(req.query.item || '').trim();
-	const period = safeText(req.query.period || '').trim();
-	const mode = safeText(req.query.mode || '').trim().toLowerCase() || 'dark';
-	const title = safeText(req.query.title || '').trim();
+	const rawItem = req.query?.item;
+	const rawPeriod = req.query?.period;
+	const rawMode = req.query?.mode;
+	const rawTitle = req.query?.title;
+	if (typeof rawItem !== 'string' || typeof rawPeriod !== 'string') {
+		return res.status(400).type('text/plain').send('Invalid item parameter');
+	}
+	if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
+		return res.status(400).type('text/plain').send('Invalid mode parameter');
+	}
+	const item = rawItem.trim();
+	const period = rawPeriod.trim();
+	const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
+	const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
+		return res.status(400).type('text/plain').send('Invalid parameters');
+	}
+	if (title && title.length > 200) {
+		return res.status(400).type('text/plain').send('Invalid title parameter');
+	}
 
 	// Validate item: a-zA-Z0-9_- max 50 chars
 	if (!item || !/^[a-zA-Z0-9_-]{1,50}$/.test(item)) {
@@ -5988,10 +6225,26 @@ app.get('/chart', (req, res) => {
 
 // Chart hash endpoint - regenerates chart and returns hash for smart iframe refresh
 app.get('/api/chart-hash', (req, res) => {
-	const item = safeText(req.query.item || '').trim();
-	const period = safeText(req.query.period || '').trim();
-	const mode = safeText(req.query.mode || '').trim().toLowerCase() || 'dark';
-	const title = safeText(req.query.title || '').trim() || item;
+	const rawItem = req.query?.item;
+	const rawPeriod = req.query?.period;
+	const rawMode = req.query?.mode;
+	const rawTitle = req.query?.title;
+	if (typeof rawItem !== 'string' || typeof rawPeriod !== 'string') {
+		return res.status(400).json({ error: 'Invalid item' });
+	}
+	if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
+		return res.status(400).json({ error: 'Invalid mode' });
+	}
+	const item = rawItem.trim();
+	const period = rawPeriod.trim();
+	const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
+	const title = (typeof rawTitle === 'string' ? rawTitle.trim() : '') || item;
+	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
+		return res.status(400).json({ error: 'Invalid parameters' });
+	}
+	if (title && title.length > 200) {
+		return res.status(400).json({ error: 'Invalid title' });
+	}
 
 	// Validate parameters
 	if (!item || !/^[a-zA-Z0-9_-]{1,50}$/.test(item)) {
@@ -6226,10 +6479,14 @@ app.get('/proxy', async (req, res, next) => {
 	const raw = req.query?.url;
 
 	// External URL proxy (url= parameter) - supports regular images and MJPEG streams
-	if (raw) {
-		const candidate = Array.isArray(raw) ? raw[0] : raw;
-		const text = safeText(candidate).trim();
-		if (!text) return res.status(400).send('Invalid proxy target');
+	if (raw !== undefined) {
+		if (typeof raw !== 'string') {
+			return res.status(400).send('Invalid proxy target');
+		}
+		const text = raw.trim();
+		if (!text || text.length > 2048 || hasAnyControlChars(text)) {
+			return res.status(400).send('Invalid proxy target');
+		}
 
 		let target;
 		try {
@@ -6237,6 +6494,9 @@ app.get('/proxy', async (req, res, next) => {
 		} catch {
 			let decoded = text;
 			try { decoded = decodeURIComponent(text); } catch {}
+			if (!decoded || decoded.length > 2048 || hasAnyControlChars(decoded)) {
+				return res.status(400).send('Invalid proxy target');
+			}
 			try {
 				target = new URL(decoded);
 			} catch {
@@ -6247,6 +6507,9 @@ app.get('/proxy', async (req, res, next) => {
 		if (!['http:', 'https:', 'rtsp:'].includes(target.protocol)) {
 			return res.status(400).send('Invalid proxy target');
 		}
+		if (target.port && (!/^\d+$/.test(target.port) || Number(target.port) < 1 || Number(target.port) > 65535)) {
+			return res.status(400).send('Invalid proxy target');
+		}
 		if (!isProxyTargetAllowed(target, liveConfig.proxyAllowlist)) {
 			return res.status(403).send('Proxy target not allowed');
 		}
@@ -6254,19 +6517,26 @@ app.get('/proxy', async (req, res, next) => {
 		// RTSP stream - convert to MP4 via FFmpeg
 		if (target.protocol === 'rtsp:') {
 			const rtspUrl = target.toString();
+			const rtspUrlLog = redactUrlCredentials(rtspUrl);
 			const clientIp = getRemoteIp(req) || 'unknown';
 			const username = req.ohProxyUser || 'anonymous';
 			const streamId = ++rtspStreamIdCounter;
 
 			// Get viewport width for scaling time overlay (0-10000, invalid = 0)
-			const rawWidth = parseInt(req.query.w, 10);
-			const viewportWidth = (Number.isFinite(rawWidth) && rawWidth >= 0 && rawWidth <= 10000) ? rawWidth : 0;
+			if (req.query?.w !== undefined && typeof req.query.w !== 'string') {
+				return res.status(400).send('Invalid viewport width');
+			}
+			const rawWidth = parseOptionalInt(req.query?.w, { min: 0, max: 10000 });
+			if (req.query?.w !== undefined && !Number.isFinite(rawWidth)) {
+				return res.status(400).send('Invalid viewport width');
+			}
+			const viewportWidth = Number.isFinite(rawWidth) ? rawWidth : 0;
 			// Font size scales with viewport: ~2.5% of width, min 16px, max 48px
 			const fontSize = viewportWidth > 0 ? Math.max(16, Math.min(48, Math.round(viewportWidth / 40))) : 24;
 
 			// Track and log stream start
-			activeRtspStreams.set(streamId, { url: rtspUrl, user: username, ip: clientIp, startTime: Date.now() });
-			logMessage(`[RTSP] Starting stream ${rtspUrl} to ${username}@${clientIp} (w=${viewportWidth})`);
+			activeRtspStreams.set(streamId, { url: rtspUrlLog, user: username, ip: clientIp, startTime: Date.now() });
+			logMessage(`[RTSP] Starting stream ${rtspUrlLog} to ${username}@${clientIp} (w=${viewportWidth})`);
 
 			// Time overlay filter: top-right, HH:MM:SS format (using strftime expansion for older ffmpeg)
 			const drawtext = `drawtext=text='%H\\:%M\\:%S':expansion=strftime:x=w-tw-15:y=15:fontsize=${fontSize}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`;
@@ -6339,7 +6609,7 @@ app.get('/proxy', async (req, res, next) => {
 			const endStream = () => {
 				if (activeRtspStreams.has(streamId)) {
 					activeRtspStreams.delete(streamId);
-					logMessage(`[RTSP] Ending stream ${rtspUrl} to ${username}@${clientIp}`);
+					logMessage(`[RTSP] Ending stream ${rtspUrlLog} to ${username}@${clientIp}`);
 				}
 			};
 
@@ -6360,16 +6630,23 @@ app.get('/proxy', async (req, res, next) => {
 		}
 
 		const headers = {};
-		const accept = safeText(req.headers.accept);
+		const accept = normalizeHeaderValue(req.headers.accept);
 		if (accept) headers.Accept = accept;
 
 		// Check for cache parameter (seconds)
-		const cacheSeconds = parseInt(req.query.cache, 10);
+		if (req.query?.cache !== undefined && typeof req.query.cache !== 'string') {
+			return res.status(400).send('Invalid cache parameter');
+		}
+		const cacheSeconds = parseOptionalInt(req.query?.cache, { min: 0, max: 86400 });
+		if (req.query?.cache !== undefined && !Number.isFinite(cacheSeconds)) {
+			return res.status(400).send('Invalid cache parameter');
+		}
 		const shouldCache = Number.isFinite(cacheSeconds) && cacheSeconds > 0;
 
 		if (shouldCache) {
 			// Caching mode - use buffered fetch
 			const targetUrl = target.toString();
+			const targetUrlLog = redactUrlCredentials(targetUrl);
 			const cachePath = getProxyCachePath(targetUrl);
 			const metaPath = `${cachePath}.meta`;
 
@@ -6409,7 +6686,7 @@ app.get('/proxy', async (req, res, next) => {
 				res.setHeader('X-Proxy-Cache', 'miss');
 				res.send(result.body || '');
 			} catch (err) {
-				logMessage(`Cached proxy fetch failed for ${targetUrl}: ${err.message || err}`);
+				logMessage(`Cached proxy fetch failed for ${targetUrlLog}: ${err.message || err}`);
 				if (!res.headersSent) {
 					res.status(502).send('Proxy error');
 				}
@@ -6421,7 +6698,7 @@ app.get('/proxy', async (req, res, next) => {
 			// Use streaming proxy - works for both regular images and MJPEG streams
 			await pipeStreamingProxy(target.toString(), res, headers);
 		} catch (err) {
-			logMessage(`Direct proxy failed for ${target.toString()}: ${err.message || err}`);
+			logMessage(`Direct proxy failed for ${redactUrlCredentials(target.toString())}: ${err.message || err}`);
 			if (!res.headersSent) {
 				res.status(502).send('Proxy error');
 			}

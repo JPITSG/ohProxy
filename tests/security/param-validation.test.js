@@ -15,9 +15,37 @@ const crypto = require('crypto');
 
 const { basicAuthHeader, TEST_USERS, TEST_COOKIE_KEY, generateTestAuthCookie } = require('../test-helpers');
 
+const ANY_CONTROL_CHARS_RE = /[\x00-\x1F\x7F]/;
+
 // Mirror validation functions from server.js
 function safeText(value) {
 	return value === null || value === undefined ? '' : String(value);
+}
+
+function isPlainObject(value) {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+	const proto = Object.getPrototypeOf(value);
+	return proto === Object.prototype || proto === null;
+}
+
+function hasAnyControlChars(value) {
+	return ANY_CONTROL_CHARS_RE.test(value);
+}
+
+function parseOptionalInt(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+	if (value === '' || value === null || value === undefined) return null;
+	if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) {
+		if (value < min || value > max) return NaN;
+		return value;
+	}
+	if (typeof value === 'string') {
+		const trimmed = value.trim();
+		if (!/^\d+$/.test(trimmed)) return NaN;
+		const num = Number(trimmed);
+		if (!Number.isFinite(num) || num < min || num > max) return NaN;
+		return num;
+	}
+	return NaN;
 }
 
 function isProxyTargetAllowed(url, allowlist) {
@@ -35,6 +63,7 @@ function isProxyTargetAllowed(url, allowlist) {
 // Create test app with validated endpoints
 function createValidationTestApp() {
 	const app = express();
+	app.set('query parser', 'simple');
 	const USERS = TEST_USERS;
 	const PROXY_ALLOWLIST = [
 		{ host: 'allowed.example.com', port: null },
@@ -59,15 +88,18 @@ function createValidationTestApp() {
 
 	// Login endpoint (mirrors server.js validation)
 	app.post('/api/auth/login', express.json(), (req, res) => {
-		const { username, password } = req.body || {};
+		if (!isPlainObject(req.body)) {
+			return res.status(400).json({ error: 'Invalid request body' });
+		}
+		const { username, password } = req.body;
 
 		// Validate username format
-		if (!username || typeof username !== 'string' || !/^[a-zA-Z0-9_-]{1,20}$/.test(username)) {
+		if (!username || typeof username !== 'string' || hasAnyControlChars(username) || !/^[a-zA-Z0-9_-]{1,20}$/.test(username)) {
 			return res.status(400).json({ error: 'Invalid username format' });
 		}
 
 		// Validate password
-		if (!password || typeof password !== 'string' || password.length > 200) {
+		if (!password || typeof password !== 'string' || hasAnyControlChars(password) || password.length > 200) {
 			return res.status(400).json({ error: 'Invalid password format' });
 		}
 
@@ -77,18 +109,44 @@ function createValidationTestApp() {
 	// Settings endpoint with whitelist
 	app.post('/api/settings', express.json(), (req, res) => {
 		const newSettings = req.body;
-		if (!newSettings || typeof newSettings !== 'object' || Array.isArray(newSettings)) {
+		if (!isPlainObject(newSettings)) {
 			return res.status(400).json({ error: 'Invalid settings' });
 		}
 
-		const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels'];
+		const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode', 'paused'];
+		const allowedKeySet = new Set(allowedKeys);
+		const incomingKeys = Object.keys(newSettings);
+		if (incomingKeys.some((key) => !allowedKeySet.has(key))) {
+			return res.status(400).json({ error: 'Invalid settings key' });
+		}
+		const boolKeys = new Set(['slimMode', 'compactView', 'showLabels', 'darkMode', 'paused']);
 		const sanitized = {};
-		for (const key of allowedKeys) {
-			if (key in newSettings) {
-				const val = newSettings[key];
-				if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
-					sanitized[key] = val;
+		for (const key of incomingKeys) {
+			const val = newSettings[key];
+			if (boolKeys.has(key)) {
+				if (typeof val !== 'boolean') {
+					return res.status(400).json({ error: `Invalid value for ${key}` });
 				}
+				sanitized[key] = val;
+				continue;
+			}
+			if (key === 'theme') {
+				if (typeof val !== 'string' || hasAnyControlChars(val)) {
+					return res.status(400).json({ error: 'Invalid theme value' });
+				}
+				const theme = val.trim().toLowerCase();
+				if (theme !== 'light' && theme !== 'dark') {
+					return res.status(400).json({ error: 'Invalid theme value' });
+				}
+				sanitized[key] = theme;
+				continue;
+			}
+			if (key === 'fontSize') {
+				const size = parseOptionalInt(val, { min: 8, max: 32 });
+				if (!Number.isFinite(size)) {
+					return res.status(400).json({ error: 'Invalid fontSize value' });
+				}
+				sanitized[key] = size;
 			}
 		}
 
@@ -102,9 +160,12 @@ function createValidationTestApp() {
 			return res.status(403).json({ error: 'Admin access required' });
 		}
 
-		const { widgetId, rules, visibility } = req.body || {};
+		if (!isPlainObject(req.body)) {
+			return res.status(400).json({ error: 'Invalid request body' });
+		}
+		const { widgetId, rules, visibility } = req.body;
 
-		if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200) {
+		if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200 || hasAnyControlChars(widgetId)) {
 			return res.status(400).json({ error: 'Missing or invalid widgetId' });
 		}
 
@@ -112,13 +173,21 @@ function createValidationTestApp() {
 			if (!Array.isArray(rules)) {
 				return res.status(400).json({ error: 'Rules must be an array' });
 			}
+			if (rules.length > 100) {
+				return res.status(400).json({ error: 'Too many rules' });
+			}
 
 			const validOperators = ['=', '!=', '>', '<', '>=', '<=', 'contains', '!contains', 'startsWith', 'endsWith', '*'];
 			const validColors = ['green', 'orange', 'red'];
+			const allowedRuleKeys = new Set(['operator', 'color', 'value']);
 
 			for (const rule of rules) {
-				if (!rule || typeof rule !== 'object') {
+				if (!isPlainObject(rule)) {
 					return res.status(400).json({ error: 'Each rule must be an object' });
+				}
+				const ruleKeys = Object.keys(rule);
+				if (ruleKeys.some((key) => !allowedRuleKeys.has(key))) {
+					return res.status(400).json({ error: 'Invalid rule key' });
 				}
 				if (!validOperators.includes(rule.operator)) {
 					return res.status(400).json({ error: `Invalid operator: ${rule.operator}` });
@@ -126,12 +195,29 @@ function createValidationTestApp() {
 				if (!validColors.includes(rule.color)) {
 					return res.status(400).json({ error: `Invalid color: ${rule.color}` });
 				}
+				if (rule.operator !== '*' && (rule.value === undefined || rule.value === null)) {
+					return res.status(400).json({ error: 'Value required for non-wildcard operator' });
+				}
+				if (rule.value !== undefined && rule.value !== null) {
+					const valueType = typeof rule.value;
+					if (valueType === 'string') {
+						if (rule.value.length > 200 || hasAnyControlChars(rule.value)) {
+							return res.status(400).json({ error: 'Invalid rule value' });
+						}
+					} else if (valueType === 'number') {
+						if (!Number.isFinite(rule.value)) {
+							return res.status(400).json({ error: 'Invalid rule value' });
+						}
+					} else if (valueType !== 'boolean') {
+						return res.status(400).json({ error: 'Invalid rule value' });
+					}
+				}
 			}
 		}
 
 		if (visibility !== undefined) {
 			const validVisibilities = ['all', 'normal', 'admin'];
-			if (!validVisibilities.includes(visibility)) {
+			if (typeof visibility !== 'string' || hasAnyControlChars(visibility) || !validVisibilities.includes(visibility)) {
 				return res.status(400).json({ error: `Invalid visibility: ${visibility}` });
 			}
 		}
@@ -141,9 +227,12 @@ function createValidationTestApp() {
 
 	// Voice endpoint with length validation
 	app.post('/api/voice', express.json(), (req, res) => {
-		const { command } = req.body || {};
+		if (!isPlainObject(req.body)) {
+			return res.status(400).json({ error: 'Invalid request body' });
+		}
+		const { command } = req.body;
 
-		if (!command || typeof command !== 'string' || command.length > 500) {
+		if (!command || typeof command !== 'string' || command.length > 500 || hasAnyControlChars(command)) {
 			return res.status(400).json({ error: 'Missing or invalid command' });
 		}
 
@@ -157,9 +246,26 @@ function createValidationTestApp() {
 
 	// Chart endpoint with strict validation
 	app.get('/chart', (req, res) => {
-		const item = safeText(req.query.item || '').trim();
-		const period = safeText(req.query.period || '').trim();
-		const widthRaw = safeText(req.query.width || '').trim();
+		const rawItem = req.query?.item;
+		const rawPeriod = req.query?.period;
+		const rawMode = req.query?.mode;
+		const rawTitle = req.query?.title;
+		if (typeof rawItem !== 'string' || typeof rawPeriod !== 'string') {
+			return res.status(400).send('Invalid item parameter');
+		}
+		if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
+			return res.status(400).send('Invalid mode parameter');
+		}
+		const item = rawItem.trim();
+		const period = rawPeriod.trim();
+		const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
+		const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+		if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
+			return res.status(400).send('Invalid parameters');
+		}
+		if (title && title.length > 200) {
+			return res.status(400).send('Invalid title parameter');
+		}
 
 		if (!item || !/^[a-zA-Z0-9_-]{1,50}$/.test(item)) {
 			return res.status(400).send('Invalid item parameter');
@@ -168,19 +274,21 @@ function createValidationTestApp() {
 		if (!['h', 'D', 'W', 'M', 'Y'].includes(period)) {
 			return res.status(400).send('Invalid period parameter');
 		}
-
-		const width = parseInt(widthRaw, 10);
-		if (!Number.isFinite(width) || width < 0 || width > 10000) {
-			return res.status(400).send('Invalid width parameter');
+		if (!['light', 'dark'].includes(mode)) {
+			return res.status(400).send('Invalid mode parameter');
 		}
 
-		res.json({ item, period, width });
+		res.json({ item, period, mode, title });
 	});
 
 	// Video preview with allowlist validation
 	app.get('/video-preview', (req, res) => {
-		const url = safeText(req.query.url).trim();
-		if (!url) {
+		const rawUrl = req.query?.url;
+		if (typeof rawUrl !== 'string') {
+			return res.status(400).send('Missing URL');
+		}
+		const url = rawUrl.trim();
+		if (!url || url.length > 2048 || hasAnyControlChars(url)) {
 			return res.status(400).send('Missing URL');
 		}
 
@@ -188,7 +296,16 @@ function createValidationTestApp() {
 		try {
 			target = new URL(url);
 		} catch {
-			return res.status(400).send('Invalid URL');
+			let decoded = url;
+			try { decoded = decodeURIComponent(url); } catch {}
+			if (!decoded || decoded.length > 2048 || hasAnyControlChars(decoded)) {
+				return res.status(400).send('Invalid URL');
+			}
+			try {
+				target = new URL(decoded);
+			} catch {
+				return res.status(400).send('Invalid URL');
+			}
 		}
 
 		if (target.protocol !== 'rtsp:') {
@@ -291,27 +408,22 @@ describe('Parameter Validation Security Tests', () => {
 	});
 
 	describe('/api/settings - Whitelist Validation', () => {
-		it('filters out non-whitelisted keys', async () => {
+		it('rejects non-whitelisted keys', async () => {
 			const res = await fetch(`${baseUrl}/api/settings`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
 				body: JSON.stringify({ slimMode: true, maliciousKey: 'evil', __proto__: 'bad' }),
 			});
-			const data = await res.json();
-			assert.strictEqual(res.status, 200);
-			assert.strictEqual(data.settings.slimMode, true);
-			assert.strictEqual(Object.hasOwn(data.settings, 'maliciousKey'), false);
-			assert.strictEqual(Object.hasOwn(data.settings, '__proto__'), false);
+			assert.strictEqual(res.status, 400);
 		});
 
-		it('rejects non-primitive values', async () => {
+		it('rejects invalid value types', async () => {
 			const res = await fetch(`${baseUrl}/api/settings`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
 				body: JSON.stringify({ theme: { nested: 'object' } }),
 			});
-			const data = await res.json();
-			assert.strictEqual(data.settings.theme, undefined);
+			assert.strictEqual(res.status, 400);
 		});
 
 		it('rejects arrays as body', async () => {
@@ -420,56 +532,42 @@ describe('Parameter Validation Security Tests', () => {
 
 	describe('/chart - Parameter Validation', () => {
 		it('rejects item with special chars', async () => {
-			const res = await fetch(`${baseUrl}/chart?item=test<script>&period=h&width=400`, {
+			const res = await fetch(`${baseUrl}/chart?item=test<script>&period=h&mode=dark`, {
 				headers: { 'Authorization': authHeader },
 			});
 			assert.strictEqual(res.status, 400);
 		});
 
 		it('rejects item over 50 chars', async () => {
-			const res = await fetch(`${baseUrl}/chart?item=${'a'.repeat(51)}&period=h&width=400`, {
+			const res = await fetch(`${baseUrl}/chart?item=${'a'.repeat(51)}&period=h&mode=dark`, {
 				headers: { 'Authorization': authHeader },
 			});
 			assert.strictEqual(res.status, 400);
 		});
 
 		it('rejects invalid period', async () => {
-			const res = await fetch(`${baseUrl}/chart?item=test&period=X&width=400`, {
+			const res = await fetch(`${baseUrl}/chart?item=test&period=X&mode=dark`, {
 				headers: { 'Authorization': authHeader },
 			});
 			assert.strictEqual(res.status, 400);
 		});
 
-		it('rejects lowercase period (case-sensitive)', async () => {
-			const res = await fetch(`${baseUrl}/chart?item=test&period=d&width=400`, {
+		it('rejects invalid mode', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=test&period=D&mode=evil`, {
 				headers: { 'Authorization': authHeader },
 			});
 			assert.strictEqual(res.status, 400);
 		});
 
-		it('rejects width over 10000', async () => {
-			const res = await fetch(`${baseUrl}/chart?item=test&period=h&width=10001`, {
-				headers: { 'Authorization': authHeader },
-			});
-			assert.strictEqual(res.status, 400);
-		});
-
-		it('rejects negative width', async () => {
-			const res = await fetch(`${baseUrl}/chart?item=test&period=h&width=-1`, {
-				headers: { 'Authorization': authHeader },
-			});
-			assert.strictEqual(res.status, 400);
-		});
-
-		it('rejects non-numeric width', async () => {
-			const res = await fetch(`${baseUrl}/chart?item=test&period=h&width=abc`, {
+		it('rejects title over 200 chars', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=test&period=h&mode=dark&title=${'a'.repeat(201)}`, {
 				headers: { 'Authorization': authHeader },
 			});
 			assert.strictEqual(res.status, 400);
 		});
 
 		it('accepts valid parameters', async () => {
-			const res = await fetch(`${baseUrl}/chart?item=Temperature_Living&period=D&width=800`, {
+			const res = await fetch(`${baseUrl}/chart?item=Temperature_Living&period=D&mode=light&title=Living`, {
 				headers: { 'Authorization': authHeader },
 			});
 			assert.strictEqual(res.status, 200);
@@ -489,6 +587,13 @@ describe('Parameter Validation Security Tests', () => {
 				headers: { 'Authorization': authHeader },
 			});
 			assert.strictEqual(res.status, 400);
+		});
+
+		it('accepts RTSP URL with credentials in allowlist', async () => {
+			const res = await fetch(`${baseUrl}/video-preview?url=${encodeURIComponent('rtsp://user:pass@camera.local:554/stream')}`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
 		});
 
 		it('rejects RTSP URL not in allowlist', async () => {
