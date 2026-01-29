@@ -3338,7 +3338,7 @@ function animateSliderValue(input, targetValue, valueBubble = null, positionCall
 	const endValue = Number(targetValue);
 	if (startValue === endValue || !Number.isFinite(startValue) || !Number.isFinite(endValue)) {
 		input.value = targetValue;
-		if (valueBubble) valueBubble.textContent = targetValue + '%';
+		if (valueBubble) valueBubble.textContent = targetValue;
 		if (positionCallback) positionCallback();
 		return;
 	}
@@ -3350,7 +3350,7 @@ function animateSliderValue(input, targetValue, valueBubble = null, positionCall
 		const eased = 1 - Math.pow(1 - progress, 3);
 		const currentValue = Math.round(startValue + (endValue - startValue) * eased);
 		input.value = currentValue;
-		if (valueBubble) valueBubble.textContent = currentValue + '%';
+		if (valueBubble) valueBubble.textContent = currentValue;
 		if (positionCallback) positionCallback();
 		if (progress < 1) {
 			requestAnimationFrame(animate);
@@ -4569,7 +4569,7 @@ function updateCard(card, w, afterImage, info) {
 
 		const valueBubble = document.createElement('span');
 		valueBubble.className = 'slider-bubble';
-		valueBubble.textContent = current + '%';
+		valueBubble.textContent = current;
 		inlineSlider.appendChild(input);
 		inlineSlider.appendChild(valueBubble);
 
@@ -4589,7 +4589,7 @@ function updateCard(card, w, afterImage, info) {
 
 		// Update label and position when slider value changes
 		input.addEventListener('input', () => {
-			valueBubble.textContent = input.value + '%';
+			valueBubble.textContent = input.value;
 			positionBubble();
 		});
 
