@@ -5077,6 +5077,7 @@ app.post('/api/gps', express.json(), (req, res) => {
 	const homeLon = parseFloat(gpsConfig.homeLon);
 	let lat = rawLat;
 	let lon = rawLon;
+	let distanceHome = null;
 	if (Number.isFinite(homeLat) && Number.isFinite(homeLon)) {
 		const toRad = (deg) => deg * Math.PI / 180;
 		const R = 6371000;
@@ -5084,6 +5085,7 @@ app.post('/api/gps', express.json(), (req, res) => {
 		const dLon = toRad(rawLon - homeLon);
 		const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(homeLat)) * Math.cos(toRad(rawLat)) * Math.sin(dLon / 2) ** 2;
 		const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+		distanceHome = Math.round(dist * 100) / 100;
 		if (dist <= 150) {
 			lat = homeLat;
 			lon = homeLon;
@@ -5093,8 +5095,8 @@ app.post('/api/gps', express.json(), (req, res) => {
 	const conn = getMysqlConnection();
 	if (conn) {
 		conn.query(
-			'INSERT INTO log_gps (username, lat, lon) VALUES (?, ?, ?)',
-			[username, lat, lon],
+			'INSERT INTO log_gps (username, lat, lon, distancehome) VALUES (?, ?, ?, ?)',
+			[username, lat, lon, distanceHome],
 			(err) => {
 				if (err) logMessage(`[GPS] DB insert failed: ${err.message || err}`);
 			}
