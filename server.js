@@ -5085,10 +5085,12 @@ app.post('/api/gps', express.json(), (req, res) => {
 		const dLon = toRad(rawLon - homeLon);
 		const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(homeLat)) * Math.cos(toRad(rawLat)) * Math.sin(dLon / 2) ** 2;
 		const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-		distanceHome = Math.round(dist * 100) / 100;
 		if (dist <= 150) {
 			lat = homeLat;
 			lon = homeLon;
+			distanceHome = 0;
+		} else {
+			distanceHome = Math.round(dist * 100) / 100;
 		}
 	}
 	logMessage(`[GPS] user=${username} lat=${lat.toFixed(7)} lon=${lon.toFixed(7)} accuracy=${accuracy}m ip=${req.ohProxyClientIp}`);
