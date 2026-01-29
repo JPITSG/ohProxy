@@ -4596,8 +4596,8 @@ app.post('/api/auth/login', express.json(), (req, res) => {
 
 	const { username, password } = req.body || {};
 
-	// Validate username format (alphanumeric, underscore, dash, 1-50 chars)
-	if (!username || typeof username !== 'string' || !/^[a-zA-Z0-9_-]{1,50}$/.test(username)) {
+	// Validate username format (alphanumeric, underscore, dash, 1-20 chars)
+	if (!username || typeof username !== 'string' || !/^[a-zA-Z0-9_-]{1,20}$/.test(username)) {
 		res.status(400).json({ error: 'Invalid username format' });
 		return;
 	}

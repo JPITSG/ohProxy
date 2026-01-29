@@ -62,7 +62,7 @@ describe('Input Validation Coverage', () => {
 	it('validates POST body keys and values', () => {
 		const content = readFile(SERVER_FILE);
 
-		assert.ok(content.includes("!username || typeof username !== 'string' || !/^[a-zA-Z0-9_-]{1,50}$/.test(username)"));
+		assert.ok(content.includes("!username || typeof username !== 'string' || !/^[a-zA-Z0-9_-]{1,20}$/.test(username)"));
 		assert.ok(content.includes("!password || typeof password !== 'string' || password.length > 200"));
 
 		assert.ok(content.includes('const allowedKeys = ['));
