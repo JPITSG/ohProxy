@@ -944,6 +944,7 @@ async function showStatusNotification() {
 		await reg.showNotification(siteName, {
 			tag: STATUS_NOTIFICATION_TAG,
 			body: getStatusNotificationBody(),
+			icon: './icons/transparent-192.png',
 			silent: true,
 			renotify: false,
 			requireInteraction: true,
