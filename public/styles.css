@@ -1654,6 +1654,20 @@ body.card-config-open {
 	color: var(--color-text-muted);
 }
 
+/* Default Sound Section */
+.default-sound-section {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+/* Visibility Section */
+.visibility-section {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
 /* Section Glow Section */
 .section-glow-section {
 	display: flex;
@@ -1665,7 +1679,7 @@ body.card-config-open {
 .glow-rules-section {
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
+	gap: 8px;
 }
 
 /* Iframe Height Section */
