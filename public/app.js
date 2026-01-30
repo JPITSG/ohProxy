@@ -850,6 +850,7 @@ function updateStatusBar() {
 			els.statusBar.classList.remove('status-error', 'status-pending', 'status-fast');
 		}
 		updateErrorUiState();
+		closeStatusNotification();
 		return;
 	}
 	if (state.connectionOk) {
@@ -872,6 +873,11 @@ function updateStatusBar() {
 		els.statusBar.classList.remove('status-ok', 'status-pending', 'status-fast');
 	}
 	updateErrorUiState();
+	if (state.connectionOk) {
+		showStatusNotification();
+	} else {
+		closeStatusNotification();
+	}
 }
 
 function positionStatusTooltip(e) {
@@ -884,14 +890,14 @@ function positionStatusTooltip(e) {
 }
 
 function showStatusTooltip(e) {
-	if (!els.statusTooltip) return;
+	if (!els.statusTooltip || isTouchDevice()) return;
 	const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
 	if (valueEl) {
 		if (isLanClient === true) {
 			valueEl.textContent = 'LAN';
 			valueEl.classList.remove('loading');
 		} else {
-			const latency = getRollingLatency();
+			const latency = getDisplayLatency();
 			if (latency !== null) {
 				valueEl.textContent = latency + 'ms';
 				valueEl.classList.remove('loading');
@@ -901,13 +907,56 @@ function showStatusTooltip(e) {
 			}
 		}
 	}
-	if (e && e.clientX !== undefined) positionStatusTooltip(e);
+	if (e && e.clientX !== undefined) {
+		positionStatusTooltip(e);
+	}
 	els.statusTooltip.classList.add('visible');
 }
 
 function hideStatusTooltip() {
 	if (!els.statusTooltip) return;
 	els.statusTooltip.classList.remove('visible');
+}
+
+function getStatusNotificationBody() {
+	if (!state.connectionReady || state.connectionPending) {
+		return state.initialStatusText || 'Connected';
+	}
+	if (state.connectionOk) {
+		const info = connectionStatusInfo();
+		if (isLanClient === true) {
+			return info.label + ' · LAN';
+		}
+		const latency = getDisplayLatency();
+		if (latency !== null) {
+			return info.label + ' · ' + Math.round(latency) + 'ms';
+		}
+		return info.label;
+	}
+	return 'Disconnected';
+}
+
+async function showStatusNotification() {
+	if (notificationPermission !== 'granted' || !isTouchDevice()) return;
+	try {
+		const reg = await navigator.serviceWorker.ready;
+		const siteName = CLIENT_CONFIG.siteName || state.rootPageTitle || state.pageTitle || 'openHAB';
+		await reg.showNotification(siteName, {
+			tag: STATUS_NOTIFICATION_TAG,
+			body: getStatusNotificationBody(),
+			silent: true,
+			renotify: false,
+			requireInteraction: true,
+		});
+	} catch (_) { /* ignore */ }
+}
+
+async function closeStatusNotification() {
+	try {
+		const reg = await navigator.serviceWorker.ready;
+		const notifications = await reg.getNotifications({ tag: STATUS_NOTIFICATION_TAG });
+		notifications.forEach(n => n.close());
+	} catch (_) { /* ignore */ }
 }
 
 function updateErrorUiState() {
@@ -5574,14 +5623,16 @@ async function checkHeartbeat() {
 const PING_INTERVAL_MS = 5000;
 const PING_TIMEOUT_MS = 1000;
 const PING_SAMPLE_COUNT = 5;
-const FAST_CONNECTION_ENABLE_MS = 50;   // Enter fast mode below this
-const FAST_CONNECTION_DISABLE_MS = 80;  // Exit fast mode above this
+const FAST_CONNECTION_ENABLE_MS = 100;  // Enter fast mode below this
+const FAST_CONNECTION_DISABLE_MS = 130; // Exit fast mode above this
 let pingSamples = [];
 let pingTimer = null;
 let forceFastMode = false;
 let isLanClient = null;  // null = unknown, true = LAN, false = WAN (set by server via WS)
 let fastConnectionActive = false;
 let pingNeedsPrefill = true;
+let notificationPermission = 'default';
+const STATUS_NOTIFICATION_TAG = 'ohproxy-status';
 
 function invalidatePing() {
 	const wasFast = fastConnectionActive;
@@ -5601,6 +5652,11 @@ function invalidatePing() {
 
 function getRollingLatency() {
 	if (pingSamples.length < PING_SAMPLE_COUNT) return null;
+	return Math.round(pingSamples.reduce((a, b) => a + b, 0) / pingSamples.length * 100) / 100;
+}
+
+function getDisplayLatency() {
+	if (pingSamples.length === 0) return null;
 	return Math.round(pingSamples.reduce((a, b) => a + b, 0) / pingSamples.length * 100) / 100;
 }
 
@@ -5627,12 +5683,15 @@ function updateFastConnectionState() {
 	if (wasFast !== fastConnectionActive) {
 		updateStatusBar();
 	}
+	// Update notification with latest latency
+	if (state.connectionOk) showStatusNotification();
 	// Update tooltip if visible (skip if LAN client - already showing "LAN")
 	if (!isLanClient && els.statusTooltip && els.statusTooltip.classList.contains('visible')) {
+		const displayLatency = getDisplayLatency();
 		const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
 		if (valueEl) {
-			if (latency !== null) {
-				valueEl.textContent = latency + 'ms';
+			if (displayLatency !== null) {
+				valueEl.textContent = displayLatency + 'ms';
 				valueEl.classList.remove('loading');
 			} else {
 				valueEl.textContent = '';
@@ -6105,9 +6164,12 @@ function restoreNormalPolling() {
 		els.statusDotWrap.addEventListener('mouseenter', showStatusTooltip);
 		els.statusDotWrap.addEventListener('mousemove', positionStatusTooltip);
 		els.statusDotWrap.addEventListener('mouseleave', hideStatusTooltip);
-		els.statusDotWrap.addEventListener('touchstart', showStatusTooltip, { passive: true });
-		els.statusDotWrap.addEventListener('touchend', hideStatusTooltip, { passive: true });
-		els.statusDotWrap.addEventListener('touchcancel', hideStatusTooltip, { passive: true });
+	}
+	if (isTouchDevice() && 'Notification' in window && 'serviceWorker' in navigator) {
+		Notification.requestPermission().then(perm => {
+			notificationPermission = perm;
+			if (perm === 'granted') showStatusNotification();
+		}).catch(() => {});
 	}
 	// Ctrl+click on cards opens item config modal
 	document.addEventListener('click', (e) => {
@@ -6166,6 +6228,7 @@ function restoreNormalPolling() {
 		// Also update lastActivity as backup timestamp
 		state.lastActivity = lastHiddenTime;
 		stopPing();
+		closeStatusNotification();
 	}
 
 	function handlePageVisible() {
@@ -6184,6 +6247,7 @@ function restoreNormalPolling() {
 				startPingDelayed();
 			}
 		}
+		if (state.connectionOk) showStatusNotification();
 	}
 
 	// Initialize lastHiddenTime if page loads while hidden
@@ -6202,6 +6266,7 @@ function restoreNormalPolling() {
 
 	// pagehide is more reliable than visibilitychange on some mobile browsers
 	window.addEventListener('pagehide', () => markPageHidden());
+	window.addEventListener('beforeunload', () => closeStatusNotification());
 
 	// Handle bfcache restoration (browser killed and reopened)
 	window.addEventListener('pageshow', (event) => {
