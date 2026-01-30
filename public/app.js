@@ -1838,20 +1838,22 @@ function ensureCardConfigModal() {
 					<div class="item-config-section-header">CACHE</div>
 					<input type="text" class="proxy-cache-input" placeholder="seconds" inputmode="numeric">
 				</div>
-				<div class="item-config-section-header">VISIBILITY</div>
-				<div class="item-config-visibility">
-					<label class="item-config-radio">
-						<input type="radio" name="visibility" value="all" checked>
-						<span>All</span>
-					</label>
-					<label class="item-config-radio">
-						<input type="radio" name="visibility" value="normal">
-						<span>Normal</span>
-					</label>
-					<label class="item-config-radio">
-						<input type="radio" name="visibility" value="admin">
-						<span>Admin</span>
-					</label>
+				<div class="visibility-section">
+					<div class="item-config-section-header">VISIBILITY</div>
+					<div class="item-config-visibility">
+						<label class="item-config-radio">
+							<input type="radio" name="visibility" value="all" checked>
+							<span>All</span>
+						</label>
+						<label class="item-config-radio">
+							<input type="radio" name="visibility" value="normal">
+							<span>Normal</span>
+						</label>
+						<label class="item-config-radio">
+							<input type="radio" name="visibility" value="admin">
+							<span>Admin</span>
+						</label>
+					</div>
 				</div>
 				<div class="section-glow-section" style="display:none;">
 					<div class="item-config-section-header">RESPECT OPENHAB GLOW RULES</div>
