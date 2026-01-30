@@ -5240,7 +5240,7 @@ app.post('/api/gps', jsonParserMedium, (req, res) => {
 			lon = homeLon;
 			distanceHome = 0;
 		} else {
-			distanceHome = Math.round(dist * 100) / 100;
+			distanceHome = Math.round(dist / 10) / 100;
 		}
 	}
 	logMessage(`[GPS] user=${username} lat=${lat.toFixed(7)} lon=${lon.toFixed(7)} accuracy=${accuracy}m ip=${req.ohProxyClientIp}`);
