@@ -2056,16 +2056,19 @@ function connectAtmospherePage(pageId) {
 
 					// Check configured group items for calculated state changes
 					const groupChanges = [];
-					if (liveConfig.groupItems && liveConfig.groupItems.length > 0) {
-						for (const groupName of liveConfig.groupItems) {
-							if (actualChanges.some(c => c.name === groupName)) continue;
-							const calculatedState = await calculateGroupState(groupName);
-							if (calculatedState !== null) {
-								const prevCalculated = groupItemCalculatedStates.get(groupName);
-								if (prevCalculated !== calculatedState) {
-									groupItemCalculatedStates.set(groupName, calculatedState);
-									groupChanges.push({ name: groupName, state: calculatedState });
-								}
+					const affectedGroupsSet = new Set();
+					for (const c of actualChanges) {
+						const groups = memberToGroups.get(c.name);
+						if (groups) for (const g of groups) affectedGroupsSet.add(g);
+					}
+					for (const groupName of affectedGroupsSet) {
+						if (actualChanges.some(c => c.name === groupName)) continue;
+						const calculatedState = await calculateGroupState(groupName);
+						if (calculatedState !== null) {
+							const prevCalculated = groupItemCalculatedStates.get(groupName);
+							if (prevCalculated !== calculatedState) {
+								groupItemCalculatedStates.set(groupName, calculatedState);
+								groupChanges.push({ name: groupName, state: calculatedState });
 							}
 						}
 					}
@@ -2074,9 +2077,7 @@ function connectAtmospherePage(pageId) {
 					if (allChanges.length > 0) {
 						noteAtmosphereItemUpdate();
 						if (wss.clients.size > 0) {
-							// Apply group state overrides before broadcasting
-							const transformedChanges = await applyGroupStateToItems(allChanges);
-							wsBroadcast('update', { type: 'items', changes: transformedChanges });
+							wsBroadcast('update', { type: 'items', changes: allChanges });
 						}
 					}
 				}
@@ -2776,6 +2777,7 @@ function connectSSE() {
 
 		logMessage('[SSE] Connected to event stream');
 		setBackendStatus(true);
+		refreshGroupMemberMap().catch(() => {});
 
 		// Disable socket timeout for long-lived SSE connection
 		if (res.socket) res.socket.setTimeout(0);
@@ -2804,9 +2806,9 @@ function connectSSE() {
 
 							// Check configured group items for calculated state changes
 							const groupChanges = [];
-							if (liveConfig.groupItems && liveConfig.groupItems.length > 0) {
-								for (const groupName of liveConfig.groupItems) {
-									if (change.name === groupName) continue;
+							const affectedGroups = memberToGroups.get(change.name);
+							if (affectedGroups) {
+								for (const groupName of affectedGroups) {
 									const calculatedState = await calculateGroupState(groupName);
 									if (calculatedState !== null) {
 										const prevCalculated = groupItemCalculatedStates.get(groupName);
@@ -2820,8 +2822,7 @@ function connectSSE() {
 
 							const allChanges = [change, ...groupChanges];
 							if (wss.clients.size > 0) {
-								const transformedChanges = await applyGroupStateToItems(allChanges);
-								wsBroadcast('update', { type: 'items', changes: transformedChanges });
+								wsBroadcast('update', { type: 'items', changes: allChanges });
 							}
 						}
 					}
@@ -2970,23 +2971,24 @@ async function pollItems() {
 		// Check configured group items for calculated state changes
 		// (their native state may not change even when member counts do)
 		const groupChanges = [];
-		if (liveConfig.groupItems && liveConfig.groupItems.length > 0) {
-			for (const groupName of liveConfig.groupItems) {
-				// Skip if already in actualChanges
-				if (actualChanges.some(c => c.name === groupName)) continue;
+		const affectedGroupsSet = new Set();
+		for (const c of actualChanges) {
+			const groups = memberToGroups.get(c.name);
+			if (groups) for (const g of groups) affectedGroupsSet.add(g);
+		}
+		for (const groupName of affectedGroupsSet) {
+			if (actualChanges.some(c => c.name === groupName)) continue;
 
-				const calculatedState = await calculateGroupState(groupName);
-				if (calculatedState !== null) {
-					const prevCalculated = groupItemCalculatedStates.get(groupName);
-					if (prevCalculated !== calculatedState) {
-						groupItemCalculatedStates.set(groupName, calculatedState);
-						// Find the item from the poll to get its full data
-						const itemData = items.find(i => i.name === groupName);
-						if (itemData) {
-							groupChanges.push({ ...itemData, state: calculatedState });
-						} else {
-							groupChanges.push({ name: groupName, state: calculatedState });
-						}
+			const calculatedState = await calculateGroupState(groupName);
+			if (calculatedState !== null) {
+				const prevCalculated = groupItemCalculatedStates.get(groupName);
+				if (prevCalculated !== calculatedState) {
+					groupItemCalculatedStates.set(groupName, calculatedState);
+					const itemData = items.find(i => i.name === groupName);
+					if (itemData) {
+						groupChanges.push({ ...itemData, state: calculatedState });
+					} else {
+						groupChanges.push({ name: groupName, state: calculatedState });
 					}
 				}
 			}
@@ -2994,9 +2996,7 @@ async function pollItems() {
 
 		const allChanges = [...actualChanges, ...groupChanges];
 		if (allChanges.length > 0) {
-			// Apply group state overrides before broadcasting
-			const transformedChanges = await applyGroupStateToItems(allChanges);
-			wsBroadcast('update', { type: 'items', changes: transformedChanges });
+			wsBroadcast('update', { type: 'items', changes: allChanges });
 		}
 	}
 
@@ -3886,9 +3886,31 @@ function findDeltaMatch(key, since) {
 	return null;
 }
 
-// Cache for group member data (structure only, states fetched fresh)
-const groupMemberCache = new Map();
-const GROUP_MEMBER_CACHE_TTL_MS = 60000; // 1 minute TTL for member structure
+// Reverse lookup: memberName → Set of groupNames this member belongs to
+const memberToGroups = new Map();
+
+async function refreshGroupMemberMap() {
+	if (!liveConfig.groupItems || !liveConfig.groupItems.length) return;
+	const newMap = new Map();
+	for (const groupName of liveConfig.groupItems) {
+		try {
+			const body = await fetchOpenhab(`/rest/items/${encodeURIComponent(groupName)}`);
+			if (!body.ok) continue;
+			const data = JSON.parse(body.body);
+			if (!data || !Array.isArray(data.members)) continue;
+			for (const m of data.members) {
+				if (!m || !m.name) continue;
+				if (!newMap.has(m.name)) newMap.set(m.name, new Set());
+				newMap.get(m.name).add(groupName);
+			}
+		} catch {
+			// Skip this group on error; map stays partial, no regression
+		}
+	}
+	memberToGroups.clear();
+	for (const [k, v] of newMap) memberToGroups.set(k, v);
+	logMessage(`[GroupState] Member map refreshed: ${memberToGroups.size} members across ${liveConfig.groupItems.length} groups`);
+}
 
 // Fetch group members and calculate count of OPEN states
 async function calculateGroupState(groupName) {
@@ -3912,8 +3934,8 @@ async function calculateGroupState(groupName) {
 	}
 }
 
-// Apply group state overrides to item changes (for WebSocket broadcasts)
-async function applyGroupStateToItems(items) {
+// Apply group state overrides to item changes using cached values (for WebSocket broadcasts)
+function applyGroupStateToItems(items) {
 	if (!items || !items.length || !liveConfig.groupItems || !liveConfig.groupItems.length) {
 		return items;
 	}
@@ -3921,9 +3943,9 @@ async function applyGroupStateToItems(items) {
 	const result = [];
 	for (const item of items) {
 		if (item && item.name && groupSet.has(item.name)) {
-			const calculatedState = await calculateGroupState(item.name);
-			if (calculatedState !== null) {
-				result.push({ ...item, state: calculatedState });
+			const cached = groupItemCalculatedStates.get(item.name);
+			if (cached !== undefined) {
+				result.push({ ...item, state: cached });
 				continue;
 			}
 		}
@@ -3946,8 +3968,15 @@ async function applyGroupStateOverrides(page) {
 			if (!w) continue;
 			const itemName = w?.item?.name || w?.name || '';
 			if (itemName && groupSet.has(itemName)) {
-				const calculatedState = await calculateGroupState(itemName);
-				if (calculatedState !== null) {
+				// Use cached value; only fetch if cache is empty (e.g. first render after startup)
+				let calculatedState = groupItemCalculatedStates.get(itemName);
+				if (calculatedState === undefined) {
+					calculatedState = await calculateGroupState(itemName);
+					if (calculatedState !== null) {
+						groupItemCalculatedStates.set(itemName, calculatedState);
+					}
+				}
+				if (calculatedState !== null && calculatedState !== undefined) {
 					if (w.item) w.item.state = calculatedState;
 					w.state = calculatedState;
 					// Also update label if it contains a value in brackets like "Motion [1]"
@@ -6767,6 +6796,7 @@ app.use((req, res) => {
 });
 
 registerBackgroundTask('sitemap-cache', SITEMAP_REFRESH_MS, refreshSitemapCache);
+registerBackgroundTask('group-member-map', 60000, refreshGroupMemberMap);
 
 // Video preview capture function
 async function captureRtspPreview(rtspUrl) {
