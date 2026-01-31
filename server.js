@@ -6378,23 +6378,34 @@ app.get('/presence', async (req, res) => {
 		return res.status(401).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
 	}
 
-	const query = 'SELECT * FROM log_gps WHERE username = ? ORDER BY id DESC LIMIT 20';
-
 	const QUERY_TIMEOUT_MS = 10000;
 
-	let rows;
-	try {
-		rows = await new Promise((resolve, reject) => {
-			const timeout = setTimeout(() => {
-				reject(new Error('Query timeout'));
-			}, QUERY_TIMEOUT_MS);
-
-			conn.query(query, [username], (err, results) => {
+	function queryWithTimeout(sql, params) {
+		return new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => reject(new Error('Query timeout')), QUERY_TIMEOUT_MS);
+			conn.query(sql, params, (err, results) => {
 				clearTimeout(timeout);
 				if (err) reject(err);
 				else resolve(results);
 			});
 		});
+	}
+
+	let rows;
+	let displayDate = new Date();
+	try {
+		// Try today first
+		rows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = CURDATE() ORDER BY id DESC', [username]);
+
+		// If no results for today, fall back to the most recent date with data
+		if (!rows.length) {
+			const fallbackRows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? ORDER BY timestamp DESC LIMIT 1', [username]);
+			if (fallbackRows.length && fallbackRows[0].timestamp) {
+				displayDate = new Date(fallbackRows[0].timestamp);
+				const dateStr = displayDate.toISOString().slice(0, 10);
+				rows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = ? ORDER BY id DESC', [username, dateStr]);
+			}
+		}
 	} catch (err) {
 		logMessage(`[Presence] Query failed: ${err.message || err}`);
 		return res.status(504).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
@@ -6423,7 +6434,6 @@ app.get('/presence', async (req, res) => {
 		first = false;
 	}
 
-	const zoom = 15;
 	markers.reverse();
 	const markersJson = JSON.stringify(markers);
 
@@ -6484,7 +6494,6 @@ body{margin:0;padding:0}
 <script>
 (function(){
 var markers=${markersJson};
-var zoom=${zoom};
 if(!markers.length)return;
 
 var map=new OpenLayers.Map("map");
@@ -6540,26 +6549,32 @@ map.events.register('move',map,updateRedTooltip);
 map.events.register('moveend',map,updateRedTooltip);
 map.events.register('zoomend',map,updateRedTooltip);
 
-map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),zoom);
+var extent=vector.getDataExtent();
+if(extent){
+if(markers.length===1){map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),15)}
+else{extent.scale(1.15);map.zoomToExtent(extent)}
+}
 setTimeout(updateRedTooltip,100);
 
 document.getElementById('search-modal').addEventListener('keydown',function(e){e.stopPropagation()});
 
 var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-var now=new Date();
+var displayMonth=${displayDate.getMonth()};
+var displayDay=${displayDate.getDate()};
+var displayYear=${displayDate.getFullYear()};
 var monthBtn=document.querySelector('.month-select-btn');
 var monthMenu=document.getElementById('month-menu');
 var ddInput=document.querySelector('.search-dd');
 var yyyyInput=document.querySelector('.search-yyyy');
 
-monthBtn.textContent=months[now.getMonth()];
-ddInput.value=String(now.getDate());
-yyyyInput.value=String(now.getFullYear());
+monthBtn.textContent=months[displayMonth];
+ddInput.value=String(displayDay);
+yyyyInput.value=String(displayYear);
 
 months.forEach(function(m,i){
 var d=document.createElement('div');
 d.textContent=m;
-if(i===now.getMonth())d.classList.add('selected');
+if(i===displayMonth)d.classList.add('selected');
 d.addEventListener('click',function(){
 monthBtn.textContent=m;
 monthMenu.classList.remove('open');
