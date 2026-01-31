@@ -548,7 +548,7 @@ function isTouchDevice() {
 	return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
 
-function haptic(ms = 15) {
+function haptic(ms = 30) {
 	if (navigator.vibrate) navigator.vibrate(ms);
 }
 
@@ -949,15 +949,30 @@ async function showStatusNotification() {
 			renotify: false,
 			requireInteraction: true,
 		});
+		startNotificationHeartbeat();
 	} catch (_) { /* ignore */ }
 }
 
 async function closeStatusNotification() {
+	stopNotificationHeartbeat();
 	try {
 		const reg = await navigator.serviceWorker.ready;
 		const notifications = await reg.getNotifications({ tag: STATUS_NOTIFICATION_TAG });
 		notifications.forEach(n => n.close());
 	} catch (_) { /* ignore */ }
+}
+
+let notificationHeartbeatTimer = null;
+function startNotificationHeartbeat() {
+	stopNotificationHeartbeat();
+	notificationHeartbeatTimer = setInterval(() => {
+		if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+			navigator.serviceWorker.controller.postMessage({ type: 'notification-heartbeat' });
+		}
+	}, 1000);
+}
+function stopNotificationHeartbeat() {
+	if (notificationHeartbeatTimer) { clearInterval(notificationHeartbeatTimer); notificationHeartbeatTimer = null; }
 }
 
 function updateErrorUiState() {
@@ -1934,14 +1949,15 @@ function ensureCardConfigModal() {
 	cardConfigModal = wrap;
 
 	// Event listeners
-	wrap.querySelector('.card-config-cancel').addEventListener('click', closeCardConfigModal);
+	wrap.querySelector('.card-config-cancel').addEventListener('click', () => { haptic(); closeCardConfigModal(); });
 	wrap.querySelector('.card-config-save').addEventListener('click', async () => {
+		haptic();
 		await saveCardConfig();
 		closeCardConfigModal();
 	});
-	wrap.querySelector('.card-config-add').addEventListener('click', addGlowRuleRow);
+	wrap.querySelector('.card-config-add').addEventListener('click', () => { haptic(); addGlowRuleRow(); });
 	wrap.addEventListener('click', (e) => {
-		if (e.target === wrap) closeCardConfigModal();
+		if (e.target === wrap) { haptic(); closeCardConfigModal(); }
 	});
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape' && cardConfigModal && !cardConfigModal.classList.contains('hidden')) {
@@ -1984,6 +2000,7 @@ function createCustomSelect(options, initialValue, className) {
 			optBtn.dataset.color = opt.value;
 		}
 		optBtn.onclick = (e) => {
+			haptic();
 			e.preventDefault();
 			e.stopPropagation();
 			wrap.dataset.value = opt.value;
@@ -2009,6 +2026,7 @@ function createCustomSelect(options, initialValue, className) {
 	};
 
 	fakeSelect.onclick = (e) => {
+		haptic();
 		e.preventDefault();
 		e.stopPropagation();
 		// Close other open menus
@@ -2074,7 +2092,7 @@ function createGlowRuleRow(rule = {}) {
 	deleteBtn.type = 'button';
 	deleteBtn.className = 'glow-rule-delete';
 	deleteBtn.innerHTML = '<img src="icons/image-viewer-close.svg" alt="X" />';
-	deleteBtn.onclick = () => row.remove();
+	deleteBtn.onclick = () => { haptic(); row.remove(); };
 
 	row.appendChild(operatorSelect);
 	row.appendChild(valueInput);
@@ -2377,11 +2395,11 @@ function ensureImageViewer() {
 	imageViewerImg = wrap.querySelector('.image-viewer-img');
 	imageViewerClose = wrap.querySelector('.image-viewer-close');
 	if (imageViewerClose) {
-		imageViewerClose.addEventListener('click', requestCloseImageViewer);
+		imageViewerClose.addEventListener('click', () => { haptic(); requestCloseImageViewer(); });
 	}
 	const imageViewerDownload = wrap.querySelector('.image-viewer-download');
 	if (imageViewerDownload) {
-		imageViewerDownload.addEventListener('click', downloadImageViewerImage);
+		imageViewerDownload.addEventListener('click', () => { haptic(); downloadImageViewerImage(); });
 	}
 	if (imageViewerImg) {
 		imageViewerImg.addEventListener('load', () => {
@@ -2403,6 +2421,7 @@ function ensureImageViewer() {
 		if (!isTouch) {
 			imageViewerImg.addEventListener('click', (e) => {
 				if (state.isSlim) return;
+				haptic();
 				e.preventDefault();
 				e.stopPropagation();
 				toggleImageViewerZoom();
@@ -2509,7 +2528,7 @@ function ensureImageViewer() {
 		}
 	}
 	wrap.addEventListener('click', (e) => {
-		if (e.target === wrap) requestCloseImageViewer();
+		if (e.target === wrap) { haptic(); requestCloseImageViewer(); }
 	});
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape') requestCloseImageViewer();
@@ -4076,6 +4095,7 @@ function updateCard(card, w, afterImage, info) {
 			};
 
 			muteBtn.addEventListener('click', (e) => {
+				haptic();
 				e.stopPropagation();
 				videoEl.muted = !videoEl.muted;
 				updateMuteBtn();
@@ -4251,6 +4271,7 @@ function updateCard(card, w, afterImage, info) {
 					optBtn.textContent = m.label || m.command;
 					optBtn.dataset.command = m.command;
 					optBtn.onclick = async (e) => {
+						haptic();
 						e.preventDefault();
 						e.stopPropagation();
 						if (safeText(m.command) === safeText(st)) {
@@ -4707,6 +4728,7 @@ function updateCard(card, w, afterImage, info) {
 		card.classList.add('cursor-pointer');
 		card.onclick = (e) => {
 			if (e.target.closest('button, a, input, select, textarea')) return;
+			haptic();
 			toggleSlider();
 		};
 
@@ -6530,8 +6552,8 @@ function restoreNormalPolling() {
 		}
 	}
 	if (els.themeToggle) els.themeToggle.addEventListener('click', () => { haptic(); toggleTheme(); });
-	if (els.lightMode) els.lightMode.addEventListener('click', () => setTheme('light'));
-	if (els.darkMode) els.darkMode.addEventListener('click', () => setTheme('dark'));
+	if (els.lightMode) els.lightMode.addEventListener('click', () => { haptic(); setTheme('light'); });
+	if (els.darkMode) els.darkMode.addEventListener('click', () => { haptic(); setTheme('dark'); });
 	initTheme(state.forcedMode);
 	initPaused();
 	updatePauseButton();
