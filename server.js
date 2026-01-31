@@ -6619,12 +6619,18 @@ map.events.register('move',map,updateRedTooltip);
 map.events.register('moveend',map,updateRedTooltip);
 map.events.register('zoomend',map,updateRedTooltip);
 
-if(markers.length){
+function zoomToMarkers(){
 var extent=vector.getDataExtent();
-if(extent){
-if(markers.length===1){map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),15)}
-else{extent.scale(1.15);map.zoomToExtent(extent)}
+if(!extent)return;
+if(markers.length===1){map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),15);return}
+var res=map.getResolutionForZoom(map.getZoomForExtent(extent));
+extent.left-=30*res;extent.right+=30*res;
+extent.top+=50*res;extent.bottom-=15*res;
+map.zoomToExtent(extent);
 }
+
+if(markers.length){
+zoomToMarkers();
 setTimeout(updateRedTooltip,100);
 }
 
@@ -6713,11 +6719,7 @@ vector.addFeatures(feature);
 });
 red=markers[markers.length-1];
 redTooltip.innerHTML=red[3];
-var extent=vector.getDataExtent();
-if(extent){
-if(markers.length===1){map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),15)}
-else{extent.scale(1.15);map.zoomToExtent(extent)}
-}
+zoomToMarkers();
 setTimeout(updateRedTooltip,100);
 }).catch(function(){searchEmpty.textContent='Request failed';searchEmpty.style.display='block'});
 });
