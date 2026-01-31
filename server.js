@@ -6444,6 +6444,27 @@ body{margin:0;padding:0}
 .tooltip .tt-date{font-weight:500}
 .tooltip .tt-time{font-weight:300;margin-top:0.125rem}
 #hover-tooltip{display:none}
+@media(max-width:767px){#search-modal{display:none!important}}
+#search-modal{position:fixed;top:16px;right:16px;z-index:150;background:rgb(245,246,250);border:0.5px solid rgba(150,150,150,0.3);border-radius:18px;box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:12px;font-family:'Rubik',sans-serif}
+.search-header{font-size:0.625rem;font-weight:500;letter-spacing:0.08em;color:rgba(19,21,54,0.5);margin-bottom:8px}
+.search-controls{display:flex;gap:6px;align-items:center}
+.search-controls button,.search-controls input{box-sizing:border-box;height:36px;padding:0 12px;font-size:.75rem;font-weight:300;font-family:'Rubik',sans-serif;color:#0f172a;background:rgba(19,21,54,0.08);border:0.5px solid rgba(19,21,54,0.2);border-radius:10px;cursor:pointer;transition:background-color .2s,border-color .2s,box-shadow .2s;outline:none}
+.search-controls button:hover,.search-controls input:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}
+.search-controls input{background:rgba(255,255,255,0.7);box-shadow:inset 0 1px 3px rgba(0,0,0,0.08);cursor:text}
+.search-controls input:focus{border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35),inset 0 1px 3px rgba(0,0,0,0.08)}
+.search-controls input.search-dd{width:48px;text-align:center}
+.search-controls input.search-yyyy{width:64px;text-align:center}
+.month-select{position:relative}
+.month-select-btn{min-width:60px;text-align:center;white-space:nowrap}
+.month-select-btn.active{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 8px rgba(78,183,128,0.35)}
+.month-select-menu{position:fixed;z-index:200;background:rgb(245,246,250);border:0.5px solid rgba(150,150,150,0.3);border-radius:10px;box-shadow:0 8px 16px rgba(0,0,0,0.12);padding:0;overflow:hidden;display:none}
+.month-select-menu.open{display:block}
+.month-select-menu div{padding:6px 16px;font-size:.75rem;font-weight:300;font-family:'Rubik',sans-serif;color:#0f172a;cursor:pointer;white-space:nowrap;text-align:center}
+.month-select-menu div:first-child{padding-top:8px}
+.month-select-menu div:last-child{padding-bottom:8px}
+.month-select-menu div:hover{background:rgba(78,183,128,0.12)}
+.month-select-menu div.selected{background:rgba(78,183,128,0.12);font-weight:500}
+.search-go{}
 </style>
 <script src="https://openlayers.org/api/OpenLayers.js"></script>
 </head>
@@ -6451,6 +6472,15 @@ body{margin:0;padding:0}
 <div id="map"></div>
 <div id="red-tooltip" class="tooltip"></div>
 <div id="hover-tooltip" class="tooltip"></div>
+<div id="search-modal">
+<div class="search-header">SEARCH HISTORY</div>
+<div class="search-controls">
+<div class="month-select"><button class="month-select-btn" type="button">Month</button><div class="month-select-menu" id="month-menu"></div></div>
+<input type="text" class="search-dd" placeholder="DD" maxlength="2">
+<input type="text" class="search-yyyy" placeholder="YYYY" maxlength="4">
+<button class="search-go" type="button">Search</button>
+</div>
+</div>
 <script>
 (function(){
 var markers=${markersJson};
@@ -6512,6 +6542,66 @@ map.events.register('zoomend',map,updateRedTooltip);
 
 map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),zoom);
 setTimeout(updateRedTooltip,100);
+
+document.getElementById('search-modal').addEventListener('keydown',function(e){e.stopPropagation()});
+
+var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+var now=new Date();
+var monthBtn=document.querySelector('.month-select-btn');
+var monthMenu=document.getElementById('month-menu');
+var ddInput=document.querySelector('.search-dd');
+var yyyyInput=document.querySelector('.search-yyyy');
+
+monthBtn.textContent=months[now.getMonth()];
+ddInput.value=String(now.getDate());
+yyyyInput.value=String(now.getFullYear());
+
+months.forEach(function(m,i){
+var d=document.createElement('div');
+d.textContent=m;
+if(i===now.getMonth())d.classList.add('selected');
+d.addEventListener('click',function(){
+monthBtn.textContent=m;
+monthMenu.classList.remove('open');
+monthBtn.classList.remove('active');
+monthMenu.querySelectorAll('div').forEach(function(el){el.classList.remove('selected')});
+d.classList.add('selected');
+});
+monthMenu.appendChild(d);
+});
+monthBtn.addEventListener('click',function(e){
+e.stopPropagation();
+var open=monthMenu.classList.contains('open');
+if(open){monthMenu.classList.remove('open');monthBtn.classList.remove('active');return}
+var r=monthBtn.getBoundingClientRect();
+monthMenu.style.top=(r.bottom+4)+'px';
+monthMenu.style.left=r.left+'px';
+monthMenu.style.width=r.width+'px';
+monthMenu.classList.add('open');
+monthBtn.classList.add('active');
+});
+document.addEventListener('click',function(){monthMenu.classList.remove('open');monthBtn.classList.remove('active')});
+monthMenu.addEventListener('click',function(e){e.stopPropagation()});
+
+function setupInput(inp,validate){
+var lastGood=inp.value;
+inp.addEventListener('input',function(){
+var v=inp.value;
+if(!/^\\d*$/.test(v)){inp.value=lastGood;return}
+if(v.length>1&&v[0]==='0')v=String(parseInt(v,10));
+if(v!==''&&!validate(v)){inp.value=lastGood;return}
+inp.value=v;
+lastGood=v;
+});
+}
+setupInput(ddInput,function(v){return parseInt(v,10)<=31});
+setupInput(yyyyInput,function(v){
+var n=parseInt(v,10);
+if(v.length===1)return n===2;
+if(v.length===2)return v==='20';
+if(v.length===3)return n>=200&&n<=205;
+return n>=2000&&n<=2050;
+});
 })();
 </script>
 </body>
