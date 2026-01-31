@@ -18,6 +18,14 @@ const net = require('net');
 const mysql = require('mysql2');
 const sessions = require('./sessions');
 
+// Keep-alive agents for openHAB backend connections (eliminates TIME_WAIT buildup)
+const ohHttpAgent = new http.Agent({ keepAlive: true });
+const ohHttpsAgent = new https.Agent({ keepAlive: true });
+function getOhAgent() {
+	const proto = new URL(liveConfig.ohTarget).protocol;
+	return proto === 'https:' ? ohHttpsAgent : ohHttpAgent;
+}
+
 const CONFIG_PATH = path.join(__dirname, 'config.js');
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 const CONTROL_CHARS_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
@@ -2027,6 +2035,7 @@ function connectAtmospherePage(pageId) {
 		path: reqPath,
 		headers,
 		timeout: 120000,
+		agent: getOhAgent(),
 	}, (res) => {
 		const newTrackingId = res.headers['x-atmosphere-tracking-id'];
 		if (newTrackingId) pageState.trackingId = newTrackingId;
@@ -2756,6 +2765,7 @@ function connectSSE() {
 		port: target.port || (isHttps ? 443 : 80),
 		path: reqPath,
 		headers,
+		agent: getOhAgent(),
 	}, (res) => {
 		if (res.statusCode !== 200) {
 			logMessage(`[SSE] Connection failed: HTTP ${res.statusCode}`);
@@ -4107,7 +4117,7 @@ function isImageContentType(contentType) {
 	return lower.startsWith('image/') || lower.includes('svg+xml') || lower.includes('application/octet-stream');
 }
 
-function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3) {
+function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3, agent) {
 	return new Promise((resolve, reject) => {
 		let url;
 		try {
@@ -4120,19 +4130,21 @@ function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3) {
 		const isHttps = url.protocol === 'https:';
 		const client = isHttps ? https : http;
 		const requestHeaders = { ...headers, 'User-Agent': liveConfig.userAgent };
-		const req = client.request({
+		const opts = {
 			method: 'GET',
 			hostname: url.hostname,
 			port: url.port || (isHttps ? 443 : 80),
 			path: `${url.pathname}${url.search}`,
 			headers: requestHeaders,
-		}, (res) => {
+		};
+		if (agent) opts.agent = agent;
+		const req = client.request(opts, (res) => {
 			const status = res.statusCode || 500;
 			const location = res.headers.location;
 			if (location && redirectsLeft > 0 && REDIRECT_STATUS.has(status)) {
 				res.resume();
 				const nextUrl = new URL(location, url);
-				resolve(fetchBinaryFromUrl(nextUrl.toString(), headers, redirectsLeft - 1));
+				resolve(fetchBinaryFromUrl(nextUrl.toString(), headers, redirectsLeft - 1, agent));
 				return;
 			}
 
@@ -4163,7 +4175,7 @@ function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3) {
 	});
 }
 
-function pipeStreamingProxy(targetUrl, expressRes, headers = {}) {
+function pipeStreamingProxy(targetUrl, expressRes, headers = {}, agent) {
 	return new Promise((resolve, reject) => {
 		let url;
 		try {
@@ -4177,13 +4189,15 @@ function pipeStreamingProxy(targetUrl, expressRes, headers = {}) {
 		const client = isHttps ? https : http;
 		const requestHeaders = { ...headers, 'User-Agent': liveConfig.userAgent };
 
-		const req = client.request({
+		const opts = {
 			method: 'GET',
 			hostname: url.hostname,
 			port: url.port || (isHttps ? 443 : 80),
 			path: `${url.pathname}${url.search}`,
 			headers: requestHeaders,
-		}, (upstreamRes) => {
+		};
+		if (agent) opts.agent = agent;
+		const req = client.request(opts, (upstreamRes) => {
 			const status = upstreamRes.statusCode || 502;
 			const contentType = safeText(upstreamRes.headers['content-type']);
 
@@ -4228,6 +4242,7 @@ function fetchOpenhab(pathname) {
 			port: target.port || (isHttps ? 443 : 80),
 			path: reqPath,
 			headers,
+			agent: getOhAgent(),
 		}, (res) => {
 			let body = '';
 			res.setEncoding('utf8');
@@ -4270,6 +4285,7 @@ function sendOpenhabCommand(itemName, command) {
 			port: target.port || (isHttps ? 443 : 80),
 			path: reqPath,
 			headers,
+			agent: getOhAgent(),
 		}, (res) => {
 			let body = '';
 			res.setEncoding('utf8');
@@ -4308,6 +4324,7 @@ function sendCmdApiCommand(itemName, command) {
 			port: target.port || (isHttps ? 443 : 80),
 			path: reqPath,
 			headers,
+			agent: getOhAgent(),
 		}, (res) => {
 			let body = '';
 			res.setEncoding('utf8');
@@ -4463,7 +4480,7 @@ function fetchOpenhabBinary(pathname, options = {}) {
 	const headers = { Accept: 'image/*,*/*;q=0.8', 'User-Agent': liveConfig.userAgent };
 	const ah = authHeader();
 	if (ah) headers.Authorization = ah;
-	return fetchBinaryFromUrl(buildTargetUrl(baseUrl, pathname), headers);
+	return fetchBinaryFromUrl(buildTargetUrl(baseUrl, pathname), headers, 3, getOhAgent());
 }
 
 async function buildIconCache(cachePath, sourcePath, sourceExt) {
@@ -5940,6 +5957,7 @@ const proxyCommon = {
 	changeOrigin: true,
 	ws: false, // Disabled - we handle WebSocket ourselves via wss
 	logLevel: PROXY_LOG_LEVEL,
+	agent: ohHttpAgent,
 	onProxyReq(proxyReq) {
 		proxyReq.setHeader('User-Agent', liveConfig.userAgent);
 		const ah = authHeader();
