@@ -6367,6 +6367,74 @@ app.get('/api/chart-hash', (req, res) => {
 	}
 });
 
+app.get('/api/presence', async (req, res) => {
+	const username = req.ohProxyUser;
+	if (!username) {
+		return res.status(401).json({ ok: false, error: 'Unauthorized' });
+	}
+
+	const conn = getMysqlConnection();
+	if (!conn) {
+		return res.status(503).json({ ok: false, error: 'Database unavailable' });
+	}
+
+	const month = parseInt(req.query.month, 10);
+	const day = parseInt(req.query.day, 10);
+	const year = parseInt(req.query.year, 10);
+
+	if (isNaN(month) || isNaN(day) || isNaN(year) || month < 0 || month > 11 || day < 1 || day > 31 || year < 2000 || year > 2050) {
+		return res.status(400).json({ ok: false, error: 'Invalid date parameters' });
+	}
+
+	const dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+
+	const QUERY_TIMEOUT_MS = 10000;
+	function queryWithTimeout(sql, params) {
+		return new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => reject(new Error('Query timeout')), QUERY_TIMEOUT_MS);
+			conn.query(sql, params, (err, results) => {
+				clearTimeout(timeout);
+				if (err) reject(err);
+				else resolve(results);
+			});
+		});
+	}
+
+	let rows;
+	try {
+		rows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = ? ORDER BY id DESC', [username, dateStr]);
+	} catch (err) {
+		logMessage(`[Presence API] Query failed: ${err.message || err}`);
+		return res.status(504).json({ ok: false, error: 'Query failed' });
+	}
+
+	const markers = [];
+	let last = null;
+	let first = true;
+
+	for (const row of rows) {
+		const current = [
+			Math.round(row.lat * 10000000) / 10000000,
+			Math.round(row.lon * 10000000) / 10000000,
+		];
+		if (last && current[0] === last[0] && current[1] === last[1]) {
+			continue;
+		}
+		last = current;
+		const ts = row.timestamp ? (() => {
+			const d = new Date(row.timestamp);
+			const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+			const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+			return '<div class="tt-date">' + date + '</div><div class="tt-time">' + time + '</div>';
+		})() : '';
+		markers.push([current[0], current[1], first ? 'red' : 'blue', ts]);
+		first = false;
+	}
+
+	markers.reverse();
+	res.json({ ok: true, markers: markers });
+});
+
 app.get('/presence', async (req, res) => {
 	const conn = getMysqlConnection();
 	if (!conn) {
@@ -6475,6 +6543,7 @@ body{margin:0;padding:0}
 .month-select-menu div:hover{background:rgba(78,183,128,0.12)}
 .month-select-menu div.selected{background:rgba(78,183,128,0.12);font-weight:500}
 .search-go{}
+.search-empty{display:none;font-size:0.6875rem;font-weight:300;color:rgba(19,21,54,0.45);text-align:center;padding:6px 0 2px;font-family:'Rubik',sans-serif}
 </style>
 <script src="https://openlayers.org/api/OpenLayers.js"></script>
 </head>
@@ -6484,6 +6553,7 @@ body{margin:0;padding:0}
 <div id="hover-tooltip" class="tooltip"></div>
 <div id="search-modal">
 <div class="search-header">SEARCH HISTORY</div>
+<div class="search-empty">No results found</div>
 <div class="search-controls">
 <div class="month-select"><button class="month-select-btn" type="button">Month</button><div class="month-select-menu" id="month-menu"></div></div>
 <input type="text" class="search-dd" placeholder="DD" maxlength="2">
@@ -6494,7 +6564,6 @@ body{margin:0;padding:0}
 <script>
 (function(){
 var markers=${markersJson};
-if(!markers.length)return;
 
 var map=new OpenLayers.Map("map");
 map.addLayer(new OpenLayers.Layer.OSM("OSM",["//a.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//b.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//c.tile.openstreetmap.org/\${z}/\${x}/\${y}.png"]));
@@ -6513,11 +6582,12 @@ vector.addFeatures(feature);
 
 map.addLayer(vector);
 
-var red=markers[markers.length-1];
+var red=markers.length?markers[markers.length-1]:null;
 var redTooltip=document.getElementById('red-tooltip');
-redTooltip.innerHTML=red[3];
+if(red)redTooltip.innerHTML=red[3];
 
 function updateRedTooltip(){
+if(!red)return;
 var lonlat=new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj);
 var px=map.getPixelFromLonLat(lonlat);
 if(px){
@@ -6549,12 +6619,14 @@ map.events.register('move',map,updateRedTooltip);
 map.events.register('moveend',map,updateRedTooltip);
 map.events.register('zoomend',map,updateRedTooltip);
 
+if(markers.length){
 var extent=vector.getDataExtent();
 if(extent){
 if(markers.length===1){map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),15)}
 else{extent.scale(1.15);map.zoomToExtent(extent)}
 }
 setTimeout(updateRedTooltip,100);
+}
 
 document.getElementById('search-modal').addEventListener('keydown',function(e){e.stopPropagation()});
 
@@ -6616,6 +6688,38 @@ if(v.length===1)return n===2;
 if(v.length===2)return v==='20';
 if(v.length===3)return n>=200&&n<=205;
 return n>=2000&&n<=2050;
+});
+
+var searchEmpty=document.querySelector('.search-empty');
+document.querySelector('.search-go').addEventListener('click',function(){
+var selItem=monthMenu.querySelector('.selected');
+if(!selItem)return;
+var month=Array.prototype.indexOf.call(monthMenu.children,selItem);
+var day=parseInt(ddInput.value,10);
+var year=parseInt(yyyyInput.value,10);
+if(isNaN(month)||isNaN(day)||isNaN(year)||!ddInput.value||!yyyyInput.value)return;
+fetch('/api/presence?month='+month+'&day='+day+'&year='+year).then(function(r){return r.json()}).then(function(data){
+if(!data.ok){searchEmpty.textContent=data.error||'Request failed';searchEmpty.style.display='block';return}
+if(!data.markers.length){searchEmpty.textContent='No results found';searchEmpty.style.display='block';return}
+searchEmpty.style.display='none';
+vector.removeAllFeatures();
+markers=data.markers;
+markers.forEach(function(m,i){
+var feature=new OpenLayers.Feature.Vector(
+new OpenLayers.Geometry.Point(m[1],m[0]).transform(wgs84,proj),
+{timestamp:m[3],index:i,color:m[2]},{externalGraphic:'/images/marker-'+m[2]+'.png',graphicHeight:41,graphicWidth:25,graphicXOffset:-12,graphicYOffset:-41}
+);
+vector.addFeatures(feature);
+});
+red=markers[markers.length-1];
+redTooltip.innerHTML=red[3];
+var extent=vector.getDataExtent();
+if(extent){
+if(markers.length===1){map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),15)}
+else{extent.scale(1.15);map.zoomToExtent(extent)}
+}
+setTimeout(updateRedTooltip,100);
+}).catch(function(){searchEmpty.textContent='Request failed';searchEmpty.style.display='block'});
 });
 })();
 </script>
