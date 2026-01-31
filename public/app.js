@@ -938,8 +938,10 @@ function getStatusNotificationBody() {
 
 async function showStatusNotification() {
 	if (notificationPermission !== 'granted' || !isTouchDevice()) return;
+	if (document.visibilityState === 'hidden') return;
 	try {
 		const reg = await navigator.serviceWorker.ready;
+		if (document.visibilityState === 'hidden') return;
 		const siteName = CLIENT_CONFIG.siteName || state.rootPageTitle || state.pageTitle || 'openHAB';
 		await reg.showNotification(siteName, {
 			tag: STATUS_NOTIFICATION_TAG,
