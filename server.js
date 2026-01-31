@@ -6543,7 +6543,7 @@ body{margin:0;padding:0}
 .month-select-menu div:hover{background:rgba(78,183,128,0.12)}
 .month-select-menu div.selected{background:rgba(78,183,128,0.12);font-weight:500}
 .search-go{}
-.search-empty{display:none;font-size:0.6875rem;font-weight:300;color:rgba(19,21,54,0.45);text-align:center;padding:6px 0 2px;font-family:'Rubik',sans-serif}
+.search-empty{display:none;font-size:0.625rem;font-weight:300;letter-spacing:0.08em;color:rgba(19,21,54,0.5);padding:0 0 8px;font-family:'Rubik',sans-serif}
 </style>
 <script src="https://openlayers.org/api/OpenLayers.js"></script>
 </head>
