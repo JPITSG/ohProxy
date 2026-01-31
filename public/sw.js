@@ -99,6 +99,23 @@ self.addEventListener('fetch', (event) => {
 	);
 });
 
+const STATUS_NOTIFICATION_TAG = 'ohproxy-status';
+let heartbeatTimeout = null;
+const HEARTBEAT_TIMEOUT_MS = 5000;
+
+function clearStatusNotification() {
+	self.registration.getNotifications({ tag: STATUS_NOTIFICATION_TAG })
+		.then((notifications) => notifications.forEach((n) => n.close()))
+		.catch(() => {});
+}
+
+self.addEventListener('message', (event) => {
+	if (event.data && event.data.type === 'notification-heartbeat') {
+		if (heartbeatTimeout) clearTimeout(heartbeatTimeout);
+		heartbeatTimeout = setTimeout(() => clearStatusNotification(), HEARTBEAT_TIMEOUT_MS);
+	}
+});
+
 self.addEventListener('notificationclick', (event) => {
 	event.notification.close();
 	event.waitUntil(
