@@ -3282,7 +3282,7 @@ function renderWeatherWidget(forecastData, mode) {
 	const textColor = isDark ? '#ffffff' : '#000000';
 	const rainColor = '#3498db';
 
-	const days = Array.isArray(forecastData?.data) ? forecastData.data.slice(0, 7) : [];
+	const days = Array.isArray(forecastData?.data) ? forecastData.data : [];
 	const cityName = safeText(forecastData?.city_name || '');
 	const unitSymbol = WEATHERBIT_UNITS === 'I' ? 'F' : 'C';
 
@@ -3351,25 +3351,23 @@ html, body {
 .forecast-container {
 	display: flex;
 	gap: 10px;
-	overflow-x: auto;
+	overflow: hidden;
 	padding: 5px;
-	-webkit-overflow-scrolling: touch;
-	scrollbar-width: none;
 	flex: 1;
 }
-.forecast-container::-webkit-scrollbar { display: none; }
 .forecast-day {
 	flex: 1;
 	min-width: 70px;
 	background: transparent;
 	border-radius: 15px;
 	padding: 15px 10px;
-	display: flex;
+	display: none;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
 	gap: 5px;
 }
+.forecast-day.visible { display: flex; }
 .day-name {
 	font-size: 1.125rem;
 	font-weight: 400;
@@ -3404,15 +3402,6 @@ html, body {
 	width: 10px;
 	height: 10px;
 }
-@media (max-width: 560px) {
-	.forecast-day:nth-child(7) { display: none; }
-}
-@media (max-width: 480px) {
-	.forecast-day:nth-child(6) { display: none; }
-}
-@media (max-width: 400px) {
-	.forecast-day:nth-child(5) { display: none; }
-}
 </style>
 </head>
 <body>
@@ -3421,6 +3410,28 @@ html, body {
 		${forecastCards}
 	</div>
 </div>
+<script>
+(function() {
+  var container = document.querySelector('.forecast-container');
+  if (!container) return;
+  var cards = container.querySelectorAll('.forecast-day');
+  if (!cards.length) return;
+  function fitCards() {
+    var contentWidth = container.clientWidth - 10;
+    var maxFit = Math.max(1, Math.floor((contentWidth + 10) / 80));
+    for (var i = 0; i < cards.length; i++) {
+      if (i < maxFit) cards[i].classList.add('visible');
+      else cards[i].classList.remove('visible');
+    }
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(fitCards).observe(container);
+  } else {
+    fitCards();
+    window.addEventListener('resize', fitCards);
+  }
+})();
+</script>
 </body>
 </html>`;
 }
