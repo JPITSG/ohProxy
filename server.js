@@ -6519,7 +6519,7 @@ app.get('/presence', async (req, res) => {
 .olControlAttribution{display:none!important}
 @media(pointer:coarse){.olControlZoom{display:none!important}}
 #map{position:absolute;top:0;left:0;right:0;bottom:0}
-body{margin:0;padding:0}
+body{margin:0;padding:0;overflow:hidden}
 .tooltip{position:absolute;background:#f1f2f9;border:1px solid #ccccd1;border-radius:10px;padding:0.5rem 0.75rem;font-size:11px;line-height:1.5;font-family:'Rubik',sans-serif;color:#0f172a;pointer-events:none;z-index:100;white-space:nowrap}
 .tooltip .tt-date{font-weight:500}
 .tooltip .tt-time{font-weight:300;margin-top:0.125rem}
