@@ -1687,7 +1687,7 @@ function handleWsConnection(ws, req) {
 
 	// Send welcome message and current backend status
 	try {
-		ws.send(JSON.stringify({ event: 'connected', data: { time: Date.now() } }));
+		ws.send(JSON.stringify({ event: 'connected', data: { time: Date.now(), assetVersion: liveConfig.assetVersion } }));
 		ws.send(JSON.stringify({
 			event: 'backendStatus',
 			data: { ok: backendStatus.ok, error: backendStatus.lastError },
@@ -5043,6 +5043,7 @@ app.get('/config.js', (req, res) => {
 	}
 
 	res.send(`window.__OH_CONFIG__=${JSON.stringify({
+		assetVersion: liveConfig.assetVersion,
 		iconVersion: liveConfig.iconVersion,
 		jsLogEnabled: liveConfig.jsLogEnabled,
 		client: clientConfig,
