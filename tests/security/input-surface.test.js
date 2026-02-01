@@ -54,6 +54,9 @@ describe('Input Surface Coverage', () => {
 			/if\s*\(req\.query\?\.cache\s*!==\s*undefined\s*&&\s*!Number\.isFinite\(cacheSeconds\)\s*\)/,
 			/const\s+queryKeys\s*=\s*Object\.keys\(req\.query\)\s*;/,
 			/const\s+rawState\s*=\s*req\.query\[itemName\]\s*;/,
+			/const\s+month\s*=\s*parseInt\(req\.query\.month,\s*10\)\s*;/,
+			/const\s+day\s*=\s*parseInt\(req\.query\.day,\s*10\)\s*;/,
+			/const\s+year\s*=\s*parseInt\(req\.query\.year,\s*10\)\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));
