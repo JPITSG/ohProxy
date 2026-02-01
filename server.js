@@ -806,6 +806,7 @@ function validateConfig() {
 		ensureNumber(CLIENT_CONFIG.sliderDebounceMs, 'client.sliderDebounceMs', { min: 0 }, errors);
 		ensureNumber(CLIENT_CONFIG.idleAfterMs, 'client.idleAfterMs', { min: 0 }, errors);
 		ensureNumber(CLIENT_CONFIG.activityThrottleMs, 'client.activityThrottleMs', { min: 0 }, errors);
+		ensureBoolean(CLIENT_CONFIG.statusNotification, 'client.statusNotification', errors);
 
 		if (ensureArray(CLIENT_CONFIG.hideTitleItems, 'client.hideTitleItems', { allowEmpty: true }, errors)) {
 			CLIENT_CONFIG.hideTitleItems.forEach((entry, index) => {
