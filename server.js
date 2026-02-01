@@ -6567,8 +6567,8 @@ body{margin:0;padding:0;overflow:hidden}
 (function(){
 var markers=${markersJson};
 
-var map=new OpenLayers.Map("map",{numZoomLevels:28});
-map.addLayer(new OpenLayers.Layer.OSM("OSM",["//a.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//b.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//c.tile.openstreetmap.org/\${z}/\${x}/\${y}.png"],{numZoomLevels:28}));
+var map=new OpenLayers.Map("map");
+map.addLayer(new OpenLayers.Layer.OSM("OSM",["//a.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//b.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//c.tile.openstreetmap.org/\${z}/\${x}/\${y}.png"]));
 
 var wgs84=new OpenLayers.Projection("EPSG:4326");
 var proj=map.getProjectionObject();
