@@ -306,6 +306,8 @@ module.exports = {
 		idleAfterMs: 60000,
 		// Activity throttle window (ms; >=0).
 		activityThrottleMs: 250,
+		// Show PWA connection status notification on touch devices (true/false).
+		statusNotification: true,
 		// Items with hidden titles (item names; case-insensitive; empty allowed).
 		hideTitleItems: [],
 		// Minimum time app must be hidden before touch-device reload (ms; >=0).

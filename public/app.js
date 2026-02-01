@@ -937,6 +937,7 @@ function getStatusNotificationBody() {
 }
 
 async function showStatusNotification() {
+	if (CLIENT_CONFIG.statusNotification === false) return;
 	if (notificationPermission !== 'granted' || !isTouchDevice()) return;
 	if (document.visibilityState === 'hidden') return;
 	try {
