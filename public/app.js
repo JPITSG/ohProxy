@@ -5981,6 +5981,13 @@ function connectWs() {
 		wsConnection.onmessage = (event) => {
 			try {
 				const msg = JSON.parse(event.data);
+				if (msg.event === 'connected' && msg.data?.assetVersion) {
+					if (msg.data.assetVersion !== OH_CONFIG.assetVersion) {
+						console.log('Asset version mismatch on reconnect, reloading...');
+						triggerReload();
+						return;
+					}
+				}
 				if (msg.event === 'account-deleted') {
 					// Account was deleted - redirect to login
 					window.location.href = '/login';
