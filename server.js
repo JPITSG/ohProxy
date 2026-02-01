@@ -6698,6 +6698,9 @@ if(v.length===3)return n>=200&&n<=205;
 return n>=2000&&n<=2050;
 });
 
+ddInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&ddInput.value)yyyyInput.focus()});
+yyyyInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&yyyyInput.value.length===4)document.querySelector('.search-go').click()});
+
 var searchEmpty=document.querySelector('.search-empty');
 document.querySelector('.search-go').addEventListener('click',function(){
 var selItem=monthMenu.querySelector('.selected');
