@@ -6845,7 +6845,8 @@ body{margin:0;padding:0;overflow:hidden}
 #hover-tooltip{display:none}
 @media(max-width:767px){#search-modal{display:none!important}}
 #search-modal{position:fixed;top:16px;right:16px;z-index:150;background:rgb(245,246,250);border:0.5px solid rgba(150,150,150,0.3);border-radius:18px;box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:12px;font-family:'Rubik',sans-serif}
-.search-header{font-size:0.625rem;font-weight:500;letter-spacing:0.08em;color:rgba(19,21,54,0.5);margin-bottom:8px}
+.search-header{display:flex;justify-content:space-between;align-items:center;font-size:0.625rem;font-weight:500;letter-spacing:0.08em;color:rgba(19,21,54,0.5);margin-bottom:8px}
+.search-today{cursor:pointer}
 .search-controls{display:flex;gap:6px;align-items:center}
 .search-controls button,.search-controls input{box-sizing:border-box;height:36px;padding:0 12px;font-size:.75rem;font-weight:300;font-family:'Rubik',sans-serif;color:#0f172a;background:rgba(19,21,54,0.08);border:0.5px solid rgba(19,21,54,0.2);border-radius:10px;cursor:pointer;transition:background-color .2s,border-color .2s,box-shadow .2s;outline:none}
 .search-controls button:hover,.search-controls input:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}
@@ -6886,7 +6887,7 @@ body{margin:0;padding:0;overflow:hidden}
 <div id="hover-tooltip" class="tooltip"></div>
 <div id="ctx-menu"></div>
 <div id="search-modal">
-<div class="search-header">SEARCH HISTORY</div>
+<div class="search-header"><span>SEARCH HISTORY</span><span class="search-today">TODAY</span></div>
 <div class="search-empty">No results found</div>
 <div class="search-controls">
 <div class="month-select"><button class="month-select-btn" type="button">Month</button><div class="month-select-menu" id="month-menu"></div></div>
@@ -7063,6 +7064,14 @@ var day=parseInt(ddInput.value,10);
 var year=parseInt(yyyyInput.value,10);
 if(isNaN(month)||isNaN(day)||isNaN(year)||!ddInput.value||!yyyyInput.value)return;
 loadDay(month,day,year);
+});
+
+document.querySelector('.search-today').addEventListener('click',function(){
+var now=new Date();var m=now.getMonth(),d=now.getDate(),y=now.getFullYear();
+monthBtn.textContent=months[m];
+monthMenu.querySelectorAll('div').forEach(function(el,i){if(i===m)el.classList.add('selected');else el.classList.remove('selected')});
+ddInput.value=String(d);yyyyInput.value=String(y);
+loadDay(m,d,y);
 });
 
 var ctxMenu=document.getElementById('ctx-menu');
