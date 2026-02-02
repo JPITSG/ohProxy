@@ -25,18 +25,8 @@
 	function fmtDT(d, fmt) {
 		var pad = function(n) { return String(n).padStart(2, '0'); };
 		var h24 = d.getHours(), h12 = h24 % 12 || 12;
-		return fmt
-			.replace('YYYY', d.getFullYear())
-			.replace('MMM', MONTHS_S[d.getMonth()])
-			.replace('Do', ordSuffix(d.getDate()))
-			.replace('DD', pad(d.getDate()))
-			.replace('HH', pad(h24))
-			.replace(/(?<![Dh])H(?!H)/, h24)
-			.replace('hh', pad(h12))
-			.replace(/(?<![Hd])h(?!h)/, h12)
-			.replace('mm', pad(d.getMinutes()))
-			.replace('ss', pad(d.getSeconds()))
-			.replace('A', h24 < 12 ? 'AM' : 'PM');
+		var tokens = { YYYY: d.getFullYear(), MMM: MONTHS_S[d.getMonth()], Do: ordSuffix(d.getDate()), DD: pad(d.getDate()), HH: pad(h24), H: h24, hh: pad(h12), h: h12, mm: pad(d.getMinutes()), ss: pad(d.getSeconds()), A: h24 < 12 ? 'AM' : 'PM' };
+		return fmt.replace(/YYYY|MMM|Do|DD|HH|H|hh|h|mm|ss|A/g, function(m) { return tokens[m]; });
 	}
 
 	window.ChartRenderer = class {
