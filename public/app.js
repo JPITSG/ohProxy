@@ -2495,7 +2495,7 @@ async function loadHistoryEntries(itemName, offset) {
 			stateSpan.className = 'history-state';
 			const mapped = historyMappings.length ? historyMappings.find(m => m.command === entry.state) : null;
 			const rawState = entry.state;
-			stateSpan.textContent = mapped ? (mapped.label || mapped.command) : (/^[A-Z]{2,}$/.test(rawState) ? rawState.charAt(0) + rawState.slice(1).toLowerCase() : rawState);
+			stateSpan.textContent = mapped ? (mapped.label || mapped.command) : (/^[A-Z][A-Z_]+$/.test(rawState) ? rawState.split('_').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ') : rawState);
 			row.appendChild(timeSpan);
 			row.appendChild(stateSpan);
 			frag.appendChild(row);
@@ -2566,7 +2566,7 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 			const stateSpan = document.createElement('span');
 			stateSpan.className = 'history-state';
 			const rawState = entry.state;
-			const displayState = /^[A-Z]{2,}$/.test(rawState) ? rawState.charAt(0) + rawState.slice(1).toLowerCase() : rawState;
+			const displayState = /^[A-Z][A-Z_]+$/.test(rawState) ? rawState.split('_').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ') : rawState;
 			stateSpan.textContent = (entry.member || '') + ' \u00B7 ' + displayState;
 			row.appendChild(timeSpan);
 			row.appendChild(stateSpan);
