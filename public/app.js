@@ -6107,6 +6107,14 @@ function sendFocusState() {
 	if (focused !== lastFocusState) {
 		lastFocusState = focused;
 		sendClientState({ focused });
+		// Pause/resume video streams on desktop focus change
+		if (!isTouchDevice()) {
+			if (focused) {
+				resumeVideoStreamsFromVisibility();
+			} else {
+				pauseVideoStreamsForVisibility();
+			}
+		}
 	}
 }
 
