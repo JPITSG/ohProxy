@@ -6448,6 +6448,76 @@ app.get('/api/presence', async (req, res) => {
 	res.json({ ok: true, markers: markers });
 });
 
+app.get('/api/presence/nearby-days', async (req, res) => {
+	const username = req.ohProxyUser;
+	if (!username) {
+		return res.status(401).json({ ok: false, error: 'Unauthorized' });
+	}
+
+	const conn = getMysqlConnection();
+	if (!conn) {
+		return res.status(503).json({ ok: false, error: 'Database unavailable' });
+	}
+
+	const lat = parseFloat(req.query.lat);
+	const lon = parseFloat(req.query.lon);
+	const offset = parseInt(req.query.offset, 10) || 0;
+	const radius = Math.min(Math.max(parseInt(req.query.radius, 10) || 100, 1), 50000);
+
+	if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) {
+		return res.status(400).json({ ok: false, error: 'Invalid coordinates' });
+	}
+	if (offset < 0 || offset > 10000) {
+		return res.status(400).json({ ok: false, error: 'Invalid offset' });
+	}
+
+	const latDelta = radius / 111111;
+	const lonDelta = latDelta / Math.cos(lat * Math.PI / 180);
+	const latMin = lat - latDelta;
+	const latMax = lat + latDelta;
+	const lonMin = lon - lonDelta;
+	const lonMax = lon + lonDelta;
+
+	const QUERY_TIMEOUT_MS = 10000;
+	let rows;
+	try {
+		rows = await new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => reject(new Error('Query timeout')), QUERY_TIMEOUT_MS);
+			conn.query(
+				'SELECT lat, lon, DATE(timestamp) AS day_date FROM log_gps WHERE username = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT 5000',
+				[username, latMin, latMax, lonMin, lonMax],
+				(err, results) => { clearTimeout(timeout); if (err) reject(err); else resolve(results); }
+			);
+		});
+	} catch (err) {
+		logMessage(`[Nearby Days API] Query failed: ${err.message || err}`);
+		return res.status(504).json({ ok: false, error: 'Query failed' });
+	}
+
+	const toRad = (deg) => deg * Math.PI / 180;
+	const R = 6371000;
+	const dayCounts = {};
+	for (const row of rows) {
+		const dLat = toRad(row.lat - lat);
+		const dLon = toRad(row.lon - lon);
+		const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat)) * Math.cos(toRad(row.lat)) * Math.sin(dLon / 2) ** 2;
+		const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+		if (dist <= radius) {
+			const key = row.day_date instanceof Date ? row.day_date.getFullYear() + '-' + String(row.day_date.getMonth() + 1).padStart(2, '0') + '-' + String(row.day_date.getDate()).padStart(2, '0') : String(row.day_date);
+			dayCounts[key] = (dayCounts[key] || 0) + 1;
+		}
+	}
+
+	const sorted = Object.entries(dayCounts).sort((a, b) => b[0].localeCompare(a[0]));
+	const page = sorted.slice(offset, offset + 5);
+	const days = page.map(([dateStr, count]) => {
+		const parts = dateStr.split('-');
+		return { year: parseInt(parts[0], 10), month: parseInt(parts[1], 10) - 1, day: parseInt(parts[2], 10), label: dateStr, count };
+	});
+
+	res.json({ ok: true, days, hasMore: sorted.length > offset + 5 });
+});
+
 app.get('/presence', async (req, res) => {
 	const conn = getMysqlConnection();
 	if (!conn) {
@@ -6557,6 +6627,18 @@ body{margin:0;padding:0;overflow:hidden}
 .month-select-menu div.selected{background:rgba(78,183,128,0.12);font-weight:500}
 .search-go{}
 .search-empty{display:none;font-size:0.625rem;font-weight:300;letter-spacing:0.08em;color:rgba(19,21,54,0.5);padding:0 0 8px;font-family:'Rubik',sans-serif}
+@media(max-width:767px){#ctx-menu{display:none!important}}
+#ctx-menu{display:none;position:absolute;z-index:200;background:rgb(245,246,250);border:0.5px solid rgba(150,150,150,0.3);border-radius:18px;box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:12px;font-family:'Rubik',sans-serif;min-width:160px}
+.ctx-header{display:flex;align-items:center;justify-content:space-between;font-size:0.625rem;font-weight:500;letter-spacing:0.08em;color:rgba(19,21,54,0.5);margin-bottom:8px}
+.ctx-radius{box-sizing:content-box;padding:1px 1px 1px 0;margin-right:2px;font-size:0.625rem;font-weight:500;letter-spacing:0;color:rgba(19,21,54,0.5);font-family:'Rubik',sans-serif;background:none;border:none;border-bottom:0.5px solid rgba(19,21,54,0.2);outline:none;text-align:right;transition:border-color .2s}
+.ctx-radius:focus{border-bottom-color:rgba(78,183,128,0.45)}
+.ctx-day{display:flex;align-items:center;justify-content:space-between;padding:6px 0;cursor:pointer;font-size:.75rem;font-weight:300;font-family:'Rubik',sans-serif;color:#0f172a}
+.ctx-count{font-size:0.625rem;color:rgba(19,21,54,0.4);margin-left:12px;white-space:nowrap}
+.ctx-older,.ctx-newer{box-sizing:border-box;display:block;width:100%;height:36px;padding:0 12px;margin-top:8px;font-size:.75rem;font-weight:300;font-family:'Rubik',sans-serif;color:#0f172a;background:rgba(19,21,54,0.08);border:0.5px solid rgba(19,21,54,0.2);border-radius:10px;cursor:pointer;transition:background-color .2s,border-color .2s,box-shadow .2s;outline:none}
+.ctx-older:hover,.ctx-newer:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}
+.ctx-nav{display:flex;gap:6px;margin-top:8px}
+.ctx-nav .ctx-older,.ctx-nav .ctx-newer{margin-top:0}
+.ctx-empty,.ctx-loading{font-size:0.625rem;font-weight:300;letter-spacing:0.08em;color:rgba(19,21,54,0.5);font-family:'Rubik',sans-serif}
 </style>
 <script src="https://openlayers.org/api/OpenLayers.js"></script>
 </head>
@@ -6564,6 +6646,7 @@ body{margin:0;padding:0;overflow:hidden}
 <div id="map"></div>
 <div id="red-tooltip" class="tooltip"></div>
 <div id="hover-tooltip" class="tooltip"></div>
+<div id="ctx-menu"></div>
 <div id="search-modal">
 <div class="search-header">SEARCH HISTORY</div>
 <div class="search-empty">No results found</div>
@@ -6713,13 +6796,7 @@ ddInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&ddInput.value
 yyyyInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&yyyyInput.value.length===4)document.querySelector('.search-go').click()});
 
 var searchEmpty=document.querySelector('.search-empty');
-document.querySelector('.search-go').addEventListener('click',function(){
-var selItem=monthMenu.querySelector('.selected');
-if(!selItem)return;
-var month=Array.prototype.indexOf.call(monthMenu.children,selItem);
-var day=parseInt(ddInput.value,10);
-var year=parseInt(yyyyInput.value,10);
-if(isNaN(month)||isNaN(day)||isNaN(year)||!ddInput.value||!yyyyInput.value)return;
+function loadDay(month,day,year){
 fetch('/api/presence?month='+month+'&day='+day+'&year='+year).then(function(r){return r.json()}).then(function(data){
 if(!data.ok){searchEmpty.textContent=data.error||'Request failed';searchEmpty.style.display='block';return}
 if(!data.markers.length){searchEmpty.textContent='No results found';searchEmpty.style.display='block';return}
@@ -6738,7 +6815,116 @@ redTooltip.innerHTML=red[3];
 zoomToMarkers();
 setTimeout(updateRedTooltip,100);
 }).catch(function(){searchEmpty.textContent='Request failed';searchEmpty.style.display='block'});
+}
+
+document.querySelector('.search-go').addEventListener('click',function(){
+var selItem=monthMenu.querySelector('.selected');
+if(!selItem)return;
+var month=Array.prototype.indexOf.call(monthMenu.children,selItem);
+var day=parseInt(ddInput.value,10);
+var year=parseInt(yyyyInput.value,10);
+if(isNaN(month)||isNaN(day)||isNaN(year)||!ddInput.value||!yyyyInput.value)return;
+loadDay(month,day,year);
 });
+
+var ctxMenu=document.getElementById('ctx-menu');
+var ctxLat=0,ctxLon=0,ctxOffset=0,ctxRadius=100;
+
+function closeCtxMenu(){ctxMenu.style.display='none'}
+
+var radiusCtx=document.createElement('canvas').getContext('2d');
+function sizeRadius(inp){
+radiusCtx.font=getComputedStyle(inp).font;
+inp.style.width=Math.ceil(radiusCtx.measureText(inp.value||'0').width)+'px';
+}
+
+function bindRadiusInput(){
+var inp=ctxMenu.querySelector('.ctx-radius');
+if(!inp)return;
+sizeRadius(inp);
+inp.addEventListener('keydown',function(e){
+if(e.key==='Enter'){
+var v=parseInt(inp.value,10);
+if(v>=1&&v<=50000){ctxRadius=v;ctxOffset=0;loadNearbyDays()}
+}
+e.stopPropagation();
+});
+inp.addEventListener('input',function(){
+var v=inp.value.replace(/[^0-9]/g,'').replace(/^0+/,'');
+if(v!==inp.value)inp.value=v;
+sizeRadius(inp);
+});
+inp.addEventListener('click',function(e){e.stopPropagation()});
+}
+
+function ctxHeader(){return '<div class="ctx-header"><span>NEARBY DAYS</span><span><input class="ctx-radius" type="text" value="'+ctxRadius+'" maxlength="5">m</span></div>'}
+
+function loadNearbyDays(){
+ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-loading">Loading\\u2026</div>';
+ctxMenu.style.display='block';
+bindRadiusInput();
+fetch('/api/presence/nearby-days?lat='+ctxLat+'&lon='+ctxLon+'&offset='+ctxOffset+'&radius='+ctxRadius).then(function(r){return r.json()}).then(function(data){
+if(!data.ok){ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-empty">'+(data.error||'Request failed')+'</div>';bindRadiusInput();return}
+var html=ctxHeader();
+if(!data.days.length){html+='<div class="ctx-empty">No entries nearby</div>';ctxMenu.innerHTML=html;bindRadiusInput();return}
+data.days.forEach(function(d){
+html+='<div class="ctx-day" data-month="'+d.month+'" data-day="'+d.day+'" data-year="'+d.year+'"><span>'+d.label+'</span><span class="ctx-count">'+d.count+'</span></div>';
+});
+var hasNewer=ctxOffset>0;
+if(hasNewer||data.hasMore){
+if(hasNewer&&data.hasMore)html+='<div class="ctx-nav">';
+if(hasNewer)html+='<button class="ctx-newer" type="button">Newer \\u25B4</button>';
+if(data.hasMore)html+='<button class="ctx-older" type="button">Older \\u25BE</button>';
+if(hasNewer&&data.hasMore)html+='</div>';
+}
+ctxMenu.innerHTML=html;
+bindRadiusInput();
+ctxMenu.querySelectorAll('.ctx-day').forEach(function(el){
+el.addEventListener('click',function(e){
+e.stopPropagation();
+loadDayFromCtx(parseInt(el.dataset.month,10),parseInt(el.dataset.day,10),parseInt(el.dataset.year,10));
+});
+});
+var newerBtn=ctxMenu.querySelector('.ctx-newer');
+if(newerBtn)newerBtn.addEventListener('click',function(e){e.stopPropagation();ctxOffset=Math.max(0,ctxOffset-5);loadNearbyDays()});
+var olderBtn=ctxMenu.querySelector('.ctx-older');
+if(olderBtn)olderBtn.addEventListener('click',function(e){e.stopPropagation();ctxOffset+=5;loadNearbyDays()});
+requestAnimationFrame(function(){
+var r=ctxMenu.getBoundingClientRect();
+var mapR=document.getElementById('map').getBoundingClientRect();
+if(r.right>mapR.right)ctxMenu.style.left=Math.max(0,parseInt(ctxMenu.style.left)-r.right+mapR.right-8)+'px';
+if(r.bottom>mapR.bottom)ctxMenu.style.top=Math.max(0,parseInt(ctxMenu.style.top)-r.bottom+mapR.bottom-8)+'px';
+});
+}).catch(function(){ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-empty">Request failed</div>';bindRadiusInput()});
+}
+
+function loadDayFromCtx(month,day,year){
+closeCtxMenu();
+monthBtn.textContent=months[month];
+monthMenu.querySelectorAll('div').forEach(function(el,i){if(i===month)el.classList.add('selected');else el.classList.remove('selected')});
+ddInput.value=String(day);
+yyyyInput.value=String(year);
+loadDay(month,day,year);
+}
+
+document.getElementById('map').addEventListener('contextmenu',function(e){
+e.preventDefault();
+var mapEl=document.getElementById('map');
+var rect=mapEl.getBoundingClientRect();
+var px=new OpenLayers.Pixel(e.clientX-rect.left,e.clientY-rect.top);
+var lonlat=map.getLonLatFromPixel(px);
+if(!lonlat)return;
+lonlat=lonlat.transform(proj,wgs84);
+ctxLat=lonlat.lat;ctxLon=lonlat.lon;ctxOffset=0;
+ctxMenu.style.left=(e.clientX-rect.left)+'px';
+ctxMenu.style.top=(e.clientY-rect.top)+'px';
+loadNearbyDays();
+});
+
+document.getElementById('map').addEventListener('click',closeCtxMenu);
+map.events.register('movestart',map,closeCtxMenu);
+ctxMenu.addEventListener('click',function(e){e.stopPropagation()});
+ctxMenu.addEventListener('contextmenu',function(e){e.stopPropagation();e.preventDefault()});
 })();
 </script>
 </body>

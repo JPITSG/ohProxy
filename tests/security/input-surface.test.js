@@ -57,6 +57,10 @@ describe('Input Surface Coverage', () => {
 			/const\s+month\s*=\s*parseInt\(req\.query\.month,\s*10\)\s*;/,
 			/const\s+day\s*=\s*parseInt\(req\.query\.day,\s*10\)\s*;/,
 			/const\s+year\s*=\s*parseInt\(req\.query\.year,\s*10\)\s*;/,
+			/const\s+lat\s*=\s*parseFloat\(req\.query\.lat\)\s*;/,
+			/const\s+lon\s*=\s*parseFloat\(req\.query\.lon\)\s*;/,
+			/const\s+offset\s*=\s*parseInt\(req\.query\.offset,\s*10\)\s*\|\|\s*0\s*;/,
+			/const\s+radius\s*=\s*Math\.min\(Math\.max\(parseInt\(req\.query\.radius,\s*10\)\s*\|\|\s*100,\s*1\),\s*50000\)\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));
