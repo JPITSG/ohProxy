@@ -6860,9 +6860,11 @@ inp.addEventListener('click',function(e){e.stopPropagation()});
 function ctxHeader(){return '<div class="ctx-header"><span>NEARBY DAYS</span><span><input class="ctx-radius" type="text" value="'+ctxRadius+'" maxlength="5">m</span></div>'}
 
 function loadNearbyDays(){
+if(!ctxDragging){
 ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-loading">Loading\\u2026</div>';
-ctxMenu.style.display='block';
 bindRadiusInput();
+}
+ctxMenu.style.display='block';
 fetch('/api/presence/nearby-days?lat='+ctxLat+'&lon='+ctxLon+'&offset='+ctxOffset+'&radius='+ctxRadius).then(function(r){return r.json()}).then(function(data){
 if(!data.ok){ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-empty">'+(data.error||'Request failed')+'</div>';bindRadiusInput();return}
 var html=ctxHeader();
@@ -6907,24 +6909,54 @@ yyyyInput.value=String(year);
 loadDay(month,day,year);
 }
 
-document.getElementById('map').addEventListener('contextmenu',function(e){
-e.preventDefault();
+var ctxDragging=false;
 var mapEl=document.getElementById('map');
+
+function ctxUpdatePos(e){
 var rect=mapEl.getBoundingClientRect();
 var px=new OpenLayers.Pixel(e.clientX-rect.left,e.clientY-rect.top);
 var lonlat=map.getLonLatFromPixel(px);
-if(!lonlat)return;
+if(!lonlat)return false;
 lonlat=lonlat.transform(proj,wgs84);
-ctxLat=lonlat.lat;ctxLon=lonlat.lon;ctxOffset=0;
+ctxLat=lonlat.lat;ctxLon=lonlat.lon;
 ctxMenu.style.left=(e.clientX-rect.left)+'px';
 ctxMenu.style.top=(e.clientY-rect.top)+'px';
-loadNearbyDays();
-});
+return true;
+}
 
-document.getElementById('map').addEventListener('click',closeCtxMenu);
-map.events.register('movestart',map,closeCtxMenu);
+mapEl.addEventListener('mousedown',function(e){
+if(e.button!==2)return;
+if(!ctxUpdatePos(e))return;
+ctxOffset=0;
+ctxDragging=true;
+ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-loading">Release to search</div>';
+ctxMenu.style.display='block';
+ctxMenu.style.pointerEvents='none';
+bindRadiusInput();
+},true);
+
+var ctxThrottle=0;
+document.addEventListener('mousemove',function(e){
+if(!ctxDragging)return;
+ctxUpdatePos(e);
+var now=Date.now();
+if(now-ctxThrottle>300){ctxThrottle=now;ctxOffset=0;loadNearbyDays()}
+},true);
+
+mapEl.addEventListener('contextmenu',function(e){
+e.preventDefault();
+if(!ctxDragging)return;
+ctxDragging=false;
+ctxMenu.style.pointerEvents='';
+ctxUpdatePos(e);
+loadNearbyDays();
+},true);
+
+mapEl.addEventListener('click',closeCtxMenu);
+map.events.register('movestart',map,function(){if(!ctxDragging)closeCtxMenu()});
 ctxMenu.addEventListener('click',function(e){e.stopPropagation()});
 ctxMenu.addEventListener('contextmenu',function(e){e.stopPropagation();e.preventDefault()});
+ctxMenu.addEventListener('mousedown',function(e){e.stopPropagation()});
 })();
 </script>
 </body>
