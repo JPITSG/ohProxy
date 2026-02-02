@@ -1429,6 +1429,54 @@ body.theme-light .card-config-frame {
 	flex-direction: column;
 	gap: 12px;
 }
+/* History Section */
+.history-section { display: flex; flex-direction: column; gap: 8px; }
+.history-entries { display: flex; flex-direction: column; }
+.history-entry {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 6px 0;
+	font-size: .75rem;
+	font-weight: 300;
+	color: var(--color-text-primary);
+	white-space: nowrap;
+	flex-shrink: 0;
+}
+.history-state {
+	font-size: .75rem;
+	color: var(--color-text-muted);
+	margin-left: 12px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.history-loading, .history-empty {
+	font-size: .75rem;
+	font-weight: 300;
+	color: var(--color-text-muted);
+	padding: 6px 0;
+}
+.history-nav { display: flex; gap: 6px; }
+.history-older, .history-newer {
+	flex: 1;
+	padding: 11px 12px;
+	font-size: .75rem;
+	line-height: 1;
+	border-radius: 10px;
+	cursor: pointer;
+	background-color: var(--color-control-off-bg);
+	color: var(--color-control-off-text);
+	border: var(--glass-border-width) solid var(--color-control-off-border);
+	box-shadow: 0 0 8px var(--color-control-off-shadow);
+	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+	.history-older:hover, .history-newer:hover {
+		background-color: var(--color-control-off-hover);
+		border-color: var(--color-control-off-border-hover);
+		box-shadow: 0 0 10px var(--color-control-off-shadow-hover);
+	}
+}
 .card-config-rules {
 	display: flex;
 	flex-direction: column;

@@ -15,6 +15,30 @@
 		document.documentElement.classList.add('chart-animated');
 	}
 
+	var CHART_DATE_FMT = window._chartDateFormat || 'MMM Do, YYYY';
+	var CHART_TIME_FMT = window._chartTimeFormat || 'H:mm:ss';
+	var MONTHS_S = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+	function ordSuffix(n) {
+		if (n >= 11 && n <= 13) return n + 'th';
+		switch (n % 10) { case 1: return n + 'st'; case 2: return n + 'nd'; case 3: return n + 'rd'; default: return n + 'th'; }
+	}
+	function fmtDT(d, fmt) {
+		var pad = function(n) { return String(n).padStart(2, '0'); };
+		var h24 = d.getHours(), h12 = h24 % 12 || 12;
+		return fmt
+			.replace('YYYY', d.getFullYear())
+			.replace('MMM', MONTHS_S[d.getMonth()])
+			.replace('Do', ordSuffix(d.getDate()))
+			.replace('DD', pad(d.getDate()))
+			.replace('HH', pad(h24))
+			.replace(/(?<![Dh])H(?!H)/, h24)
+			.replace('hh', pad(h12))
+			.replace(/(?<![Hd])h(?!h)/, h12)
+			.replace('mm', pad(d.getMinutes()))
+			.replace('ss', pad(d.getSeconds()))
+			.replace('A', h24 < 12 ? 'AM' : 'PM');
+	}
+
 	window.ChartRenderer = class {
 		constructor(containerId, svgId) {
 			this.container = document.getElementById(containerId);
@@ -440,11 +464,7 @@
 
 		fmtTimestamp(ts) {
 			var d = new Date(ts);
-			var h = d.getHours();
-			var mi = d.getMinutes();
-			var time = h + ':' + (mi < 10 ? '0' : '') + mi;
-			var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-			return time + ', ' + months[d.getMonth()] + ' ' + d.getDate();
+			return fmtDT(d, CHART_DATE_FMT + ' ' + CHART_TIME_FMT);
 		}
 
 		findClosestPoint(clientX) {

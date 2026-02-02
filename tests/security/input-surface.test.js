@@ -61,6 +61,10 @@ describe('Input Surface Coverage', () => {
 			/const\s+lon\s*=\s*parseFloat\(req\.query\.lon\)\s*;/,
 			/const\s+offset\s*=\s*parseInt\(req\.query\.offset,\s*10\)\s*\|\|\s*0\s*;/,
 			/const\s+radius\s*=\s*Math\.min\(Math\.max\(parseInt\(req\.query\.radius,\s*10\)\s*\|\|\s*100,\s*1\),\s*50000\)\s*;/,
+			/const\s+rawItemName\s*=\s*req\.params\.itemName\s*;/,
+			/const\s+offset\s*=\s*Math\.max\(0,\s*parseInt\(req\.query\.offset,\s*10\)\s*\|\|\s*0\)\s*;/,
+			/const\s+rawCommands\s*=\s*typeof\s+req\.query\.commands\s*===\s*'string'\s*\?\s*req\.query\.commands\s*:\s*''\s*;/,
+			/const\s+rawBefore\s*=\s*typeof\s+req\.query\.before\s*===\s*'string'\s*\?\s*req\.query\.before\s*:\s*''\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));
@@ -116,6 +120,9 @@ describe('Input Validation Coverage', () => {
 		assert.ok(content.includes('parseOptionalInt(req.query?.w, { min: 0, max: 10000 })'));
 
 		assert.ok(content.includes("target.protocol !== 'rtsp:'"));
+
+		assert.ok(content.includes("/^[a-zA-Z0-9_]{1,50}$/"), 'Missing itemName regex validation');
+		assert.ok(content.includes('offset > 100000'), 'Missing history offset upper bound');
 	});
 });
 
