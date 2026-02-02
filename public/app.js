@@ -809,6 +809,14 @@ function pauseVideoStreamsForVisibility() {
 	for (const video of videos) {
 		if (video.src) {
 			video.dataset.savedSrc = video.src;
+			// Save preview image URL for use as poster during resume
+			const container = video.closest('.video-container');
+			const preview = container?.querySelector('.video-preview');
+			if (preview) {
+				const bg = preview.style.backgroundImage;
+				const match = bg && bg.match(/url\(['"]?(.+?)['"]?\)/);
+				if (match) video.dataset.savedPoster = match[1];
+			}
 			video.src = '';
 			video.load();
 		}
@@ -821,6 +829,24 @@ function resumeVideoStreamsFromVisibility() {
 	const videos = document.querySelectorAll('video.video-stream');
 	for (const video of videos) {
 		if (video.dataset.savedSrc) {
+			const container = video.closest('.video-container');
+			const spinner = container?.querySelector('.video-spinner');
+			if (video.dataset.savedPoster) {
+				video.poster = video.dataset.savedPoster;
+				delete video.dataset.savedPoster;
+			}
+			if (spinner) {
+				spinner.style.display = 'flex';
+				spinner.style.zIndex = '20';
+			}
+			video.addEventListener('playing', function onResumePlaying() {
+				video.removeEventListener('playing', onResumePlaying);
+				video.removeAttribute('poster');
+				if (spinner) {
+					spinner.style.display = '';
+					spinner.style.zIndex = '';
+				}
+			});
 			video.src = video.dataset.savedSrc;
 			video.play().catch(() => {});
 			delete video.dataset.savedSrc;
