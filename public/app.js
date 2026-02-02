@@ -358,6 +358,14 @@ const widgetVideoConfigMap = new Map();
 	}
 })();
 
+// Video fullscreen state
+let videoFullscreenActive = false;
+let videoFullscreenVideoEl = null;
+let videoFullscreenContainer = null;
+let videoFullscreenFake = false;
+let videoFsEscHandler = null;
+let videoFsPlaceholder = null;
+
 // Widget iframe configs: Map from widgetId to {height: number}
 const widgetIframeConfigMap = new Map();
 (function initWidgetIframeConfigs() {
@@ -550,6 +558,146 @@ function isTouchDevice() {
 
 function haptic(ms = 30) {
 	if (navigator.vibrate) navigator.vibrate(ms);
+}
+
+function isIOSSafari() {
+	const ua = navigator.userAgent;
+	if (/iPad|iPhone|iPod/.test(ua)) return true;
+	// iPad on iOS 13+ reports as Macintosh
+	if (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) return true;
+	return false;
+}
+
+function isVideoLandscape(videoEl) {
+	return new Promise((resolve) => {
+		if (videoEl.videoWidth && videoEl.videoHeight) {
+			resolve(videoEl.videoWidth > videoEl.videoHeight);
+			return;
+		}
+		const timeout = setTimeout(() => resolve(true), 3000);
+		videoEl.addEventListener('loadedmetadata', () => {
+			clearTimeout(timeout);
+			resolve(videoEl.videoWidth > videoEl.videoHeight);
+		}, { once: true });
+	});
+}
+
+async function enterVideoFullscreen(videoEl, videoContainer) {
+	if (videoFullscreenActive) return;
+
+	// iOS: use native video fullscreen player
+	if (isIOSSafari()) {
+		try { videoEl.webkitEnterFullscreen(); } catch (_) {}
+		return;
+	}
+
+	// Try native fullscreen first, fall back to fake (CSS) fullscreen
+	let fake = false;
+	const requestFs = videoContainer.requestFullscreen
+		|| videoContainer.webkitRequestFullscreen;
+	try {
+		if (requestFs) await requestFs.call(videoContainer);
+		else throw new Error('no API');
+	} catch (_) {
+		// Native fullscreen blocked (e.g. iframe without allow="fullscreen")
+		// Use fake fullscreen: move container to body and cover viewport with CSS
+		fake = true;
+
+		// Insert placeholder so we can restore the container later
+		videoFsPlaceholder = document.createElement('div');
+		videoFsPlaceholder.style.display = 'none';
+		videoContainer.parentNode.insertBefore(videoFsPlaceholder, videoContainer);
+		document.body.appendChild(videoContainer);
+
+		videoContainer.classList.add('fs-active');
+		document.documentElement.classList.add('fs-no-scroll');
+
+		// Listen for Escape key to exit fake fullscreen
+		videoFsEscHandler = (e) => {
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				e.stopPropagation();
+				cleanupVideoFullscreen();
+			}
+		};
+		document.addEventListener('keydown', videoFsEscHandler, true);
+	}
+
+	videoFullscreenActive = true;
+	videoFullscreenFake = fake;
+	videoFullscreenVideoEl = videoEl;
+	videoFullscreenContainer = videoContainer;
+
+	// Update button icon to exit
+	const fsBtn = videoContainer.querySelector('.video-fullscreen-btn');
+	if (fsBtn) {
+		fsBtn.innerHTML = '<img src="icons/video-fullscreen-exit.svg" alt="Exit Fullscreen" style="width:100%;height:100%;display:block;" />';
+		fsBtn.title = 'Exit Fullscreen';
+	}
+
+	// On mobile with landscape video, rotate to landscape orientation
+	const landscape = await isVideoLandscape(videoEl);
+	if (landscape && isTouchDevice() && videoFullscreenActive) {
+		if (!fake) {
+			try {
+				await screen.orientation.lock('landscape');
+			} catch (_) {
+				videoEl.classList.add('fs-rotated');
+			}
+		} else {
+			videoEl.classList.add('fs-rotated');
+		}
+	}
+
+}
+
+function exitVideoFullscreen() {
+	if (!videoFullscreenActive) return;
+	if (videoFullscreenFake) {
+		cleanupVideoFullscreen();
+		return;
+	}
+	const exitFs = document.exitFullscreen || document.webkitExitFullscreen;
+	if (exitFs) {
+		try { exitFs.call(document); } catch (_) {}
+	}
+}
+
+function cleanupVideoFullscreen() {
+	if (!videoFullscreenVideoEl) return;
+	const videoEl = videoFullscreenVideoEl;
+	const videoContainer = videoFullscreenContainer;
+
+	videoEl.classList.remove('fs-rotated');
+	try { screen.orientation.unlock(); } catch (_) {}
+
+	// Clean up fake fullscreen state
+	if (videoFullscreenFake) {
+		videoContainer.classList.remove('fs-active');
+		document.documentElement.classList.remove('fs-no-scroll');
+		// Move container back to its original position
+		if (videoFsPlaceholder && videoFsPlaceholder.parentNode) {
+			videoFsPlaceholder.parentNode.insertBefore(videoContainer, videoFsPlaceholder);
+			videoFsPlaceholder.remove();
+		}
+		videoFsPlaceholder = null;
+	}
+	if (videoFsEscHandler) {
+		document.removeEventListener('keydown', videoFsEscHandler, true);
+		videoFsEscHandler = null;
+	}
+
+	// Restore button icon to enter
+	const fsBtn = videoContainer?.querySelector('.video-fullscreen-btn');
+	if (fsBtn) {
+		fsBtn.innerHTML = '<img src="icons/video-fullscreen.svg" alt="Fullscreen" style="width:100%;height:100%;display:block;" />';
+		fsBtn.title = 'Fullscreen';
+	}
+
+	videoFullscreenActive = false;
+	videoFullscreenFake = false;
+	videoFullscreenVideoEl = null;
+	videoFullscreenContainer = null;
 }
 
 function showResumeSpinner(show) {
@@ -4083,7 +4231,7 @@ function updateCard(card, w, afterImage, info) {
 			const muteBtn = document.createElement('button');
 			muteBtn.type = 'button';
 			muteBtn.className = 'video-mute-btn';
-			muteBtn.style.cssText = 'position:absolute;top:8px;left:8px;z-index:20;width:32px;height:32px;padding:0;border:none;background:transparent;cursor:pointer;opacity:0;pointer-events:none;transition:opacity 0.2s;';
+			muteBtn.style.cssText = 'position:absolute;bottom:8px;right:48px;z-index:20;width:32px;height:32px;padding:0;border:none;background:transparent;cursor:pointer;opacity:0;pointer-events:none;transition:opacity 0.2s;';
 			muteBtn.innerHTML = '<img src="icons/video-unmute.svg" alt="Unmute" style="width:100%;height:100%;display:block;" />';
 			muteBtn.title = 'Unmute';
 			videoContainer.appendChild(muteBtn);
@@ -4111,6 +4259,27 @@ function updateCard(card, w, afterImage, info) {
 			videoEl.addEventListener('playing', () => {
 				muteBtn.style.opacity = '1';
 				muteBtn.style.pointerEvents = 'auto';
+			});
+
+			// Create fullscreen button (hidden until video plays)
+			const fsBtn = document.createElement('button');
+			fsBtn.type = 'button';
+			fsBtn.className = 'video-fullscreen-btn';
+			fsBtn.innerHTML = '<img src="icons/video-fullscreen.svg" alt="Fullscreen" style="width:100%;height:100%;display:block;" />';
+			fsBtn.title = 'Fullscreen';
+			videoContainer.appendChild(fsBtn);
+
+			fsBtn.addEventListener('click', (e) => {
+				haptic();
+				e.stopPropagation();
+				if (videoFullscreenActive) exitVideoFullscreen();
+				else enterVideoFullscreen(videoEl, videoContainer);
+			});
+
+			// Show fullscreen button when video starts playing
+			videoEl.addEventListener('playing', () => {
+				fsBtn.style.opacity = '1';
+				fsBtn.style.pointerEvents = 'auto';
 			});
 
 			videoContainer.appendChild(videoEl);
@@ -6311,9 +6480,21 @@ function restoreNormalPolling() {
 			}
 		}
 	});
+	// Exit video fullscreen on fullscreenchange (browser ESC, back button, etc.)
+	document.addEventListener('fullscreenchange', () => {
+		if (!document.fullscreenElement) cleanupVideoFullscreen();
+	});
+	document.addEventListener('webkitfullscreenchange', () => {
+		if (!document.webkitFullscreenElement) cleanupVideoFullscreen();
+	});
+
 	window.addEventListener('popstate', (event) => {
 		const next = event.state;
 		if (!next) {
+			if (videoFullscreenActive) {
+				exitVideoFullscreen();
+				return;
+			}
 			if (imageViewer && !imageViewer.classList.contains('hidden')) {
 				closeImageViewer();
 				return;
