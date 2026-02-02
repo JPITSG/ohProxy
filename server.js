@@ -75,18 +75,8 @@ function formatDT(date, fmt) {
 	const pad = (n) => String(n).padStart(2, '0');
 	const h24 = date.getHours();
 	const h12 = h24 % 12 || 12;
-	return fmt
-		.replace('YYYY', date.getFullYear())
-		.replace('MMM', MONTHS_SHORT[date.getMonth()])
-		.replace('Do', ordinalSuffix(date.getDate()))
-		.replace('DD', pad(date.getDate()))
-		.replace('HH', pad(h24))
-		.replace(/(?<![Dh])H(?!H)/, h24)
-		.replace('hh', pad(h12))
-		.replace(/(?<![Hd])h(?!h)/, h12)
-		.replace('mm', pad(date.getMinutes()))
-		.replace('ss', pad(date.getSeconds()))
-		.replace('A', h24 < 12 ? 'AM' : 'PM');
+	const tokens = { YYYY: date.getFullYear(), MMM: MONTHS_SHORT[date.getMonth()], Do: ordinalSuffix(date.getDate()), DD: pad(date.getDate()), HH: pad(h24), H: h24, hh: pad(h12), h: h12, mm: pad(date.getMinutes()), ss: pad(date.getSeconds()), A: h24 < 12 ? 'AM' : 'PM' };
+	return fmt.replace(/YYYY|MMM|Do|DD|HH|H|hh|h|mm|ss|A/g, (m) => tokens[m]);
 }
 
 function normalizeHeaderValue(value, maxLen = 1000) {

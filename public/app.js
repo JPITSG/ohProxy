@@ -318,18 +318,8 @@ function formatDT(date, fmt) {
 	const pad = (n) => String(n).padStart(2, '0');
 	const h24 = date.getHours();
 	const h12 = h24 % 12 || 12;
-	return fmt
-		.replace('YYYY', date.getFullYear())
-		.replace('MMM', MONTHS_SHORT[date.getMonth()])
-		.replace('Do', ordinalSuffix(date.getDate()))
-		.replace('DD', pad(date.getDate()))
-		.replace('HH', pad(h24))
-		.replace(/(?<![Dh])H(?!H)/, h24)
-		.replace('hh', pad(h12))
-		.replace(/(?<![Hd])h(?!h)/, h12)
-		.replace('mm', pad(date.getMinutes()))
-		.replace('ss', pad(date.getSeconds()))
-		.replace('A', h24 < 12 ? 'AM' : 'PM');
+	const tokens = { YYYY: date.getFullYear(), MMM: MONTHS_SHORT[date.getMonth()], Do: ordinalSuffix(date.getDate()), DD: pad(date.getDate()), HH: pad(h24), H: h24, hh: pad(h12), h: h12, mm: pad(date.getMinutes()), ss: pad(date.getSeconds()), A: h24 < 12 ? 'AM' : 'PM' };
+	return fmt.replace(/YYYY|MMM|Do|DD|HH|H|hh|h|mm|ss|A/g, (m) => tokens[m]);
 }
 
 const PAGE_FADE_OUT_MS = configNumber(CLIENT_CONFIG.pageFadeOutMs, 250);
@@ -2479,8 +2469,11 @@ async function loadHistoryEntries(itemName, offset) {
 	const section = cardConfigModal.querySelector('.history-section');
 	const container = section.querySelector('.history-entries');
 	const nav = section.querySelector('.history-nav');
-	container.innerHTML = '<div class="history-loading">Loading\u2026</div>';
-	nav.style.display = 'none';
+	const isFirstLoad = !container.children.length;
+	if (isFirstLoad) {
+		container.innerHTML = '<div class="history-loading">Loading\u2026</div>';
+		nav.style.display = 'none';
+	}
 	try {
 		let historyUrl = '/api/card-config/' + encodeURIComponent(itemName) + '/history?offset=' + offset;
 		if (historyMappings.length) {
@@ -2492,7 +2485,7 @@ async function loadHistoryEntries(itemName, offset) {
 			section.style.display = 'none';
 			return;
 		}
-		container.innerHTML = '';
+		const frag = document.createDocumentFragment();
 		for (const entry of data.entries) {
 			const row = document.createElement('div');
 			row.className = 'history-entry';
@@ -2505,11 +2498,12 @@ async function loadHistoryEntries(itemName, offset) {
 			stateSpan.textContent = mapped ? (mapped.label || mapped.command) : (/^[A-Z]{2,}$/.test(rawState) ? rawState.charAt(0) + rawState.slice(1).toLowerCase() : rawState);
 			row.appendChild(timeSpan);
 			row.appendChild(stateSpan);
-			container.appendChild(row);
+			frag.appendChild(row);
 		}
+		container.innerHTML = '';
+		container.appendChild(frag);
+		const navFrag = document.createDocumentFragment();
 		if (data.hasNewer || data.hasOlder) {
-			nav.style.display = 'flex';
-			nav.innerHTML = '';
 			if (data.hasNewer) {
 				const btn = document.createElement('button');
 				btn.type = 'button';
@@ -2519,7 +2513,7 @@ async function loadHistoryEntries(itemName, offset) {
 					const prevOffset = historyOffsetStack.pop() || 0;
 					loadHistoryEntries(itemName, prevOffset);
 				});
-				nav.appendChild(btn);
+				navFrag.appendChild(btn);
 			}
 			if (data.hasOlder) {
 				const btn = document.createElement('button');
@@ -2530,8 +2524,11 @@ async function loadHistoryEntries(itemName, offset) {
 					historyOffsetStack.push(offset);
 					loadHistoryEntries(itemName, data.nextOffset);
 				});
-				nav.appendChild(btn);
+				navFrag.appendChild(btn);
 			}
+			nav.innerHTML = '';
+			nav.appendChild(navFrag);
+			nav.style.display = 'flex';
 		} else {
 			nav.style.display = 'none';
 		}
@@ -2544,8 +2541,11 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 	const section = cardConfigModal.querySelector('.history-section');
 	const container = section.querySelector('.history-entries');
 	const nav = section.querySelector('.history-nav');
-	container.innerHTML = '<div class="history-loading">Loading\u2026</div>';
-	nav.style.display = 'none';
+	const isFirstLoad = !container.children.length;
+	if (isFirstLoad) {
+		container.innerHTML = '<div class="history-loading">Loading\u2026</div>';
+		nav.style.display = 'none';
+	}
 	try {
 		let historyUrl = '/api/card-config/' + encodeURIComponent(itemName) + '/history';
 		if (cursor) {
@@ -2557,7 +2557,7 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 			section.style.display = 'none';
 			return;
 		}
-		container.innerHTML = '';
+		const frag = document.createDocumentFragment();
 		for (const entry of data.entries) {
 			const row = document.createElement('div');
 			row.className = 'history-entry';
@@ -2570,11 +2570,12 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 			stateSpan.textContent = (entry.member || '') + ' \u00B7 ' + displayState;
 			row.appendChild(timeSpan);
 			row.appendChild(stateSpan);
-			container.appendChild(row);
+			frag.appendChild(row);
 		}
+		container.innerHTML = '';
+		container.appendChild(frag);
+		const navFrag = document.createDocumentFragment();
 		if (data.hasNewer || data.hasOlder) {
-			nav.style.display = 'flex';
-			nav.innerHTML = '';
 			if (data.hasNewer) {
 				const btn = document.createElement('button');
 				btn.type = 'button';
@@ -2584,7 +2585,7 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 					const prevCursor = historyCursorStack.pop() || null;
 					loadGroupHistoryEntries(itemName, prevCursor);
 				});
-				nav.appendChild(btn);
+				navFrag.appendChild(btn);
 			}
 			if (data.hasOlder) {
 				const btn = document.createElement('button');
@@ -2595,8 +2596,11 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 					historyCursorStack.push(cursor);
 					loadGroupHistoryEntries(itemName, data.nextCursor);
 				});
-				nav.appendChild(btn);
+				navFrag.appendChild(btn);
 			}
+			nav.innerHTML = '';
+			nav.appendChild(navFrag);
+			nav.style.display = 'flex';
 		} else {
 			nav.style.display = 'none';
 		}
