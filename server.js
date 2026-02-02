@@ -2778,6 +2778,8 @@ function connectSSE() {
 
 		logMessage('[SSE] Connected to event stream');
 		setBackendStatus(true);
+		groupMemberBackoffLevel = 0;
+		groupMemberLastFingerprint = null;
 		refreshGroupMemberMap().catch(() => {});
 
 		// Disable socket timeout for long-lived SSE connection
@@ -3901,6 +3903,20 @@ function findDeltaMatch(key, since) {
 // Reverse lookup: memberName → Set of groupNames this member belongs to
 const memberToGroups = new Map();
 
+// Backoff tiers for unchanged group member maps: 1m → 2m → 5m → 10m
+const GROUP_MEMBER_BACKOFF_TIERS = [60000, 120000, 300000, 600000];
+let groupMemberBackoffLevel = 0;
+let groupMemberLastFingerprint = null;
+
+function getGroupMemberFingerprint() {
+	const entries = [];
+	for (const [k, v] of memberToGroups) {
+		entries.push(k + ':' + [...v].sort().join(','));
+	}
+	entries.sort();
+	return entries.join('|');
+}
+
 async function refreshGroupMemberMap() {
 	if (!liveConfig.groupItems || !liveConfig.groupItems.length) return;
 	const newMap = new Map();
@@ -3921,7 +3937,16 @@ async function refreshGroupMemberMap() {
 	}
 	memberToGroups.clear();
 	for (const [k, v] of newMap) memberToGroups.set(k, v);
-	logMessage(`[GroupState] Member map refreshed: ${memberToGroups.size} members across ${liveConfig.groupItems.length} groups`);
+	const fingerprint = getGroupMemberFingerprint();
+	if (groupMemberLastFingerprint !== null && fingerprint === groupMemberLastFingerprint) {
+		groupMemberBackoffLevel = Math.min(groupMemberBackoffLevel + 1, GROUP_MEMBER_BACKOFF_TIERS.length - 1);
+	} else {
+		groupMemberBackoffLevel = 0;
+		groupMemberLastFingerprint = fingerprint;
+	}
+	const nextInterval = GROUP_MEMBER_BACKOFF_TIERS[groupMemberBackoffLevel];
+	updateBackgroundTaskInterval('group-member-map', nextInterval);
+	logMessage(`[GroupState] Member map refreshed: ${memberToGroups.size} members across ${liveConfig.groupItems.length} groups (next in ${formatInterval(nextInterval)})`);
 }
 
 // Fetch group members and calculate count of OPEN states
