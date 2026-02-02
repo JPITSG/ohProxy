@@ -365,6 +365,7 @@ let videoFullscreenContainer = null;
 let videoFullscreenFake = false;
 let videoFsEscHandler = null;
 let videoFsPlaceholder = null;
+let videosPausedForVisibility = false;
 
 // Widget iframe configs: Map from widgetId to {height: number}
 const widgetIframeConfigMap = new Map();
@@ -799,6 +800,30 @@ function stopAllVideoStreams() {
 		if (video.src) {
 			video.src = '';
 			video.load();
+		}
+	}
+}
+
+function pauseVideoStreamsForVisibility() {
+	const videos = document.querySelectorAll('video.video-stream');
+	for (const video of videos) {
+		if (video.src) {
+			video.dataset.savedSrc = video.src;
+			video.src = '';
+			video.load();
+		}
+	}
+	videosPausedForVisibility = true;
+}
+
+function resumeVideoStreamsFromVisibility() {
+	videosPausedForVisibility = false;
+	const videos = document.querySelectorAll('video.video-stream');
+	for (const video of videos) {
+		if (video.dataset.savedSrc) {
+			video.src = video.dataset.savedSrc;
+			video.play().catch(() => {});
+			delete video.dataset.savedSrc;
 		}
 	}
 }
@@ -4184,6 +4209,7 @@ function updateCard(card, w, afterImage, info) {
 			// Auto-reconnect on error - aggressive retry
 			videoEl.addEventListener('error', () => {
 				const retry = () => {
+					if (videosPausedForVisibility) return;
 					if (videoEl.src && document.contains(videoEl)) {
 						const src = videoEl.src;
 						videoEl.src = '';
@@ -4196,6 +4222,7 @@ function updateCard(card, w, afterImage, info) {
 			// Auto-reconnect on stall/ended
 			videoEl.addEventListener('stalled', () => {
 				setTimeout(() => {
+					if (videosPausedForVisibility) return;
 					if (videoEl.src) {
 						videoEl.play().catch(() => {});
 					}
@@ -4203,6 +4230,7 @@ function updateCard(card, w, afterImage, info) {
 			});
 			videoEl.addEventListener('ended', () => {
 				setTimeout(() => {
+					if (videosPausedForVisibility) return;
 					if (videoEl.src && document.contains(videoEl)) {
 						const src = videoEl.src;
 						videoEl.src = '';
@@ -4217,6 +4245,7 @@ function updateCard(card, w, afterImage, info) {
 					clearInterval(healthCheck);
 					return;
 				}
+				if (videosPausedForVisibility) return;
 				if (videoEl.src && videoEl.paused && !videoEl.ended) {
 					videoEl.play().catch(() => {
 						const src = videoEl.src;
@@ -6431,10 +6460,12 @@ function restoreNormalPolling() {
 		state.lastActivity = lastHiddenTime;
 		stopPing();
 		closeStatusNotification();
+		if (isTouchDevice()) pauseVideoStreamsForVisibility();
 	}
 
 	function handlePageVisible() {
 		resumeReloadArmed = false;
+		videosPausedForVisibility = false;
 		const minHiddenMs = CLIENT_CONFIG.touchReloadMinHiddenMs ?? 60000;
 		const hiddenDuration = getHiddenDuration();
 		if (isTouchDevice() && hiddenDuration >= minHiddenMs) {
@@ -6442,6 +6473,7 @@ function restoreNormalPolling() {
 			softReset();
 		} else {
 			// Brief hide - resume where we left off
+			resumeVideoStreamsFromVisibility();
 			if (!state.isPaused) {
 				noteActivity();
 				refresh(false);
