@@ -66,6 +66,29 @@ function stripControlChars(value) {
 	return safeText(value).replace(CONTROL_CHARS_RE, '');
 }
 
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function ordinalSuffix(n) {
+	if (n >= 11 && n <= 13) return n + 'th';
+	switch (n % 10) { case 1: return n + 'st'; case 2: return n + 'nd'; case 3: return n + 'rd'; default: return n + 'th'; }
+}
+function formatDT(date, fmt) {
+	const pad = (n) => String(n).padStart(2, '0');
+	const h24 = date.getHours();
+	const h12 = h24 % 12 || 12;
+	return fmt
+		.replace('YYYY', date.getFullYear())
+		.replace('MMM', MONTHS_SHORT[date.getMonth()])
+		.replace('Do', ordinalSuffix(date.getDate()))
+		.replace('DD', pad(date.getDate()))
+		.replace('HH', pad(h24))
+		.replace(/(?<![Dh])H(?!H)/, h24)
+		.replace('hh', pad(h12))
+		.replace(/(?<![Hd])h(?!h)/, h12)
+		.replace('mm', pad(date.getMinutes()))
+		.replace('ss', pad(date.getSeconds()))
+		.replace('A', h24 < 12 ? 'AM' : 'PM');
+}
+
 function normalizeHeaderValue(value, maxLen = 1000) {
 	if (typeof value !== 'string') return '';
 	const cleaned = value.replace(/[\r\n]+/g, '').trim();
@@ -2550,6 +2573,8 @@ window._chartYMax=${yMax};
 window._chartDataMin=${dataMin};
 window._chartDataMax=${dataMax};
 window._chartUnit=${JSON.stringify(unit)};
+window._chartDateFormat=${JSON.stringify(liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY')};
+window._chartTimeFormat=${JSON.stringify(liveConfig.clientConfig?.timeFormat || 'H:mm:ss')};
 </script>
 <script src="/chart.${assetVersion}.js"></script>
 </body>
@@ -3903,6 +3928,9 @@ function findDeltaMatch(key, since) {
 // Reverse lookup: memberName → Set of groupNames this member belongs to
 const memberToGroups = new Map();
 
+// Forward lookup: groupName → [{name, label}] array of members
+const groupToMembers = new Map();
+
 // Backoff tiers for unchanged group member maps: 1m → 2m → 5m → 10m
 const GROUP_MEMBER_BACKOFF_TIERS = [60000, 120000, 300000, 600000];
 let groupMemberBackoffLevel = 0;
@@ -3919,24 +3947,30 @@ function getGroupMemberFingerprint() {
 
 async function refreshGroupMemberMap() {
 	if (!liveConfig.groupItems || !liveConfig.groupItems.length) return;
-	const newMap = new Map();
+	const newReverseMap = new Map();
+	const newForwardMap = new Map();
 	for (const groupName of liveConfig.groupItems) {
 		try {
 			const body = await fetchOpenhab(`/rest/items/${encodeURIComponent(groupName)}`);
 			if (!body.ok) continue;
 			const data = JSON.parse(body.body);
 			if (!data || !Array.isArray(data.members)) continue;
+			const members = [];
 			for (const m of data.members) {
 				if (!m || !m.name) continue;
-				if (!newMap.has(m.name)) newMap.set(m.name, new Set());
-				newMap.get(m.name).add(groupName);
+				if (!newReverseMap.has(m.name)) newReverseMap.set(m.name, new Set());
+				newReverseMap.get(m.name).add(groupName);
+				members.push({ name: m.name, label: safeText(m.label || m.name) });
 			}
+			newForwardMap.set(groupName, members);
 		} catch {
 			// Skip this group on error; map stays partial, no regression
 		}
 	}
 	memberToGroups.clear();
-	for (const [k, v] of newMap) memberToGroups.set(k, v);
+	for (const [k, v] of newReverseMap) memberToGroups.set(k, v);
+	groupToMembers.clear();
+	for (const [k, v] of newForwardMap) groupToMembers.set(k, v);
 	const fingerprint = getGroupMemberFingerprint();
 	if (groupMemberLastFingerprint !== null && fingerprint === groupMemberLastFingerprint) {
 		groupMemberBackoffLevel = Math.min(groupMemberBackoffLevel + 1, GROUP_MEMBER_BACKOFF_TIERS.length - 1);
@@ -5092,6 +5126,7 @@ app.get('/config.js', (req, res) => {
 		widgetSectionGlowConfigs: sessions.getAllSectionGlowConfigs(),
 		userRole: userRole,
 		trackGps: trackGps,
+		groupItems: liveConfig.groupItems || [],
 	})};`);
 });
 
@@ -5515,6 +5550,194 @@ app.post('/api/card-config', jsonParserLarge, (req, res) => {
 	} catch (err) {
 		logMessage(`Failed to save card config: ${err.message || err}`, 'error');
 		res.status(500).json({ error: 'Failed to save config' });
+	}
+});
+
+app.get('/api/card-config/:itemName/history', async (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+	// Admin only
+	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
+	if (user?.role !== 'admin') {
+		res.status(403).json({ error: 'Admin access required' });
+		return;
+	}
+	const rawItemName = req.params.itemName;
+	if (typeof rawItemName !== 'string' || !/^[a-zA-Z0-9_]{1,50}$/.test(rawItemName)) {
+		res.status(400).json({ error: 'Invalid item name' });
+		return;
+	}
+	const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+	if (offset > 100000) {
+		res.status(400).json({ error: 'Invalid offset' });
+		return;
+	}
+	const rawCommands = typeof req.query.commands === 'string' ? req.query.commands : '';
+	const validCommands = rawCommands.length > 0 && rawCommands.length <= 200
+		? new Set(rawCommands.split(',').map(c => c.toLowerCase()))
+		: null;
+	const rawBefore = typeof req.query.before === 'string' ? req.query.before : '';
+	const conn = getMysqlConnection();
+	if (!conn) {
+		return res.status(503).json({ ok: false, error: 'Database unavailable' });
+	}
+	const QUERY_TIMEOUT_MS = 10000;
+	function queryWithTimeout(sql, params) {
+		return new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => reject(new Error('Query timeout')), QUERY_TIMEOUT_MS);
+			conn.query(sql, params, (err, results) => {
+				clearTimeout(timeout);
+				if (err) reject(err);
+				else resolve(results);
+			});
+		});
+	}
+	try {
+		// Group items: merged timeline from all members
+		if (groupToMembers.has(rawItemName)) {
+			const members = groupToMembers.get(rawItemName);
+			if (!members || !members.length) {
+				return res.json({ ok: true, entries: [], hasNewer: false, hasOlder: false, isGroup: true });
+			}
+			// Batch-lookup ItemIds for all member names
+			const memberNames = members.map(m => m.name);
+			const placeholders = memberNames.map(() => '?').join(',');
+			const idRows = await queryWithTimeout('SELECT ItemName, ItemId FROM items WHERE ItemName IN (' + placeholders + ')', memberNames);
+			const memberIdMap = new Map();
+			for (const row of idRows) {
+				const id = parseInt(row.ItemId, 10);
+				if (Number.isFinite(id) && id >= 0) memberIdMap.set(row.ItemName, id);
+			}
+			const labelMap = new Map();
+			for (const m of members) labelMap.set(m.name, m.label);
+			let beforeDate = null;
+			if (rawBefore) {
+				beforeDate = new Date(rawBefore);
+				if (isNaN(beforeDate.getTime())) {
+					return res.status(400).json({ error: 'Invalid before cursor' });
+				}
+			}
+			// Find transition points per member, then merge
+			const allTransitions = [];
+			const MEMBER_BATCH = 100;
+			const MEMBER_MAX_BATCHES = 10;
+			for (const [memberName, itemId] of memberIdMap) {
+				const tableId = parseInt(itemId, 10);
+				const label = safeText(labelMap.get(memberName) || memberName);
+				const transitions = [];
+				let pendingValue = null;
+				let pendingEntry = null;
+				let mCursor = 0;
+				for (let batch = 0; batch < MEMBER_MAX_BATCHES && transitions.length < 4; batch++) {
+					const sql = beforeDate
+						? 'SELECT Time, Value FROM Item' + tableId + ' WHERE Time < ? ORDER BY Time DESC LIMIT ' + MEMBER_BATCH + ' OFFSET ?'
+						: 'SELECT Time, Value FROM Item' + tableId + ' ORDER BY Time DESC LIMIT ' + MEMBER_BATCH + ' OFFSET ?';
+					const params = beforeDate ? [beforeDate, mCursor] : [mCursor];
+					const rows = await queryWithTimeout(sql, params);
+					for (let i = 0; i < rows.length; i++) {
+						const val = String(rows[i].Value).trim();
+						if (!val || val === 'NULL' || val === 'UNDEF') continue;
+						const valLower = val.toLowerCase();
+						if (valLower !== pendingValue) {
+							if (pendingEntry !== null) {
+								transitions.push(pendingEntry);
+								if (transitions.length >= 4) break;
+							}
+							pendingValue = valLower;
+						}
+						pendingEntry = {
+							time: rows[i].Time instanceof Date ? rows[i].Time.toISOString() : String(rows[i].Time),
+							state: val,
+							member: label,
+						};
+					}
+					if (transitions.length >= 4) break;
+					mCursor += rows.length;
+					if (rows.length < MEMBER_BATCH) break;
+				}
+				if (pendingEntry !== null && transitions.length < 4) {
+					transitions.push(pendingEntry);
+				}
+				allTransitions.push(...transitions);
+			}
+			// Sort by time DESC and take top entries
+			allTransitions.sort((a, b) => b.time.localeCompare(a.time));
+			const entries = allTransitions.slice(0, 3);
+			const hasOlder = allTransitions.length > 3;
+			const nextCursor = entries.length ? entries[entries.length - 1].time : null;
+			return res.json({
+				ok: true,
+				entries,
+				hasNewer: !!rawBefore,
+				hasOlder,
+				nextCursor,
+				isGroup: true,
+			});
+		}
+		// Look up ItemId from the items mapping table
+		const itemRows = await queryWithTimeout('SELECT ItemId FROM items WHERE ItemName = ? LIMIT 1', [rawItemName]);
+		if (!itemRows.length) {
+			return res.json({ ok: true, entries: [], hasNewer: false, hasOlder: false });
+		}
+		const itemId = parseInt(itemRows[0].ItemId, 10);
+		if (!Number.isFinite(itemId) || itemId < 0) {
+			return res.json({ ok: true, entries: [], hasNewer: false, hasOlder: false });
+		}
+		// Fetch batches and find transition points (oldest occurrence of each state run)
+		const tableName = 'Item' + itemId;
+		const BATCH = 500;
+		const MAX_BATCHES = 10;
+		const deduped = [];
+		let pendingValue = null;
+		let pendingEntry = null;
+		let cursor = offset;
+		let exhausted = false;
+		for (let batch = 0; batch < MAX_BATCHES && deduped.length < 4; batch++) {
+			const rows = await queryWithTimeout('SELECT Time, Value FROM `' + tableName + '` ORDER BY Time DESC LIMIT ' + BATCH + ' OFFSET ?', [cursor]);
+			for (let i = 0; i < rows.length; i++) {
+				const val = String(rows[i].Value).trim();
+				if (!val || val === 'NULL' || val === 'UNDEF') continue;
+				const valLower = val.toLowerCase();
+				if (valLower !== pendingValue) {
+					// Value changed — emit the pending entry (oldest row of the previous run)
+					if (pendingEntry !== null) {
+						if (!validCommands || validCommands.has(pendingEntry.state.toLowerCase())) {
+							deduped.push(pendingEntry);
+							if (deduped.length >= 4) break;
+						}
+					}
+					pendingValue = valLower;
+				}
+				// Keep updating pending to the current (older) row
+				pendingEntry = {
+					time: rows[i].Time instanceof Date ? rows[i].Time.toISOString() : String(rows[i].Time),
+					state: val,
+					cursorPos: cursor + i,
+				};
+			}
+			if (deduped.length >= 4) break;
+			cursor += rows.length;
+			if (rows.length < BATCH) { exhausted = true; break; }
+		}
+		// Emit trailing pending entry (oldest row of the last run)
+		if (pendingEntry !== null && deduped.length < 4) {
+			if (!validCommands || validCommands.has(pendingEntry.state.toLowerCase())) {
+				deduped.push(pendingEntry);
+			}
+		}
+		const entries = deduped.slice(0, 3).map(({ time, state }) => ({ time, state }));
+		const nextOffset = deduped.length > 3 ? deduped[3].cursorPos : cursor;
+		const hasOlder = deduped.length > 3 || !exhausted;
+		res.json({
+			ok: true,
+			entries,
+			hasNewer: offset > 0,
+			hasOlder,
+			nextOffset,
+		});
+	} catch (err) {
+		logMessage(`[History API] Query failed for ${rawItemName}: ${err.message || err}`);
+		res.status(504).json({ ok: false, error: 'Query failed' });
 	}
 });
 
@@ -6461,8 +6684,8 @@ app.get('/api/presence', async (req, res) => {
 		last = current;
 		const ts = row.timestamp ? (() => {
 			const d = new Date(row.timestamp);
-			const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-			const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+			const date = formatDT(d, liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY');
+			const time = formatDT(d, liveConfig.clientConfig?.timeFormat || 'H:mm:ss');
 			return '<div class="tt-date">' + date + '</div><div class="tt-time">' + time + '</div>';
 		})() : '';
 		markers.push([current[0], current[1], first ? 'red' : 'blue', ts]);
@@ -6602,8 +6825,8 @@ app.get('/presence', async (req, res) => {
 		last = current;
 		const ts = row.timestamp ? (() => {
 			const d = new Date(row.timestamp);
-			const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-			const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+			const date = formatDT(d, liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY');
+			const time = formatDT(d, liveConfig.clientConfig?.timeFormat || 'H:mm:ss');
 			return '<div class="tt-date">' + date + '</div><div class="tt-time">' + time + '</div>';
 		})() : '';
 		markers.push([current[0], current[1], first ? 'red' : 'blue', ts]);
@@ -7055,8 +7278,13 @@ app.get('/proxy', async (req, res, next) => {
 			activeRtspStreams.set(streamId, { url: rtspUrlLog, user: username, ip: clientIp, startTime: Date.now() });
 			logMessage(`[RTSP] Starting stream ${rtspUrlLog} to ${username}@${clientIp} (w=${viewportWidth})`);
 
-			// Time overlay filter: top-right, HH:MM:SS format (using strftime expansion for older ffmpeg)
-			const drawtext = `drawtext=text='%H\\:%M\\:%S':expansion=strftime:x=w-tw-15:y=15:fontsize=${fontSize}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`;
+			// Time overlay filter: top-right, using configured timeFormat (strftime expansion)
+			const timeOverlay = (liveConfig.clientConfig?.timeFormat || 'H:mm:ss')
+				.replace('HH', '%H').replace(/(?<![Dh%])H(?!H)/, '%-H')
+				.replace('hh', '%I').replace(/(?<![Hd%])h(?!h)/, '%-I')
+				.replace('mm', '%M').replace('ss', '%S').replace('A', '%p')
+				.replace(/:/g, '\\:');
+			const drawtext = `drawtext=text='${timeOverlay}':expansion=strftime:x=w-tw-15:y=15:fontsize=${fontSize}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`;
 			// Scale to viewport width if provided - ensure even dimensions for x264
 			const scaleWidth = viewportWidth > 0 ? (viewportWidth % 2 === 0 ? viewportWidth : viewportWidth + 1) : 0;
 			const videoFilter = scaleWidth > 0

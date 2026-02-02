@@ -314,6 +314,18 @@ module.exports = {
 		// Prevents unnecessary reloads when quickly switching apps.
 		touchReloadMinHiddenMs: 60000,
 
+		// === Date/Time Formatting ===
+		// Date format used across all client-facing timestamps.
+		// Tokens: YYYY = 4-digit year, MMM = short month (Jan, Feb, ...),
+		// Do = day with ordinal suffix (1st, 2nd, 3rd, ...), HH = hours (00-23),
+		// mm = minutes (00-59), ss = seconds (00-59).
+		dateFormat: 'MMM Do, YYYY',
+		// Time format used across all client-facing timestamps.
+		// Tokens: H = hours without leading zero (0-23), HH = hours (00-23),
+		// h = 12-hour without leading zero (1-12), hh = 12-hour (01-12),
+		// mm = minutes (00-59), ss = seconds (00-59), A = AM/PM.
+		timeFormat: 'HH:mm:ss',
+
 		// === Voice ===
 		// Voice response timeout (ms; >=0).
 		voiceResponseTimeoutMs: 10000,

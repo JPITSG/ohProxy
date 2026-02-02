@@ -300,6 +300,37 @@ function configNumber(value, fallback) {
 
 const ICON_VERSION = OH_CONFIG.iconVersion || 'v1';
 const WEBVIEW_NO_PROXY = Array.isArray(OH_CONFIG.webviewNoProxy) ? OH_CONFIG.webviewNoProxy : [];
+const GROUP_ITEMS_SET = new Set(Array.isArray(OH_CONFIG.groupItems) ? OH_CONFIG.groupItems : []);
+const DATE_FORMAT = typeof CLIENT_CONFIG.dateFormat === 'string' ? CLIENT_CONFIG.dateFormat : 'MMM Do, YYYY';
+const TIME_FORMAT = typeof CLIENT_CONFIG.timeFormat === 'string' ? CLIENT_CONFIG.timeFormat : 'H:mm:ss';
+
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function ordinalSuffix(n) {
+	if (n >= 11 && n <= 13) return n + 'th';
+	switch (n % 10) {
+		case 1: return n + 'st';
+		case 2: return n + 'nd';
+		case 3: return n + 'rd';
+		default: return n + 'th';
+	}
+}
+function formatDT(date, fmt) {
+	const pad = (n) => String(n).padStart(2, '0');
+	const h24 = date.getHours();
+	const h12 = h24 % 12 || 12;
+	return fmt
+		.replace('YYYY', date.getFullYear())
+		.replace('MMM', MONTHS_SHORT[date.getMonth()])
+		.replace('Do', ordinalSuffix(date.getDate()))
+		.replace('DD', pad(date.getDate()))
+		.replace('HH', pad(h24))
+		.replace(/(?<![Dh])H(?!H)/, h24)
+		.replace('hh', pad(h12))
+		.replace(/(?<![Hd])h(?!h)/, h12)
+		.replace('mm', pad(date.getMinutes()))
+		.replace('ss', pad(date.getSeconds()))
+		.replace('A', h24 < 12 ? 'AM' : 'PM');
+}
 
 const PAGE_FADE_OUT_MS = configNumber(CLIENT_CONFIG.pageFadeOutMs, 250);
 const PAGE_FADE_IN_MS = configNumber(CLIENT_CONFIG.pageFadeInMs, 250);
@@ -2075,6 +2106,9 @@ let cardConfigModal = null;
 let cardConfigWidgetKey = '';
 let cardConfigWidgetLabel = '';
 let cardConfigSectionLabel = ''; // Normalized section label for section glow
+let historyOffsetStack = [];
+let historyMappings = [];
+let historyCursorStack = [];
 
 function ensureCardConfigModal() {
 	if (cardConfigModal) return;
@@ -2084,6 +2118,11 @@ function ensureCardConfigModal() {
 	wrap.innerHTML = `
 		<div class="card-config-frame glass">
 			<div class="card-config-body">
+				<div class="history-section" style="display:none;">
+					<div class="item-config-section-header">HISTORICAL VALUES</div>
+					<div class="history-entries"></div>
+					<div class="history-nav" style="display:none;"></div>
+				</div>
 				<div class="default-sound-section" style="display:none;">
 					<div class="item-config-section-header">DEFAULT SOUND</div>
 					<div class="item-config-visibility">
@@ -2402,8 +2441,168 @@ function openCardConfigModal(widget, card) {
 		rulesContainer.appendChild(createGlowRuleRow());
 	}
 
+	// Show/hide history section for items with persistence
+	const itemName = widget?.item?.name || '';
+	const historySection = cardConfigModal.querySelector('.history-section');
+	if (historySection) {
+		if (itemName && !isSection) {
+			historySection.style.display = '';
+			historyOffsetStack = [];
+			historyCursorStack = [];
+			if (GROUP_ITEMS_SET.has(itemName)) {
+				historyMappings = [];
+				loadGroupHistoryEntries(itemName, null);
+			} else {
+				historyMappings = normalizeMapping(widget?.mappings || widget?.mapping);
+				loadHistoryEntries(itemName, 0);
+			}
+		} else {
+			historySection.style.display = 'none';
+		}
+	}
+
 	cardConfigModal.classList.remove('hidden');
 	document.body.classList.add('card-config-open');
+}
+
+function formatHistoryTime(isoString) {
+	const d = new Date(isoString);
+	if (isNaN(d.getTime())) return isoString;
+	const now = new Date();
+	if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
+		return 'Today ' + formatDT(d, TIME_FORMAT);
+	}
+	return formatDT(d, DATE_FORMAT + ' ' + TIME_FORMAT);
+}
+
+async function loadHistoryEntries(itemName, offset) {
+	const section = cardConfigModal.querySelector('.history-section');
+	const container = section.querySelector('.history-entries');
+	const nav = section.querySelector('.history-nav');
+	container.innerHTML = '<div class="history-loading">Loading\u2026</div>';
+	nav.style.display = 'none';
+	try {
+		let historyUrl = '/api/card-config/' + encodeURIComponent(itemName) + '/history?offset=' + offset;
+		if (historyMappings.length) {
+			historyUrl += '&commands=' + encodeURIComponent(historyMappings.map(m => m.command).join(','));
+		}
+		const resp = await fetch(historyUrl);
+		const data = await resp.json();
+		if (!data.ok || !data.entries.length) {
+			section.style.display = 'none';
+			return;
+		}
+		container.innerHTML = '';
+		for (const entry of data.entries) {
+			const row = document.createElement('div');
+			row.className = 'history-entry';
+			const timeSpan = document.createElement('span');
+			timeSpan.textContent = formatHistoryTime(entry.time);
+			const stateSpan = document.createElement('span');
+			stateSpan.className = 'history-state';
+			const mapped = historyMappings.length ? historyMappings.find(m => m.command === entry.state) : null;
+			const rawState = entry.state;
+			stateSpan.textContent = mapped ? (mapped.label || mapped.command) : (/^[A-Z]{2,}$/.test(rawState) ? rawState.charAt(0) + rawState.slice(1).toLowerCase() : rawState);
+			row.appendChild(timeSpan);
+			row.appendChild(stateSpan);
+			container.appendChild(row);
+		}
+		if (data.hasNewer || data.hasOlder) {
+			nav.style.display = 'flex';
+			nav.innerHTML = '';
+			if (data.hasNewer) {
+				const btn = document.createElement('button');
+				btn.type = 'button';
+				btn.className = 'history-newer';
+				btn.textContent = 'Newer \u25B4';
+				btn.addEventListener('click', () => {
+					const prevOffset = historyOffsetStack.pop() || 0;
+					loadHistoryEntries(itemName, prevOffset);
+				});
+				nav.appendChild(btn);
+			}
+			if (data.hasOlder) {
+				const btn = document.createElement('button');
+				btn.type = 'button';
+				btn.className = 'history-older';
+				btn.textContent = 'Older \u25BE';
+				btn.addEventListener('click', () => {
+					historyOffsetStack.push(offset);
+					loadHistoryEntries(itemName, data.nextOffset);
+				});
+				nav.appendChild(btn);
+			}
+		} else {
+			nav.style.display = 'none';
+		}
+	} catch {
+		section.style.display = 'none';
+	}
+}
+
+async function loadGroupHistoryEntries(itemName, cursor) {
+	const section = cardConfigModal.querySelector('.history-section');
+	const container = section.querySelector('.history-entries');
+	const nav = section.querySelector('.history-nav');
+	container.innerHTML = '<div class="history-loading">Loading\u2026</div>';
+	nav.style.display = 'none';
+	try {
+		let historyUrl = '/api/card-config/' + encodeURIComponent(itemName) + '/history';
+		if (cursor) {
+			historyUrl += '?before=' + encodeURIComponent(cursor);
+		}
+		const resp = await fetch(historyUrl);
+		const data = await resp.json();
+		if (!data.ok || !data.entries.length) {
+			section.style.display = 'none';
+			return;
+		}
+		container.innerHTML = '';
+		for (const entry of data.entries) {
+			const row = document.createElement('div');
+			row.className = 'history-entry';
+			const timeSpan = document.createElement('span');
+			timeSpan.textContent = formatHistoryTime(entry.time);
+			const stateSpan = document.createElement('span');
+			stateSpan.className = 'history-state';
+			const rawState = entry.state;
+			const displayState = /^[A-Z]{2,}$/.test(rawState) ? rawState.charAt(0) + rawState.slice(1).toLowerCase() : rawState;
+			stateSpan.textContent = (entry.member || '') + ' \u00B7 ' + displayState;
+			row.appendChild(timeSpan);
+			row.appendChild(stateSpan);
+			container.appendChild(row);
+		}
+		if (data.hasNewer || data.hasOlder) {
+			nav.style.display = 'flex';
+			nav.innerHTML = '';
+			if (data.hasNewer) {
+				const btn = document.createElement('button');
+				btn.type = 'button';
+				btn.className = 'history-newer';
+				btn.textContent = 'Newer \u25B4';
+				btn.addEventListener('click', () => {
+					const prevCursor = historyCursorStack.pop() || null;
+					loadGroupHistoryEntries(itemName, prevCursor);
+				});
+				nav.appendChild(btn);
+			}
+			if (data.hasOlder) {
+				const btn = document.createElement('button');
+				btn.type = 'button';
+				btn.className = 'history-older';
+				btn.textContent = 'Older \u25BE';
+				btn.addEventListener('click', () => {
+					historyCursorStack.push(cursor);
+					loadGroupHistoryEntries(itemName, data.nextCursor);
+				});
+				nav.appendChild(btn);
+			}
+		} else {
+			nav.style.display = 'none';
+		}
+	} catch {
+		section.style.display = 'none';
+	}
 }
 
 function closeCardConfigModal() {
@@ -6449,6 +6648,20 @@ function restoreNormalPolling() {
 		if (!widget) return;
 		e.preventDefault();
 		e.stopPropagation();
+		openCardConfigModal(widget, card);
+	}, true);
+	// Right-click on non-iframe cards opens item config modal
+	document.addEventListener('contextmenu', (e) => {
+		if (state.isSlim) return;
+		const card = e.target.closest('#grid > .glass[data-widget-key]');
+		if (!card) return;
+		// Don't intercept right-click on iframe-based cards (webview, chart)
+		if (card.querySelector('iframe')) return;
+		const key = card.dataset.widgetKey;
+		if (!key || !key.startsWith('widget:')) return;
+		const widget = findWidgetByKey(key);
+		if (!widget) return;
+		e.preventDefault();
 		openCardConfigModal(widget, card);
 	}, true);
 	// Disable pointer-events on iframes when ctrl/meta held so clicks pass through to cards
