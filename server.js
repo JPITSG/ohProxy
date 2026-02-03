@@ -6826,6 +6826,12 @@ app.get('/presence', async (req, res) => {
 	markers.reverse();
 	const markersJson = JSON.stringify(markers);
 
+	const gpsConf = SERVER_CONFIG.gps || {};
+	const hLat = parseFloat(gpsConf.homeLat);
+	const hLon = parseFloat(gpsConf.homeLon);
+	const homeLatJson = Number.isFinite(hLat) ? String(hLat) : "''";
+	const homeLonJson = Number.isFinite(hLon) ? String(hLon) : "''";
+
 	const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -6836,7 +6842,12 @@ app.get('/presence', async (req, res) => {
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-500.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
 .olControlAttribution{display:none!important}
-@media(pointer:coarse){.olControlZoom{display:none!important}}
+.olControlZoom{display:none!important}
+#map-controls{position:fixed;top:16px;left:16px;z-index:150;background:rgb(245,246,250);border:0.5px solid rgba(150,150,150,0.3);border-radius:18px;box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:6px;display:flex;flex-direction:column;gap:4px}
+@media(pointer:coarse){#map-controls{background:none;border:none;box-shadow:none;padding:0;gap:6px}}
+.map-ctrl-btn{width:36px;height:36px;border-radius:10px;border:0.5px solid rgba(19,21,54,0.2);background:rgba(19,21,54,0.08);color:#0f172a;font-size:18px;font-weight:300;font-family:'Rubik',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;outline:none;transition:background-color .2s,border-color .2s,box-shadow .2s}
+.map-ctrl-btn:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}
+.map-ctrl-btn svg{width:16px;height:16px;fill:currentColor}
 #map{position:absolute;top:0;left:0;right:0;bottom:0}
 body{margin:0;padding:0;overflow:hidden}
 .tooltip{position:absolute;background:#f1f2f9;border:1px solid #ccccd1;border-radius:10px;padding:0.5rem 0.75rem;font-size:11px;line-height:1.5;font-family:'Rubik',sans-serif;color:#0f172a;pointer-events:none;z-index:100;white-space:nowrap}
@@ -6886,6 +6897,11 @@ body{margin:0;padding:0;overflow:hidden}
 <div id="red-tooltip" class="tooltip"></div>
 <div id="hover-tooltip" class="tooltip"></div>
 <div id="ctx-menu"></div>
+<div id="map-controls">
+<button class="map-ctrl-btn" id="zoom-in" type="button">+</button>
+<button class="map-ctrl-btn" id="zoom-home" type="button"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></button>
+<button class="map-ctrl-btn" id="zoom-out" type="button">&minus;</button>
+</div>
 <div id="search-modal">
 <div class="search-header"><span>SEARCH HISTORY</span><span class="search-today">TODAY</span></div>
 <div class="search-empty">No results found</div>
@@ -6968,6 +6984,16 @@ if(markers.length){
 zoomToMarkers();
 setTimeout(updateRedTooltip,100);
 }
+
+var homeLat=${homeLatJson};
+var homeLon=${homeLonJson};
+document.getElementById('zoom-in').addEventListener('click',function(){map.zoomIn()});
+document.getElementById('zoom-out').addEventListener('click',function(){map.zoomOut()});
+document.getElementById('zoom-home').addEventListener('click',function(){
+if(typeof homeLat==='number'&&typeof homeLon==='number'){
+map.setCenter(new OpenLayers.LonLat(homeLon,homeLat).transform(wgs84,proj),15);
+}
+});
 
 document.getElementById('search-modal').addEventListener('keydown',function(e){e.stopPropagation()});
 
