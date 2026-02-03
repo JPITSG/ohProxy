@@ -5,7 +5,8 @@
 	if (mode === 'dark' || mode === 'light') {
 		document.documentElement.setAttribute('data-theme', mode);
 	} else {
-		var saved = localStorage.getItem('theme');
+		var saved;
+		try { saved = localStorage.getItem('ohTheme'); } catch (e) { /* storage blocked */ }
 		var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 		document.documentElement.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
 	}

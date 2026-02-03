@@ -1220,7 +1220,7 @@ function updateThemeMeta() {
 	if (!metaTheme && !metaApple && !manifest) return;
 	let resolved = null;
 	const header = document.querySelector('header');
-	if (header) {
+	if (header && header.offsetParent !== null) {
 		const headerColor = parseCssColor(getComputedStyle(header).backgroundColor);
 		if (headerColor) {
 			if (headerColor.a < 1) {
@@ -1290,7 +1290,7 @@ function reloadChartIframes(mode) {
 		// Replace mode param and strip hash (hash is content-based including colors, so invalid across modes)
 		const newUrl = currentUrl
 			.replace(/([?&])mode=(light|dark)/, `$1mode=${mode}`)
-			.replace(/&_h=[^&]*/, '');
+			.replace(/&_t=[^&]*/, '');
 		if (newUrl !== currentUrl) {
 			// Use location.replace() to avoid adding browser history entry (same-origin iframes)
 			setChartIframeAnimState(iframe, newUrl);
@@ -1666,9 +1666,13 @@ function getThemeMode() {
 
 function appendModeParam(url, mode) {
 	if (!url) return url;
-	// Don't add if mode param already present
-	if (/[?&]mode=/.test(url)) return url;
-	return url + (url.includes('?') ? '&' : '?') + `mode=${mode}`;
+	// Split at fragment first so we only check/modify the query string portion
+	const hashIdx = url.indexOf('#');
+	const base = hashIdx >= 0 ? url.slice(0, hashIdx) : url;
+	const frag = hashIdx >= 0 ? url.slice(hashIdx) : '';
+	// Don't add if mode param already present in query string
+	if (/[?&]mode=/.test(base)) return url;
+	return base + (base.includes('?') ? '&' : '?') + `mode=${mode}` + frag;
 }
 
 function chartWidgetUrl(widget) {
@@ -1686,7 +1690,10 @@ function chartWidgetUrl(widget) {
 
 function withCacheBust(url) {
 	if (!url) return url;
-	return url + (url.includes('?') ? '&' : '?') + `_ts=${Date.now()}`;
+	const hashIdx = url.indexOf('#');
+	const base = hashIdx >= 0 ? url.slice(0, hashIdx) : url;
+	const frag = hashIdx >= 0 ? url.slice(hashIdx) : '';
+	return base + (base.includes('?') ? '&' : '?') + `_ts=${Date.now()}` + frag;
 }
 
 function appendProxyWidth(proxyUrl, width) {
@@ -1805,7 +1812,10 @@ function scheduleImageResizeRefresh() {
 		if (imageViewer && !imageViewer.classList.contains('hidden') && imageViewerFitMode === 'real') {
 			updateImageViewerFrameSize();
 		}
-		if (!hasProxyImagesInView()) return;
+		if (!hasProxyImagesInView()) {
+			if (!hasStaleProxyImages()) imageResizePending = false;
+			return;
+		}
 		refreshVisibleProxyImages();
 		if (!hasStaleProxyImages()) imageResizePending = false;
 	}, 250);
@@ -2688,10 +2698,11 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'server.openhab.user', type: 'text', allowEmpty: true },
 			{ key: 'server.openhab.pass', type: 'secret', allowEmpty: true },
 			{ key: 'server.openhab.apiToken', type: 'secret', allowEmpty: true },
+			{ key: 'server.openhab.timeoutMs', type: 'number', min: 0 },
 		],
 	},
 	{
-		id: 'database', group: 'server',
+		id: 'database', group: 'server', restartRequired: true,
 		fields: [
 			{ key: 'server.mysql.socket', type: 'text', allowEmpty: true },
 			{ key: 'server.mysql.host', type: 'text', allowEmpty: true },
@@ -3704,7 +3715,7 @@ function pendingUntilAbort(signal) {
 		? new DOMException('Aborted', 'AbortError')
 		: Object.assign(new Error('Aborted'), { name: 'AbortError' });
 	return new Promise((_, reject) => {
-		if (!signal) return; // stays pending (same as before)
+		if (!signal) return reject(mkAbortErr());
 		if (signal.aborted) return reject(mkAbortErr());
 		signal.addEventListener('abort', () => reject(mkAbortErr()), { once: true });
 	});
@@ -3774,7 +3785,6 @@ async function refreshSearchStates(matches) {
 	if (!names.size) return false;
 
 	state.searchStateInFlight = true;
-	state.lastSearchStateSync = now;
 	const filterAtStart = state.filter;
 	try {
 		const stateMap = new Map();
@@ -3808,6 +3818,7 @@ async function refreshSearchStates(matches) {
 		if (token !== state.searchStateToken || filterAtStart !== state.filter || !state.filter.trim()) {
 			return false;
 		}
+		state.lastSearchStateSync = Date.now();
 		let updated = false;
 		if (Array.isArray(state.searchWidgets)) {
 			for (const w of state.searchWidgets) {
@@ -3859,12 +3870,16 @@ async function fetchPage(url, options) {
 	}
 
 	// Create fetch with timeout to prevent deadlocks on spotty connections
+	const fetchSignal = { aborted: false };
 	let timeoutId;
 	const timeoutPromise = new Promise((_, reject) => {
-		timeoutId = setTimeout(() => reject(new Error('Fetch timeout')), FETCH_PAGE_TIMEOUT_MS);
+		timeoutId = setTimeout(() => {
+			fetchSignal.aborted = true;
+			reject(new Error('Fetch timeout'));
+		}, FETCH_PAGE_TIMEOUT_MS);
 	});
 
-	const fetchPromise = fetchPageInternal(url, opts);
+	const fetchPromise = fetchPageInternal(url, opts, fetchSignal);
 	const racedPromise = Promise.race([fetchPromise, timeoutPromise]).finally(() => {
 		clearTimeout(timeoutId);
 	});
@@ -3877,7 +3892,7 @@ async function fetchPage(url, options) {
 	}
 }
 
-async function fetchPageInternal(url, opts) {
+async function fetchPageInternal(url, opts, fetchSignal) {
 	const key = pageCacheKey(url);
 	const since = opts.forceFull ? '' : (state.deltaTokens.get(key) || '');
 
@@ -3886,11 +3901,11 @@ async function fetchPageInternal(url, opts) {
 		try {
 			const data = await fetchDeltaViaWs(url, since);
 			if (data && data.delta === true) {
-				if (data.hash) state.deltaTokens.set(key, data.hash);
+				if (data.hash && !fetchSignal.aborted) state.deltaTokens.set(key, data.hash);
 				return { delta: true, title: data.title || '', changes: data.changes || [] };
 			}
 			if (data && data.delta === false && data.page) {
-				if (data.hash) state.deltaTokens.set(key, data.hash);
+				if (data.hash && !fetchSignal.aborted) state.deltaTokens.set(key, data.hash);
 				return { delta: false, page: data.page };
 			}
 			// Fallback: unexpected format
@@ -3937,11 +3952,11 @@ async function fetchPageInternal(url, opts) {
 	}
 
 	if (data && data.delta === true) {
-		if (data.hash) state.deltaTokens.set(key, data.hash);
+		if (data.hash && !fetchSignal.aborted) state.deltaTokens.set(key, data.hash);
 		return { delta: true, title: data.title || '', changes: data.changes || [] };
 	}
 	if (data && data.delta === false && data.page) {
-		if (data.hash) state.deltaTokens.set(key, data.hash);
+		if (data.hash && !fetchSignal.aborted) state.deltaTokens.set(key, data.hash);
 		return { delta: false, page: data.page };
 	}
 
@@ -4103,7 +4118,8 @@ function applyDeltaChanges(changes) {
 					if (w.item) w.item.icon = change.icon;
 				}
 				if (change.mapping !== undefined) {
-					w.mapping = change.mapping;
+					if (w.mappings) w.mappings = change.mapping;
+					else w.mapping = change.mapping;
 				}
 				updated = true;
 			}
@@ -4131,10 +4147,7 @@ function syncDeltaToCache(pageUrl, changes) {
 		const list = Array.isArray(widgets) ? widgets : (widgets.item ? (Array.isArray(widgets.item) ? widgets.item : [widgets.item]) : [widgets]);
 		for (const w of list) {
 			if (!w) continue;
-			// Get widget key (same logic as deltaKey/widgetSnapshot)
-			const itemName = safeText(w?.item?.name || w?.name || '');
-			const widgetId = safeText(w?.widgetId || '');
-			const key = itemName || widgetId;
+			const key = deltaKey(w);
 			if (key && changeMap.has(key)) {
 				const change = changeMap.get(key);
 				if (change.label !== undefined) w.label = change.label;
@@ -4147,7 +4160,8 @@ function syncDeltaToCache(pageUrl, changes) {
 					if (w.item) w.item.icon = change.icon;
 				}
 				if (change.mapping !== undefined) {
-					w.mapping = change.mapping;
+					if (w.mappings) w.mappings = change.mapping;
+					else w.mapping = change.mapping;
 				}
 			}
 			// Recurse into nested widgets (Frames, etc.)
@@ -4551,7 +4565,8 @@ function getWidgetRenderInfo(w, afterImage) {
 	// Check for proxy cache config and add cache param to image URL
 	const proxyCacheConfig = isImage ? widgetProxyCacheConfigMap.get(wKey) : null;
 	const cacheParam = proxyCacheConfig?.cacheSeconds ? `&cache=${proxyCacheConfig.cacheSeconds}` : '';
-	const mediaUrl = isImage ? normalizeMediaUrl(imageWidgetUrl(w)) + cacheParam : '';
+	const rawMediaUrl = isImage ? normalizeMediaUrl(imageWidgetUrl(w)) : '';
+	const mediaUrl = rawMediaUrl ? rawMediaUrl + cacheParam : '';
 	const chartUrl = isChart ? normalizeMediaUrl(chartWidgetUrl(w)) : '';
 	const rawWebviewUrl = isWebview ? safeText(w?.label || '') : '';
 	const themeMode = getThemeMode();
@@ -4978,7 +4993,8 @@ function updateCard(card, w, afterImage, info) {
 			spinner.className = 'video-spinner';
 			spinner.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:12;display:flex;align-items:center;justify-content:center;';
 			const spinnerInner = document.createElement('div');
-			spinnerInner.style.cssText = 'width:3rem;height:3rem;border:5px solid #666;border-top-color:white;border-radius:50%;animation:spin 1s linear infinite;';
+			spinnerInner.className = 'video-spinner-ring';
+			spinnerInner.style.cssText = 'width:3rem;height:3rem;border-radius:50%;animation:spin 1s linear infinite;';
 			spinner.appendChild(spinnerInner);
 			videoContainer.appendChild(spinner);
 		}
@@ -5058,8 +5074,7 @@ function updateCard(card, w, afterImage, info) {
 			const muteBtn = document.createElement('button');
 			muteBtn.type = 'button';
 			muteBtn.className = 'video-mute-btn';
-			muteBtn.style.cssText = 'position:absolute;bottom:8px;right:48px;z-index:20;width:32px;height:32px;padding:0;border:none;background:transparent;cursor:pointer;opacity:0;pointer-events:none;transition:opacity 0.2s;';
-			muteBtn.innerHTML = '<img src="icons/video-unmute.svg" alt="Unmute" style="width:100%;height:100%;display:block;" />';
+			muteBtn.innerHTML = '<img src="icons/video-unmute.svg" alt="Unmute" />';
 			muteBtn.title = 'Unmute';
 			videoContainer.appendChild(muteBtn);
 
@@ -5067,8 +5082,8 @@ function updateCard(card, w, afterImage, info) {
 				const isMuted = videoEl.muted;
 				// Show action icon: unmute (green) when muted, mute (red) when playing sound
 				muteBtn.innerHTML = isMuted
-					? '<img src="icons/video-unmute.svg" alt="Unmute" style="width:100%;height:100%;display:block;" />'
-					: '<img src="icons/video-mute.svg" alt="Mute" style="width:100%;height:100%;display:block;" />';
+					? '<img src="icons/video-unmute.svg" alt="Unmute" />'
+					: '<img src="icons/video-mute.svg" alt="Mute" />';
 				muteBtn.title = isMuted ? 'Unmute' : 'Mute';
 			};
 
@@ -5092,7 +5107,7 @@ function updateCard(card, w, afterImage, info) {
 			const fsBtn = document.createElement('button');
 			fsBtn.type = 'button';
 			fsBtn.className = 'video-fullscreen-btn';
-			fsBtn.innerHTML = '<img src="icons/video-fullscreen.svg" alt="Fullscreen" style="width:100%;height:100%;display:block;" />';
+			fsBtn.innerHTML = '<img src="icons/video-fullscreen.svg" alt="Fullscreen" />';
 			fsBtn.title = 'Fullscreen';
 			videoContainer.appendChild(fsBtn);
 
@@ -5531,7 +5546,10 @@ function updateCard(card, w, afterImage, info) {
 		input.value = String(startValue);
 		input.className = 'w-full';
 
+		let sliderHeld = false;
 		const releaseSliderRefresh = () => {
+			if (!sliderHeld) return;
+			sliderHeld = false;
 			state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
 			if (state.pendingRefresh) {
 				state.pendingRefresh = false;
@@ -5540,6 +5558,8 @@ function updateCard(card, w, afterImage, info) {
 		};
 
 		const holdSliderRefresh = () => {
+			if (sliderHeld) return;
+			sliderHeld = true;
 			state.suppressRefreshCount += 1;
 		};
 
@@ -5892,7 +5912,7 @@ function render() {
 		els.title.appendChild(siteSpan);
 
 		const pageSpan = document.createElement('span');
-		pageSpan.className = 'font-extralight text-slate-300';
+		pageSpan.className = 'font-light text-slate-300';
 		pageSpan.textContent = ` · ${pageParts.title || pageLabel}`;
 		els.title.appendChild(pageSpan);
 
@@ -7469,7 +7489,7 @@ function restoreNormalPolling() {
 	if (els.voice) {
 		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 		if (SpeechRecognition) {
-			const VOICE_RESPONSE_TIMEOUT_MS = window.ohProxyConfig?.voiceResponseTimeoutMs || 10000;
+			const VOICE_RESPONSE_TIMEOUT_MS = configNumber(CLIENT_CONFIG.voiceResponseTimeoutMs, 10000);
 
 			let recognition = null;
 			let isListening = false;

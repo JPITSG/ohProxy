@@ -38,6 +38,8 @@ module.exports = {
 			// openHAB 3.x API token (optional, takes precedence over user/pass).
 			// Generate via openHAB UI: Settings > API Security > Create new API token.
 			apiToken: '',
+			// Request timeout for openHAB API calls in ms (0 disables; >=0).
+			timeoutMs: 15000,
 		},
 
 		// === Database ===
@@ -121,12 +123,12 @@ module.exports = {
 
 		// === Assets ===
 		assets: {
-			// Combined version for JS, CSS, and service worker (v### or ###).
+			// Combined version for JS, CSS, and service worker (v###).
 			// When any asset changes, increment this to bust all caches together.
 			assetVersion: 'v1',
-			// Apple touch icon version (v### or ###).
+			// Apple touch icon version (v###).
 			appleTouchIconVersion: 'v1',
-			// Icon cache version (v### or ###).
+			// Icon cache version (v###).
 			iconVersion: 'v1',
 		},
 
