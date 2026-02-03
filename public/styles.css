@@ -2071,11 +2071,24 @@ body.theme-light .admin-config-sections::-webkit-scrollbar-thumb:hover {
 	background: rgba(150, 150, 150, 0.55);
 }
 .admin-config-group-header {
-	padding: 14px 20px 6px;
+	padding: 14px 20px 12px;
 	font-size: .8rem;
 	font-weight: 400;
 	letter-spacing: .08em;
 	color: var(--color-text-primary);
+	border-bottom: 1px solid var(--glass-border-color);
+}
+.admin-config-group-header:not(:first-child) {
+	border-top: 1px solid var(--glass-border-color);
+}
+.admin-config-section:not(.collapsed) + .admin-config-group-header {
+	border-top: none;
+}
+body.theme-light .admin-config-group-header {
+	border-bottom-color: var(--header-border);
+}
+body.theme-light .admin-config-group-header:not(:first-child) {
+	border-top-color: var(--header-border);
 }
 .admin-config-section {
 }
