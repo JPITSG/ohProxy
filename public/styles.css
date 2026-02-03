@@ -765,11 +765,6 @@ body.image-viewer-open {
 html.error-state #grid {
 	pointer-events: none;
 }
-html.resume-reset #grid {
-	opacity: 0;
-	visibility: hidden;
-	pointer-events: none;
-}
 html:not(.slim) #grid {
 	margin-top: -7px;
 }
