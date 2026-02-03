@@ -491,13 +491,16 @@ function isPlainObject(value) {
 	return value && typeof value === 'object' && !Array.isArray(value);
 }
 
-function ensureString(value, name, { allowEmpty = false } = {}, errors) {
+function ensureString(value, name, { allowEmpty = false, maxLen } = {}, errors) {
 	if (typeof value !== 'string') {
 		errors.push(`${name} must be a string but currently is ${describeValue(value)}`);
 		return;
 	}
 	if (!allowEmpty && value.trim() === '') {
 		errors.push(`${name} is required but currently is ${describeValue(value)}`);
+	}
+	if (maxLen !== undefined && value.length > maxLen) {
+		errors.push(`${name} must be at most ${maxLen} characters but is ${value.length}`);
 	}
 }
 
@@ -524,13 +527,17 @@ function ensureBoolean(value, name, errors) {
 	}
 }
 
-function ensureArray(value, name, { allowEmpty = false } = {}, errors) {
+function ensureArray(value, name, { allowEmpty = false, maxItems } = {}, errors) {
 	if (!Array.isArray(value)) {
 		errors.push(`${name} must be an array but currently is ${describeValue(value)}`);
 		return false;
 	}
 	if (!allowEmpty && value.length === 0) {
 		errors.push(`${name} must not be empty but currently is ${describeValue(value)}`);
+		return false;
+	}
+	if (maxItems !== undefined && value.length > maxItems) {
+		errors.push(`${name} must have at most ${maxItems} items but has ${value.length}`);
 		return false;
 	}
 	return true;
@@ -568,8 +575,8 @@ function isValidAllowSubnet(value) {
 	return isValidCidr(value);
 }
 
-function ensureCidrList(value, name, { allowEmpty = false } = {}, errors) {
-	if (!ensureArray(value, name, { allowEmpty }, errors)) return;
+function ensureCidrList(value, name, { allowEmpty = false, maxItems } = {}, errors) {
+	if (!ensureArray(value, name, { allowEmpty, maxItems }, errors)) return;
 	value.forEach((entry, index) => {
 		if (!isValidCidr(entry)) {
 			errors.push(`${name}[${index}] must be IPv4 CIDR but currently is ${describeValue(entry)}`);
@@ -579,7 +586,7 @@ function ensureCidrList(value, name, { allowEmpty = false } = {}, errors) {
 
 function ensureAllowSubnets(value, name, errors, options = {}) {
 	const allowEmpty = options.allowEmpty === true;
-	if (!ensureArray(value, name, { allowEmpty }, errors)) return;
+	if (!ensureArray(value, name, { allowEmpty, maxItems: options.maxItems }, errors)) return;
 	value.forEach((entry, index) => {
 		if (!isValidAllowSubnet(entry)) {
 			errors.push(`${name}[${index}] must be IPv4 CIDR or 0.0.0.0 but currently is ${describeValue(entry)}`);
@@ -597,6 +604,47 @@ function ensureUrl(value, name, errors) {
 		}
 	} catch {
 		errors.push(`${name} must be a valid URL but currently is ${describeValue(value)}`);
+	}
+}
+
+function ensureHostOrIp(value, name, errors) {
+	if (typeof value !== 'string') {
+		errors.push(`${name} must be a string but currently is ${describeValue(value)}`);
+		return;
+	}
+	const trimmed = value.trim();
+	if (!trimmed) {
+		errors.push(`${name} is required but currently is ${describeValue(value)}`);
+		return;
+	}
+	if (trimmed === '0.0.0.0') return;
+	if (isValidIpv4(trimmed)) return;
+	// RFC 952/1123 hostname: dot-separated labels, each label alphanumeric/hyphens, max 253 chars total
+	if (trimmed.length > 253) {
+		errors.push(`${name} hostname must be at most 253 characters but is ${trimmed.length}`);
+		return;
+	}
+	const labels = trimmed.split('.');
+	const validLabel = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
+	for (const label of labels) {
+		if (!validLabel.test(label)) {
+			errors.push(`${name} must be a valid IPv4 address or hostname but currently is ${describeValue(value)}`);
+			return;
+		}
+	}
+}
+
+function ensureAbsolutePath(value, name, errors) {
+	if (typeof value !== 'string') {
+		errors.push(`${name} must be a string but currently is ${describeValue(value)}`);
+		return;
+	}
+	if (value.trim() === '') {
+		errors.push(`${name} is required but currently is ${describeValue(value)}`);
+		return;
+	}
+	if (!path.isAbsolute(value)) {
+		errors.push(`${name} must be an absolute path but currently is ${describeValue(value)}`);
 	}
 }
 
@@ -827,6 +875,339 @@ function validateConfig() {
 					errors.push(`client.hideTitleItems[${index}] must be a string`);
 				}
 			});
+		}
+	}
+
+	return errors;
+}
+
+function validateAdminConfig(config) {
+	const errors = [];
+	if (!isPlainObject(config)) {
+		errors.push('Config must be an object');
+		return errors;
+	}
+	const s = config.server || {};
+	const c = config.client || {};
+
+	// Listeners
+	if (isPlainObject(s.http)) {
+		ensureBoolean(s.http.enabled, 'server.http.enabled', errors);
+		if (s.http.enabled) {
+			ensureHostOrIp(s.http.host, 'server.http.host', errors);
+			ensureNumber(s.http.port, 'server.http.port', { min: 1, max: 65535 }, errors);
+		}
+	}
+	if (isPlainObject(s.https)) {
+		ensureBoolean(s.https.enabled, 'server.https.enabled', errors);
+		if (s.https.enabled) {
+			ensureHostOrIp(s.https.host, 'server.https.host', errors);
+			ensureNumber(s.https.port, 'server.https.port', { min: 1, max: 65535 }, errors);
+			ensureReadableFile(s.https.certFile, 'server.https.certFile', errors);
+			ensureReadableFile(s.https.keyFile, 'server.https.keyFile', errors);
+		}
+	}
+	if (isPlainObject(s.http) && isPlainObject(s.https) && !s.http.enabled && !s.https.enabled) {
+		errors.push('At least one of server.http.enabled or server.https.enabled must be true');
+	}
+
+	// Upstream
+	if (isPlainObject(s.openhab)) {
+		ensureUrl(s.openhab.target, 'server.openhab.target', errors);
+		ensureString(s.openhab.user || '', 'server.openhab.user', { allowEmpty: true, maxLen: 256 }, errors);
+		ensureString(s.openhab.pass || '', 'server.openhab.pass', { allowEmpty: true, maxLen: 512 }, errors);
+		ensureString(s.openhab.apiToken || '', 'server.openhab.apiToken', { allowEmpty: true, maxLen: 512 }, errors);
+	}
+
+	// Database
+	if (isPlainObject(s.mysql)) {
+		ensureString(s.mysql.socket || '', 'server.mysql.socket', { allowEmpty: true, maxLen: 4096 }, errors);
+		ensureString(s.mysql.host || '', 'server.mysql.host', { allowEmpty: true, maxLen: 253 }, errors);
+		const mysqlPort = s.mysql.port;
+		if (mysqlPort !== undefined) {
+			if (typeof mysqlPort !== 'string') {
+				errors.push(`server.mysql.port must be a string but currently is ${describeValue(mysqlPort)}`);
+			} else if (mysqlPort.trim() !== '') {
+				const portNum = Number(mysqlPort.trim());
+				if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+					errors.push(`server.mysql.port must be empty or a number 1-65535 but currently is ${describeValue(mysqlPort)}`);
+				}
+			}
+		}
+		ensureString(s.mysql.database || '', 'server.mysql.database', { allowEmpty: true, maxLen: 64 }, errors);
+		ensureString(s.mysql.username || '', 'server.mysql.username', { allowEmpty: true, maxLen: 256 }, errors);
+		ensureString(s.mysql.password || '', 'server.mysql.password', { allowEmpty: true, maxLen: 512 }, errors);
+	}
+
+	// Auth
+	if (isPlainObject(s.auth)) {
+		const authMode = s.auth.mode;
+		if (typeof authMode === 'string' && authMode !== 'basic' && authMode !== 'html') {
+			errors.push('server.auth.mode must be "basic" or "html"');
+		}
+		ensureString(s.auth.realm || '', 'server.auth.realm', { allowEmpty: false, maxLen: 256 }, errors);
+		ensureString(s.auth.cookieName || '', 'server.auth.cookieName', { allowEmpty: true, maxLen: 256 }, errors);
+		ensureNumber(s.auth.cookieDays, 'server.auth.cookieDays', { min: 0 }, errors);
+		ensureString(s.auth.cookieKey || '', 'server.auth.cookieKey', { allowEmpty: true, maxLen: 256 }, errors);
+		ensureString(s.auth.authFailNotifyCmd || '', 'server.auth.authFailNotifyCmd', { allowEmpty: true, maxLen: 1024 }, errors);
+		ensureNumber(s.auth.authFailNotifyIntervalMins, 'server.auth.authFailNotifyIntervalMins', { min: 1 }, errors);
+		if (s.auth.cookieKey && typeof s.auth.cookieKey === 'string' && s.auth.cookieKey.trim()) {
+			if (!s.auth.cookieName) {
+				errors.push('server.auth.cookieName is required when cookieKey is set');
+			}
+			if (!Number.isFinite(s.auth.cookieDays) || s.auth.cookieDays <= 0) {
+				errors.push('server.auth.cookieDays must be > 0 when cookieKey is set');
+			}
+		}
+	}
+
+	// Access control
+	if (Array.isArray(s.allowSubnets)) ensureAllowSubnets(s.allowSubnets, 'server.allowSubnets', errors, { maxItems: 100 });
+	if (s.trustProxy !== undefined) ensureBoolean(s.trustProxy, 'server.trustProxy', errors);
+	if (Array.isArray(s.denyXFFSubnets)) ensureAllowSubnets(s.denyXFFSubnets, 'server.denyXFFSubnets', errors, { allowEmpty: true, maxItems: 100 });
+
+	// Security headers
+	if (isPlainObject(s.securityHeaders)) {
+		ensureBoolean(s.securityHeaders.enabled, 'server.securityHeaders.enabled', errors);
+		if (isPlainObject(s.securityHeaders.hsts)) {
+			ensureBoolean(s.securityHeaders.hsts.enabled, 'server.securityHeaders.hsts.enabled', errors);
+			ensureNumber(s.securityHeaders.hsts.maxAge, 'server.securityHeaders.hsts.maxAge', { min: 0 }, errors);
+			ensureBoolean(s.securityHeaders.hsts.includeSubDomains, 'server.securityHeaders.hsts.includeSubDomains', errors);
+			ensureBoolean(s.securityHeaders.hsts.preload, 'server.securityHeaders.hsts.preload', errors);
+		}
+		if (isPlainObject(s.securityHeaders.csp)) {
+			ensureBoolean(s.securityHeaders.csp.enabled, 'server.securityHeaders.csp.enabled', errors);
+			ensureBoolean(s.securityHeaders.csp.reportOnly, 'server.securityHeaders.csp.reportOnly', errors);
+			ensureString(s.securityHeaders.csp.policy || '', 'server.securityHeaders.csp.policy', { allowEmpty: true, maxLen: 4096 }, errors);
+			if (s.securityHeaders.csp.enabled && !(s.securityHeaders.csp.policy || '').trim()) {
+				errors.push('server.securityHeaders.csp.policy must be set when CSP is enabled');
+			}
+		}
+		if (s.securityHeaders.referrerPolicy !== undefined) {
+			const ref = typeof s.securityHeaders.referrerPolicy === 'string' ? s.securityHeaders.referrerPolicy.trim() : '';
+			if (ref) {
+				const allowed = ['no-referrer', 'no-referrer-when-downgrade', 'origin', 'origin-when-cross-origin',
+					'same-origin', 'strict-origin', 'strict-origin-when-cross-origin', 'unsafe-url'];
+				if (!allowed.includes(ref)) {
+					errors.push('server.securityHeaders.referrerPolicy must be a supported value');
+				}
+			}
+		}
+	}
+
+	// Proxy
+	if (Array.isArray(s.proxyAllowlist)) {
+		if (s.proxyAllowlist.length > 100) {
+			errors.push(`server.proxyAllowlist must have at most 100 items but has ${s.proxyAllowlist.length}`);
+		} else {
+			s.proxyAllowlist.forEach((entry, index) => {
+				if (!parseProxyAllowEntry(entry)) {
+					errors.push(`server.proxyAllowlist[${index}] is not a valid host or host:port`);
+				}
+			});
+		}
+	}
+	if (Array.isArray(s.webviewNoProxy)) {
+		if (s.webviewNoProxy.length > 100) {
+			errors.push(`server.webviewNoProxy must have at most 100 items but has ${s.webviewNoProxy.length}`);
+		} else {
+			s.webviewNoProxy.forEach((entry, index) => {
+				if (!parseProxyAllowEntry(entry)) {
+					errors.push(`server.webviewNoProxy[${index}] is not a valid host or host:port`);
+				}
+			});
+		}
+	}
+
+	// Assets
+	if (isPlainObject(s.assets)) {
+		ensureVersion(s.assets.assetVersion, 'server.assets.assetVersion', errors);
+		ensureVersion(s.assets.appleTouchIconVersion, 'server.assets.appleTouchIconVersion', errors);
+		ensureVersion(s.assets.iconVersion, 'server.assets.iconVersion', errors);
+	}
+
+	// Scalar server fields
+	if (s.userAgent !== undefined) ensureString(s.userAgent, 'server.userAgent', { allowEmpty: false, maxLen: 256 }, errors);
+	if (s.iconSize !== undefined) ensureNumber(s.iconSize, 'server.iconSize', { min: 1 }, errors);
+	if (s.iconCacheConcurrency !== undefined) ensureNumber(s.iconCacheConcurrency, 'server.iconCacheConcurrency', { min: 1 }, errors);
+	if (s.deltaCacheLimit !== undefined) ensureNumber(s.deltaCacheLimit, 'server.deltaCacheLimit', { min: 1 }, errors);
+	if (s.logFile !== undefined) ensureLogPath(s.logFile, 'server.logFile', errors);
+	if (s.accessLog !== undefined) ensureLogPath(s.accessLog, 'server.accessLog', errors);
+	if (s.jsLogFile !== undefined) ensureLogPath(s.jsLogFile, 'server.jsLogFile', errors);
+	if (s.jsLogEnabled !== undefined) ensureBoolean(s.jsLogEnabled, 'server.jsLogEnabled', errors);
+	if (s.accessLogLevel !== undefined) {
+		if (s.accessLogLevel !== 'all' && s.accessLogLevel !== '400+') {
+			errors.push('server.accessLogLevel must be "all" or "400+"');
+		}
+	}
+	if (s.proxyMiddlewareLogLevel !== undefined) {
+		const valid = ['silent', 'error', 'warn', 'info', 'debug'];
+		if (!valid.includes(s.proxyMiddlewareLogLevel)) {
+			errors.push('server.proxyMiddlewareLogLevel must be one of: ' + valid.join(', '));
+		}
+	}
+	if (s.slowQueryMs !== undefined) ensureNumber(s.slowQueryMs, 'server.slowQueryMs', { min: 0 }, errors);
+	if (s.sessionMaxAgeDays !== undefined) ensureNumber(s.sessionMaxAgeDays, 'server.sessionMaxAgeDays', { min: 1 }, errors);
+
+	// Background tasks
+	if (isPlainObject(s.backgroundTasks)) {
+		ensureNumber(s.backgroundTasks.sitemapRefreshMs, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
+	}
+
+	// WebSocket
+	if (isPlainObject(s.websocket)) {
+		const validModes = ['polling', 'atmosphere', 'sse'];
+		if (!validModes.includes(s.websocket.mode)) {
+			errors.push('server.websocket.mode must be one of: ' + validModes.join(', '));
+		}
+		ensureNumber(s.websocket.pollingIntervalMs, 'server.websocket.pollingIntervalMs', { min: 100 }, errors);
+		ensureNumber(s.websocket.pollingIntervalBgMs, 'server.websocket.pollingIntervalBgMs', { min: 100 }, errors);
+		ensureNumber(s.websocket.atmosphereNoUpdateWarnMs, 'server.websocket.atmosphereNoUpdateWarnMs', { min: 0 }, errors);
+		ensureNumber(s.websocket.backendRecoveryDelayMs, 'server.websocket.backendRecoveryDelayMs', { min: 0 }, errors);
+	}
+
+	// Video preview
+	if (isPlainObject(s.videoPreview)) {
+		ensureNumber(s.videoPreview.intervalMs, 'server.videoPreview.intervalMs', { min: 0 }, errors);
+		ensureNumber(s.videoPreview.pruneAfterHours, 'server.videoPreview.pruneAfterHours', { min: 1 }, errors);
+	}
+
+	// CMD API
+	if (isPlainObject(s.cmdapi)) {
+		ensureBoolean(s.cmdapi.enabled, 'server.cmdapi.enabled', errors);
+		if (Array.isArray(s.cmdapi.allowedSubnets)) {
+			ensureCidrList(s.cmdapi.allowedSubnets, 'server.cmdapi.allowedSubnets', { allowEmpty: true, maxItems: 100 }, errors);
+		}
+		if (Array.isArray(s.cmdapi.allowedItems)) {
+			if (s.cmdapi.allowedItems.length > 100) {
+				errors.push(`server.cmdapi.allowedItems must have at most 100 items but has ${s.cmdapi.allowedItems.length}`);
+			} else {
+				s.cmdapi.allowedItems.forEach((entry, index) => {
+					if (typeof entry !== 'string' || (!entry.trim() && entry !== '*')) {
+						errors.push(`server.cmdapi.allowedItems[${index}] must be a non-empty string or '*'`);
+					}
+				});
+			}
+		}
+	}
+
+	// GPS
+	if (isPlainObject(s.gps)) {
+		if (s.gps.homeLat !== undefined && s.gps.homeLat !== '') {
+			const lat = Number(s.gps.homeLat);
+			if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+				errors.push('server.gps.homeLat must be a number between -90 and 90');
+			}
+		}
+		if (s.gps.homeLon !== undefined && s.gps.homeLon !== '') {
+			const lon = Number(s.gps.homeLon);
+			if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
+				errors.push('server.gps.homeLon must be a number between -180 and 180');
+			}
+		}
+	}
+
+	// Binaries
+	if (isPlainObject(s.binaries)) {
+		ensureAbsolutePath(s.binaries.ffmpeg, 'server.binaries.ffmpeg', errors);
+		ensureAbsolutePath(s.binaries.convert, 'server.binaries.convert', errors);
+		ensureAbsolutePath(s.binaries.shell, 'server.binaries.shell', errors);
+	}
+	if (isPlainObject(s.paths)) {
+		ensureString(s.paths.rrd || '', 'server.paths.rrd', { allowEmpty: true, maxLen: 4096 }, errors);
+	}
+
+	// Features
+	if (Array.isArray(s.groupItems)) {
+		if (s.groupItems.length > 100) {
+			errors.push(`server.groupItems must have at most 100 items but has ${s.groupItems.length}`);
+		} else {
+			s.groupItems.forEach((entry, index) => {
+				if (typeof entry !== 'string') {
+					errors.push(`server.groupItems[${index}] must be a string but currently is ${describeValue(entry)}`);
+				} else if (entry.length > 256) {
+					errors.push(`server.groupItems[${index}] must be at most 256 characters but is ${entry.length}`);
+				}
+			});
+		}
+	}
+
+	// External services
+	if (isPlainObject(s.apiKeys)) {
+		ensureString(s.apiKeys.anthropic || '', 'server.apiKeys.anthropic', { allowEmpty: true, maxLen: 512 }, errors);
+	}
+	if (isPlainObject(s.weatherbit)) {
+		ensureString(s.weatherbit.apiKey || '', 'server.weatherbit.apiKey', { allowEmpty: true, maxLen: 512 }, errors);
+		ensureString(s.weatherbit.latitude || '', 'server.weatherbit.latitude', { allowEmpty: true, maxLen: 64 }, errors);
+		if (typeof s.weatherbit.latitude === 'string' && s.weatherbit.latitude.trim() !== '') {
+			const lat = Number(s.weatherbit.latitude.trim());
+			if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+				errors.push('server.weatherbit.latitude must be a number between -90 and 90');
+			}
+		}
+		ensureString(s.weatherbit.longitude || '', 'server.weatherbit.longitude', { allowEmpty: true, maxLen: 64 }, errors);
+		if (typeof s.weatherbit.longitude === 'string' && s.weatherbit.longitude.trim() !== '') {
+			const lon = Number(s.weatherbit.longitude.trim());
+			if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
+				errors.push('server.weatherbit.longitude must be a number between -180 and 180');
+			}
+		}
+		if (s.weatherbit.units !== undefined && s.weatherbit.units !== 'M' && s.weatherbit.units !== 'I') {
+			errors.push('server.weatherbit.units must be "M" or "I"');
+		}
+		if (s.weatherbit.refreshIntervalMs !== undefined) {
+			ensureNumber(s.weatherbit.refreshIntervalMs, 'server.weatherbit.refreshIntervalMs', { min: 1 }, errors);
+		}
+	}
+
+	// Client config
+	if (isPlainObject(c)) {
+		if (c.siteName !== undefined) ensureString(c.siteName || '', 'client.siteName', { allowEmpty: true, maxLen: 256 }, errors);
+		if (c.statusNotification !== undefined) ensureBoolean(c.statusNotification, 'client.statusNotification', errors);
+		if (c.pageFadeOutMs !== undefined) ensureNumber(c.pageFadeOutMs, 'client.pageFadeOutMs', { min: 0 }, errors);
+		if (c.pageFadeInMs !== undefined) ensureNumber(c.pageFadeInMs, 'client.pageFadeInMs', { min: 0 }, errors);
+		if (c.loadingDelayMs !== undefined) ensureNumber(c.loadingDelayMs, 'client.loadingDelayMs', { min: 0 }, errors);
+		if (c.minImageRefreshMs !== undefined) ensureNumber(c.minImageRefreshMs, 'client.minImageRefreshMs', { min: 0 }, errors);
+		if (c.imageLoadTimeoutMs !== undefined) ensureNumber(c.imageLoadTimeoutMs, 'client.imageLoadTimeoutMs', { min: 0 }, errors);
+		if (c.sliderDebounceMs !== undefined) ensureNumber(c.sliderDebounceMs, 'client.sliderDebounceMs', { min: 0 }, errors);
+		if (c.idleAfterMs !== undefined) ensureNumber(c.idleAfterMs, 'client.idleAfterMs', { min: 0 }, errors);
+		if (c.activityThrottleMs !== undefined) ensureNumber(c.activityThrottleMs, 'client.activityThrottleMs', { min: 0 }, errors);
+		if (c.voiceResponseTimeoutMs !== undefined) ensureNumber(c.voiceResponseTimeoutMs, 'client.voiceResponseTimeoutMs', { min: 0 }, errors);
+		if (c.touchReloadMinHiddenMs !== undefined) ensureNumber(c.touchReloadMinHiddenMs, 'client.touchReloadMinHiddenMs', { min: 0 }, errors);
+		if (c.dateFormat !== undefined) ensureString(c.dateFormat, 'client.dateFormat', { allowEmpty: false, maxLen: 64 }, errors);
+		if (c.timeFormat !== undefined) ensureString(c.timeFormat, 'client.timeFormat', { allowEmpty: false, maxLen: 64 }, errors);
+		if (isPlainObject(c.pollIntervalsMs)) {
+			if (c.pollIntervalsMs.default) {
+				ensureNumber(c.pollIntervalsMs.default.active, 'client.pollIntervalsMs.default.active', { min: 1 }, errors);
+				ensureNumber(c.pollIntervalsMs.default.idle, 'client.pollIntervalsMs.default.idle', { min: 1 }, errors);
+			}
+			if (c.pollIntervalsMs.slim) {
+				ensureNumber(c.pollIntervalsMs.slim.active, 'client.pollIntervalsMs.slim.active', { min: 1 }, errors);
+				ensureNumber(c.pollIntervalsMs.slim.idle, 'client.pollIntervalsMs.slim.idle', { min: 1 }, errors);
+			}
+		}
+		if (isPlainObject(c.searchDebounceMs)) {
+			ensureNumber(c.searchDebounceMs.default, 'client.searchDebounceMs.default', { min: 0 }, errors);
+			ensureNumber(c.searchDebounceMs.slim, 'client.searchDebounceMs.slim', { min: 0 }, errors);
+		}
+		if (isPlainObject(c.searchStateMinIntervalMs)) {
+			ensureNumber(c.searchStateMinIntervalMs.default, 'client.searchStateMinIntervalMs.default', { min: 0 }, errors);
+			ensureNumber(c.searchStateMinIntervalMs.slim, 'client.searchStateMinIntervalMs.slim', { min: 0 }, errors);
+		}
+		if (isPlainObject(c.searchStateConcurrency)) {
+			ensureNumber(c.searchStateConcurrency.default, 'client.searchStateConcurrency.default', { min: 1 }, errors);
+			ensureNumber(c.searchStateConcurrency.slim, 'client.searchStateConcurrency.slim', { min: 1 }, errors);
+		}
+		if (Array.isArray(c.hideTitleItems)) {
+			if (c.hideTitleItems.length > 100) {
+				errors.push(`client.hideTitleItems must have at most 100 items but has ${c.hideTitleItems.length}`);
+			} else {
+				c.hideTitleItems.forEach((entry, index) => {
+					if (typeof entry !== 'string' || entry.trim() === '') {
+						errors.push(`client.hideTitleItems[${index}] must be a non-empty string`);
+					}
+				});
+			}
 		}
 	}
 
@@ -1322,6 +1703,26 @@ const restartRequiredKeys = [
 function getNestedValue(obj, path) {
 	return path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj);
 }
+
+function setNestedValue(obj, path, value) {
+	const keys = path.split('.');
+	let cur = obj;
+	for (let i = 0; i < keys.length - 1; i++) {
+		if (!cur[keys[i]] || typeof cur[keys[i]] !== 'object') cur[keys[i]] = {};
+		cur = cur[keys[i]];
+	}
+	cur[keys[keys.length - 1]] = value;
+}
+
+const SENSITIVE_CONFIG_KEYS = [
+	'server.auth.cookieKey',
+	'server.apiKeys.anthropic',
+	'server.weatherbit.apiKey',
+	'server.openhab.pass',
+	'server.openhab.apiToken',
+	'server.mysql.password',
+];
+const SENSITIVE_MASK = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
 
 function readConfigLocalMtime() {
 	try {
@@ -5502,6 +5903,101 @@ app.post('/api/card-config', jsonParserLarge, (req, res) => {
 		logMessage(`Failed to save card config: ${err.message || err}`, 'error');
 		res.status(500).json({ error: 'Failed to save config' });
 	}
+});
+
+// Admin config endpoints
+app.get('/api/admin/config', (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
+	if (user?.role !== 'admin') {
+		res.status(403).json({ error: 'Admin access required' });
+		return;
+	}
+
+	let config;
+	try {
+		delete require.cache[require.resolve('./config.local.js')];
+		delete require.cache[require.resolve('./config.js')];
+		config = JSON.parse(JSON.stringify(loadUserConfig()));
+	} catch (err) {
+		logMessage(`Failed to load config for admin: ${err.message || err}`);
+		res.status(500).json({ error: 'Failed to load config' });
+		return;
+	}
+
+	for (const keyPath of SENSITIVE_CONFIG_KEYS) {
+		const val = getNestedValue(config, keyPath);
+		if (val && typeof val === 'string' && val.trim()) {
+			setNestedValue(config, keyPath, SENSITIVE_MASK);
+		}
+	}
+
+	res.json(config);
+});
+
+app.post('/api/admin/config', jsonParserLarge, (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
+	if (user?.role !== 'admin') {
+		res.status(403).json({ error: 'Admin access required' });
+		return;
+	}
+
+	const incoming = req.body;
+	if (!isPlainObject(incoming)) {
+		res.status(400).json({ error: 'Invalid config' });
+		return;
+	}
+
+	// Restore masked sensitive values from current config
+	let currentLocal;
+	try {
+		delete require.cache[require.resolve('./config.local.js')];
+		currentLocal = require('./config.local.js');
+	} catch { currentLocal = {}; }
+
+	for (const keyPath of SENSITIVE_CONFIG_KEYS) {
+		const val = getNestedValue(incoming, keyPath);
+		if (val === SENSITIVE_MASK) {
+			const currentVal = getNestedValue(currentLocal, keyPath);
+			if (currentVal !== undefined) {
+				setNestedValue(incoming, keyPath, currentVal);
+			} else {
+				setNestedValue(incoming, keyPath, '');
+			}
+		}
+	}
+
+	// Validate
+	const errors = validateAdminConfig(incoming);
+	if (errors.length > 0) {
+		res.status(400).json({ errors });
+		return;
+	}
+
+	// Check if restart will be required
+	const needsRestart = restartRequiredKeys.some(key => {
+		const oldVal = getNestedValue(currentLocal?.server || {}, key);
+		const newVal = getNestedValue(incoming?.server || {}, key);
+		return JSON.stringify(oldVal) !== JSON.stringify(newVal);
+	});
+
+	// Write config.local.js atomically
+	const content = '\'use strict\';\n\nmodule.exports = ' + JSON.stringify(incoming, null, '\t') + ';\n';
+	const tmpPath = LOCAL_CONFIG_PATH + '.tmp';
+	try {
+		fs.writeFileSync(tmpPath, content, 'utf8');
+		fs.renameSync(tmpPath, LOCAL_CONFIG_PATH);
+	} catch (err) {
+		logMessage(`Failed to write admin config: ${err.message || err}`);
+		res.status(500).json({ error: 'Failed to write config: ' + err.message });
+		return;
+	}
+
+	logMessage(`[Admin] Config updated by ${user.username || 'unknown'}`);
+	res.json({ ok: true, restartRequired: needsRestart });
 });
 
 app.get('/api/card-config/:itemName/history', async (req, res) => {
