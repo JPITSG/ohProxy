@@ -290,11 +290,7 @@ const ICON_VERSION = safeText(process.env.ICON_VERSION || SERVER_CONFIG.assets?.
 const USER_AGENT = safeText(process.env.USER_AGENT || SERVER_CONFIG.userAgent);
 const ASSET_VERSION = safeText(SERVER_CONFIG.assets?.assetVersion);
 const APPLE_TOUCH_VERSION_RAW = safeText(SERVER_CONFIG.assets?.appleTouchIconVersion);
-const APPLE_TOUCH_VERSION = APPLE_TOUCH_VERSION_RAW
-	? (APPLE_TOUCH_VERSION_RAW.startsWith('v')
-		? APPLE_TOUCH_VERSION_RAW
-		: `v${APPLE_TOUCH_VERSION_RAW}`)
-	: '';
+const APPLE_TOUCH_VERSION = APPLE_TOUCH_VERSION_RAW || '';
 const ICON_SIZE = configNumber(SERVER_CONFIG.iconSize);
 const ICON_CACHE_CONCURRENCY = Math.max(1, Math.floor(configNumber(SERVER_CONFIG.iconCacheConcurrency, 5)));
 const DELTA_CACHE_LIMIT = configNumber(SERVER_CONFIG.deltaCacheLimit);
@@ -487,10 +483,6 @@ function shouldSkipAccessLog(res) {
 	return false;
 }
 
-function isPlainObject(value) {
-	return value && typeof value === 'object' && !Array.isArray(value);
-}
-
 function ensureString(value, name, { allowEmpty = false, maxLen } = {}, errors) {
 	if (typeof value !== 'string') {
 		errors.push(`${name} must be a string but currently is ${describeValue(value)}`);
@@ -651,8 +643,8 @@ function ensureAbsolutePath(value, name, errors) {
 function ensureVersion(value, name, errors) {
 	ensureString(value, name, { allowEmpty: false }, errors);
 	if (typeof value !== 'string' || value.trim() === '') return;
-	if (!/^v?\d+$/i.test(value.trim())) {
-		errors.push(`${name} must be digits or v123 but currently is ${describeValue(value)}`);
+	if (!/^v\d+$/i.test(value.trim())) {
+		errors.push(`${name} must be in format v123 but currently is ${describeValue(value)}`);
 	}
 }
 
@@ -728,16 +720,12 @@ function validateConfig() {
 		ensureUrl(OH_TARGET, 'server.openhab.target', errors);
 		ensureString(OH_USER, 'server.openhab.user', { allowEmpty: true }, errors);
 		ensureString(OH_PASS, 'server.openhab.pass', { allowEmpty: true }, errors);
+		ensureNumber(OPENHAB_REQUEST_TIMEOUT_MS, 'server.openhab.timeoutMs', { min: 0 }, errors);
 	}
 
 	if (ensureObject(SERVER_CONFIG.assets, 'server.assets', errors)) {
 		ensureVersion(ASSET_VERSION, 'server.assets.assetVersion', errors);
-		const appleRaw = safeText(APPLE_TOUCH_VERSION_RAW);
-		if (!appleRaw) {
-			errors.push(`server.assets.appleTouchIconVersion is required but currently is ${describeValue(APPLE_TOUCH_VERSION_RAW)}`);
-		} else if (!/^(v\d+|\d+)$/i.test(appleRaw.trim())) {
-			errors.push(`server.assets.appleTouchIconVersion must be digits or v123 but currently is ${describeValue(APPLE_TOUCH_VERSION_RAW)}`);
-		}
+		ensureVersion(APPLE_TOUCH_VERSION_RAW, 'server.assets.appleTouchIconVersion', errors);
 		ensureVersion(ICON_VERSION, 'server.assets.iconVersion', errors);
 	}
 
@@ -882,7 +870,7 @@ function validateAdminConfig(config) {
 	const s = config.server || {};
 	const c = config.client || {};
 
-	// Listeners
+	// Listeners (required — defaults have both disabled, at least one must be enabled)
 	if (isPlainObject(s.http)) {
 		ensureBoolean(s.http.enabled, 'server.http.enabled', errors);
 		if (s.http.enabled) {
@@ -899,16 +887,21 @@ function validateAdminConfig(config) {
 			ensureReadableFile(s.https.keyFile, 'server.https.keyFile', errors);
 		}
 	}
-	if (isPlainObject(s.http) && isPlainObject(s.https) && !s.http.enabled && !s.https.enabled) {
+	const httpEnabled = isPlainObject(s.http) && s.http.enabled === true;
+	const httpsEnabled = isPlainObject(s.https) && s.https.enabled === true;
+	if (!httpEnabled && !httpsEnabled) {
 		errors.push('At least one of server.http.enabled or server.https.enabled must be true');
 	}
 
-	// Upstream
+	// Upstream (required — default target is empty, startup requires valid URL)
 	if (isPlainObject(s.openhab)) {
 		ensureUrl(s.openhab.target, 'server.openhab.target', errors);
 		ensureString(s.openhab.user || '', 'server.openhab.user', { allowEmpty: true, maxLen: 256 }, errors);
 		ensureString(s.openhab.pass || '', 'server.openhab.pass', { allowEmpty: true, maxLen: 512 }, errors);
 		ensureString(s.openhab.apiToken || '', 'server.openhab.apiToken', { allowEmpty: true, maxLen: 512 }, errors);
+		if (s.openhab.timeoutMs !== undefined) ensureNumber(s.openhab.timeoutMs, 'server.openhab.timeoutMs', { min: 0 }, errors);
+	} else {
+		errors.push('server.openhab is required');
 	}
 
 	// Database
@@ -953,8 +946,8 @@ function validateAdminConfig(config) {
 		}
 	}
 
-	// Access control
-	if (Array.isArray(s.allowSubnets)) ensureAllowSubnets(s.allowSubnets, 'server.allowSubnets', errors, { maxItems: 100 });
+	// Access control (required — default is empty, startup requires non-empty)
+	ensureAllowSubnets(s.allowSubnets, 'server.allowSubnets', errors, { maxItems: 100 });
 	if (s.trustProxy !== undefined) ensureBoolean(s.trustProxy, 'server.trustProxy', errors);
 	if (Array.isArray(s.denyXFFSubnets)) ensureAllowSubnets(s.denyXFFSubnets, 'server.denyXFFSubnets', errors, { allowEmpty: true, maxItems: 100 });
 
@@ -987,17 +980,13 @@ function validateAdminConfig(config) {
 		}
 	}
 
-	// Proxy
-	if (Array.isArray(s.proxyAllowlist)) {
-		if (s.proxyAllowlist.length > 100) {
-			errors.push(`server.proxyAllowlist must have at most 100 items but has ${s.proxyAllowlist.length}`);
-		} else {
-			s.proxyAllowlist.forEach((entry, index) => {
-				if (!parseProxyAllowEntry(entry)) {
-					errors.push(`server.proxyAllowlist[${index}] is not a valid host or host:port`);
-				}
-			});
-		}
+	// Proxy (required — default is empty, startup requires non-empty)
+	if (ensureArray(s.proxyAllowlist, 'server.proxyAllowlist', { allowEmpty: false, maxItems: 100 }, errors)) {
+		s.proxyAllowlist.forEach((entry, index) => {
+			if (!parseProxyAllowEntry(entry)) {
+				errors.push(`server.proxyAllowlist[${index}] is not a valid host or host:port`);
+			}
+		});
 	}
 	if (Array.isArray(s.webviewNoProxy)) {
 		if (s.webviewNoProxy.length > 100) {
@@ -1529,7 +1518,7 @@ function maybeNotifyAuthFailure(ip) {
 	if (!command) return;
 	sessions.setServerSetting('lastAuthFailNotifyAt', String(now));
 	try {
-		const child = execFile(BIN_SHELL, ['-c', command], { detached: true, stdio: 'ignore' });
+		const child = execFile(liveConfig.binShell, ['-c', command], { detached: true, stdio: 'ignore' });
 		child.unref();
 		logMessage(`Auth failure notify command executed for ${safeIp}`);
 	} catch (err) {
@@ -1608,6 +1597,7 @@ const liveConfig = {
 	ohUser: OH_USER,
 	ohPass: OH_PASS,
 	ohApiToken: OH_API_TOKEN,
+	ohTimeoutMs: OPENHAB_REQUEST_TIMEOUT_MS,
 	iconVersion: ICON_VERSION,
 	userAgent: USER_AGENT,
 	assetVersion: ASSET_VERSION,
@@ -1645,6 +1635,19 @@ const liveConfig = {
 	accessLogLevel: ACCESS_LOG_LEVEL,
 	jsLogFile: JS_LOG_FILE,
 	proxyLogLevel: PROXY_LOG_LEVEL,
+	binFfmpeg: BIN_FFMPEG,
+	binConvert: BIN_CONVERT,
+	binShell: BIN_SHELL,
+	anthropicApiKey: ANTHROPIC_API_KEY,
+	weatherbitApiKey: WEATHERBIT_API_KEY,
+	weatherbitLatitude: WEATHERBIT_LATITUDE,
+	weatherbitLongitude: WEATHERBIT_LONGITUDE,
+	weatherbitUnits: WEATHERBIT_UNITS,
+	weatherbitRefreshMs: WEATHERBIT_REFRESH_MS,
+	videoPreviewIntervalMs: VIDEO_PREVIEW_INTERVAL_MS,
+	videoPreviewPruneHours: VIDEO_PREVIEW_PRUNE_HOURS,
+	gpsHomeLat: Number.isFinite(parseFloat(SERVER_CONFIG.gps?.homeLat)) ? parseFloat(SERVER_CONFIG.gps?.homeLat) : NaN,
+	gpsHomeLon: Number.isFinite(parseFloat(SERVER_CONFIG.gps?.homeLon)) ? parseFloat(SERVER_CONFIG.gps?.homeLon) : NaN,
 };
 
 logMessage('[Startup] Starting ohProxy instance...');
@@ -1683,6 +1686,7 @@ migrateGlowRulesToDb();
 const restartRequiredKeys = [
 	'http.enabled', 'http.host', 'http.port',
 	'https.enabled', 'https.host', 'https.port', 'https.certFile', 'https.keyFile', 'https.http2',
+	'mysql.socket', 'mysql.host', 'mysql.port', 'mysql.database', 'mysql.username', 'mysql.password',
 ];
 
 function getNestedValue(obj, path) {
@@ -1733,6 +1737,13 @@ function reloadLiveConfig() {
 		return false;
 	}
 
+	// Validate before applying — reject malformed configs
+	const validationErrors = validateAdminConfig(newConfig);
+	if (validationErrors.length > 0) {
+		logMessage(`[Config] Hot reload rejected — validation failed:\n  ${validationErrors.join('\n  ')}`);
+		return false;
+	}
+
 	const newServer = newConfig.server || {};
 	const oldServer = SERVER_CONFIG;
 
@@ -1755,6 +1766,7 @@ function reloadLiveConfig() {
 
 	liveConfig.allowSubnets = newServer.allowSubnets;
 	liveConfig.trustProxy = newServer.trustProxy === true;
+	app.set('trust proxy', liveConfig.trustProxy);
 	liveConfig.denyXFFSubnets = newServer.denyXFFSubnets;
 	liveConfig.proxyAllowlist = normalizeProxyAllowlist(newServer.proxyAllowlist);
 	liveConfig.webviewNoProxy = normalizeProxyAllowlist(newServer.webviewNoProxy);
@@ -1762,6 +1774,7 @@ function reloadLiveConfig() {
 	liveConfig.ohUser = safeText(newServer.openhab?.user || '');
 	liveConfig.ohPass = safeText(newServer.openhab?.pass || '');
 	liveConfig.ohApiToken = safeText(newServer.openhab?.apiToken || '');
+	liveConfig.ohTimeoutMs = configNumber(newServer.openhab?.timeoutMs, 15000);
 	const oldIconVersion = liveConfig.iconVersion;
 	const oldIconSize = liveConfig.iconSize;
 	const oldAssetVersion = liveConfig.assetVersion;
@@ -1772,10 +1785,7 @@ function reloadLiveConfig() {
 		logMessage(`[Config] Asset version changed: ${oldAssetVersion} -> ${liveConfig.assetVersion}`);
 		wsBroadcast('assetVersionChanged', { version: liveConfig.assetVersion });
 	}
-	const appleTouchRaw = safeText(newAssets.appleTouchIconVersion);
-	liveConfig.appleTouchVersion = appleTouchRaw
-		? (appleTouchRaw.startsWith('v') ? appleTouchRaw : `v${appleTouchRaw}`)
-		: '';
+	liveConfig.appleTouchVersion = safeText(newAssets.appleTouchIconVersion);
 	liveConfig.iconSize = configNumber(newServer.iconSize);
 	liveConfig.iconCacheConcurrency = Math.max(1, Math.floor(configNumber(newServer.iconCacheConcurrency, 5)));
 	liveConfig.deltaCacheLimit = configNumber(newServer.deltaCacheLimit);
@@ -1830,6 +1840,37 @@ function reloadLiveConfig() {
 	liveConfig.jsLogFile = safeText(newServer.jsLogFile || '');
 	liveConfig.proxyLogLevel = safeText(newServer.proxyMiddlewareLogLevel || 'silent');
 	proxyCommon.logLevel = liveConfig.proxyLogLevel;
+
+	// System binaries
+	const newBinaries = newServer.binaries || {};
+	liveConfig.binFfmpeg = safeText(newBinaries.ffmpeg) || '/usr/bin/ffmpeg';
+	liveConfig.binConvert = safeText(newBinaries.convert) || '/usr/bin/convert';
+	liveConfig.binShell = safeText(newBinaries.shell) || '/bin/sh';
+
+	// External services
+	liveConfig.anthropicApiKey = safeText(newServer.apiKeys?.anthropic) || '';
+	const newWeatherbit = newServer.weatherbit || {};
+	liveConfig.weatherbitApiKey = safeText(newWeatherbit.apiKey) || '';
+	liveConfig.weatherbitLatitude = safeText(newWeatherbit.latitude) || '';
+	liveConfig.weatherbitLongitude = safeText(newWeatherbit.longitude) || '';
+	liveConfig.weatherbitUnits = safeText(newWeatherbit.units) || 'M';
+	liveConfig.weatherbitRefreshMs = configNumber(newWeatherbit.refreshIntervalMs, 3600000);
+	updateBackgroundTaskInterval('weatherbit', isWeatherbitConfigured() ? liveConfig.weatherbitRefreshMs : 0);
+
+	// Video preview config
+	const newVideoPreview = newServer.videoPreview || {};
+	liveConfig.videoPreviewIntervalMs = configNumber(newVideoPreview.intervalMs, 900000);
+	liveConfig.videoPreviewPruneHours = configNumber(newVideoPreview.pruneAfterHours, 24);
+	updateBackgroundTaskInterval('video-preview', liveConfig.videoPreviewIntervalMs);
+
+	// GPS config
+	const newGps = newServer.gps || {};
+	liveConfig.gpsHomeLat = Number.isFinite(parseFloat(newGps.homeLat)) ? parseFloat(newGps.homeLat) : NaN;
+	liveConfig.gpsHomeLon = Number.isFinite(parseFloat(newGps.homeLon)) ? parseFloat(newGps.homeLon) : NaN;
+
+	// Session max age
+	const newMaxAge = configNumber(newServer.sessionMaxAgeDays, 14);
+	if (newMaxAge >= 1) sessions.setMaxAgeDays(newMaxAge);
 
 	const iconVersionChanged = liveConfig.iconVersion !== oldIconVersion;
 	const iconSizeChanged = liveConfig.iconSize !== oldIconSize;
@@ -3251,6 +3292,8 @@ function connectSSE() {
 		res.on('error', (err) => {
 			logMessage(`[SSE] Stream error: ${err.message || err}`);
 			setBackendStatus(false, err.message || String(err));
+			sseConnection = null;
+			scheduleSSEReconnect();
 		});
 	});
 
@@ -3615,24 +3658,25 @@ function handleWsUpgrade(req, socket, head) {
 }
 
 function getInitialPageTitle() {
+	const clientSiteName = safeText(liveConfig.clientConfig?.siteName || '').trim();
+	if (clientSiteName) return clientSiteName;
 	const cached = safeText(backgroundState.sitemap.title);
 	return cached || DEFAULT_PAGE_TITLE;
 }
 
 function getInitialDocumentTitle() {
-	const site = safeText(backgroundState.sitemap.title || '');
-	const normalized = site.trim();
-	if (!normalized || normalized.toLowerCase() === DEFAULT_PAGE_TITLE.toLowerCase()) {
+	const site = getInitialPageTitle();
+	if (!site || site.toLowerCase() === DEFAULT_PAGE_TITLE.toLowerCase()) {
 		return `${DEFAULT_PAGE_TITLE} · Home`;
 	}
-	return `${DEFAULT_PAGE_TITLE} · ${normalized} · Home`;
+	return `${DEFAULT_PAGE_TITLE} · ${site} · Home`;
 }
 
 function getInitialPageTitleHtml() {
 	const site = escapeHtml(getInitialPageTitle());
 	const home = 'Home';
 	return `<span class="font-semibold">${site}</span>` +
-		`<span class="font-extralight text-slate-300"> · ${escapeHtml(home)}</span>`;
+		`<span class="font-light text-slate-300"> · ${escapeHtml(home)}</span>`;
 }
 
 function getInitialStatusLabel(req) {
@@ -3694,15 +3738,15 @@ function renderWeatherWidget(forecastData, mode) {
 	const rainColor = '#3498db';
 
 	const days = Array.isArray(forecastData?.data) ? forecastData.data : [];
-	const cityName = safeText(forecastData?.city_name || '');
-	const unitSymbol = WEATHERBIT_UNITS === 'I' ? 'F' : 'C';
+	const cityName = escapeHtml(forecastData?.city_name || '');
+	const unitSymbol = liveConfig.weatherbitUnits === 'I' ? 'F' : 'C';
 
 	const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 	const forecastCards = days.map((day) => {
 		const date = new Date(day.datetime);
 		const dayName = dayNames[date.getDay()];
-		const icon = safeText(day.weather?.icon || 'c01d');
+		const icon = escapeHtml(day.weather?.icon || 'c01d');
 		const highTemp = Math.round(day.high_temp || 0);
 		const lowTemp = Math.round(day.low_temp || 0);
 		const pop = day.pop || 0;
@@ -3712,7 +3756,7 @@ function renderWeatherWidget(forecastData, mode) {
 		return `
 			<div class="forecast-day">
 				<div class="day-name">${dayName}</div>
-				<img class="weather-icon" src="/weather/icons/${icon}.png" alt="${safeText(day.weather?.description || '')}">
+				<img class="weather-icon" src="/weather/icons/${icon}.png" alt="${escapeHtml(day.weather?.description || '')}">
 				<div class="temps">
 					<div class="temp-high">${highTemp}°</div>
 					<div class="temp-low">${lowTemp}°</div>
@@ -3922,6 +3966,61 @@ async function getFullSitemapData(sitemapName) {
 	return { pages, root: rootPath };
 }
 
+function filterSitemapCacheVisibility(cache, userRole) {
+	if (!cache || !cache.pages || userRole === 'admin') return cache;
+	const visibilityRules = sessions.getAllVisibilityRules();
+	const visibilityMap = new Map(visibilityRules.map((r) => [r.widgetId, r.visibility]));
+
+	const shouldHide = (w) => {
+		if (!w) return false;
+		const wKey = serverWidgetKey(w);
+		const vis = visibilityMap.get(wKey) || 'all';
+		if (vis === 'admin') return true;
+		if (vis === 'normal' && userRole !== 'normal' && userRole !== 'readonly') return true;
+		return false;
+	};
+
+	// Filter an array of widgets, cloning each kept widget before recursing.
+	const filterArray = (arr) => {
+		return arr.filter((w) => !w || !shouldHide(w)).map((w) => {
+			if (!w) return w;
+			const clone = { ...w };
+			if (clone.widgets) clone.widgets = filterNested(clone.widgets);
+			if (clone.widget) clone.widget = filterNested(clone.widget);
+			return clone;
+		});
+	};
+
+	// Normalize any widget structure to filtered output, preserving shape.
+	const filterNested = (val) => {
+		if (!val) return val;
+		if (Array.isArray(val)) return filterArray(val);
+		// Object with .item array (XML-to-JSON wrapper)
+		if (Array.isArray(val.item)) return { ...val, item: filterArray(val.item) };
+		// Object with single .item (XML-to-JSON single child)
+		if (val.item) {
+			if (shouldHide(val.item)) return null;
+			const filtered = filterArray([val.item]);
+			return filtered.length ? { ...val, item: filtered[0] } : null;
+		}
+		// Single widget object
+		if (shouldHide(val)) return null;
+		const clone = { ...val };
+		if (clone.widgets) clone.widgets = filterNested(clone.widgets);
+		if (clone.widget) clone.widget = filterNested(clone.widget);
+		return clone;
+	};
+
+	const filtered = { pages: {}, root: cache.root };
+	for (const [url, page] of Object.entries(cache.pages)) {
+		const copy = { ...page };
+		if (copy.widgets) copy.widgets = filterNested(copy.widgets);
+		if (copy.widget) copy.widget = filterNested(copy.widget);
+		filtered.pages[url] = copy;
+	}
+	return filtered;
+}
+
 async function getHomepageData(req) {
 	const sitemapName = backgroundState.sitemap.name;
 	if (!sitemapName || !backgroundState.sitemap.ok) return null;
@@ -3934,6 +4033,7 @@ async function getHomepageData(req) {
 		if (!result.ok) return null;
 
 		const page = JSON.parse(result.body);
+		await applyGroupStateOverrides(page);
 		const widgets = normalizeWidgets(page);
 
 		// Apply visibility filtering
@@ -3982,8 +4082,9 @@ async function sendIndex(req, res) {
 				getHomepageData(req),
 				getFullSitemapData(sitemapName),
 			]);
+			const userRole = req.ohProxyUser ? (sessions.getUser(req.ohProxyUser)?.role || 'normal') : 'normal';
 			status.homepageData = homepageData;
-			status.sitemapCache = sitemapCache;
+			status.sitemapCache = filterSitemapCacheVisibility(sitemapCache, userRole);
 		}
 	}
 
@@ -4170,7 +4271,7 @@ function deltaKey(widget) {
 }
 
 function serverWidgetKey(widget) {
-	if (widget?.__section) return `section:${safeText(widget.label)}`;
+	if (widget?.__section || widgetType(widget) === 'Frame') return `section:${safeText(widget?.label || widget?.item?.label || widget?.item?.name || '')}`;
 	const item = safeText(widget?.item?.name || '');
 	const fullLabel = safeText(widget?.label || '');
 	const { title } = splitLabelState(fullLabel);
@@ -4322,7 +4423,11 @@ function getGroupMemberFingerprint() {
 }
 
 async function refreshGroupMemberMap() {
-	if (!liveConfig.groupItems || !liveConfig.groupItems.length) return;
+	if (!liveConfig.groupItems || !liveConfig.groupItems.length) {
+		memberToGroups.clear();
+		groupToMembers.clear();
+		return;
+	}
 	const newReverseMap = new Map();
 	const newForwardMap = new Map();
 	for (const groupName of liveConfig.groupItems) {
@@ -4353,6 +4458,7 @@ async function refreshGroupMemberMap() {
 	} else {
 		groupMemberBackoffLevel = 0;
 		groupMemberLastFingerprint = fingerprint;
+		groupItemCalculatedStates.clear();
 	}
 	const nextInterval = GROUP_MEMBER_BACKOFF_TIERS[groupMemberBackoffLevel];
 	updateBackgroundTaskInterval('group-member-map', nextInterval);
@@ -4572,7 +4678,7 @@ function isImageContentType(contentType) {
 	return lower.startsWith('image/') || lower.includes('svg+xml') || lower.includes('application/octet-stream');
 }
 
-function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3, agent) {
+function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3, agent, validateRedirect) {
 	return new Promise((resolve, reject) => {
 		let url;
 		try {
@@ -4593,17 +4699,23 @@ function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3, agent) {
 			headers: requestHeaders,
 		};
 		if (agent) opts.agent = agent;
+		opts.timeout = 30000;
 		const req = client.request(opts, (res) => {
 			const status = res.statusCode || 500;
 			const location = res.headers.location;
 			if (location && redirectsLeft > 0 && REDIRECT_STATUS.has(status)) {
 				res.resume();
 				const nextUrl = new URL(location, url);
-				resolve(fetchBinaryFromUrl(nextUrl.toString(), headers, redirectsLeft - 1, agent));
+				if (typeof validateRedirect === 'function' && !validateRedirect(nextUrl)) {
+					reject(new Error('Redirect target not allowed'));
+					return;
+				}
+				resolve(fetchBinaryFromUrl(nextUrl.toString(), headers, redirectsLeft - 1, agent, validateRedirect));
 				return;
 			}
 
 			const chunks = [];
+			res.on('error', reject);
 			res.on('data', (chunk) => chunks.push(chunk));
 			res.on('end', () => {
 				let body = Buffer.concat(chunks);
@@ -4625,6 +4737,9 @@ function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3, agent) {
 			});
 		});
 
+		req.on('timeout', () => {
+			req.destroy(new Error('Proxy fetch timed out'));
+		});
 		req.on('error', reject);
 		req.end();
 	});
@@ -4702,6 +4817,7 @@ function fetchOpenhab(pathname) {
 			let body = '';
 			res.setEncoding('utf8');
 			res.on('data', (chunk) => { body += chunk; });
+			res.on('error', reject);
 			res.on('end', () => resolve({
 				status: res.statusCode || 500,
 				ok: res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
@@ -4709,8 +4825,8 @@ function fetchOpenhab(pathname) {
 			}));
 		});
 
-		if (OPENHAB_REQUEST_TIMEOUT_MS > 0) {
-			req.setTimeout(OPENHAB_REQUEST_TIMEOUT_MS, () => {
+		if (liveConfig.ohTimeoutMs > 0) {
+			req.setTimeout(liveConfig.ohTimeoutMs, () => {
 				req.destroy(new Error('openHAB request timed out'));
 			});
 		}
@@ -4745,6 +4861,7 @@ function sendOpenhabCommand(itemName, command) {
 			let body = '';
 			res.setEncoding('utf8');
 			res.on('data', (chunk) => { body += chunk; });
+			res.on('error', reject);
 			res.on('end', () => resolve({
 				status: res.statusCode || 500,
 				ok: res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
@@ -4752,6 +4869,11 @@ function sendOpenhabCommand(itemName, command) {
 			}));
 		});
 
+		if (liveConfig.ohTimeoutMs > 0) {
+			req.setTimeout(liveConfig.ohTimeoutMs, () => {
+				req.destroy(new Error('openHAB command timed out'));
+			});
+		}
 		req.on('error', reject);
 		req.write(String(command));
 		req.end();
@@ -4784,6 +4906,7 @@ function sendCmdApiCommand(itemName, command) {
 			let body = '';
 			res.setEncoding('utf8');
 			res.on('data', (chunk) => { body += chunk; });
+			res.on('error', reject);
 			res.on('end', () => resolve({
 				status: res.statusCode || 500,
 				ok: res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
@@ -4802,7 +4925,7 @@ function sendCmdApiCommand(itemName, command) {
 
 function callAnthropicApi(requestBody) {
 	return new Promise((resolve, reject) => {
-		if (!ANTHROPIC_API_KEY) {
+		if (!liveConfig.anthropicApiKey) {
 			reject(new Error('Anthropic API key not configured'));
 			return;
 		}
@@ -4816,7 +4939,7 @@ function callAnthropicApi(requestBody) {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
-				'x-api-key': ANTHROPIC_API_KEY,
+				'x-api-key': liveConfig.anthropicApiKey,
 				'anthropic-version': '2023-06-01',
 				'Content-Length': Buffer.byteLength(postData),
 			},
@@ -4920,7 +5043,7 @@ async function refreshSitemapCache(options = {}) {
 	}
 
 	// Trigger initial video preview capture on first successful sitemap pull
-	if (!videoPreviewInitialCaptureDone && VIDEO_PREVIEW_INTERVAL_MS > 0) {
+	if (!videoPreviewInitialCaptureDone && liveConfig.videoPreviewIntervalMs > 0) {
 		videoPreviewInitialCaptureDone = true;
 		captureVideoPreviewsTask().catch((err) => {
 			logMessage(`Initial video preview capture failed: ${err.message || err}`);
@@ -4950,7 +5073,7 @@ async function buildIconCache(cachePath, sourcePath, sourceExt) {
 		}
 		fs.writeFileSync(srcPath, res.body);
 		ensureDir(path.dirname(cachePath));
-		await enqueueIconConvert(() => execFileAsync(BIN_CONVERT, [
+		await enqueueIconConvert(() => execFileAsync(liveConfig.binConvert, [
 			srcPath,
 			'-resize', `${iconSize}x${iconSize}`,
 			'-background', 'none',
@@ -4984,6 +5107,7 @@ async function getCachedIcon(cachePath, sourcePath, sourceExt) {
 const app = express();
 app.set('query parser', 'simple');
 app.disable('x-powered-by');
+if (TRUST_PROXY) app.set('trust proxy', true);
 const jsonParserSmall = express.json({ limit: '4kb', strict: true, type: 'application/json' });
 const jsonParserMedium = express.json({ limit: '16kb', strict: true, type: 'application/json' });
 const jsonParserLarge = express.json({ limit: '64kb', strict: true, type: 'application/json' });
@@ -5695,9 +5819,8 @@ app.post('/api/gps', jsonParserMedium, (req, res) => {
 		? Math.round(body.batt)
 		: null;
 	// Snap to home coordinates if within 150m
-	const gpsConfig = SERVER_CONFIG.gps || {};
-	const homeLat = parseFloat(gpsConfig.homeLat);
-	const homeLon = parseFloat(gpsConfig.homeLon);
+	const homeLat = liveConfig.gpsHomeLat;
+	const homeLon = liveConfig.gpsHomeLon;
 	let lat = rawLat;
 	let lon = rawLon;
 	let distanceHome = null;
@@ -5970,9 +6093,10 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 		return;
 	}
 
-	// Check if restart will be required
+	// Check if restart will be required (compare against merged boot config, not raw config.local.js,
+	// because config.local.js may omit keys that have default values)
 	const needsRestart = restartRequiredKeys.some(key => {
-		const oldVal = getNestedValue(currentLocal?.server || {}, key);
+		const oldVal = getNestedValue(SERVER_CONFIG, key);
 		const newVal = getNestedValue(incoming?.server || {}, key);
 		return JSON.stringify(oldVal) !== JSON.stringify(newVal);
 	});
@@ -6205,7 +6329,7 @@ app.post('/api/voice', jsonParserSmall, async (req, res) => {
 	const username = user?.username || 'anonymous';
 
 	// Check if AI is configured
-	if (!ANTHROPIC_API_KEY) {
+	if (!liveConfig.anthropicApiKey) {
 		logMessage(`[Voice] [${username}] "${trimmed}" - AI not configured`);
 		res.status(503).json({ error: 'Voice AI not configured' });
 		return;
@@ -6354,8 +6478,8 @@ app.get('/manifest.webmanifest', (req, res) => {
 			? rawTheme.toLowerCase()
 			: '';
 		if (theme === 'light' || theme === 'dark') {
-			const themeColor = theme === 'light' ? '#e4e5e9' : '#131420';
-			const bgColor = theme === 'light' ? '#dbdde9' : '#131420';
+			const themeColor = theme === 'light' ? '#f5f6fa' : '#131420';
+			const bgColor = theme === 'light' ? '#f5f6fa' : '#131420';
 			manifest.theme_color = themeColor;
 			manifest.background_color = bgColor;
 		}
@@ -6463,8 +6587,18 @@ app.get('/search-index', async (req, res) => {
 		return true;
 	});
 
+	const filteredFrames = frames.filter(f => {
+		if (userRole === 'admin') return true;
+		const fKey = `section:${safeText(f.label)}`;
+		const vis = visibilityMap.get(fKey) || 'all';
+		if (vis === 'all') return true;
+		if (vis === 'admin') return false;
+		if (vis === 'normal') return userRole === 'normal' || userRole === 'readonly';
+		return true;
+	});
+
 	res.setHeader('Cache-Control', 'no-store');
-	return res.json({ widgets: filteredWidgets, frames });
+	return res.json({ widgets: filteredWidgets, frames: filteredFrames });
 });
 
 // Return full sitemap structure with all pages indexed by URL
@@ -6551,8 +6685,11 @@ app.get('/sitemap-full', async (req, res) => {
 			findLinks(page?.widgets || page?.widget);
 		}
 
+		const userRole = req.ohProxyUser ? (sessions.getUser(req.ohProxyUser)?.role || 'normal') : 'normal';
+		const filtered = filterSitemapCacheVisibility({ pages, root: rootPath }, userRole);
+
 		res.setHeader('Cache-Control', 'no-store');
-		return res.json({ pages, root: rootPath });
+		return res.json(filtered);
 	} catch (err) {
 		console.error('[sitemap-full] Error:', err);
 		return res.status(500).json({ error: err.message });
@@ -6685,13 +6822,20 @@ app.get(/^\/lang\.v[\w.-]+\.js$/i, (req, res) => {
 });
 
 // --- Proxy FIRST (so bodies aren't eaten by any parsers) ---
+// Delegating agent that forwards all operations to the protocol-appropriate agent,
+// so proxy middleware always uses the correct agent even if ohTarget changes at runtime
+const ohDynamicAgent = new Proxy({}, {
+	get(_target, prop, receiver) {
+		return Reflect.get(getOhAgent(), prop, receiver);
+	},
+});
 const proxyCommon = {
 	target: OH_TARGET,
 	router: () => liveConfig.ohTarget,
 	changeOrigin: true,
 	ws: false, // Disabled - we handle WebSocket ourselves via wss
 	logLevel: liveConfig.proxyLogLevel,
-	agent: ohHttpAgent,
+	agent: ohDynamicAgent,
 	onProxyReq(proxyReq) {
 		proxyReq.setHeader('User-Agent', liveConfig.userAgent);
 		const ah = authHeader();
@@ -7163,7 +7307,8 @@ app.get('/api/presence/nearby-days', async (req, res) => {
 	}
 
 	const latDelta = radius / 111111;
-	const lonDelta = latDelta / Math.cos(lat * Math.PI / 180);
+	const cosLat = Math.cos(lat * Math.PI / 180);
+	const lonDelta = cosLat > 1e-6 ? latDelta / cosLat : 360;
 	const latMin = lat - latDelta;
 	const latMax = lat + latDelta;
 	const lonMin = lon - lonDelta;
@@ -7279,9 +7424,8 @@ app.get('/presence', async (req, res) => {
 	markers.reverse();
 	const markersJson = JSON.stringify(markers);
 
-	const gpsConf = SERVER_CONFIG.gps || {};
-	const hLat = parseFloat(gpsConf.homeLat);
-	const hLon = parseFloat(gpsConf.homeLon);
+	const hLat = liveConfig.gpsHomeLat;
+	const hLon = liveConfig.gpsHomeLon;
 	const homeLatJson = Number.isFinite(hLat) ? String(hLat) : "''";
 	const homeLonJson = Number.isFinite(hLon) ? String(hLon) : "''";
 
@@ -7791,7 +7935,7 @@ app.get('/proxy', async (req, res, next) => {
 				'-reset_timestamps', '1',
 				'pipe:1',
 			];
-			const ffmpeg = spawn(BIN_FFMPEG, ffmpegArgs, {
+			const ffmpeg = spawn(liveConfig.binFfmpeg, ffmpegArgs, {
 				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 			res.setHeader('Content-Type', 'video/mp4');
@@ -7890,7 +8034,9 @@ app.get('/proxy', async (req, res, next) => {
 
 			// Cache miss or stale - fetch and cache
 			try {
-				const result = await fetchBinaryFromUrl(targetUrl, headers);
+				const allowlist = liveConfig.proxyAllowlist;
+				const result = await fetchBinaryFromUrl(targetUrl, headers, 3, undefined,
+					(redirectUrl) => isProxyTargetAllowed(redirectUrl, allowlist));
 				if (result.ok && result.body) {
 					// Ensure cache directory exists
 					ensureDir(PROXY_CACHE_DIR);
@@ -7978,7 +8124,7 @@ async function captureRtspPreview(rtspUrl) {
 	const outputPath = path.join(VIDEO_PREVIEW_DIR, `${hash}.jpg`);
 
 	return new Promise((resolve) => {
-		const ffmpeg = spawn(BIN_FFMPEG, [
+		const ffmpeg = spawn(liveConfig.binFfmpeg, [
 			'-y',
 			'-rtsp_transport', 'tcp',
 			'-i', rtspUrl,
@@ -8042,7 +8188,7 @@ function pruneChartCache() {
 function pruneVideoPreviews() {
 	if (!fs.existsSync(VIDEO_PREVIEW_DIR)) return;
 
-	const maxAgeMs = VIDEO_PREVIEW_PRUNE_HOURS * 60 * 60 * 1000;
+	const maxAgeMs = liveConfig.videoPreviewPruneHours * 60 * 60 * 1000;
 	const now = Date.now();
 
 	try {
@@ -8103,10 +8249,8 @@ async function captureVideoPreviewsTask() {
 	pruneVideoPreviews();
 }
 
-// Register video preview task if enabled
-if (VIDEO_PREVIEW_INTERVAL_MS > 0) {
-	registerBackgroundTask('video-preview', VIDEO_PREVIEW_INTERVAL_MS, captureVideoPreviewsTask);
-}
+// Register video preview task (interval 0 = disabled, can be hot-enabled via config reload)
+registerBackgroundTask('video-preview', liveConfig.videoPreviewIntervalMs, captureVideoPreviewsTask);
 
 // Register chart cache prune task (every 24 hours)
 registerBackgroundTask('chart-cache-prune', 24 * 60 * 60 * 1000, pruneChartCache);
@@ -8143,7 +8287,7 @@ registerBackgroundTask('session-cleanup', SESSION_CLEANUP_MS, () => {
 
 // Weatherbit weather data fetch
 function isWeatherbitConfigured() {
-	return !!(WEATHERBIT_API_KEY && WEATHERBIT_LATITUDE && WEATHERBIT_LONGITUDE);
+	return !!(liveConfig.weatherbitApiKey && liveConfig.weatherbitLatitude && liveConfig.weatherbitLongitude);
 }
 
 function getWeatherbitCacheAgeMinutes() {
@@ -8158,9 +8302,9 @@ function getWeatherbitCacheAgeMinutes() {
 async function fetchWeatherbitData() {
 	if (!isWeatherbitConfigured()) return;
 
-	// Check cache freshness - skip if less than 1 hour old
+	// Check cache freshness - skip if younger than configured refresh interval
 	const cacheAgeMinutes = getWeatherbitCacheAgeMinutes();
-	if (cacheAgeMinutes < 60) {
+	if (cacheAgeMinutes < liveConfig.weatherbitRefreshMs / 60000) {
 		logMessage(`[Weather] Using cached data (${cacheAgeMinutes} minutes old)`);
 		return;
 	}
@@ -8178,7 +8322,7 @@ async function fetchWeatherbitData() {
 
 	try {
 		// Fetch forecast
-		const forecastUrl = `https://api.weatherbit.io/v2.0/forecast/daily?lat=${encodeURIComponent(WEATHERBIT_LATITUDE)}&lon=${encodeURIComponent(WEATHERBIT_LONGITUDE)}&key=${encodeURIComponent(WEATHERBIT_API_KEY)}&units=${encodeURIComponent(WEATHERBIT_UNITS)}&days=16`;
+		const forecastUrl = `https://api.weatherbit.io/v2.0/forecast/daily?lat=${encodeURIComponent(liveConfig.weatherbitLatitude)}&lon=${encodeURIComponent(liveConfig.weatherbitLongitude)}&key=${encodeURIComponent(liveConfig.weatherbitApiKey)}&units=${encodeURIComponent(liveConfig.weatherbitUnits)}&days=16`;
 		const forecastResponse = await fetch(forecastUrl, {
 			headers: { 'User-Agent': USER_AGENT },
 			signal: AbortSignal.timeout(30000),
@@ -8197,7 +8341,7 @@ async function fetchWeatherbitData() {
 		let currentDescription = null;
 		try {
 			logMessage('[Weather] Fetching current weather...');
-			const currentUrl = `https://api.weatherbit.io/v2.0/current?lat=${encodeURIComponent(WEATHERBIT_LATITUDE)}&lon=${encodeURIComponent(WEATHERBIT_LONGITUDE)}&key=${encodeURIComponent(WEATHERBIT_API_KEY)}&units=${encodeURIComponent(WEATHERBIT_UNITS)}`;
+			const currentUrl = `https://api.weatherbit.io/v2.0/current?lat=${encodeURIComponent(liveConfig.weatherbitLatitude)}&lon=${encodeURIComponent(liveConfig.weatherbitLongitude)}&key=${encodeURIComponent(liveConfig.weatherbitApiKey)}&units=${encodeURIComponent(liveConfig.weatherbitUnits)}`;
 			const currentResponse = await fetch(currentUrl, {
 				headers: { 'User-Agent': USER_AGENT },
 				signal: AbortSignal.timeout(30000),
@@ -8255,8 +8399,8 @@ async function fetchWeatherbitData() {
 	}
 }
 
-// Schedule weatherbit refresh (uses WEATHERBIT_REFRESH_MS from config, 0 if not configured)
-registerBackgroundTask('weatherbit', isWeatherbitConfigured() ? WEATHERBIT_REFRESH_MS : 0, fetchWeatherbitData);
+// Schedule weatherbit refresh (uses configured interval, 0 if not configured)
+registerBackgroundTask('weatherbit', isWeatherbitConfigured() ? liveConfig.weatherbitRefreshMs : 0, fetchWeatherbitData);
 
 // MySQL connection worker
 function getMysqlConnectionTarget() {

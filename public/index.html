@@ -33,7 +33,7 @@
 					: serverMode
 						? serverMode
 						: (stored === 'dark' || stored === 'light') ? stored : 'dark';
-				const themeColor = mode === 'light' ? '#fef4f2' : '#1e1e1e';
+				const themeColor = mode === 'light' ? '#f5f6fa' : '#1e1e1e';
 				const metaTheme = document.querySelector('meta[name="theme-color"]');
 				if (metaTheme) metaTheme.setAttribute('content', themeColor);
 				const metaApple = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');

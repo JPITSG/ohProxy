@@ -200,6 +200,6 @@ describe('SQL and Command Injection Surfaces', () => {
 
 		assert.ok(content.includes('const safeIp = normalizeNotifyIp(ip);'));
 		assert.ok(content.includes('const command = liveConfig.authFailNotifyCmd.replace(/\\{IP\\}/g, safeIp).trim();'));
-		assert.ok(content.includes("execFile(BIN_SHELL, ['-c', command]"));
+		assert.ok(content.includes("execFile(liveConfig.binShell, ['-c', command]"));
 	});
 });

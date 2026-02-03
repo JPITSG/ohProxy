@@ -44,6 +44,7 @@ function shouldHandleRequest(request, url) {
 	if (path.includes('/proxy')) return false;
 	if (path.includes('/search-index')) return false;
 	if (path.startsWith('/api/')) return false;
+	if (path === '/sitemap-full' || path === '/video-preview') return false;
 	if (path.endsWith('/config.js')) return false; // User-specific, never cache
 	return true;
 }
