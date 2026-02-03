@@ -2108,6 +2108,15 @@ function createCustomSelect(options, initialValue, className) {
 	const menu = document.createElement('div');
 	menu.className = 'glow-select-menu';
 
+	const needsScroll = options.length > 5;
+	let scrollInner = null;
+	if (needsScroll) {
+		menu.classList.add('scrollable');
+		scrollInner = document.createElement('div');
+		scrollInner.className = 'glow-select-menu-scroll';
+		menu.appendChild(scrollInner);
+	}
+
 	const closeMenu = () => {
 		menu.style.display = 'none';
 		wrap.classList.remove('menu-open');
@@ -2136,17 +2145,36 @@ function createCustomSelect(options, initialValue, className) {
 			optBtn.classList.add('active');
 			closeMenu();
 		};
-		menu.appendChild(optBtn);
+		(scrollInner || menu).appendChild(optBtn);
 	}
 
 	const openMenu = () => {
 		const rect = fakeSelect.getBoundingClientRect();
 		menu.style.position = 'fixed';
-		menu.style.left = rect.left + 'px';
-		menu.style.top = (rect.bottom + 4) + 'px';
-		menu.style.minWidth = rect.width + 'px';
 		menu.style.display = 'block';
 		wrap.classList.add('menu-open');
+
+		if (needsScroll && scrollInner && !scrollInner.style.maxHeight) {
+			const btns = scrollInner.querySelectorAll('.glow-select-option');
+			if (btns.length > 1) {
+				const btnH = btns[0].offsetHeight;
+				const btnM = parseFloat(getComputedStyle(btns[1]).marginTop || 0);
+				scrollInner.style.maxHeight = `${(btnH * 5) + (btnM * 5)}px`;
+			}
+			const scrollStyle = getComputedStyle(scrollInner);
+			const scrollPad = parseFloat(scrollStyle.paddingRight || 0);
+			const scrollbarW = scrollInner.offsetWidth - scrollInner.clientWidth;
+			const menuStyle = getComputedStyle(menu);
+			const menuPad = parseFloat(menuStyle.paddingLeft || 0) + parseFloat(menuStyle.paddingRight || 0);
+			menu.style.minWidth = `${rect.width + scrollPad + scrollbarW + menuPad}px`;
+		}
+
+		const menuPadLeft = parseFloat(getComputedStyle(menu).paddingLeft || 0);
+		menu.style.left = (rect.left - menuPadLeft) + 'px';
+		menu.style.top = (rect.bottom + 4) + 'px';
+		if (!needsScroll) {
+			menu.style.minWidth = (rect.width + menuPadLeft * 2) + 'px';
+		}
 	};
 
 	fakeSelect.onclick = (e) => {
@@ -4276,7 +4304,7 @@ function updateCard(card, w, afterImage, info) {
 			videoEl.setAttribute('autoplay', '');
 			videoEl.setAttribute('playsinline', '');
 			// Apply video config for muted state
-			const videoConfig = widgetVideoConfigMap.get(wKey);
+			const videoConfig = widgetVideoConfigMap.get(widgetKey(w));
 			const shouldMute = videoConfig?.defaultMuted !== false; // Default to muted
 			if (shouldMute) {
 				videoEl.setAttribute('muted', '');

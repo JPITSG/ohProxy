@@ -1562,8 +1562,9 @@ body.theme-light .glow-rule-row input:focus {
 	backdrop-filter: var(--glass-blur);
 	-webkit-backdrop-filter: var(--glass-blur);
 	border: var(--glass-border-width) solid var(--color-select-menu-border);
-	border-radius: 10px;
+	border-radius: 14px;
 	padding: .25rem;
+	box-shadow: var(--glass-box-shadow), var(--glass-inset-shadow);
 	z-index: 200;
 }
 .glow-select-option {
@@ -1595,6 +1596,39 @@ body.theme-light .glow-rule-row input:focus {
 	border-color: var(--color-select-option-active-border);
 	color: var(--color-select-option-active-text);
 	box-shadow: 0 0 10px var(--color-select-option-active-shadow);
+}
+.glow-select-menu.scrollable {
+	overflow: hidden;
+	border-radius: 14px;
+}
+.glow-select-menu-scroll {
+	padding-right: 4px;
+	overflow-y: auto;
+	overflow-x: hidden;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+.glow-select-menu-scroll::-webkit-scrollbar {
+	width: 4px;
+}
+.glow-select-menu-scroll::-webkit-scrollbar-track {
+	background: transparent;
+}
+.glow-select-menu-scroll::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.25);
+	border-radius: 2px;
+}
+.glow-select-menu-scroll::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.4);
+}
+body.theme-light .glow-select-menu-scroll {
+	scrollbar-color: #888 transparent;
+}
+body.theme-light .glow-select-menu-scroll::-webkit-scrollbar-thumb {
+	background: #888;
+}
+body.theme-light .glow-select-menu-scroll::-webkit-scrollbar-thumb:hover {
+	background: #666;
 }
 /* Color dropdown glow effects */
 .glow-color-select .glow-fake-select[data-color="green"] {
