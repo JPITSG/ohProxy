@@ -2694,6 +2694,728 @@ async function saveCardConfig() {
 	}
 }
 
+// ========== Admin Config Modal ==========
+
+const ADMIN_CONFIG_SCHEMA = [
+	{
+		id: 'listeners', group: 'server', title: 'LISTENERS', restartRequired: true,
+		fields: [
+			{ key: 'server.http.enabled', label: 'HTTP Enabled', type: 'toggle', desc: 'Enable HTTP listener.' },
+			{ key: 'server.http.host', label: 'HTTP Host', type: 'text', placeholder: '0.0.0.0', desc: 'HTTP bind address (IP/hostname).' },
+			{ key: 'server.http.port', label: 'HTTP Port', type: 'number', min: 1, max: 65535, desc: 'HTTP bind port (1\u201365535).' },
+			{ key: 'server.https.enabled', label: 'HTTPS Enabled', type: 'toggle', desc: 'Enable HTTPS listener.' },
+			{ key: 'server.https.host', label: 'HTTPS Host', type: 'text', placeholder: '0.0.0.0', desc: 'HTTPS bind address (IP/hostname).' },
+			{ key: 'server.https.port', label: 'HTTPS Port', type: 'number', min: 1, max: 65535, desc: 'HTTPS bind port (1\u201365535).' },
+			{ key: 'server.https.certFile', label: 'TLS Certificate', type: 'text', placeholder: '/path/to/fullchain.pem', desc: 'TLS certificate file (absolute path).' },
+			{ key: 'server.https.keyFile', label: 'TLS Key', type: 'text', placeholder: '/path/to/privkey.pem', desc: 'TLS key file (absolute path).' },
+			{ key: 'server.https.http2', label: 'HTTP/2', type: 'toggle', desc: 'Enable HTTP/2 via ALPN.' },
+		],
+	},
+	{
+		id: 'openhab', group: 'server', title: 'OPENHAB CONNECTION',
+		fields: [
+			{ key: 'server.openhab.target', label: 'Target URL', type: 'text', placeholder: 'http://127.0.0.1:8080', desc: 'openHAB base URL (http/https).' },
+			{ key: 'server.openhab.user', label: 'Username', type: 'text', allowEmpty: true, desc: 'openHAB username for Basic Auth.' },
+			{ key: 'server.openhab.pass', label: 'Password', type: 'secret', allowEmpty: true, desc: 'openHAB password for Basic Auth.' },
+			{ key: 'server.openhab.apiToken', label: 'API Token', type: 'secret', allowEmpty: true, desc: 'openHAB 3.x API token. Takes precedence over user/pass.' },
+		],
+	},
+	{
+		id: 'database', group: 'server', title: 'DATABASE',
+		fields: [
+			{ key: 'server.mysql.socket', label: 'Unix Socket', type: 'text', allowEmpty: true, desc: 'Unix socket path. If set, host/port are ignored.' },
+			{ key: 'server.mysql.host', label: 'Host', type: 'text', allowEmpty: true, desc: 'MySQL host.' },
+			{ key: 'server.mysql.port', label: 'Port', type: 'text', allowEmpty: true, desc: 'MySQL port.' },
+			{ key: 'server.mysql.database', label: 'Database', type: 'text', allowEmpty: true, desc: 'MySQL database name.' },
+			{ key: 'server.mysql.username', label: 'Username', type: 'text', allowEmpty: true, desc: 'MySQL username.' },
+			{ key: 'server.mysql.password', label: 'Password', type: 'secret', allowEmpty: true, desc: 'MySQL password.' },
+		],
+	},
+	{
+		id: 'auth', group: 'server', title: 'AUTHENTICATION',
+		fields: [
+			{ key: 'server.auth.mode', label: 'Auth Mode', type: 'select', options: ['basic', 'html'], desc: '\u2018basic\u2019 for HTTP Basic Auth, \u2018html\u2019 for HTML form login.' },
+			{ key: 'server.auth.realm', label: 'Realm', type: 'text', desc: 'Basic auth realm label.' },
+			{ key: 'server.auth.cookieName', label: 'Cookie Name', type: 'text', allowEmpty: true, desc: 'Auth cookie name. Empty disables cookie auth.' },
+			{ key: 'server.auth.cookieDays', label: 'Cookie Lifetime (days)', type: 'number', min: 0, desc: 'Auth cookie lifetime in days.' },
+			{ key: 'server.auth.cookieKey', label: 'Cookie HMAC Key', type: 'secret', allowEmpty: true, desc: 'Auth cookie HMAC key. Empty disables cookie auth.' },
+			{ key: 'server.auth.authFailNotifyCmd', label: 'Auth Fail Command', type: 'text', allowEmpty: true, placeholder: 'Use {IP} placeholder', desc: 'Shell command on auth failure. {IP} is replaced with client IP. Empty disables.' },
+			{ key: 'server.auth.authFailNotifyIntervalMins', label: 'Notify Interval (min)', type: 'number', min: 1, desc: 'Rate limit for auth failure notifications (minutes).' },
+		],
+	},
+	{
+		id: 'access', group: 'server', title: 'ACCESS CONTROL',
+		fields: [
+			{ key: 'server.allowSubnets', label: 'Allow Subnets', type: 'list', placeholder: 'e.g. 192.168.1.0/24', desc: 'Subnets allowed to access the proxy (IPv4 CIDR). Use 0.0.0.0/0 to allow all.' },
+			{ key: 'server.trustProxy', label: 'Trust Proxy', type: 'toggle', desc: 'Trust X-Forwarded-For header for client IP. Only enable behind a trusted reverse proxy.' },
+			{ key: 'server.denyXFFSubnets', label: 'Deny XFF Subnets', type: 'list', placeholder: 'e.g. 10.0.0.0/8', allowEmpty: true, desc: 'Block requests whose X-Forwarded-For contains an IP in these subnets (IPv4 CIDR). Only checked when trustProxy is enabled.' },
+		],
+	},
+	{
+		id: 'security', group: 'server', title: 'SECURITY HEADERS',
+		fields: [
+			{ key: 'server.securityHeaders.enabled', label: 'Enabled', type: 'toggle', desc: 'Enable security headers.' },
+			{ key: 'server.securityHeaders.hsts.enabled', label: 'HSTS Enabled', type: 'toggle', desc: 'Enable HSTS header (HTTPS only).' },
+			{ key: 'server.securityHeaders.hsts.maxAge', label: 'HSTS Max Age (sec)', type: 'number', min: 0, desc: 'HSTS max-age in seconds.' },
+			{ key: 'server.securityHeaders.hsts.includeSubDomains', label: 'Include Subdomains', type: 'toggle', desc: 'Include subdomains in HSTS.' },
+			{ key: 'server.securityHeaders.hsts.preload', label: 'Preload', type: 'toggle', desc: 'Enable HSTS preload directive.' },
+			{ key: 'server.securityHeaders.csp.enabled', label: 'CSP Enabled', type: 'toggle', desc: 'Enable Content-Security-Policy header.' },
+			{ key: 'server.securityHeaders.csp.reportOnly', label: 'CSP Report Only', type: 'toggle', desc: 'Use CSP report-only mode.' },
+			{ key: 'server.securityHeaders.csp.policy', label: 'CSP Policy', type: 'textarea', allowEmpty: true, desc: 'CSP policy string. Empty disables.' },
+			{ key: 'server.securityHeaders.referrerPolicy', label: 'Referrer Policy', type: 'select', options: ['same-origin', 'no-referrer', 'no-referrer-when-downgrade', 'origin', 'origin-when-cross-origin', 'strict-origin', 'strict-origin-when-cross-origin', 'unsafe-url'], desc: 'Referrer-Policy value. \u2018same-origin\u2019 is required for auth-exempt assets.' },
+		],
+	},
+	{
+		id: 'proxy', group: 'server', title: 'PROXY SETTINGS',
+		fields: [
+			{ key: 'server.proxyAllowlist', label: 'Proxy Allowlist', type: 'list', placeholder: 'host or host:port', desc: 'Allowlist for /proxy?url= endpoint (host or host:port).' },
+			{ key: 'server.webviewNoProxy', label: 'Webview No Proxy', type: 'list', placeholder: 'host:port', allowEmpty: true, desc: 'Webview URLs matching these hosts bypass /proxy and load directly (host or host:port).' },
+			{ key: 'server.userAgent', label: 'User Agent', type: 'text', desc: 'Proxy user-agent string.' },
+		],
+	},
+	{
+		id: 'assets', group: 'server', title: 'ASSETS',
+		fields: [
+			{ key: 'server.assets.assetVersion', label: 'Asset Version', type: 'text', placeholder: 'v1', desc: 'Combined version for JS, CSS, and service worker. Increment to bust all caches.' },
+			{ key: 'server.assets.appleTouchIconVersion', label: 'Apple Touch Icon Version', type: 'text', placeholder: 'v1', desc: 'Apple touch icon cache version.' },
+			{ key: 'server.assets.iconVersion', label: 'Icon Version', type: 'text', placeholder: 'v1', desc: 'Icon cache version.' },
+		],
+	},
+	{
+		id: 'icons', group: 'server', title: 'ICONS & CACHING',
+		fields: [
+			{ key: 'server.iconSize', label: 'Icon Size (px)', type: 'number', min: 1, desc: 'Icon size in pixels.' },
+			{ key: 'server.iconCacheConcurrency', label: 'Icon Cache Concurrency', type: 'number', min: 1, desc: 'Max concurrent icon conversions.' },
+			{ key: 'server.deltaCacheLimit', label: 'Delta Cache Limit', type: 'number', min: 1, desc: 'Max delta cache size.' },
+		],
+	},
+	{
+		id: 'logging', group: 'server', title: 'LOGGING', restartRequired: true,
+		fields: [
+			{ key: 'server.logFile', label: 'Log File', type: 'text', allowEmpty: true, placeholder: '/var/log/ohProxy.log', desc: 'Log file path (absolute). Empty disables.' },
+			{ key: 'server.accessLog', label: 'Access Log', type: 'text', allowEmpty: true, placeholder: '/var/log/ohProxy.access.log', desc: 'Access log file path (absolute). Empty disables.' },
+			{ key: 'server.jsLogFile', label: 'JS Error Log', type: 'text', allowEmpty: true, desc: 'JavaScript error log file path (absolute). Empty disables.' },
+			{ key: 'server.jsLogEnabled', label: 'JS Logging Enabled', type: 'toggle', desc: 'Enable JavaScript error logging from clients.' },
+			{ key: 'server.accessLogLevel', label: 'Access Log Level', type: 'select', options: ['all', '400+'], desc: 'Access log verbosity.' },
+			{ key: 'server.proxyMiddlewareLogLevel', label: 'Proxy Log Level', type: 'select', options: ['silent', 'error', 'warn', 'info', 'debug'], desc: 'Proxy middleware logging level.' },
+			{ key: 'server.slowQueryMs', label: 'Slow Query Threshold (ms)', type: 'number', min: 0, desc: 'Slow query threshold in ms. 0 disables. Logs requests exceeding this duration.' },
+		],
+	},
+	{
+		id: 'sessions', group: 'server', title: 'SESSIONS & TASKS',
+		fields: [
+			{ key: 'server.sessionMaxAgeDays', label: 'Session Max Age (days)', type: 'number', min: 1, desc: 'Session max age in days before cleanup.' },
+			{ key: 'server.backgroundTasks.sitemapRefreshMs', label: 'Sitemap Refresh (ms)', type: 'number', min: 1000, desc: 'Sitemap refresh interval in ms.' },
+		],
+	},
+	{
+		id: 'websocket', group: 'server', title: 'REAL-TIME UPDATES',
+		fields: [
+			{ key: 'server.websocket.mode', label: 'Mode', type: 'select', options: ['polling', 'atmosphere', 'sse'], desc: 'Real-time update mode. polling: polls REST API at interval. atmosphere: openHAB 1.x/2.x long-polling. sse: openHAB 3.x Server-Sent Events.' },
+			{ key: 'server.websocket.pollingIntervalMs', label: 'Poll Interval Active (ms)', type: 'number', min: 100, desc: 'Polling interval in ms when clients are focused.' },
+			{ key: 'server.websocket.pollingIntervalBgMs', label: 'Poll Interval Background (ms)', type: 'number', min: 100, desc: 'Polling interval in ms when all clients are unfocused.' },
+			{ key: 'server.websocket.atmosphereNoUpdateWarnMs', label: 'Atmosphere Warn (ms)', type: 'number', min: 0, desc: 'Warn if no Atmosphere updates received for this many ms. 0 disables.' },
+			{ key: 'server.websocket.backendRecoveryDelayMs', label: 'Backend Recovery Delay (ms)', type: 'number', min: 0, desc: 'Delay before marking backend as OK after recovery. Gives openHAB time to fully initialize. 0 disables.' },
+		],
+	},
+	{
+		id: 'features', group: 'server', title: 'FEATURES',
+		fields: [
+			{ key: 'server.groupItems', label: 'Group Items', type: 'list', placeholder: 'item name', allowEmpty: true, desc: 'Group items whose state is calculated from member states. Counts members with state \u201cOPEN\u201d.' },
+			{ key: 'server.videoPreview.intervalMs', label: 'Video Preview Interval (ms)', type: 'number', min: 0, desc: 'Interval to capture preview frames from RTSP streams (ms). 0 disables.' },
+			{ key: 'server.videoPreview.pruneAfterHours', label: 'Prune Previews After (hours)', type: 'number', min: 1, desc: 'Delete preview images older than this (hours).' },
+			{ key: 'server.cmdapi.enabled', label: 'CMD API Enabled', type: 'toggle', desc: 'Enable /CMD endpoint.' },
+			{ key: 'server.cmdapi.allowedSubnets', label: 'CMD Allowed Subnets', type: 'list', placeholder: 'CIDR or * for all', allowEmpty: true, desc: 'Allowed subnets for /CMD requests (IPv4 CIDR). Empty blocks all.' },
+			{ key: 'server.cmdapi.allowedItems', label: 'CMD Allowed Items', type: 'list', placeholder: 'item or * for all', allowEmpty: true, desc: 'Allowed items for /CMD requests. \u2018*\u2019 allows all. Empty blocks all.' },
+		],
+	},
+	{
+		id: 'gps', group: 'server', title: 'GPS',
+		fields: [
+			{ key: 'server.gps.homeLat', label: 'Home Latitude', type: 'text', allowEmpty: true, placeholder: '51.5074', desc: 'Home latitude (decimal). Empty disables home snapping.' },
+			{ key: 'server.gps.homeLon', label: 'Home Longitude', type: 'text', allowEmpty: true, placeholder: '-0.1278', desc: 'Home longitude (decimal). Empty disables home snapping.' },
+		],
+	},
+	{
+		id: 'system', group: 'server', title: 'SYSTEM',
+		fields: [
+			{ key: 'server.binaries.ffmpeg', label: 'FFmpeg Path', type: 'text', desc: 'FFmpeg binary path (RTSP streaming and video previews).' },
+			{ key: 'server.binaries.convert', label: 'ImageMagick Path', type: 'text', desc: 'ImageMagick convert binary path (icon conversion).' },
+			{ key: 'server.binaries.shell', label: 'Shell Path', type: 'text', desc: 'Shell binary path (auth failure notification commands).' },
+			{ key: 'server.paths.rrd', label: 'RRD4J Path', type: 'text', allowEmpty: true, desc: 'RRD4J persistence directory (chart generation).' },
+		],
+	},
+	{
+		id: 'external', group: 'server', title: 'EXTERNAL SERVICES',
+		fields: [
+			{ key: 'server.apiKeys.anthropic', label: 'Anthropic API Key', type: 'secret', allowEmpty: true, desc: 'Anthropic API key (Claude AI integration).' },
+			{ key: 'server.weatherbit.apiKey', label: 'Weatherbit API Key', type: 'secret', allowEmpty: true, desc: 'Weatherbit API key.' },
+			{ key: 'server.weatherbit.latitude', label: 'Weather Latitude', type: 'text', allowEmpty: true, desc: 'Location latitude (decimal).' },
+			{ key: 'server.weatherbit.longitude', label: 'Weather Longitude', type: 'text', allowEmpty: true, desc: 'Location longitude (decimal).' },
+			{ key: 'server.weatherbit.units', label: 'Temperature Units', type: 'select', options: ['M', 'I'], desc: 'Temperature units. \u2018M\u2019 = Celsius, \u2018I\u2019 = Fahrenheit.' },
+			{ key: 'server.weatherbit.refreshIntervalMs', label: 'Refresh Interval (ms)', type: 'number', min: 1, desc: 'Data refresh interval in ms.' },
+		],
+	},
+	{
+		id: 'client-ui', group: 'client', title: 'UI',
+		fields: [
+			{ key: 'client.siteName', label: 'Site Name', type: 'text', allowEmpty: true, placeholder: 'Uses sitemap name if empty', desc: 'Site name override for header display. Empty uses sitemap name.' },
+			{ key: 'client.statusNotification', label: 'Status Notification', type: 'toggle', desc: 'Show PWA connection status notification on touch devices.' },
+			{ key: 'client.hideTitleItems', label: 'Hidden Title Items', type: 'list', placeholder: 'item name', allowEmpty: true, desc: 'Items with hidden titles (case-insensitive).' },
+			{ key: 'client.touchReloadMinHiddenMs', label: 'Touch Reload Min Hidden (ms)', type: 'number', min: 0, desc: 'Minimum time app must be hidden before touch-device reload. Prevents unnecessary reloads when quickly switching apps.' },
+		],
+	},
+	{
+		id: 'client-timing', group: 'client', title: 'TIMING',
+		fields: [
+			{ key: 'client.pageFadeOutMs', label: 'Page Fade Out (ms)', type: 'number', min: 0, desc: 'Section fade-out duration in ms.' },
+			{ key: 'client.pageFadeInMs', label: 'Page Fade In (ms)', type: 'number', min: 0, desc: 'Section fade-in duration in ms.' },
+			{ key: 'client.loadingDelayMs', label: 'Loading Delay (ms)', type: 'number', min: 0, desc: 'Loading label delay in ms.' },
+			{ key: 'client.minImageRefreshMs', label: 'Min Image Refresh (ms)', type: 'number', min: 0, desc: 'Minimum image refresh interval in ms.' },
+			{ key: 'client.imageLoadTimeoutMs', label: 'Image Load Timeout (ms)', type: 'number', min: 0, desc: 'Image load timeout in ms.' },
+			{ key: 'client.sliderDebounceMs', label: 'Slider Debounce (ms)', type: 'number', min: 0, desc: 'Slider debounce delay in ms.' },
+			{ key: 'client.idleAfterMs', label: 'Idle Threshold (ms)', type: 'number', min: 0, desc: 'Idle threshold in ms.' },
+			{ key: 'client.activityThrottleMs', label: 'Activity Throttle (ms)', type: 'number', min: 0, desc: 'Activity throttle window in ms.' },
+			{ key: 'client.voiceResponseTimeoutMs', label: 'Voice Timeout (ms)', type: 'number', min: 0, desc: 'Voice response timeout in ms.' },
+		],
+	},
+	{
+		id: 'client-polling', group: 'client', title: 'POLLING & SEARCH',
+		fields: [
+			{ key: 'client.pollIntervalsMs.default.active', label: 'Poll Default Active (ms)', type: 'number', min: 1, desc: 'Default mode polling interval when active (ms).' },
+			{ key: 'client.pollIntervalsMs.default.idle', label: 'Poll Default Idle (ms)', type: 'number', min: 1, desc: 'Default mode polling interval when idle (ms).' },
+			{ key: 'client.pollIntervalsMs.slim.active', label: 'Poll Slim Active (ms)', type: 'number', min: 1, desc: 'Slim mode polling interval when active (ms).' },
+			{ key: 'client.pollIntervalsMs.slim.idle', label: 'Poll Slim Idle (ms)', type: 'number', min: 1, desc: 'Slim mode polling interval when idle (ms).' },
+			{ key: 'client.searchDebounceMs.default', label: 'Search Debounce Default (ms)', type: 'number', min: 0, desc: 'Default mode search debounce (ms).' },
+			{ key: 'client.searchDebounceMs.slim', label: 'Search Debounce Slim (ms)', type: 'number', min: 0, desc: 'Slim mode search debounce (ms).' },
+			{ key: 'client.searchStateMinIntervalMs.default', label: 'Search Refresh Default (ms)', type: 'number', min: 0, desc: 'Default mode search state refresh minimum (ms).' },
+			{ key: 'client.searchStateMinIntervalMs.slim', label: 'Search Refresh Slim (ms)', type: 'number', min: 0, desc: 'Slim mode search state refresh minimum (ms).' },
+			{ key: 'client.searchStateConcurrency.default', label: 'Search Concurrency Default', type: 'number', min: 1, desc: 'Default mode search concurrency limit.' },
+			{ key: 'client.searchStateConcurrency.slim', label: 'Search Concurrency Slim', type: 'number', min: 1, desc: 'Slim mode search concurrency limit.' },
+		],
+	},
+	{
+		id: 'client-format', group: 'client', title: 'DATE / TIME',
+		fields: [
+			{ key: 'client.dateFormat', label: 'Date Format', type: 'text', placeholder: 'MMM Do, YYYY', desc: 'Date format tokens: YYYY (year), MMM (short month), Do (day with ordinal).' },
+			{ key: 'client.timeFormat', label: 'Time Format', type: 'text', placeholder: 'HH:mm:ss', desc: 'Time format tokens: HH (24h), hh (12h), mm (minutes), ss (seconds), A (AM/PM).' },
+		],
+	},
+];
+
+let adminConfigModal = null;
+const adminSelectMenus = [];
+
+function adminGetNested(obj, path) {
+	return path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj);
+}
+
+function adminSetNested(obj, path, value) {
+	const keys = path.split('.');
+	let cur = obj;
+	for (let i = 0; i < keys.length - 1; i++) {
+		if (!cur[keys[i]] || typeof cur[keys[i]] !== 'object') cur[keys[i]] = {};
+		cur = cur[keys[i]];
+	}
+	cur[keys[keys.length - 1]] = value;
+}
+
+function createAdminSelect(options, initialValue) {
+	const wrap = document.createElement('div');
+	wrap.className = 'admin-select-wrap';
+	const current = options.find(o => o === initialValue) || options[0];
+	wrap.dataset.value = current;
+
+	const fakeSelect = document.createElement('button');
+	fakeSelect.type = 'button';
+	fakeSelect.className = 'admin-fake-select';
+	fakeSelect.textContent = current;
+
+	const menu = document.createElement('div');
+	menu.className = 'glow-select-menu';
+
+	const needsScroll = options.length > 5;
+	let scrollInner = null;
+	if (needsScroll) {
+		menu.classList.add('scrollable');
+		scrollInner = document.createElement('div');
+		scrollInner.className = 'glow-select-menu-scroll';
+		menu.appendChild(scrollInner);
+	}
+
+	const closeMenu = () => {
+		menu.style.display = 'none';
+		wrap.classList.remove('menu-open');
+	};
+
+	for (const opt of options) {
+		const optBtn = document.createElement('button');
+		optBtn.type = 'button';
+		optBtn.className = 'glow-select-option';
+		if (opt === current) optBtn.classList.add('active');
+		optBtn.textContent = opt;
+		optBtn.dataset.value = opt;
+		optBtn.onclick = (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			wrap.dataset.value = opt;
+			fakeSelect.textContent = opt;
+			menu.querySelectorAll('.glow-select-option').forEach(b => b.classList.remove('active'));
+			optBtn.classList.add('active');
+			closeMenu();
+		};
+		(scrollInner || menu).appendChild(optBtn);
+	}
+
+	const openMenu = () => {
+		const rect = fakeSelect.getBoundingClientRect();
+		menu.style.position = 'fixed';
+		menu.style.display = 'block';
+		wrap.classList.add('menu-open');
+
+		if (needsScroll && scrollInner && !scrollInner.style.maxHeight) {
+			const btns = scrollInner.querySelectorAll('.glow-select-option');
+			if (btns.length > 1) {
+				const btnH = btns[0].offsetHeight;
+				const btnM = parseFloat(getComputedStyle(btns[1]).marginTop || 0);
+				scrollInner.style.maxHeight = `${(btnH * 5) + (btnM * 5)}px`;
+			}
+		}
+
+		const menuPadLeft = parseFloat(getComputedStyle(menu).paddingLeft || 0);
+		menu.style.left = (rect.left - menuPadLeft) + 'px';
+		menu.style.top = (rect.bottom + 4) + 'px';
+		menu.style.minWidth = (rect.width + menuPadLeft * 2) + 'px';
+	};
+
+	fakeSelect.onclick = (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		adminSelectMenus.forEach(m => { if (m !== menu) m.style.display = 'none'; });
+		if (wrap.classList.contains('menu-open')) {
+			closeMenu();
+		} else {
+			openMenu();
+		}
+	};
+
+	document.addEventListener('click', (e) => {
+		if (!wrap.contains(e.target) && !menu.contains(e.target)) {
+			closeMenu();
+		}
+	});
+
+	wrap.appendChild(fakeSelect);
+	document.body.appendChild(menu);
+	adminSelectMenus.push(menu);
+	return wrap;
+}
+
+function autoResizeTextarea(ta) {
+	ta.style.height = 'auto';
+	ta.style.height = ta.scrollHeight + 'px';
+}
+
+function createAdminListRow(value, placeholder, wrap) {
+	const row = document.createElement('div');
+	row.className = 'admin-list-row';
+	const input = document.createElement('input');
+	input.type = 'text';
+	input.className = 'admin-list-input';
+	input.value = value;
+	if (placeholder) input.placeholder = placeholder;
+	row.appendChild(input);
+	const del = document.createElement('button');
+	del.type = 'button';
+	del.className = 'admin-list-delete';
+	del.innerHTML = '<img src="icons/image-viewer-close.svg" alt="X" />';
+	del.addEventListener('click', () => {
+		haptic();
+		row.remove();
+		if (!wrap.querySelector('.admin-list-row')) {
+			wrap.insertBefore(createAdminListRow('', placeholder, wrap), wrap.querySelector('.admin-list-add'));
+		}
+	});
+	row.appendChild(del);
+	return row;
+}
+
+function createAdminField(field, value) {
+	const isStacked = field.type === 'list';
+	const row = document.createElement('div');
+	row.className = 'admin-config-field' + (isStacked ? ' stacked' : '');
+
+	const label = document.createElement('label');
+	label.textContent = field.label;
+	if (field.desc) {
+		const desc = document.createElement('span');
+		desc.className = 'admin-field-desc';
+		const parts = field.desc.split('. ');
+		parts.forEach((part, i) => {
+			if (i > 0) desc.appendChild(document.createElement('br'));
+			desc.appendChild(document.createTextNode(i < parts.length - 1 ? part + '.' : part));
+		});
+		label.appendChild(desc);
+	}
+	row.appendChild(label);
+
+	const control = document.createElement('div');
+	control.className = 'admin-field-control';
+
+	if (field.type === 'toggle') {
+		const toggle = document.createElement('label');
+		toggle.className = 'admin-toggle';
+		const input = document.createElement('input');
+		input.type = 'checkbox';
+		input.checked = value === true;
+		input.dataset.key = field.key;
+		const track = document.createElement('span');
+		track.className = 'admin-toggle-track';
+		const dot = document.createElement('span');
+		dot.className = 'admin-toggle-dot';
+		toggle.appendChild(input);
+		toggle.appendChild(track);
+		toggle.appendChild(dot);
+		control.appendChild(toggle);
+	} else if (field.type === 'number') {
+		const input = document.createElement('input');
+		input.type = 'number';
+		input.dataset.key = field.key;
+		if (field.min !== undefined) input.min = field.min;
+		if (field.max !== undefined) input.max = field.max;
+		input.value = value !== undefined && value !== null ? value : '';
+		if (field.placeholder) input.placeholder = field.placeholder;
+		control.appendChild(input);
+	} else if (field.type === 'text') {
+		const input = document.createElement('input');
+		input.type = 'text';
+		input.dataset.key = field.key;
+		input.value = value !== undefined && value !== null ? String(value) : '';
+		if (field.placeholder) input.placeholder = field.placeholder;
+		control.appendChild(input);
+	} else if (field.type === 'secret') {
+		const MASK = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+		const wrap = document.createElement('div');
+		wrap.className = 'admin-secret-wrap';
+		const input = document.createElement('input');
+		const rawVal = value !== undefined && value !== null ? String(value) : '';
+		const isMasked = rawVal === MASK;
+		input.type = 'password';
+		input.dataset.key = field.key;
+		if (isMasked) {
+			input.value = '';
+			input.placeholder = '(unchanged)';
+			input.dataset.masked = '1';
+		} else {
+			input.value = rawVal;
+			if (field.placeholder) input.placeholder = field.placeholder;
+		}
+		const eyeBtn = document.createElement('button');
+		eyeBtn.type = 'button';
+		eyeBtn.className = 'admin-secret-eye';
+		eyeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+		eyeBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			input.type = input.type === 'password' ? 'text' : 'password';
+		});
+		wrap.appendChild(input);
+		wrap.appendChild(eyeBtn);
+		control.appendChild(wrap);
+	} else if (field.type === 'select') {
+		const selectWrap = createAdminSelect(field.options, value !== undefined && value !== null ? String(value) : field.options[0]);
+		selectWrap.dataset.key = field.key;
+		control.appendChild(selectWrap);
+	} else if (field.type === 'textarea') {
+		const textarea = document.createElement('textarea');
+		textarea.rows = 1;
+		textarea.dataset.key = field.key;
+		if (field.placeholder) textarea.placeholder = field.placeholder;
+		// Arrays are displayed as newline-separated; strings as-is
+		if (Array.isArray(value)) {
+			textarea.value = value.join('\n');
+		} else {
+			textarea.value = value !== undefined && value !== null ? String(value) : '';
+		}
+		textarea.addEventListener('input', () => autoResizeTextarea(textarea));
+		control.appendChild(textarea);
+	} else if (field.type === 'list') {
+		const wrap = document.createElement('div');
+		wrap.className = 'admin-list-wrap';
+		wrap.dataset.key = field.key;
+		const items = Array.isArray(value) ? value : [];
+		if (items.length === 0) {
+			wrap.appendChild(createAdminListRow('', field.placeholder, wrap));
+		} else {
+			for (const item of items) {
+				wrap.appendChild(createAdminListRow(item, field.placeholder, wrap));
+			}
+		}
+		const addBtn = document.createElement('button');
+		addBtn.type = 'button';
+		addBtn.className = 'admin-list-add';
+		addBtn.textContent = '+ Add';
+		addBtn.addEventListener('click', () => {
+			haptic();
+			const newRow = createAdminListRow('', field.placeholder, wrap);
+			wrap.insertBefore(newRow, addBtn);
+			newRow.querySelector('.admin-list-input').focus();
+		});
+		wrap.appendChild(addBtn);
+		control.appendChild(wrap);
+	}
+
+	row.appendChild(control);
+
+	return row;
+}
+
+function renderAdminConfigSection(section, config) {
+	const sectionEl = document.createElement('div');
+	sectionEl.className = 'admin-config-section collapsed';
+	sectionEl.dataset.sectionId = section.id;
+
+	const header = document.createElement('div');
+	header.className = 'admin-config-section-header';
+	header.onclick = () => {
+		const wasCollapsed = sectionEl.classList.toggle('collapsed');
+		if (!wasCollapsed) {
+			sectionEl.querySelectorAll('textarea').forEach(autoResizeTextarea);
+		}
+	};
+
+	const title = document.createElement('span');
+	title.className = 'admin-config-section-title';
+	title.textContent = section.title;
+	header.appendChild(title);
+
+	if (section.restartRequired) {
+		const badge = document.createElement('span');
+		badge.className = 'admin-restart-badge';
+		badge.textContent = 'restart required';
+		header.appendChild(badge);
+	}
+
+	const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	chevron.setAttribute('viewBox', '0 0 24 24');
+	chevron.setAttribute('fill', 'none');
+	chevron.setAttribute('stroke', 'currentColor');
+	chevron.setAttribute('stroke-width', '2');
+	chevron.classList.add('admin-config-chevron');
+	const chevPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+	chevPath.setAttribute('d', 'M6 9l6 6 6-6');
+	chevron.appendChild(chevPath);
+	header.appendChild(chevron);
+
+	sectionEl.appendChild(header);
+
+	const body = document.createElement('div');
+	body.className = 'admin-config-section-body';
+
+	for (const field of section.fields) {
+		const value = adminGetNested(config, field.key);
+		body.appendChild(createAdminField(field, value));
+	}
+
+	sectionEl.appendChild(body);
+	return sectionEl;
+}
+
+function ensureAdminConfigModal() {
+	if (adminConfigModal) return;
+	const wrap = document.createElement('div');
+	wrap.id = 'adminConfigModal';
+	wrap.className = 'admin-config-modal hidden';
+	wrap.innerHTML = `
+		<div class="admin-config-frame glass">
+			<div class="admin-config-header">
+				<h2>Settings</h2>
+				<button type="button" class="admin-config-close">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M18 6L6 18M6 6l12 12"/>
+					</svg>
+				</button>
+			</div>
+			<div class="admin-config-sections"></div>
+			<div class="admin-config-footer">
+				<div class="admin-config-status"></div>
+				<button type="button" class="admin-config-cancel">Close</button>
+				<button type="button" class="admin-config-save">Save</button>
+			</div>
+		</div>
+	`;
+	document.body.appendChild(wrap);
+	adminConfigModal = wrap;
+
+	wrap.querySelector('.admin-config-close').addEventListener('click', () => closeAdminConfigModal());
+	wrap.querySelector('.admin-config-cancel').addEventListener('click', () => closeAdminConfigModal());
+	wrap.querySelector('.admin-config-save').addEventListener('click', () => saveAdminConfig());
+	wrap.addEventListener('click', (e) => {
+		if (e.target === wrap) closeAdminConfigModal();
+	});
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape' && adminConfigModal && !adminConfigModal.classList.contains('hidden')) {
+			closeAdminConfigModal();
+		}
+	});
+}
+
+async function openAdminConfigModal() {
+	ensureAdminConfigModal();
+	const statusEl = adminConfigModal.querySelector('.admin-config-status');
+	const sectionsEl = adminConfigModal.querySelector('.admin-config-sections');
+	const saveBtn = adminConfigModal.querySelector('.admin-config-save');
+
+	statusEl.className = 'admin-config-status';
+	statusEl.textContent = '';
+	saveBtn.disabled = true;
+
+	// Show modal immediately with loading state
+	sectionsEl.innerHTML = '';
+	adminConfigModal.classList.remove('hidden');
+	document.body.classList.add('admin-config-open');
+
+	// Fetch config
+	let config;
+	try {
+		const resp = await fetch('/api/admin/config');
+		if (!resp.ok) {
+			const err = await resp.json().catch(() => ({}));
+			throw new Error(err.error || `HTTP ${resp.status}`);
+		}
+		config = await resp.json();
+	} catch (e) {
+		statusEl.className = 'admin-config-status error';
+		statusEl.textContent = 'Failed to load config: ' + e.message;
+		return;
+	}
+
+	// Render sections grouped by server/client
+	let currentGroup = '';
+	for (const section of ADMIN_CONFIG_SCHEMA) {
+		if (section.group && section.group !== currentGroup) {
+			currentGroup = section.group;
+			const groupHeader = document.createElement('div');
+			groupHeader.className = 'admin-config-group-header';
+			groupHeader.textContent = currentGroup === 'server' ? 'Server' : 'Client';
+			sectionsEl.appendChild(groupHeader);
+		}
+		sectionsEl.appendChild(renderAdminConfigSection(section, config));
+	}
+
+	saveBtn.disabled = false;
+}
+
+function closeAdminConfigModal() {
+	if (!adminConfigModal) return;
+	// Remove admin select menus from body
+	adminSelectMenus.forEach(m => m.remove());
+	adminSelectMenus.length = 0;
+	adminConfigModal.classList.add('hidden');
+	document.body.classList.remove('admin-config-open');
+}
+
+function collectAdminConfigValues() {
+	const config = {};
+	for (const section of ADMIN_CONFIG_SCHEMA) {
+		for (const field of section.fields) {
+			const key = field.key;
+			let value;
+
+			if (field.type === 'toggle') {
+				const input = adminConfigModal.querySelector(`input[data-key="${key}"]`);
+				value = input ? input.checked : false;
+			} else if (field.type === 'number') {
+				const input = adminConfigModal.querySelector(`input[data-key="${key}"]`);
+				const raw = input ? input.value.trim() : '';
+				value = raw === '' ? 0 : Number(raw);
+			} else if (field.type === 'text') {
+				const input = adminConfigModal.querySelector(`input[data-key="${key}"]`);
+				value = input ? input.value : '';
+			} else if (field.type === 'secret') {
+				const input = adminConfigModal.querySelector(`input[data-key="${key}"]`);
+				const raw = input ? input.value : '';
+				if (raw === '' && input && input.dataset.masked === '1') {
+					value = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+				} else {
+					value = raw;
+				}
+			} else if (field.type === 'select') {
+				const selectWrap = adminConfigModal.querySelector(`.admin-select-wrap[data-key="${key}"]`);
+				value = selectWrap ? selectWrap.dataset.value : field.options[0];
+			} else if (field.type === 'textarea') {
+				const textarea = adminConfigModal.querySelector(`textarea[data-key="${key}"]`);
+				value = textarea ? textarea.value : '';
+			} else if (field.type === 'list') {
+				const wrap = adminConfigModal.querySelector(`.admin-list-wrap[data-key="${key}"]`);
+				if (wrap) {
+					value = Array.from(wrap.querySelectorAll('.admin-list-input'))
+						.map(i => i.value.trim())
+						.filter(Boolean);
+				} else {
+					value = [];
+				}
+			}
+
+			adminSetNested(config, key, value);
+		}
+	}
+	return config;
+}
+
+async function saveAdminConfig() {
+	const statusEl = adminConfigModal.querySelector('.admin-config-status');
+	const saveBtn = adminConfigModal.querySelector('.admin-config-save');
+
+	statusEl.className = 'admin-config-status';
+	statusEl.textContent = '';
+	saveBtn.disabled = true;
+
+	const config = collectAdminConfigValues();
+
+	try {
+		const resp = await fetch('/api/admin/config', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(config),
+		});
+		const result = await resp.json();
+
+		if (!resp.ok) {
+			const msg = result.errors ? result.errors.join('; ') : (result.error || 'Save failed');
+			statusEl.className = 'admin-config-status error';
+			statusEl.textContent = msg;
+			saveBtn.disabled = false;
+			return;
+		}
+
+		if (result.restartRequired) {
+			statusEl.className = 'admin-config-status warning';
+			statusEl.textContent = 'Saved. Restart required for some changes.';
+		} else {
+			statusEl.className = 'admin-config-status success';
+			statusEl.textContent = 'Saved successfully.';
+		}
+	} catch (e) {
+		statusEl.className = 'admin-config-status error';
+		statusEl.textContent = 'Save failed: ' + e.message;
+	}
+
+	saveBtn.disabled = false;
+}
+
+function updateAdminConfigBtnVisibility() {
+	const btn = document.getElementById('adminConfigBtn');
+	if (!btn) return;
+	if (getUserRole() === 'admin' && window.matchMedia('(min-width: 768px)').matches) {
+		btn.classList.remove('hidden');
+	} else {
+		btn.classList.add('hidden');
+	}
+}
+
+// ========== End Admin Config Modal ==========
+
 function ensureImageViewer() {
 	if (imageViewer) return;
 	const wrap = document.createElement('div');
@@ -6769,6 +7491,15 @@ function restoreNormalPolling() {
 		queueScrollTop();
 		refresh(true);
 	});
+	const adminConfigBtn = document.getElementById('adminConfigBtn');
+	if (adminConfigBtn) {
+		adminConfigBtn.addEventListener('click', () => {
+			haptic();
+			openAdminConfigModal();
+		});
+	}
+	updateAdminConfigBtnVisibility();
+	window.addEventListener('resize', updateAdminConfigBtnVisibility);
 	if (els.voice) {
 		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 		if (SpeechRecognition) {
