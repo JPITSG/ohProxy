@@ -2760,7 +2760,7 @@ const ADMIN_CONFIG_SCHEMA = [
 		],
 	},
 	{
-		id: 'logging', group: 'server', restartRequired: true,
+		id: 'logging', group: 'server',
 		fields: [
 			{ key: 'server.logFile', type: 'text', allowEmpty: true },
 			{ key: 'server.accessLog', type: 'text', allowEmpty: true },

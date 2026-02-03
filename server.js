@@ -399,12 +399,12 @@ let rtspStreamIdCounter = 0;
 const authLockouts = new Map();
 
 function logMessage(message) {
-	writeLogLine(LOG_FILE, message);
+	writeLogLine(liveConfig.logFile, message);
 }
 
 function logJsError(message) {
-	if (!liveConfig.jsLogEnabled || !JS_LOG_FILE) return;
-	writeLogLine(JS_LOG_FILE, message);
+	if (!liveConfig.jsLogEnabled || !liveConfig.jsLogFile) return;
+	writeLogLine(liveConfig.jsLogFile, message);
 }
 
 function getLockoutKey(ip) {
@@ -465,25 +465,25 @@ function pruneAuthLockouts() {
 }
 
 function logAccess(message) {
-	if (ACCESS_LOG_LEVEL === '400+') {
+	if (liveConfig.accessLogLevel === '400+') {
 		const match = safeText(message).match(/\s(\d{3})\s/);
 		const status = match ? Number(match[1]) : NaN;
 		if (Number.isFinite(status) && status < 400) return;
 	}
 	const line = safeText(message);
-	if (!line || !ACCESS_LOG) return;
+	if (!line || !liveConfig.accessLog) return;
 	const text = line.endsWith('\n') ? line : `${line}\n`;
 	try {
-		fs.appendFileSync(ACCESS_LOG, text);
+		fs.appendFileSync(liveConfig.accessLog, text);
 	} catch (err) {
-		const fallback = formatLogLine(`Failed to write log file ${ACCESS_LOG}: ${err.message || err}`);
+		const fallback = formatLogLine(`Failed to write log file ${liveConfig.accessLog}: ${err.message || err}`);
 		if (fallback) process.stdout.write(fallback);
 	}
 }
 
 function shouldSkipAccessLog(res) {
-	if (ACCESS_LOG_LEVEL === 'all') return false;
-	if (ACCESS_LOG_LEVEL === '400+') return (res?.statusCode || 0) < 400;
+	if (liveConfig.accessLogLevel === 'all') return false;
+	if (liveConfig.accessLogLevel === '400+') return (res?.statusCode || 0) < 400;
 	return false;
 }
 
@@ -1588,11 +1588,9 @@ function inlineJson(value) {
 
 const configErrors = validateConfig();
 if (configErrors.length) {
-	configErrors.forEach((msg) => logMessage(`Config error: ${msg}`));
+	configErrors.forEach((msg) => writeLogLine(LOG_FILE, formatLogLine(`Config error: ${msg}`)));
 	process.exit(1);
 }
-
-logMessage('[Startup] Starting ohProxy instance...');
 
 const LOCAL_CONFIG_PATH = path.join(__dirname, 'config.local.js');
 let lastConfigMtime = 0;
@@ -1642,7 +1640,14 @@ const liveConfig = {
 	cmdapiAllowedSubnets: CMDAPI_ALLOWED_SUBNETS,
 	cmdapiAllowedItems: CMDAPI_ALLOWED_ITEMS,
 	jsLogEnabled: JS_LOG_ENABLED,
+	logFile: LOG_FILE,
+	accessLog: ACCESS_LOG,
+	accessLogLevel: ACCESS_LOG_LEVEL,
+	jsLogFile: JS_LOG_FILE,
+	proxyLogLevel: PROXY_LOG_LEVEL,
 };
+
+logMessage('[Startup] Starting ohProxy instance...');
 
 // Widget glow rules - migrate from JSON to SQLite on first run
 const GLOW_RULES_LOCAL_PATH = path.join(__dirname, 'widgetGlowRules.local.json');
@@ -1678,7 +1683,6 @@ migrateGlowRulesToDb();
 const restartRequiredKeys = [
 	'http.enabled', 'http.host', 'http.port',
 	'https.enabled', 'https.host', 'https.port', 'https.certFile', 'https.keyFile', 'https.http2',
-	'logFile', 'accessLog',
 ];
 
 function getNestedValue(obj, path) {
@@ -1817,8 +1821,15 @@ function reloadLiveConfig() {
 		? newServer.cmdapi.allowedItems
 		: [];
 
-	// JS logging config
+	// Logging config
 	liveConfig.jsLogEnabled = newServer.jsLogEnabled === true;
+	liveConfig.logFile = safeText(newServer.logFile || '');
+	liveConfig.accessLog = safeText(newServer.accessLog || '');
+	liveConfig.accessLogLevel = (['all', '400+'].includes(safeText(newServer.accessLogLevel || '').trim().toLowerCase()))
+		? safeText(newServer.accessLogLevel || '').trim().toLowerCase() : 'all';
+	liveConfig.jsLogFile = safeText(newServer.jsLogFile || '');
+	liveConfig.proxyLogLevel = safeText(newServer.proxyMiddlewareLogLevel || 'silent');
+	proxyCommon.logLevel = liveConfig.proxyLogLevel;
 
 	const iconVersionChanged = liveConfig.iconVersion !== oldIconVersion;
 	const iconSizeChanged = liveConfig.iconSize !== oldIconSize;
@@ -5575,7 +5586,7 @@ app.post('/api/jslog', jsonParserLarge, (req, res) => {
 		return;
 	}
 	// Check if JS logging is enabled
-	if (!JS_LOG_FILE) {
+	if (!liveConfig.jsLogFile) {
 		res.json({ ok: true, logged: false });
 		return;
 	}
@@ -6679,7 +6690,7 @@ const proxyCommon = {
 	router: () => liveConfig.ohTarget,
 	changeOrigin: true,
 	ws: false, // Disabled - we handle WebSocket ourselves via wss
-	logLevel: PROXY_LOG_LEVEL,
+	logLevel: liveConfig.proxyLogLevel,
 	agent: ohHttpAgent,
 	onProxyReq(proxyReq) {
 		proxyReq.setHeader('User-Agent', liveConfig.userAgent);
