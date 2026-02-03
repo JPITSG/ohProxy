@@ -32,6 +32,7 @@ describe('Input Surface Coverage', () => {
 			/if\s*\(!isPlainObject\(req\.body\)\)/,
 			/const\s+newSettings\s*=\s*req\.body\s*;/,
 			/const\s+body\s*=\s*req\.body\s*;/,
+			/const\s+incoming\s*=\s*req\.body\s*;/,
 			/const\s+rawWidgetId\s*=\s*req\.params\.widgetId\s*;/,
 			/const\s+\{\s*widgetId,\s*rules,\s*visibility,\s*defaultMuted,\s*iframeHeight,\s*proxyCacheSeconds\s*\}\s*=\s*req\.body\s*;/,
 			/const\s+\{\s*command\s*\}\s*=\s*req\.body\s*;/,

@@ -336,9 +336,6 @@ header {
 	white-space: normal;
 	text-wrap: balance;
 }
-.title-hidden .title {
-	display: none;
-}
 html:not(.slim) .has-meta .labelStack {
 	transform: translateY(-2px);
 }
