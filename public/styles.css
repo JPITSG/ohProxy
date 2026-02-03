@@ -482,9 +482,9 @@ html:not(.slim) .has-meta .labelStack {
 
 .selection-card .select-menu {
 	position: absolute;
-	right: 0;
+	right: -.25rem;
 	top: calc(100% + 6px);
-	min-width: 100%;
+	min-width: calc(100% + .5rem);
 	background: var(--color-select-menu-bg);
 	backdrop-filter: var(--glass-blur);
 	-webkit-backdrop-filter: var(--glass-blur);
@@ -539,7 +539,7 @@ body.theme-light .selection-card.menu-above .select-menu {
 .selection-card .select-menu.scrollable {
 	overflow: hidden;
 	right: auto;
-	left: 0;
+	left: -.25rem;
 }
 .selection-card .select-menu-scroll {
 	padding-right: 4px;
