@@ -1136,13 +1136,6 @@ input[type="range"] {
 	border-top-color: var(--color-primary);
 }
 
-/* Mode button styles */
-.mode-btn.active {
-	background: var(--color-accent-soft);
-	border-color: var(--color-accent-strong);
-	color: var(--color-mode-active-text);
-}
-.mode-btn,
 #auxWrap a {
 	height: 2.25rem;
 	display: inline-flex;
@@ -1285,13 +1278,11 @@ body.theme-light .bg-slate-950\/40 {
 	background-color: rgba(245, 246, 250, 0.8);
 }
 body.theme-light .text-slate-100 { color: var(--color-text-primary); }
-body.theme-light .text-slate-200 { color: var(--color-text-primary); }
 body.theme-light .text-slate-300 { color: var(--color-text-secondary); }
 body.theme-light .text-slate-400 { color: var(--color-text-muted); }
 body.theme-light .text-slate-500 { color: var(--color-text-muted-strong); }
 body.theme-light .border-white\/10 { border-color: var(--glass-border-color); }
 body.theme-light .bg-white\/5 { background-color: var(--color-surface-muted); }
-body.theme-light .bg-white\/10 { background-color: var(--color-surface-hover); }
 body.theme-light .hover\:bg-white\/10:hover { background-color: var(--color-surface-hover); }
 body.theme-light .theme-overlay {
 	background: radial-gradient(circle at 15% 0%, var(--color-theme-overlay-radial), transparent 55%),
@@ -1457,7 +1448,7 @@ body.theme-light .card-config-frame {
 .history-glow-dot + .history-state {
 	margin-left: 6px;
 }
-.history-loading, .history-empty {
+.history-loading {
 	font-size: .75rem;
 	font-weight: 300;
 	color: var(--color-text-muted);
