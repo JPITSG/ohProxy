@@ -1909,6 +1909,7 @@ const TAILWIND_BUNDLE_PATH = path.join(PUBLIC_DIR, 'tailwind.css');
 const CHART_JS_PATH = path.join(PUBLIC_DIR, 'chart.js');
 const CHART_CSS_PATH = path.join(PUBLIC_DIR, 'chart.css');
 const LOGIN_JS_PATH = path.join(PUBLIC_DIR, 'login.js');
+const LANG_JS_PATH = path.join(PUBLIC_DIR, 'lang.js');
 const LOGIN_HTML_PATH = path.join(PUBLIC_DIR, 'login.html');
 const INDEX_HTML_PATH = path.join(PUBLIC_DIR, 'index.html');
 const SERVICE_WORKER_PATH = path.join(PUBLIC_DIR, 'sw.js');
@@ -6685,6 +6686,10 @@ app.get(/^\/chart\.v[\w.-]+\.css$/i, (req, res) => {
 
 app.get(/^\/login\.v[\w.-]+\.js$/i, (req, res) => {
 	sendVersionedAsset(res, LOGIN_JS_PATH, 'application/javascript; charset=utf-8');
+});
+
+app.get(/^\/lang\.v[\w.-]+\.js$/i, (req, res) => {
+	sendVersionedAsset(res, LANG_JS_PATH, 'application/javascript; charset=utf-8');
 });
 
 // --- Proxy FIRST (so bodies aren't eaten by any parsers) ---

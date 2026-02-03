@@ -2011,60 +2011,61 @@ function ensureCardConfigModal() {
 	const wrap = document.createElement('div');
 	wrap.id = 'cardConfigModal';
 	wrap.className = 'card-config-modal hidden';
+	const cc = ohLang.cardConfig;
 	wrap.innerHTML = `
 		<div class="card-config-frame glass">
 			<div class="card-config-body">
 				<div class="history-section" style="display:none;">
-					<div class="item-config-section-header">HISTORICAL VALUES</div>
+					<div class="item-config-section-header">${cc.historyHeader}</div>
 					<div class="history-entries"></div>
 					<div class="history-nav" style="display:none;"></div>
 				</div>
 				<div class="default-sound-section" style="display:none;">
-					<div class="item-config-section-header">DEFAULT SOUND</div>
+					<div class="item-config-section-header">${cc.soundHeader}</div>
 					<div class="item-config-visibility">
 						<label class="item-config-radio">
 							<input type="radio" name="defaultSound" value="muted" checked>
-							<span>Muted</span>
+							<span>${cc.soundMuted}</span>
 						</label>
 						<label class="item-config-radio">
 							<input type="radio" name="defaultSound" value="unmuted">
-							<span>Unmuted</span>
+							<span>${cc.soundUnmuted}</span>
 						</label>
 					</div>
 				</div>
 				<div class="iframe-height-section" style="display:none;">
-					<div class="item-config-section-header">HEIGHT</div>
-					<input type="text" class="iframe-height-input" placeholder="pixels" inputmode="numeric">
+					<div class="item-config-section-header">${cc.heightHeader}</div>
+					<input type="text" class="iframe-height-input" placeholder="${cc.heightPlaceholder}" inputmode="numeric">
 				</div>
 				<div class="proxy-cache-section" style="display:none;">
-					<div class="item-config-section-header">CACHE</div>
-					<input type="text" class="proxy-cache-input" placeholder="seconds" inputmode="numeric">
+					<div class="item-config-section-header">${cc.cacheHeader}</div>
+					<input type="text" class="proxy-cache-input" placeholder="${cc.cachePlaceholder}" inputmode="numeric">
 				</div>
 				<div class="visibility-section">
-					<div class="item-config-section-header">VISIBILITY</div>
+					<div class="item-config-section-header">${cc.visibilityHeader}</div>
 					<div class="item-config-visibility">
 						<label class="item-config-radio">
 							<input type="radio" name="visibility" value="all" checked>
-							<span>All</span>
+							<span>${cc.visAll}</span>
 						</label>
 						<label class="item-config-radio">
 							<input type="radio" name="visibility" value="normal">
-							<span>Normal</span>
+							<span>${cc.visNormal}</span>
 						</label>
 						<label class="item-config-radio">
 							<input type="radio" name="visibility" value="admin">
-							<span>Admin</span>
+							<span>${cc.visAdmin}</span>
 						</label>
 					</div>
 				</div>
 				<div class="glow-rules-section">
-					<div class="item-config-section-header">GLOW RULES</div>
+					<div class="item-config-section-header">${cc.glowHeader}</div>
 					<div class="card-config-rules"></div>
-					<button type="button" class="card-config-add">+ Add Rule</button>
+					<button type="button" class="card-config-add">${cc.addRuleBtn}</button>
 				</div>
 				<div class="card-config-footer">
-					<button type="button" class="card-config-cancel">Close</button>
-					<button type="button" class="card-config-save">Save</button>
+					<button type="button" class="card-config-cancel">${cc.closeBtn}</button>
+					<button type="button" class="card-config-save">${cc.saveBtn}</button>
 				</div>
 			</div>
 		</div>
@@ -2211,33 +2212,13 @@ function createGlowRuleRow(rule = {}) {
 	const row = document.createElement('div');
 	row.className = 'glow-rule-row';
 
-	const operatorOptions = [
-		{ value: '=', label: '=' },
-		{ value: '!=', label: '!=' },
-		{ value: '>', label: '>' },
-		{ value: '<', label: '<' },
-		{ value: '>=', label: '>=' },
-		{ value: '<=', label: '<=' },
-		{ value: 'contains', label: 'Contains' },
-		{ value: '!contains', label: '! Contain' },
-		{ value: 'startsWith', label: 'Starts With' },
-		{ value: 'endsWith', label: 'Ends With' },
-		{ value: '*', label: '* (Any)' },
-	];
-
-	const colorOptions = [
-		{ value: 'green', label: 'Green' },
-		{ value: 'orange', label: 'Orange' },
-		{ value: 'red', label: 'Red' },
-	];
-
-	const operatorSelect = createCustomSelect(operatorOptions, rule.operator || '=', 'glow-operator-select');
-	const colorSelect = createCustomSelect(colorOptions, rule.color || 'green', 'glow-color-select');
+	const operatorSelect = createCustomSelect(ohLang.cardConfig.glowOperators, rule.operator || '=', 'glow-operator-select');
+	const colorSelect = createCustomSelect(ohLang.cardConfig.glowColors, rule.color || 'green', 'glow-color-select');
 
 	const valueInput = document.createElement('input');
 	valueInput.type = 'text';
 	valueInput.className = 'glow-rule-value';
-	valueInput.placeholder = 'value';
+	valueInput.placeholder = ohLang.cardConfig.glowValuePlaceholder;
 	if (rule.value !== undefined) valueInput.value = rule.value;
 
 	const deleteBtn = document.createElement('button');
@@ -2386,7 +2367,7 @@ async function loadHistoryEntries(itemName, offset) {
 	const nav = section.querySelector('.history-nav');
 	const isFirstLoad = !container.children.length;
 	if (isFirstLoad) {
-		container.innerHTML = '<div class="history-loading">Loading\u2026</div>';
+		container.innerHTML = '<div class="history-loading">' + ohLang.cardConfig.loading + '</div>';
 		nav.style.display = 'none';
 	}
 	try {
@@ -2437,7 +2418,7 @@ async function loadHistoryEntries(itemName, offset) {
 				const btn = document.createElement('button');
 				btn.type = 'button';
 				btn.className = 'history-newer';
-				btn.textContent = 'Newer \u25B4';
+				btn.textContent = ohLang.cardConfig.newerBtn;
 				btn.addEventListener('click', () => {
 					const prevOffset = historyOffsetStack.pop() || 0;
 					loadHistoryEntries(itemName, prevOffset);
@@ -2448,7 +2429,7 @@ async function loadHistoryEntries(itemName, offset) {
 				const btn = document.createElement('button');
 				btn.type = 'button';
 				btn.className = 'history-older';
-				btn.textContent = 'Older \u25BE';
+				btn.textContent = ohLang.cardConfig.olderBtn;
 				btn.addEventListener('click', () => {
 					historyOffsetStack.push(offset);
 					loadHistoryEntries(itemName, data.nextOffset);
@@ -2472,7 +2453,7 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 	const nav = section.querySelector('.history-nav');
 	const isFirstLoad = !container.children.length;
 	if (isFirstLoad) {
-		container.innerHTML = '<div class="history-loading">Loading\u2026</div>';
+		container.innerHTML = '<div class="history-loading">' + ohLang.cardConfig.loading + '</div>';
 		nav.style.display = 'none';
 	}
 	try {
@@ -2523,7 +2504,7 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 				const btn = document.createElement('button');
 				btn.type = 'button';
 				btn.className = 'history-newer';
-				btn.textContent = 'Newer \u25B4';
+				btn.textContent = ohLang.cardConfig.newerBtn;
 				btn.addEventListener('click', () => {
 					const prevCursor = historyCursorStack.pop() || null;
 					loadGroupHistoryEntries(itemName, prevCursor);
@@ -2534,7 +2515,7 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 				const btn = document.createElement('button');
 				btn.type = 'button';
 				btn.className = 'history-older';
-				btn.textContent = 'Older \u25BE';
+				btn.textContent = ohLang.cardConfig.olderBtn;
 				btn.addEventListener('click', () => {
 					historyCursorStack.push(cursor);
 					loadGroupHistoryEntries(itemName, data.nextCursor);
@@ -2698,207 +2679,207 @@ async function saveCardConfig() {
 
 const ADMIN_CONFIG_SCHEMA = [
 	{
-		id: 'listeners', group: 'server', title: 'LISTENERS', restartRequired: true,
+		id: 'listeners', group: 'server', restartRequired: true,
 		fields: [
-			{ key: 'server.http.enabled', label: 'HTTP Enabled', type: 'toggle', desc: 'Enable HTTP listener.' },
-			{ key: 'server.http.host', label: 'HTTP Host', type: 'text', placeholder: '0.0.0.0', desc: 'HTTP bind address (IP/hostname).' },
-			{ key: 'server.http.port', label: 'HTTP Port', type: 'number', min: 1, max: 65535, desc: 'HTTP bind port (1\u201365535).' },
-			{ key: 'server.https.enabled', label: 'HTTPS Enabled', type: 'toggle', desc: 'Enable HTTPS listener.' },
-			{ key: 'server.https.host', label: 'HTTPS Host', type: 'text', placeholder: '0.0.0.0', desc: 'HTTPS bind address (IP/hostname).' },
-			{ key: 'server.https.port', label: 'HTTPS Port', type: 'number', min: 1, max: 65535, desc: 'HTTPS bind port (1\u201365535).' },
-			{ key: 'server.https.certFile', label: 'TLS Certificate', type: 'text', placeholder: '/path/to/fullchain.pem', desc: 'TLS certificate file (absolute path).' },
-			{ key: 'server.https.keyFile', label: 'TLS Key', type: 'text', placeholder: '/path/to/privkey.pem', desc: 'TLS key file (absolute path).' },
-			{ key: 'server.https.http2', label: 'HTTP/2', type: 'toggle', desc: 'Enable HTTP/2 via ALPN.' },
+			{ key: 'server.http.enabled', type: 'toggle' },
+			{ key: 'server.http.host', type: 'text' },
+			{ key: 'server.http.port', type: 'number', min: 1, max: 65535 },
+			{ key: 'server.https.enabled', type: 'toggle' },
+			{ key: 'server.https.host', type: 'text' },
+			{ key: 'server.https.port', type: 'number', min: 1, max: 65535 },
+			{ key: 'server.https.certFile', type: 'text' },
+			{ key: 'server.https.keyFile', type: 'text' },
+			{ key: 'server.https.http2', type: 'toggle' },
 		],
 	},
 	{
-		id: 'openhab', group: 'server', title: 'OPENHAB CONNECTION',
+		id: 'openhab', group: 'server',
 		fields: [
-			{ key: 'server.openhab.target', label: 'Target URL', type: 'text', placeholder: 'http://127.0.0.1:8080', desc: 'openHAB base URL (http/https).' },
-			{ key: 'server.openhab.user', label: 'Username', type: 'text', allowEmpty: true, desc: 'openHAB username for Basic Auth.' },
-			{ key: 'server.openhab.pass', label: 'Password', type: 'secret', allowEmpty: true, desc: 'openHAB password for Basic Auth.' },
-			{ key: 'server.openhab.apiToken', label: 'API Token', type: 'secret', allowEmpty: true, desc: 'openHAB 3.x API token. Takes precedence over user/pass.' },
+			{ key: 'server.openhab.target', type: 'text' },
+			{ key: 'server.openhab.user', type: 'text', allowEmpty: true },
+			{ key: 'server.openhab.pass', type: 'secret', allowEmpty: true },
+			{ key: 'server.openhab.apiToken', type: 'secret', allowEmpty: true },
 		],
 	},
 	{
-		id: 'database', group: 'server', title: 'DATABASE',
+		id: 'database', group: 'server',
 		fields: [
-			{ key: 'server.mysql.socket', label: 'Unix Socket', type: 'text', allowEmpty: true, desc: 'Unix socket path. If set, host/port are ignored.' },
-			{ key: 'server.mysql.host', label: 'Host', type: 'text', allowEmpty: true, desc: 'MySQL host.' },
-			{ key: 'server.mysql.port', label: 'Port', type: 'text', allowEmpty: true, desc: 'MySQL port.' },
-			{ key: 'server.mysql.database', label: 'Database', type: 'text', allowEmpty: true, desc: 'MySQL database name.' },
-			{ key: 'server.mysql.username', label: 'Username', type: 'text', allowEmpty: true, desc: 'MySQL username.' },
-			{ key: 'server.mysql.password', label: 'Password', type: 'secret', allowEmpty: true, desc: 'MySQL password.' },
+			{ key: 'server.mysql.socket', type: 'text', allowEmpty: true },
+			{ key: 'server.mysql.host', type: 'text', allowEmpty: true },
+			{ key: 'server.mysql.port', type: 'text', allowEmpty: true },
+			{ key: 'server.mysql.database', type: 'text', allowEmpty: true },
+			{ key: 'server.mysql.username', type: 'text', allowEmpty: true },
+			{ key: 'server.mysql.password', type: 'secret', allowEmpty: true },
 		],
 	},
 	{
-		id: 'auth', group: 'server', title: 'AUTHENTICATION',
+		id: 'auth', group: 'server',
 		fields: [
-			{ key: 'server.auth.mode', label: 'Auth Mode', type: 'select', options: ['basic', 'html'], desc: '\u2018basic\u2019 for HTTP Basic Auth, \u2018html\u2019 for HTML form login.' },
-			{ key: 'server.auth.realm', label: 'Realm', type: 'text', desc: 'Basic auth realm label.' },
-			{ key: 'server.auth.cookieName', label: 'Cookie Name', type: 'text', allowEmpty: true, desc: 'Auth cookie name. Empty disables cookie auth.' },
-			{ key: 'server.auth.cookieDays', label: 'Cookie Lifetime (days)', type: 'number', min: 0, desc: 'Auth cookie lifetime in days.' },
-			{ key: 'server.auth.cookieKey', label: 'Cookie HMAC Key', type: 'secret', allowEmpty: true, desc: 'Auth cookie HMAC key. Empty disables cookie auth.' },
-			{ key: 'server.auth.authFailNotifyCmd', label: 'Auth Fail Command', type: 'text', allowEmpty: true, placeholder: 'Use {IP} placeholder', desc: 'Shell command on auth failure. {IP} is replaced with client IP. Empty disables.' },
-			{ key: 'server.auth.authFailNotifyIntervalMins', label: 'Notify Interval (min)', type: 'number', min: 1, desc: 'Rate limit for auth failure notifications (minutes).' },
+			{ key: 'server.auth.mode', type: 'select', options: ['basic', 'html'] },
+			{ key: 'server.auth.realm', type: 'text' },
+			{ key: 'server.auth.cookieName', type: 'text', allowEmpty: true },
+			{ key: 'server.auth.cookieDays', type: 'number', min: 0 },
+			{ key: 'server.auth.cookieKey', type: 'secret', allowEmpty: true },
+			{ key: 'server.auth.authFailNotifyCmd', type: 'text', allowEmpty: true },
+			{ key: 'server.auth.authFailNotifyIntervalMins', type: 'number', min: 1 },
 		],
 	},
 	{
-		id: 'access', group: 'server', title: 'ACCESS CONTROL',
+		id: 'access', group: 'server',
 		fields: [
-			{ key: 'server.allowSubnets', label: 'Allow Subnets', type: 'list', placeholder: 'e.g. 192.168.1.0/24', desc: 'Subnets allowed to access the proxy (IPv4 CIDR). Use 0.0.0.0/0 to allow all.' },
-			{ key: 'server.trustProxy', label: 'Trust Proxy', type: 'toggle', desc: 'Trust X-Forwarded-For header for client IP. Only enable behind a trusted reverse proxy.' },
-			{ key: 'server.denyXFFSubnets', label: 'Deny XFF Subnets', type: 'list', placeholder: 'e.g. 10.0.0.0/8', allowEmpty: true, desc: 'Block requests whose X-Forwarded-For contains an IP in these subnets (IPv4 CIDR). Only checked when trustProxy is enabled.' },
+			{ key: 'server.allowSubnets', type: 'list' },
+			{ key: 'server.trustProxy', type: 'toggle' },
+			{ key: 'server.denyXFFSubnets', type: 'list', allowEmpty: true },
 		],
 	},
 	{
-		id: 'security', group: 'server', title: 'SECURITY HEADERS',
+		id: 'security', group: 'server',
 		fields: [
-			{ key: 'server.securityHeaders.enabled', label: 'Enabled', type: 'toggle', desc: 'Enable security headers.' },
-			{ key: 'server.securityHeaders.hsts.enabled', label: 'HSTS Enabled', type: 'toggle', desc: 'Enable HSTS header (HTTPS only).' },
-			{ key: 'server.securityHeaders.hsts.maxAge', label: 'HSTS Max Age (sec)', type: 'number', min: 0, desc: 'HSTS max-age in seconds.' },
-			{ key: 'server.securityHeaders.hsts.includeSubDomains', label: 'Include Subdomains', type: 'toggle', desc: 'Include subdomains in HSTS.' },
-			{ key: 'server.securityHeaders.hsts.preload', label: 'Preload', type: 'toggle', desc: 'Enable HSTS preload directive.' },
-			{ key: 'server.securityHeaders.csp.enabled', label: 'CSP Enabled', type: 'toggle', desc: 'Enable Content-Security-Policy header.' },
-			{ key: 'server.securityHeaders.csp.reportOnly', label: 'CSP Report Only', type: 'toggle', desc: 'Use CSP report-only mode.' },
-			{ key: 'server.securityHeaders.csp.policy', label: 'CSP Policy', type: 'textarea', allowEmpty: true, desc: 'CSP policy string. Empty disables.' },
-			{ key: 'server.securityHeaders.referrerPolicy', label: 'Referrer Policy', type: 'select', options: ['same-origin', 'no-referrer', 'no-referrer-when-downgrade', 'origin', 'origin-when-cross-origin', 'strict-origin', 'strict-origin-when-cross-origin', 'unsafe-url'], desc: 'Referrer-Policy value. \u2018same-origin\u2019 is required for auth-exempt assets.' },
+			{ key: 'server.securityHeaders.enabled', type: 'toggle' },
+			{ key: 'server.securityHeaders.hsts.enabled', type: 'toggle' },
+			{ key: 'server.securityHeaders.hsts.maxAge', type: 'number', min: 0 },
+			{ key: 'server.securityHeaders.hsts.includeSubDomains', type: 'toggle' },
+			{ key: 'server.securityHeaders.hsts.preload', type: 'toggle' },
+			{ key: 'server.securityHeaders.csp.enabled', type: 'toggle' },
+			{ key: 'server.securityHeaders.csp.reportOnly', type: 'toggle' },
+			{ key: 'server.securityHeaders.csp.policy', type: 'textarea', allowEmpty: true },
+			{ key: 'server.securityHeaders.referrerPolicy', type: 'select', options: ['same-origin', 'no-referrer', 'no-referrer-when-downgrade', 'origin', 'origin-when-cross-origin', 'strict-origin', 'strict-origin-when-cross-origin', 'unsafe-url'] },
 		],
 	},
 	{
-		id: 'proxy', group: 'server', title: 'PROXY SETTINGS',
+		id: 'proxy', group: 'server',
 		fields: [
-			{ key: 'server.proxyAllowlist', label: 'Proxy Allowlist', type: 'list', placeholder: 'host or host:port', desc: 'Allowlist for /proxy?url= endpoint (host or host:port).' },
-			{ key: 'server.webviewNoProxy', label: 'Webview No Proxy', type: 'list', placeholder: 'host:port', allowEmpty: true, desc: 'Webview URLs matching these hosts bypass /proxy and load directly (host or host:port).' },
-			{ key: 'server.userAgent', label: 'User Agent', type: 'text', desc: 'Proxy user-agent string.' },
+			{ key: 'server.proxyAllowlist', type: 'list' },
+			{ key: 'server.webviewNoProxy', type: 'list', allowEmpty: true },
+			{ key: 'server.userAgent', type: 'text' },
 		],
 	},
 	{
-		id: 'assets', group: 'server', title: 'ASSETS',
+		id: 'assets', group: 'server',
 		fields: [
-			{ key: 'server.assets.assetVersion', label: 'Asset Version', type: 'text', placeholder: 'v1', desc: 'Combined version for JS, CSS, and service worker. Increment to bust all caches.' },
-			{ key: 'server.assets.appleTouchIconVersion', label: 'Apple Touch Icon Version', type: 'text', placeholder: 'v1', desc: 'Apple touch icon cache version.' },
-			{ key: 'server.assets.iconVersion', label: 'Icon Version', type: 'text', placeholder: 'v1', desc: 'Icon cache version.' },
+			{ key: 'server.assets.assetVersion', type: 'text' },
+			{ key: 'server.assets.appleTouchIconVersion', type: 'text' },
+			{ key: 'server.assets.iconVersion', type: 'text' },
 		],
 	},
 	{
-		id: 'icons', group: 'server', title: 'ICONS & CACHING',
+		id: 'icons', group: 'server',
 		fields: [
-			{ key: 'server.iconSize', label: 'Icon Size (px)', type: 'number', min: 1, desc: 'Icon size in pixels.' },
-			{ key: 'server.iconCacheConcurrency', label: 'Icon Cache Concurrency', type: 'number', min: 1, desc: 'Max concurrent icon conversions.' },
-			{ key: 'server.deltaCacheLimit', label: 'Delta Cache Limit', type: 'number', min: 1, desc: 'Max delta cache size.' },
+			{ key: 'server.iconSize', type: 'number', min: 1 },
+			{ key: 'server.iconCacheConcurrency', type: 'number', min: 1 },
+			{ key: 'server.deltaCacheLimit', type: 'number', min: 1 },
 		],
 	},
 	{
-		id: 'logging', group: 'server', title: 'LOGGING', restartRequired: true,
+		id: 'logging', group: 'server', restartRequired: true,
 		fields: [
-			{ key: 'server.logFile', label: 'Log File', type: 'text', allowEmpty: true, placeholder: '/var/log/ohProxy.log', desc: 'Log file path (absolute). Empty disables.' },
-			{ key: 'server.accessLog', label: 'Access Log', type: 'text', allowEmpty: true, placeholder: '/var/log/ohProxy.access.log', desc: 'Access log file path (absolute). Empty disables.' },
-			{ key: 'server.jsLogFile', label: 'JS Error Log', type: 'text', allowEmpty: true, desc: 'JavaScript error log file path (absolute). Empty disables.' },
-			{ key: 'server.jsLogEnabled', label: 'JS Logging Enabled', type: 'toggle', desc: 'Enable JavaScript error logging from clients.' },
-			{ key: 'server.accessLogLevel', label: 'Access Log Level', type: 'select', options: ['all', '400+'], desc: 'Access log verbosity.' },
-			{ key: 'server.proxyMiddlewareLogLevel', label: 'Proxy Log Level', type: 'select', options: ['silent', 'error', 'warn', 'info', 'debug'], desc: 'Proxy middleware logging level.' },
-			{ key: 'server.slowQueryMs', label: 'Slow Query Threshold (ms)', type: 'number', min: 0, desc: 'Slow query threshold in ms. 0 disables. Logs requests exceeding this duration.' },
+			{ key: 'server.logFile', type: 'text', allowEmpty: true },
+			{ key: 'server.accessLog', type: 'text', allowEmpty: true },
+			{ key: 'server.jsLogFile', type: 'text', allowEmpty: true },
+			{ key: 'server.jsLogEnabled', type: 'toggle' },
+			{ key: 'server.accessLogLevel', type: 'select', options: ['all', '400+'] },
+			{ key: 'server.proxyMiddlewareLogLevel', type: 'select', options: ['silent', 'error', 'warn', 'info', 'debug'] },
+			{ key: 'server.slowQueryMs', type: 'number', min: 0 },
 		],
 	},
 	{
-		id: 'sessions', group: 'server', title: 'SESSIONS & TASKS',
+		id: 'sessions', group: 'server',
 		fields: [
-			{ key: 'server.sessionMaxAgeDays', label: 'Session Max Age (days)', type: 'number', min: 1, desc: 'Session max age in days before cleanup.' },
-			{ key: 'server.backgroundTasks.sitemapRefreshMs', label: 'Sitemap Refresh (ms)', type: 'number', min: 1000, desc: 'Sitemap refresh interval in ms.' },
+			{ key: 'server.sessionMaxAgeDays', type: 'number', min: 1 },
+			{ key: 'server.backgroundTasks.sitemapRefreshMs', type: 'number', min: 1000 },
 		],
 	},
 	{
-		id: 'websocket', group: 'server', title: 'REAL-TIME UPDATES',
+		id: 'websocket', group: 'server',
 		fields: [
-			{ key: 'server.websocket.mode', label: 'Mode', type: 'select', options: ['polling', 'atmosphere', 'sse'], desc: 'Real-time update mode. polling: polls REST API at interval. atmosphere: openHAB 1.x/2.x long-polling. sse: openHAB 3.x Server-Sent Events.' },
-			{ key: 'server.websocket.pollingIntervalMs', label: 'Poll Interval Active (ms)', type: 'number', min: 100, desc: 'Polling interval in ms when clients are focused.' },
-			{ key: 'server.websocket.pollingIntervalBgMs', label: 'Poll Interval Background (ms)', type: 'number', min: 100, desc: 'Polling interval in ms when all clients are unfocused.' },
-			{ key: 'server.websocket.atmosphereNoUpdateWarnMs', label: 'Atmosphere Warn (ms)', type: 'number', min: 0, desc: 'Warn if no Atmosphere updates received for this many ms. 0 disables.' },
-			{ key: 'server.websocket.backendRecoveryDelayMs', label: 'Backend Recovery Delay (ms)', type: 'number', min: 0, desc: 'Delay before marking backend as OK after recovery. Gives openHAB time to fully initialize. 0 disables.' },
+			{ key: 'server.websocket.mode', type: 'select', options: ['polling', 'atmosphere', 'sse'] },
+			{ key: 'server.websocket.pollingIntervalMs', type: 'number', min: 100 },
+			{ key: 'server.websocket.pollingIntervalBgMs', type: 'number', min: 100 },
+			{ key: 'server.websocket.atmosphereNoUpdateWarnMs', type: 'number', min: 0 },
+			{ key: 'server.websocket.backendRecoveryDelayMs', type: 'number', min: 0 },
 		],
 	},
 	{
-		id: 'features', group: 'server', title: 'FEATURES',
+		id: 'features', group: 'server',
 		fields: [
-			{ key: 'server.groupItems', label: 'Group Items', type: 'list', placeholder: 'item name', allowEmpty: true, desc: 'Group items whose state is calculated from member states. Counts members with state \u201cOPEN\u201d.' },
-			{ key: 'server.videoPreview.intervalMs', label: 'Video Preview Interval (ms)', type: 'number', min: 0, desc: 'Interval to capture preview frames from RTSP streams (ms). 0 disables.' },
-			{ key: 'server.videoPreview.pruneAfterHours', label: 'Prune Previews After (hours)', type: 'number', min: 1, desc: 'Delete preview images older than this (hours).' },
-			{ key: 'server.cmdapi.enabled', label: 'CMD API Enabled', type: 'toggle', desc: 'Enable /CMD endpoint.' },
-			{ key: 'server.cmdapi.allowedSubnets', label: 'CMD Allowed Subnets', type: 'list', placeholder: 'CIDR or * for all', allowEmpty: true, desc: 'Allowed subnets for /CMD requests (IPv4 CIDR). Empty blocks all.' },
-			{ key: 'server.cmdapi.allowedItems', label: 'CMD Allowed Items', type: 'list', placeholder: 'item or * for all', allowEmpty: true, desc: 'Allowed items for /CMD requests. \u2018*\u2019 allows all. Empty blocks all.' },
+			{ key: 'server.groupItems', type: 'list', allowEmpty: true },
+			{ key: 'server.videoPreview.intervalMs', type: 'number', min: 0 },
+			{ key: 'server.videoPreview.pruneAfterHours', type: 'number', min: 1 },
+			{ key: 'server.cmdapi.enabled', type: 'toggle' },
+			{ key: 'server.cmdapi.allowedSubnets', type: 'list', allowEmpty: true },
+			{ key: 'server.cmdapi.allowedItems', type: 'list', allowEmpty: true },
 		],
 	},
 	{
-		id: 'gps', group: 'server', title: 'GPS',
+		id: 'gps', group: 'server',
 		fields: [
-			{ key: 'server.gps.homeLat', label: 'Home Latitude', type: 'text', allowEmpty: true, placeholder: '51.5074', desc: 'Home latitude (decimal). Empty disables home snapping.' },
-			{ key: 'server.gps.homeLon', label: 'Home Longitude', type: 'text', allowEmpty: true, placeholder: '-0.1278', desc: 'Home longitude (decimal). Empty disables home snapping.' },
+			{ key: 'server.gps.homeLat', type: 'text', allowEmpty: true },
+			{ key: 'server.gps.homeLon', type: 'text', allowEmpty: true },
 		],
 	},
 	{
-		id: 'system', group: 'server', title: 'SYSTEM',
+		id: 'system', group: 'server',
 		fields: [
-			{ key: 'server.binaries.ffmpeg', label: 'FFmpeg Path', type: 'text', desc: 'FFmpeg binary path (RTSP streaming and video previews).' },
-			{ key: 'server.binaries.convert', label: 'ImageMagick Path', type: 'text', desc: 'ImageMagick convert binary path (icon conversion).' },
-			{ key: 'server.binaries.shell', label: 'Shell Path', type: 'text', desc: 'Shell binary path (auth failure notification commands).' },
-			{ key: 'server.paths.rrd', label: 'RRD4J Path', type: 'text', allowEmpty: true, desc: 'RRD4J persistence directory (chart generation).' },
+			{ key: 'server.binaries.ffmpeg', type: 'text' },
+			{ key: 'server.binaries.convert', type: 'text' },
+			{ key: 'server.binaries.shell', type: 'text' },
+			{ key: 'server.paths.rrd', type: 'text', allowEmpty: true },
 		],
 	},
 	{
-		id: 'external', group: 'server', title: 'EXTERNAL SERVICES',
+		id: 'external', group: 'server',
 		fields: [
-			{ key: 'server.apiKeys.anthropic', label: 'Anthropic API Key', type: 'secret', allowEmpty: true, desc: 'Anthropic API key (Claude AI integration).' },
-			{ key: 'server.weatherbit.apiKey', label: 'Weatherbit API Key', type: 'secret', allowEmpty: true, desc: 'Weatherbit API key.' },
-			{ key: 'server.weatherbit.latitude', label: 'Weather Latitude', type: 'text', allowEmpty: true, desc: 'Location latitude (decimal).' },
-			{ key: 'server.weatherbit.longitude', label: 'Weather Longitude', type: 'text', allowEmpty: true, desc: 'Location longitude (decimal).' },
-			{ key: 'server.weatherbit.units', label: 'Temperature Units', type: 'select', options: ['M', 'I'], desc: 'Temperature units. \u2018M\u2019 = Celsius, \u2018I\u2019 = Fahrenheit.' },
-			{ key: 'server.weatherbit.refreshIntervalMs', label: 'Refresh Interval (ms)', type: 'number', min: 1, desc: 'Data refresh interval in ms.' },
+			{ key: 'server.apiKeys.anthropic', type: 'secret', allowEmpty: true },
+			{ key: 'server.weatherbit.apiKey', type: 'secret', allowEmpty: true },
+			{ key: 'server.weatherbit.latitude', type: 'text', allowEmpty: true },
+			{ key: 'server.weatherbit.longitude', type: 'text', allowEmpty: true },
+			{ key: 'server.weatherbit.units', type: 'select', options: ['M', 'I'] },
+			{ key: 'server.weatherbit.refreshIntervalMs', type: 'number', min: 1 },
 		],
 	},
 	{
-		id: 'client-ui', group: 'client', title: 'UI',
+		id: 'client-ui', group: 'client',
 		fields: [
-			{ key: 'client.siteName', label: 'Site Name', type: 'text', allowEmpty: true, placeholder: 'Uses sitemap name if empty', desc: 'Site name override for header display. Empty uses sitemap name.' },
-			{ key: 'client.statusNotification', label: 'Status Notification', type: 'toggle', desc: 'Show PWA connection status notification on touch devices.' },
-			{ key: 'client.hideTitleItems', label: 'Hidden Title Items', type: 'list', placeholder: 'item name', allowEmpty: true, desc: 'Items with hidden titles (case-insensitive).' },
-			{ key: 'client.touchReloadMinHiddenMs', label: 'Touch Reload Min Hidden (ms)', type: 'number', min: 0, desc: 'Minimum time app must be hidden before touch-device reload. Prevents unnecessary reloads when quickly switching apps.' },
+			{ key: 'client.siteName', type: 'text', allowEmpty: true },
+			{ key: 'client.statusNotification', type: 'toggle' },
+			{ key: 'client.hideTitleItems', type: 'list', allowEmpty: true },
+			{ key: 'client.touchReloadMinHiddenMs', type: 'number', min: 0 },
 		],
 	},
 	{
-		id: 'client-timing', group: 'client', title: 'TIMING',
+		id: 'client-timing', group: 'client',
 		fields: [
-			{ key: 'client.pageFadeOutMs', label: 'Page Fade Out (ms)', type: 'number', min: 0, desc: 'Section fade-out duration in ms.' },
-			{ key: 'client.pageFadeInMs', label: 'Page Fade In (ms)', type: 'number', min: 0, desc: 'Section fade-in duration in ms.' },
-			{ key: 'client.loadingDelayMs', label: 'Loading Delay (ms)', type: 'number', min: 0, desc: 'Loading label delay in ms.' },
-			{ key: 'client.minImageRefreshMs', label: 'Min Image Refresh (ms)', type: 'number', min: 0, desc: 'Minimum image refresh interval in ms.' },
-			{ key: 'client.imageLoadTimeoutMs', label: 'Image Load Timeout (ms)', type: 'number', min: 0, desc: 'Image load timeout in ms.' },
-			{ key: 'client.sliderDebounceMs', label: 'Slider Debounce (ms)', type: 'number', min: 0, desc: 'Slider debounce delay in ms.' },
-			{ key: 'client.idleAfterMs', label: 'Idle Threshold (ms)', type: 'number', min: 0, desc: 'Idle threshold in ms.' },
-			{ key: 'client.activityThrottleMs', label: 'Activity Throttle (ms)', type: 'number', min: 0, desc: 'Activity throttle window in ms.' },
-			{ key: 'client.voiceResponseTimeoutMs', label: 'Voice Timeout (ms)', type: 'number', min: 0, desc: 'Voice response timeout in ms.' },
+			{ key: 'client.pageFadeOutMs', type: 'number', min: 0 },
+			{ key: 'client.pageFadeInMs', type: 'number', min: 0 },
+			{ key: 'client.loadingDelayMs', type: 'number', min: 0 },
+			{ key: 'client.minImageRefreshMs', type: 'number', min: 0 },
+			{ key: 'client.imageLoadTimeoutMs', type: 'number', min: 0 },
+			{ key: 'client.sliderDebounceMs', type: 'number', min: 0 },
+			{ key: 'client.idleAfterMs', type: 'number', min: 0 },
+			{ key: 'client.activityThrottleMs', type: 'number', min: 0 },
+			{ key: 'client.voiceResponseTimeoutMs', type: 'number', min: 0 },
 		],
 	},
 	{
-		id: 'client-polling', group: 'client', title: 'POLLING & SEARCH',
+		id: 'client-polling', group: 'client',
 		fields: [
-			{ key: 'client.pollIntervalsMs.default.active', label: 'Poll Default Active (ms)', type: 'number', min: 1, desc: 'Default mode polling interval when active (ms).' },
-			{ key: 'client.pollIntervalsMs.default.idle', label: 'Poll Default Idle (ms)', type: 'number', min: 1, desc: 'Default mode polling interval when idle (ms).' },
-			{ key: 'client.pollIntervalsMs.slim.active', label: 'Poll Slim Active (ms)', type: 'number', min: 1, desc: 'Slim mode polling interval when active (ms).' },
-			{ key: 'client.pollIntervalsMs.slim.idle', label: 'Poll Slim Idle (ms)', type: 'number', min: 1, desc: 'Slim mode polling interval when idle (ms).' },
-			{ key: 'client.searchDebounceMs.default', label: 'Search Debounce Default (ms)', type: 'number', min: 0, desc: 'Default mode search debounce (ms).' },
-			{ key: 'client.searchDebounceMs.slim', label: 'Search Debounce Slim (ms)', type: 'number', min: 0, desc: 'Slim mode search debounce (ms).' },
-			{ key: 'client.searchStateMinIntervalMs.default', label: 'Search Refresh Default (ms)', type: 'number', min: 0, desc: 'Default mode search state refresh minimum (ms).' },
-			{ key: 'client.searchStateMinIntervalMs.slim', label: 'Search Refresh Slim (ms)', type: 'number', min: 0, desc: 'Slim mode search state refresh minimum (ms).' },
-			{ key: 'client.searchStateConcurrency.default', label: 'Search Concurrency Default', type: 'number', min: 1, desc: 'Default mode search concurrency limit.' },
-			{ key: 'client.searchStateConcurrency.slim', label: 'Search Concurrency Slim', type: 'number', min: 1, desc: 'Slim mode search concurrency limit.' },
+			{ key: 'client.pollIntervalsMs.default.active', type: 'number', min: 1 },
+			{ key: 'client.pollIntervalsMs.default.idle', type: 'number', min: 1 },
+			{ key: 'client.pollIntervalsMs.slim.active', type: 'number', min: 1 },
+			{ key: 'client.pollIntervalsMs.slim.idle', type: 'number', min: 1 },
+			{ key: 'client.searchDebounceMs.default', type: 'number', min: 0 },
+			{ key: 'client.searchDebounceMs.slim', type: 'number', min: 0 },
+			{ key: 'client.searchStateMinIntervalMs.default', type: 'number', min: 0 },
+			{ key: 'client.searchStateMinIntervalMs.slim', type: 'number', min: 0 },
+			{ key: 'client.searchStateConcurrency.default', type: 'number', min: 1 },
+			{ key: 'client.searchStateConcurrency.slim', type: 'number', min: 1 },
 		],
 	},
 	{
-		id: 'client-format', group: 'client', title: 'DATE / TIME',
+		id: 'client-format', group: 'client',
 		fields: [
-			{ key: 'client.dateFormat', label: 'Date Format', type: 'text', placeholder: 'MMM Do, YYYY', desc: 'Date format tokens: YYYY (year), MMM (short month), Do (day with ordinal).' },
-			{ key: 'client.timeFormat', label: 'Time Format', type: 'text', placeholder: 'HH:mm:ss', desc: 'Time format tokens: HH (24h), hh (12h), mm (minutes), ss (seconds), A (AM/PM).' },
+			{ key: 'client.dateFormat', type: 'text' },
+			{ key: 'client.timeFormat', type: 'text' },
 		],
 	},
 ];
@@ -3045,12 +3026,16 @@ function createAdminField(field, value) {
 	const row = document.createElement('div');
 	row.className = 'admin-config-field' + (isStacked ? ' stacked' : '');
 
+	const fieldLabel = ohLang.adminConfig.fieldLabels[field.key] || field.key;
+	const fieldDesc = ohLang.adminConfig.fieldDescs[field.key];
+	const fieldPlaceholder = ohLang.adminConfig.fieldPlaceholders[field.key];
+
 	const label = document.createElement('label');
-	label.textContent = field.label;
-	if (field.desc) {
+	label.textContent = fieldLabel;
+	if (fieldDesc) {
 		const desc = document.createElement('span');
 		desc.className = 'admin-field-desc';
-		const parts = field.desc.split('. ');
+		const parts = fieldDesc.split('. ');
 		parts.forEach((part, i) => {
 			if (i > 0) desc.appendChild(document.createElement('br'));
 			desc.appendChild(document.createTextNode(i < parts.length - 1 ? part + '.' : part));
@@ -3084,14 +3069,14 @@ function createAdminField(field, value) {
 		if (field.min !== undefined) input.min = field.min;
 		if (field.max !== undefined) input.max = field.max;
 		input.value = value !== undefined && value !== null ? value : '';
-		if (field.placeholder) input.placeholder = field.placeholder;
+		if (fieldPlaceholder) input.placeholder = fieldPlaceholder;
 		control.appendChild(input);
 	} else if (field.type === 'text') {
 		const input = document.createElement('input');
 		input.type = 'text';
 		input.dataset.key = field.key;
 		input.value = value !== undefined && value !== null ? String(value) : '';
-		if (field.placeholder) input.placeholder = field.placeholder;
+		if (fieldPlaceholder) input.placeholder = fieldPlaceholder;
 		control.appendChild(input);
 	} else if (field.type === 'secret') {
 		const MASK = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
@@ -3104,11 +3089,11 @@ function createAdminField(field, value) {
 		input.dataset.key = field.key;
 		if (isMasked) {
 			input.value = '';
-			input.placeholder = '(unchanged)';
+			input.placeholder = ohLang.adminConfig.secretPlaceholder;
 			input.dataset.masked = '1';
 		} else {
 			input.value = rawVal;
-			if (field.placeholder) input.placeholder = field.placeholder;
+			if (fieldPlaceholder) input.placeholder = fieldPlaceholder;
 		}
 		const eyeBtn = document.createElement('button');
 		eyeBtn.type = 'button';
@@ -3130,7 +3115,7 @@ function createAdminField(field, value) {
 		const textarea = document.createElement('textarea');
 		textarea.rows = 1;
 		textarea.dataset.key = field.key;
-		if (field.placeholder) textarea.placeholder = field.placeholder;
+		if (fieldPlaceholder) textarea.placeholder = fieldPlaceholder;
 		// Arrays are displayed as newline-separated; strings as-is
 		if (Array.isArray(value)) {
 			textarea.value = value.join('\n');
@@ -3145,19 +3130,19 @@ function createAdminField(field, value) {
 		wrap.dataset.key = field.key;
 		const items = Array.isArray(value) ? value : [];
 		if (items.length === 0) {
-			wrap.appendChild(createAdminListRow('', field.placeholder, wrap));
+			wrap.appendChild(createAdminListRow('', fieldPlaceholder, wrap));
 		} else {
 			for (const item of items) {
-				wrap.appendChild(createAdminListRow(item, field.placeholder, wrap));
+				wrap.appendChild(createAdminListRow(item, fieldPlaceholder, wrap));
 			}
 		}
 		const addBtn = document.createElement('button');
 		addBtn.type = 'button';
 		addBtn.className = 'admin-list-add';
-		addBtn.textContent = '+ Add';
+		addBtn.textContent = ohLang.adminConfig.listAddBtn;
 		addBtn.addEventListener('click', () => {
 			haptic();
-			const newRow = createAdminListRow('', field.placeholder, wrap);
+			const newRow = createAdminListRow('', fieldPlaceholder, wrap);
 			wrap.insertBefore(newRow, addBtn);
 			newRow.querySelector('.admin-list-input').focus();
 		});
@@ -3186,13 +3171,13 @@ function renderAdminConfigSection(section, config) {
 
 	const title = document.createElement('span');
 	title.className = 'admin-config-section-title';
-	title.textContent = section.title;
+	title.textContent = ohLang.adminConfig.sectionTitles[section.id] || section.id;
 	header.appendChild(title);
 
 	if (section.restartRequired) {
 		const badge = document.createElement('span');
 		badge.className = 'admin-restart-badge';
-		badge.textContent = 'restart required';
+		badge.textContent = ohLang.adminConfig.restartBadge;
 		header.appendChild(badge);
 	}
 
@@ -3229,7 +3214,7 @@ function ensureAdminConfigModal() {
 	wrap.innerHTML = `
 		<div class="admin-config-frame glass">
 			<div class="admin-config-header">
-				<h2>Settings</h2>
+				<h2>${ohLang.adminConfig.title}</h2>
 				<button type="button" class="admin-config-close">
 					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M18 6L6 18M6 6l12 12"/>
@@ -3239,8 +3224,8 @@ function ensureAdminConfigModal() {
 			<div class="admin-config-sections"></div>
 			<div class="admin-config-footer">
 				<div class="admin-config-status"></div>
-				<button type="button" class="admin-config-cancel">Close</button>
-				<button type="button" class="admin-config-save">Save</button>
+				<button type="button" class="admin-config-cancel">${ohLang.adminConfig.closeBtn}</button>
+				<button type="button" class="admin-config-save">${ohLang.adminConfig.saveBtn}</button>
 			</div>
 		</div>
 	`;
@@ -3286,7 +3271,7 @@ async function openAdminConfigModal() {
 		config = await resp.json();
 	} catch (e) {
 		statusEl.className = 'admin-config-status error';
-		statusEl.textContent = 'Failed to load config: ' + e.message;
+		statusEl.textContent = ohLang.adminConfig.loadFailed + e.message;
 		return;
 	}
 
@@ -3297,7 +3282,7 @@ async function openAdminConfigModal() {
 			currentGroup = section.group;
 			const groupHeader = document.createElement('div');
 			groupHeader.className = 'admin-config-group-header';
-			groupHeader.textContent = currentGroup === 'server' ? 'Server' : 'Client';
+			groupHeader.textContent = currentGroup === 'server' ? ohLang.adminConfig.groupServer : ohLang.adminConfig.groupClient;
 			sectionsEl.appendChild(groupHeader);
 		}
 		sectionsEl.appendChild(renderAdminConfigSection(section, config));
@@ -3382,7 +3367,7 @@ async function saveAdminConfig() {
 		const result = await resp.json();
 
 		if (!resp.ok) {
-			const msg = result.errors ? result.errors.join('; ') : (result.error || 'Save failed');
+			const msg = result.errors ? result.errors.join('; ') : (result.error || ohLang.adminConfig.saveFailedGeneric);
 			statusEl.className = 'admin-config-status error';
 			statusEl.textContent = msg;
 			saveBtn.disabled = false;
@@ -3391,14 +3376,14 @@ async function saveAdminConfig() {
 
 		if (result.restartRequired) {
 			statusEl.className = 'admin-config-status warning';
-			statusEl.textContent = 'Saved. Restart required for some changes.';
+			statusEl.textContent = ohLang.adminConfig.savedRestart;
 		} else {
 			statusEl.className = 'admin-config-status success';
-			statusEl.textContent = 'Saved successfully.';
+			statusEl.textContent = ohLang.adminConfig.savedOk;
 		}
 	} catch (e) {
 		statusEl.className = 'admin-config-status error';
-		statusEl.textContent = 'Save failed: ' + e.message;
+		statusEl.textContent = ohLang.adminConfig.saveFailed + e.message;
 	}
 
 	saveBtn.disabled = false;
