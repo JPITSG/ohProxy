@@ -3987,26 +3987,6 @@ async function calculateGroupState(groupName) {
 	}
 }
 
-// Apply group state overrides to item changes using cached values (for WebSocket broadcasts)
-function applyGroupStateToItems(items) {
-	if (!items || !items.length || !liveConfig.groupItems || !liveConfig.groupItems.length) {
-		return items;
-	}
-	const groupSet = new Set(liveConfig.groupItems);
-	const result = [];
-	for (const item of items) {
-		if (item && item.name && groupSet.has(item.name)) {
-			const cached = groupItemCalculatedStates.get(item.name);
-			if (cached !== undefined) {
-				result.push({ ...item, state: cached });
-				continue;
-			}
-		}
-		result.push(item);
-	}
-	return result;
-}
-
 // Apply group state overrides to widgets in a page
 async function applyGroupStateOverrides(page) {
 	if (!page || !liveConfig.groupItems || !liveConfig.groupItems.length) {

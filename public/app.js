@@ -550,21 +550,6 @@ function cancelSearchStateRequests() {
 	state.searchStateInFlight = false;
 }
 
-function setResumeResetUi(active) {
-	document.documentElement.classList.toggle('resume-reset', active);
-	if (active && state.rootPageUrl) {
-		// Navigate to home without reload (keeps WS connected for focus tracking)
-		if (els.search) els.search.value = '';
-		state.filter = '';
-		state.stack = [];
-		state.pageUrl = state.rootPageUrl;
-		state.pageTitle = state.rootPageTitle || state.pageTitle;
-		window.scrollTo(0, 0);
-		updateNavButtons();
-		syncHistory(true);
-	}
-}
-
 function isTouchDevice() {
 	return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
@@ -719,23 +704,6 @@ function showResumeSpinner(show) {
 	document.body.classList.toggle('resume-spinner-active', show);
 }
 
-function waitForConnection(timeoutMs = 10000) {
-	return new Promise((resolve) => {
-		const startTime = Date.now();
-		const check = () => {
-			if (wsConnected || state.connectionOk) {
-				resolve(true);
-				return;
-			}
-			if (timeoutMs > 0 && Date.now() - startTime > timeoutMs) {
-				resolve(false);
-				return;
-			}
-			setTimeout(check, 50);
-		};
-		check();
-	});
-}
 
 function isHomePage() {
 	return state.rootPageUrl && state.pageUrl && state.rootPageUrl === state.pageUrl;
@@ -1039,13 +1007,6 @@ function updatePauseButton() {
 	const playIcon = els.pause.querySelector('.play-icon');
 	if (pauseIcon) pauseIcon.classList.toggle('hidden', state.isPaused);
 	if (playIcon) playIcon.classList.toggle('hidden', !state.isPaused);
-}
-
-function formatAge(ms) {
-	if (!Number.isFinite(ms) || ms < 1000) return 'just now';
-	if (ms < 60000) return `${Math.round(ms / 1000)}s ago`;
-	if (ms < 3600000) return `${Math.round(ms / 60000)}m ago`;
-	return `${Math.round(ms / 3600000)}h ago`;
 }
 
 function updateStatusBar() {
@@ -1530,10 +1491,6 @@ function resolveColorToRgb(color) {
 
 function isGreenishRgb(rgb) {
 	return !!rgb && rgb.g >= rgb.r && rgb.g >= rgb.b;
-}
-
-function isGreenish(color) {
-	return isGreenishRgb(resolveColorToRgb(color));
 }
 
 function colorToRgba(color, alpha) {
@@ -3067,16 +3024,6 @@ async function fetchJson(url) {
 		// show a useful error (no silent failures).
 		throw new Error(`Non-JSON response from ${url} (did you enable REST + ?type=json?)`);
 	}
-}
-
-function normalizeItems(data) {
-	if (!data) return [];
-	if (Array.isArray(data)) return data;
-	if (Array.isArray(data?.items)) return data.items;
-	if (Array.isArray(data?.item)) return data.item;
-	if (Array.isArray(data?.items?.item)) return data.items.item;
-	if (Array.isArray(data?.item?.item)) return data.item.item;
-	return [];
 }
 
 async function refreshSearchStates(matches) {
