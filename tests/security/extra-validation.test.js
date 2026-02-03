@@ -239,7 +239,7 @@ function createExtraValidationTestApp() {
 		if (!isPlainObject(req.body)) {
 			return res.status(400).json({ error: 'Invalid request body' });
 		}
-		const { widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, sectionGlow } = req.body;
+		const { widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds } = req.body;
 		if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200 || hasAnyControlChars(widgetId)) {
 			return res.status(400).json({ error: 'Missing or invalid widgetId' });
 		}
@@ -316,10 +316,6 @@ function createExtraValidationTestApp() {
 			} else if (!Number.isFinite(parsed)) {
 				return res.status(400).json({ error: 'proxyCacheSeconds must be empty or an integer 0-86400' });
 			}
-		}
-
-		if (sectionGlow !== undefined && typeof sectionGlow !== 'boolean') {
-			return res.status(400).json({ error: 'sectionGlow must be a boolean' });
 		}
 
 		return res.json({ ok: true, widgetId });
@@ -746,8 +742,7 @@ describe('Extra Validation Coverage', () => {
 			{ name: 'rejects defaultMuted non-boolean', body: { widgetId: 'ok', rules: [], defaultMuted: 'yes' }, status: 400, auth: adminAuthHeader },
 			{ name: 'rejects iframeHeight invalid', body: { widgetId: 'ok', rules: [], iframeHeight: '10px' }, status: 400, auth: adminAuthHeader },
 			{ name: 'rejects proxyCacheSeconds invalid', body: { widgetId: 'ok', rules: [], proxyCacheSeconds: 86401 }, status: 400, auth: adminAuthHeader },
-			{ name: 'rejects sectionGlow non-boolean', body: { widgetId: 'ok', rules: [], sectionGlow: 'on' }, status: 400, auth: adminAuthHeader },
-			{ name: 'accepts valid optional fields', body: { widgetId: 'ok', rules: [], defaultMuted: true, iframeHeight: '240', proxyCacheSeconds: '60', sectionGlow: false }, status: 200, auth: adminAuthHeader },
+			{ name: 'accepts valid optional fields', body: { widgetId: 'ok', rules: [], defaultMuted: true, iframeHeight: '240', proxyCacheSeconds: '60' }, status: 200, auth: adminAuthHeader },
 			{ name: 'accepts wildcard rule without value', body: { widgetId: 'ok', rules: [{ operator: '*', color: 'green' }] }, status: 200, auth: adminAuthHeader },
 		];
 

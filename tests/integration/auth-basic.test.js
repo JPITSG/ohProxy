@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 
-const { basicAuthHeader, TEST_USERS, TEST_COOKIE_KEY } = require('../test-helpers');
+const { basicAuthHeader, TEST_USERS, TEST_COOKIE_KEY, base64UrlEncode } = require('../test-helpers');
 
 // Create a minimal test server that replicates auth behavior
 function createTestApp(config = {}) {
@@ -22,14 +22,6 @@ function createTestApp(config = {}) {
 
 	function safeText(value) {
 		return value === null || value === undefined ? '' : String(value);
-	}
-
-	function base64UrlEncode(value) {
-		return Buffer.from(String(value), 'utf8')
-			.toString('base64')
-			.replace(/\+/g, '-')
-			.replace(/\//g, '_')
-			.replace(/=+$/g, '');
 	}
 
 	function base64UrlDecode(value) {

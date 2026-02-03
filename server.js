@@ -3829,13 +3829,6 @@ function widgetSnapshot(widget) {
 		itemName: safeText(widget?.item?.name || widget?.itemName || ''),
 		label: safeText(widget?.label || widget?.item?.label || widget?.item?.name || ''),
 		state: safeText(widget?.item?.state ?? widget?.state ?? ''),
-		valuecolor: safeText(
-			widget?.valuecolor ||
-			widget?.valueColor ||
-			widget?.item?.valuecolor ||
-			widget?.item?.valueColor ||
-			''
-		),
 		icon: safeText(widget?.icon || widget?.item?.icon || widget?.item?.category || ''),
 		mappings: mappingSig,
 		mapping: mappingSig ? normalizeMappings(widgetMapping) : [],
@@ -3868,7 +3861,6 @@ function buildSnapshot(page) {
 			key: e.key,
 			label: e.label,
 			state: e.state,
-			valuecolor: e.valuecolor,
 			icon: e.icon,
 			mappings: e.mappings,
 		})),
@@ -4109,7 +4101,6 @@ async function computeDeltaResponse(url, since) {
 		if (
 			prev.label !== current.label ||
 			prev.state !== current.state ||
-			prev.valuecolor !== current.valuecolor ||
 			prev.icon !== current.icon ||
 			prev.mappings !== current.mappings
 		) {
@@ -5113,7 +5104,6 @@ app.get('/config.js', (req, res) => {
 		widgetVideoConfigs: sessions.getAllVideoConfigs(),
 		widgetIframeConfigs: sessions.getAllIframeConfigs(),
 		widgetProxyCacheConfigs: sessions.getAllProxyCacheConfigs(),
-		widgetSectionGlowConfigs: sessions.getAllSectionGlowConfigs(),
 		userRole: userRole,
 		trackGps: trackGps,
 		groupItems: liveConfig.groupItems || [],
@@ -5405,7 +5395,7 @@ app.post('/api/card-config', jsonParserLarge, (req, res) => {
 		return;
 	}
 
-	const { widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, sectionGlow } = req.body;
+	const { widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds } = req.body;
 	if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200 || hasAnyControlChars(widgetId)) {
 		res.status(400).json({ error: 'Missing or invalid widgetId' });
 		return;
@@ -5510,12 +5500,6 @@ app.post('/api/card-config', jsonParserLarge, (req, res) => {
 		}
 	}
 
-	// Validate sectionGlow if provided
-	if (sectionGlow !== undefined && typeof sectionGlow !== 'boolean') {
-		res.status(400).json({ error: 'sectionGlow must be a boolean' });
-		return;
-	}
-
 	// Save to database
 	try {
 		if (rules !== undefined) {
@@ -5533,10 +5517,7 @@ app.post('/api/card-config', jsonParserLarge, (req, res) => {
 		if (proxyCacheSeconds !== undefined) {
 			sessions.setProxyCacheConfig(widgetId, cacheNum);
 		}
-		if (sectionGlow !== undefined) {
-			sessions.setSectionGlowConfig(widgetId, sectionGlow);
-		}
-		res.json({ ok: true, widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, sectionGlow });
+		res.json({ ok: true, widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds });
 	} catch (err) {
 		logMessage(`Failed to save card config: ${err.message || err}`, 'error');
 		res.status(500).json({ error: 'Failed to save config' });
@@ -6341,7 +6322,6 @@ app.use('/rest', async (req, res, next) => {
 		if (
 			prev.label !== current.label ||
 			prev.state !== current.state ||
-			prev.valuecolor !== current.valuecolor ||
 			prev.icon !== current.icon ||
 			prev.mappings !== current.mappings
 		) {

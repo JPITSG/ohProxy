@@ -16,18 +16,10 @@ const http = require('http');
 const express = require('express');
 const crypto = require('crypto');
 
-const { TEST_USERS, TEST_COOKIE_KEY } = require('../test-helpers');
+const { TEST_USERS, TEST_COOKIE_KEY, base64UrlEncode } = require('../test-helpers');
 
 function safeText(value) {
 	return value === null || value === undefined ? '' : String(value);
-}
-
-function base64UrlEncode(value) {
-	return Buffer.from(String(value), 'utf8')
-		.toString('base64')
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=+$/g, '');
 }
 
 function base64UrlDecode(value) {

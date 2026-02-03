@@ -65,6 +65,7 @@ module.exports = {
 	TEST_USERS,
 	TEST_COOKIE_KEY,
 	basicAuthHeader,
+	base64UrlEncode,
 	generateTestAuthCookie,
 	cleanupTestDb,
 	wait,

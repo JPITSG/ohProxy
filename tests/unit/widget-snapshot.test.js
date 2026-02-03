@@ -61,13 +61,6 @@ function widgetSnapshot(widget) {
 		itemName: safeText(widget?.item?.name || widget?.itemName || ''),
 		label: safeText(widget?.label || widget?.item?.label || widget?.item?.name || ''),
 		state: safeText(widget?.item?.state ?? widget?.state ?? ''),
-		valuecolor: safeText(
-			widget?.valuecolor ||
-			widget?.valueColor ||
-			widget?.item?.valuecolor ||
-			widget?.item?.valueColor ||
-			''
-		),
 		icon: safeText(widget?.icon || widget?.item?.icon || widget?.item?.category || ''),
 	};
 }
@@ -134,7 +127,6 @@ function buildSnapshot(page) {
 			key: e.key,
 			label: e.label,
 			state: e.state,
-			valuecolor: e.valuecolor,
 			icon: e.icon,
 		})),
 	}));
@@ -290,11 +282,6 @@ describe('Widget Snapshot Helpers', () => {
 			assert.strictEqual(snap.state, 'OFF');
 		});
 
-		it('uses valuecolor fallbacks', () => {
-			const snap = widgetSnapshot({ item: { valueColor: 'red' } });
-			assert.strictEqual(snap.valuecolor, 'red');
-		});
-
 		it('uses icon fallbacks', () => {
 			const snap = widgetSnapshot({ item: { category: 'light' } });
 			assert.strictEqual(snap.icon, 'light');
@@ -304,7 +291,6 @@ describe('Widget Snapshot Helpers', () => {
 			const snap = widgetSnapshot({});
 			assert.strictEqual(snap.label, '');
 			assert.strictEqual(snap.state, '');
-			assert.strictEqual(snap.valuecolor, '');
 			assert.strictEqual(snap.icon, '');
 		});
 	});

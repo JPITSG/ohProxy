@@ -6,7 +6,7 @@ const http = require('http');
 const express = require('express');
 const crypto = require('crypto');
 
-const { basicAuthHeader, TEST_USERS, TEST_COOKIE_KEY, generateTestAuthCookie } = require('../test-helpers');
+const { basicAuthHeader, TEST_USERS, TEST_COOKIE_KEY, base64UrlEncode, generateTestAuthCookie } = require('../test-helpers');
 
 // Create access control test app
 function createAccessControlApp(config = {}) {
@@ -80,14 +80,6 @@ function createAccessControlApp(config = {}) {
 		const idx = decoded.indexOf(':');
 		if (idx === -1) return [decoded, ''];
 		return [decoded.slice(0, idx), decoded.slice(idx + 1)];
-	}
-
-	function base64UrlEncode(value) {
-		return Buffer.from(String(value), 'utf8')
-			.toString('base64')
-			.replace(/\+/g, '-')
-			.replace(/\//g, '_')
-			.replace(/=+$/g, '');
 	}
 
 	function base64UrlDecode(value) {
