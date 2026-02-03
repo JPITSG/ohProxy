@@ -3166,6 +3166,9 @@ function renderAdminConfigSection(section, config) {
 		const wasCollapsed = sectionEl.classList.toggle('collapsed');
 		if (!wasCollapsed) {
 			sectionEl.querySelectorAll('textarea').forEach(autoResizeTextarea);
+			requestAnimationFrame(() => {
+				sectionEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+			});
 		}
 	};
 
