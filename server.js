@@ -868,14 +868,6 @@ function validateConfig() {
 		ensureNumber(CLIENT_CONFIG.idleAfterMs, 'client.idleAfterMs', { min: 0 }, errors);
 		ensureNumber(CLIENT_CONFIG.activityThrottleMs, 'client.activityThrottleMs', { min: 0 }, errors);
 		ensureBoolean(CLIENT_CONFIG.statusNotification, 'client.statusNotification', errors);
-
-		if (ensureArray(CLIENT_CONFIG.hideTitleItems, 'client.hideTitleItems', { allowEmpty: true }, errors)) {
-			CLIENT_CONFIG.hideTitleItems.forEach((entry, index) => {
-				if (typeof entry !== 'string' || entry.trim() === '') {
-					errors.push(`client.hideTitleItems[${index}] must be a string`);
-				}
-			});
-		}
 	}
 
 	return errors;
@@ -1197,17 +1189,6 @@ function validateAdminConfig(config) {
 		if (isPlainObject(c.searchStateConcurrency)) {
 			ensureNumber(c.searchStateConcurrency.default, 'client.searchStateConcurrency.default', { min: 1 }, errors);
 			ensureNumber(c.searchStateConcurrency.slim, 'client.searchStateConcurrency.slim', { min: 1 }, errors);
-		}
-		if (Array.isArray(c.hideTitleItems)) {
-			if (c.hideTitleItems.length > 100) {
-				errors.push(`client.hideTitleItems must have at most 100 items but has ${c.hideTitleItems.length}`);
-			} else {
-				c.hideTitleItems.forEach((entry, index) => {
-					if (typeof entry !== 'string' || entry.trim() === '') {
-						errors.push(`client.hideTitleItems[${index}] must be a non-empty string`);
-					}
-				});
-			}
 		}
 	}
 

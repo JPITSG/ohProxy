@@ -308,8 +308,6 @@ module.exports = {
 		activityThrottleMs: 250,
 		// Show PWA connection status notification on touch devices (true/false).
 		statusNotification: true,
-		// Items with hidden titles (item names; case-insensitive; empty allowed).
-		hideTitleItems: [],
 		// Minimum time app must be hidden before touch-device reload (ms; >=0).
 		// Prevents unnecessary reloads when quickly switching apps.
 		touchReloadMinHiddenMs: 60000,

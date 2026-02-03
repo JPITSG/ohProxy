@@ -469,12 +469,6 @@ const IDLE_AFTER_MS = configNumber(CLIENT_CONFIG.idleAfterMs, 60000);
 const ACTIVITY_THROTTLE_MS = configNumber(CLIENT_CONFIG.activityThrottleMs, 250);
 const CHART_HASH_CHECK_MS = 30000; // Check chart hashes every 30 seconds
 const HOME_CACHE_KEY = 'ohProxyHomeSnapshot';
-const HIDE_TITLE_ITEMS = Array.isArray(CLIENT_CONFIG.hideTitleItems) ? CLIENT_CONFIG.hideTitleItems : [];
-const HIDE_TITLE_SET = new Set(
-	HIDE_TITLE_ITEMS
-		.map((name) => String(name).trim().toLowerCase())
-		.filter(Boolean)
-);
 const MAX_ICON_CACHE = Math.max(0, Math.round(configNumber(CLIENT_CONFIG.maxIconCache, 500)));
 const MAX_CHART_HASHES = Math.max(0, Math.round(configNumber(CLIENT_CONFIG.maxChartHashes, 500)));
 
@@ -1408,11 +1402,6 @@ function escapeHtml(v) {
 		.replace(/>/g, '&gt;')
 		.replace(/"/g, '&quot;')
 		.replace(/'/g, '&#39;');
-}
-
-function shouldHideTitle(itemName) {
-	const key = safeText(itemName).trim().toLowerCase();
-	return key ? HIDE_TITLE_SET.has(key) : false;
 }
 
 function connectionStatusInfo() {
@@ -2842,7 +2831,6 @@ const ADMIN_CONFIG_SCHEMA = [
 		fields: [
 			{ key: 'client.siteName', type: 'text', allowEmpty: true },
 			{ key: 'client.statusNotification', type: 'toggle' },
-			{ key: 'client.hideTitleItems', type: 'list', allowEmpty: true },
 			{ key: 'client.touchReloadMinHiddenMs', type: 'number', min: 0 },
 		],
 	},
@@ -4555,7 +4543,6 @@ function getWidgetRenderInfo(w, afterImage) {
 	const st = widgetState(w);
 	const icon = widgetIconName(w);
 	const itemName = safeText(w?.item?.name || w?.itemName || '');
-	const shouldHide = shouldHideTitle(itemName || w?.itemName);
 	// Support both OH 1.x 'mapping' and OH 3.x 'mappings'
 	const mapping = normalizeMapping(w?.mappings || w?.mapping);
 	const pageLink = widgetPageLink(w);
@@ -4590,7 +4577,6 @@ function getWidgetRenderInfo(w, afterImage) {
 		st,
 		icon,
 		itemName,
-		shouldHide ? 'hide' : '',
 		pageLink || '',
 		mappingSig,
 		mediaUrl,
@@ -4622,7 +4608,6 @@ function getWidgetRenderInfo(w, afterImage) {
 		st,
 		icon,
 		itemName,
-		shouldHide,
 		mapping,
 		pageLink,
 		labelParts,
@@ -4669,7 +4654,6 @@ function updateCard(card, w, afterImage, info) {
 		st,
 		icon,
 		itemName,
-		shouldHide,
 		mapping,
 		pageLink,
 		labelParts,
@@ -4704,7 +4688,6 @@ function updateCard(card, w, afterImage, info) {
 		'video-card',
 		'menu-open',
 		'cursor-pointer',
-		'title-hidden',
 		'has-meta',
 		'switch-many',
 		'switch-single'
@@ -4759,12 +4742,7 @@ function updateCard(card, w, afterImage, info) {
 		}
 	}
 
-	if (shouldHide) {
-		card.classList.add('title-hidden');
-		titleEl.textContent = '';
-	} else {
-		titleEl.textContent = labelParts.title;
-	}
+	titleEl.textContent = labelParts.title;
 	if (isText || isGroup) {
 		crossfadeText(metaEl, labelParts.state);
 	} else if (!isSelection && !isSwitchType) {
