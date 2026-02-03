@@ -33,7 +33,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+newSettings\s*=\s*req\.body\s*;/,
 			/const\s+body\s*=\s*req\.body\s*;/,
 			/const\s+rawWidgetId\s*=\s*req\.params\.widgetId\s*;/,
-			/const\s+\{\s*widgetId,\s*rules,\s*visibility,\s*defaultMuted,\s*iframeHeight,\s*proxyCacheSeconds,\s*sectionGlow\s*\}\s*=\s*req\.body\s*;/,
+			/const\s+\{\s*widgetId,\s*rules,\s*visibility,\s*defaultMuted,\s*iframeHeight,\s*proxyCacheSeconds\s*\}\s*=\s*req\.body\s*;/,
 			/const\s+\{\s*command\s*\}\s*=\s*req\.body\s*;/,
 			/const\s+rawTheme\s*=\s*req\.query\?\.theme\s*;/,
 			/const\s+rawRoot\s*=\s*typeof\s+req\.query\?\.root\s*===\s*'string'\s*\?\s*req\.query\.root\s*:\s*''\s*;/,

@@ -1431,7 +1431,7 @@ body.theme-light .card-config-frame {
 }
 /* History Section */
 .history-section { display: flex; flex-direction: column; gap: 8px; }
-.history-entries { display: flex; flex-direction: column; }
+.history-entries { display: flex; flex-direction: column; margin-top: -6px; }
 .history-entry {
 	display: flex;
 	align-items: center;
@@ -1449,6 +1449,18 @@ body.theme-light .card-config-frame {
 	margin-left: 12px;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+.history-glow-dot {
+	width: .4rem;
+	height: .4rem;
+	border-radius: 999px;
+	background: var(--glow-solid);
+	box-shadow: 0 0 4px var(--glow-color);
+	flex-shrink: 0;
+	margin-left: auto;
+}
+.history-glow-dot + .history-state {
+	margin-left: 6px;
 }
 .history-loading, .history-empty {
 	font-size: .75rem;
@@ -1712,13 +1724,6 @@ body.card-config-open {
 
 /* Visibility Section */
 .visibility-section {
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-}
-
-/* Section Glow Section */
-.section-glow-section {
 	display: flex;
 	flex-direction: column;
 	gap: 8px;

@@ -359,15 +359,6 @@ const widgetVisibilityMap = new Map();
 	}
 })();
 
-// Widget section glow configs: Set of widgetIds (sections) with glow enabled
-const widgetSectionGlowSet = new Set();
-(function initWidgetSectionGlowConfigs() {
-	const configs = Array.isArray(OH_CONFIG.widgetSectionGlowConfigs) ? OH_CONFIG.widgetSectionGlowConfigs : [];
-	for (const widgetId of configs) {
-		if (widgetId) widgetSectionGlowSet.add(widgetId);
-	}
-})();
-
 // Widget video configs: Map from widgetId to {defaultMuted: boolean}
 const widgetVideoConfigMap = new Map();
 (function initWidgetVideoConfigs() {
@@ -1472,10 +1463,6 @@ function connectionStatusInfo() {
 	return { label: 'Connected', isError: false };
 }
 
-function normalizeFrameName(name) {
-	return safeText(name).trim().toLowerCase();
-}
-
 function stripLeadingSlash(path) {
 	if (!path) return path;
 	return path[0] === '/' ? path.slice(1) : path;
@@ -1567,39 +1554,6 @@ function colorToRgba(color, alpha) {
 	return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 }
 
-function isGlowContext(widget) {
-	if (!widgetSectionGlowSet.size) return false;
-	const candidates = getGlowCandidates(widget);
-	for (const candidate of candidates) {
-		if (widgetSectionGlowSet.has(candidate)) return true;
-	}
-	return false;
-}
-
-function getGlowCandidates(widget) {
-	const candidates = [];
-	const frame = safeText(widget?.__frame || '');
-	if (frame) candidates.push(normalizeFrameName(frame));
-	const path = Array.isArray(widget?.__path) ? widget.__path : [];
-	// When searching, include all path elements so glow works for widgets
-	// nested under a glow-enabled section (e.g., "Cameras > Online > Battery Status")
-	if (state.filter.trim() && path.length) {
-		for (const seg of path) {
-			candidates.push(normalizeFrameName(seg));
-		}
-	} else if (path.length) {
-		candidates.push(normalizeFrameName(path[path.length - 1]));
-	}
-
-	if (!state.filter.trim()) {
-		const parts = splitLabelState(state.pageTitle || '');
-		const label = parts.title || safeText(state.pageTitle || '');
-		if (label) candidates.push(normalizeFrameName(label));
-	}
-
-	return candidates.filter(Boolean);
-}
-
 function applyGlowStyle(card, color) {
 	const solid = colorToRgba(color, 1) || color;
 	const glow = colorToRgba(color, 0.6) || color;
@@ -1619,11 +1573,6 @@ function applyGlowStyle(card, color) {
 	}
 	dot.style.setProperty('--glow-solid', solid);
 	dot.style.setProperty('--glow-color', glow);
-}
-
-function applyGlow(card, color, widget) {
-	if (!isGlowContext(widget)) return;
-	applyGlowStyle(card, color);
 }
 
 // Per-widget glow rule matching
@@ -2095,10 +2044,10 @@ function pushImageViewerHistory(url, refreshMs) {
 let cardConfigModal = null;
 let cardConfigWidgetKey = '';
 let cardConfigWidgetLabel = '';
-let cardConfigSectionLabel = ''; // Normalized section label for section glow
 let historyOffsetStack = [];
 let historyMappings = [];
 let historyCursorStack = [];
+let historyGlowColor = null;
 
 function ensureCardConfigModal() {
 	if (cardConfigModal) return;
@@ -2148,19 +2097,6 @@ function ensureCardConfigModal() {
 						<label class="item-config-radio">
 							<input type="radio" name="visibility" value="admin">
 							<span>Admin</span>
-						</label>
-					</div>
-				</div>
-				<div class="section-glow-section" style="display:none;">
-					<div class="item-config-section-header">RESPECT OPENHAB GLOW RULES</div>
-					<div class="item-config-visibility">
-						<label class="item-config-radio">
-							<input type="radio" name="sectionGlow" value="no" checked>
-							<span>No</span>
-						</label>
-						<label class="item-config-radio">
-							<input type="radio" name="sectionGlow" value="yes">
-							<span>Yes</span>
 						</label>
 					</div>
 				</div>
@@ -2394,23 +2330,9 @@ function openCardConfigModal(widget, card) {
 		}
 	}
 
-	// Show/hide section glow option for section headers (__section widgets)
-	const isSection = !!widget?.__section;
-	const sectionGlowSection = cardConfigModal.querySelector('.section-glow-section');
-	cardConfigSectionLabel = ''; // Reset
-	if (sectionGlowSection) {
-		sectionGlowSection.style.display = isSection ? '' : 'none';
-		if (isSection) {
-			// Use normalized section label for lookup and storage
-			cardConfigSectionLabel = normalizeFrameName(widget?.label || '');
-			const isEnabled = widgetSectionGlowSet.has(cardConfigSectionLabel);
-			const glowRadio = cardConfigModal.querySelector(`input[name="sectionGlow"][value="${isEnabled ? 'yes' : 'no'}"]`);
-			if (glowRadio) glowRadio.checked = true;
-		}
-	}
-
 	// Check if widget should show glow rules
 	// Any widget with subtext (state in label like "Title [State]") can have glow rules
+	const isSection = !!widget?.__section;
 	const labelParts = splitLabelState(widget?.label || '');
 	const hasSubtext = !!labelParts.state;
 	const glowRulesSection = cardConfigModal.querySelector('.glow-rules-section');
@@ -2429,6 +2351,14 @@ function openCardConfigModal(widget, card) {
 	} else {
 		// Start with one empty row
 		rulesContainer.appendChild(createGlowRuleRow());
+	}
+
+	// Build glow resolver for historical values
+	const glowRules = widgetGlowRulesMap.get(wKey) || null;
+	if (glowRules && glowRules.length) {
+		historyGlowColor = (rawState) => getWidgetGlowOverride(wKey, rawState);
+	} else {
+		historyGlowColor = null;
 	}
 
 	// Show/hide history section for items with persistence
@@ -2497,6 +2427,20 @@ async function loadHistoryEntries(itemName, offset) {
 			const rawState = entry.state;
 			stateSpan.textContent = mapped ? (mapped.label || mapped.command) : (/^[A-Z][A-Z_]+$/.test(rawState) ? rawState.split('_').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ') : rawState);
 			row.appendChild(timeSpan);
+			if (historyGlowColor) {
+				const color = historyGlowColor(rawState);
+				if (color) {
+					const solid = colorToRgba(color, 1);
+					const glow = colorToRgba(color, 0.6);
+					if (solid && glow) {
+						const dot = document.createElement('span');
+						dot.className = 'history-glow-dot';
+						dot.style.setProperty('--glow-solid', solid);
+						dot.style.setProperty('--glow-color', glow);
+						row.appendChild(dot);
+					}
+				}
+			}
 			row.appendChild(stateSpan);
 			frag.appendChild(row);
 		}
@@ -2569,6 +2513,20 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 			const displayState = /^[A-Z][A-Z_]+$/.test(rawState) ? rawState.split('_').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ') : rawState;
 			stateSpan.textContent = (entry.member || '') + ' \u00B7 ' + displayState;
 			row.appendChild(timeSpan);
+			if (historyGlowColor) {
+				const color = historyGlowColor(rawState);
+				if (color) {
+					const solid = colorToRgba(color, 1);
+					const glow = colorToRgba(color, 0.6);
+					if (solid && glow) {
+						const dot = document.createElement('span');
+						dot.className = 'history-glow-dot';
+						dot.style.setProperty('--glow-solid', solid);
+						dot.style.setProperty('--glow-color', glow);
+						row.appendChild(dot);
+					}
+				}
+			}
 			row.appendChild(stateSpan);
 			frag.appendChild(row);
 		}
@@ -2618,6 +2576,7 @@ function closeCardConfigModal() {
 	document.body.classList.remove('card-config-open');
 	cardConfigWidgetKey = '';
 	cardConfigWidgetLabel = '';
+	historyGlowColor = null;
 }
 
 async function saveCardConfig() {
@@ -2655,14 +2614,6 @@ async function saveCardConfig() {
 		proxyCacheSeconds = rawValue;
 	}
 
-	// Get sectionGlow for section links (only if section is visible)
-	const sectionGlowSection = cardConfigModal.querySelector('.section-glow-section');
-	let sectionGlow;
-	if (sectionGlowSection && sectionGlowSection.style.display !== 'none') {
-		const glowRadio = cardConfigModal.querySelector('input[name="sectionGlow"]:checked');
-		sectionGlow = glowRadio?.value === 'yes';
-	}
-
 	// Get glow rules
 	const rows = cardConfigModal.querySelectorAll('.glow-rule-row');
 	const rules = [];
@@ -2686,15 +2637,6 @@ async function saveCardConfig() {
 			body: JSON.stringify({ widgetId: cardConfigWidgetKey, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds }),
 		});
 		if (!resp.ok) return;
-
-		// Save section glow separately (uses section label as identifier)
-		if (sectionGlow !== undefined && cardConfigSectionLabel) {
-			await fetch('/api/card-config', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ widgetId: cardConfigSectionLabel, sectionGlow }),
-			});
-		}
 
 		// Update local glow rules map
 		if (rules.length) {
@@ -2739,15 +2681,6 @@ async function saveCardConfig() {
 				widgetProxyCacheConfigMap.delete(cardConfigWidgetKey);
 			} else {
 				widgetProxyCacheConfigMap.set(cardConfigWidgetKey, { widgetId: cardConfigWidgetKey, cacheSeconds: cacheNum });
-			}
-		}
-
-		// Update local section glow set (uses section label as key)
-		if (sectionGlow !== undefined && cardConfigSectionLabel) {
-			if (sectionGlow) {
-				widgetSectionGlowSet.add(cardConfigSectionLabel);
-			} else {
-				widgetSectionGlowSet.delete(cardConfigSectionLabel);
 			}
 		}
 
@@ -3492,13 +3425,6 @@ function applyDeltaChanges(changes) {
 			for (const w of targets) {
 				if (change.label !== undefined) w.label = change.label;
 				if (change.state !== undefined) updateWidgetState(w, change.state);
-				if (change.valuecolor !== undefined) {
-					w.valuecolor = change.valuecolor;
-					if (w.item) {
-						w.item.valuecolor = change.valuecolor;
-						w.item.valueColor = change.valuecolor;
-					}
-				}
 				if (change.icon !== undefined) {
 					w.icon = change.icon;
 					if (w.item) w.item.icon = change.icon;
@@ -3542,13 +3468,6 @@ function syncDeltaToCache(pageUrl, changes) {
 				if (change.state !== undefined) {
 					if (w.item) w.item.state = change.state;
 					w.state = change.state;
-				}
-				if (change.valuecolor !== undefined) {
-					w.valuecolor = change.valuecolor;
-					if (w.item) {
-						w.item.valuecolor = change.valuecolor;
-						w.item.valueColor = change.valuecolor;
-					}
 				}
 				if (change.icon !== undefined) {
 					w.icon = change.icon;
@@ -3950,13 +3869,6 @@ function getWidgetRenderInfo(w, afterImage) {
 	const label = isImage || isVideo || isChart ? safeText(w?.label || '') : widgetLabel(w);
 	const st = widgetState(w);
 	const icon = widgetIconName(w);
-	const valueColor = safeText(
-		w?.valuecolor ||
-		w?.valueColor ||
-		w?.item?.valuecolor ||
-		w?.item?.valueColor ||
-		''
-	);
 	const itemName = safeText(w?.item?.name || w?.itemName || '');
 	const shouldHide = shouldHideTitle(itemName || w?.itemName);
 	// Support both OH 1.x 'mapping' and OH 3.x 'mappings'
@@ -3992,7 +3904,6 @@ function getWidgetRenderInfo(w, afterImage) {
 		label,
 		st,
 		icon,
-		valueColor,
 		itemName,
 		shouldHide ? 'hide' : '',
 		pageLink || '',
@@ -4025,7 +3936,6 @@ function getWidgetRenderInfo(w, afterImage) {
 		label,
 		st,
 		icon,
-		valueColor,
 		itemName,
 		shouldHide,
 		mapping,
@@ -4073,7 +3983,6 @@ function updateCard(card, w, afterImage, info) {
 		label,
 		st,
 		icon,
-		valueColor,
 		itemName,
 		shouldHide,
 		mapping,
@@ -4178,13 +4087,10 @@ function updateCard(card, w, afterImage, info) {
 		metaEl.textContent = labelParts.state;
 	}
 	if (labelParts.state && !isSelection && !isSwitchType) card.classList.add('has-meta');
-	// Apply glow: custom rules override valueColor glow
-	const wKey = widgetKey(w);
-	const customGlowColor = getWidgetGlowOverride(wKey, labelParts.state || st);
-	if (customGlowColor) {
-		applyGlowStyle(card, customGlowColor);
-	} else if (valueColor) {
-		applyGlow(card, valueColor, w);
+	// Apply glow from ohProxy rules
+	const glowColor = getWidgetGlowOverride(widgetKey(w), labelParts.state || st);
+	if (glowColor) {
+		applyGlowStyle(card, glowColor);
 	}
 
 	if (isImage || isChart || isWebview || isVideo) {
