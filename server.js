@@ -6809,6 +6809,17 @@ app.post('/logout', urlencodedParserSmall, (req, res) => {
 	res.redirect('/');
 });
 
+app.post('/api/logout', (req, res) => {
+	clearAuthCookie(res);
+	clearSessionCookie(res);
+	if (liveConfig.authMode === 'basic') {
+		res.setHeader('WWW-Authenticate', `Basic realm="${liveConfig.authRealm}"`);
+		res.status(401).json({ ok: true, basicLogout: true });
+	} else {
+		res.json({ ok: true });
+	}
+});
+
 app.get(/^\/app\.v[\w.-]+\.js$/i, (req, res) => {
 	sendVersionedAsset(res, APP_BUNDLE_PATH, 'application/javascript; charset=utf-8');
 });

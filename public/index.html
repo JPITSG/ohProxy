@@ -40,6 +40,7 @@
 				if (metaApple) metaApple.setAttribute('content', mode === 'light' ? 'default' : 'black');
 				const manifest = document.querySelector('link[rel="manifest"]');
 				if (manifest) manifest.setAttribute('href', `manifest.webmanifest?theme=${mode}`);
+				window.__ohResolvedTheme = mode;
 				// Sync localStorage with server setting
 				if (serverMode) try { localStorage.setItem('ohTheme', serverMode); } catch {}
 			} catch {}
@@ -51,6 +52,7 @@
 </head>
 
 <body class="min-h-screen bg-slate-950 text-slate-100 __THEME_CLASS__">
+	<script>if(window.__ohResolvedTheme){var b=document.body,t=window.__ohResolvedTheme==='light';b.classList.toggle('theme-light',t);b.classList.toggle('theme-dark',!t)}</script>
 	<div class="fixed inset-0 bg-grid opacity-60"></div>
 	<div class="fixed inset-0 bg-gradient-to-b from-indigo-950/60 via-slate-950 to-slate-950 theme-overlay"></div>
 
@@ -121,6 +123,14 @@
 								<path d="M15 22V17C15 15.5858 15 14.8787 14.5607 14.4393C14.1213 14 13.4142 14 12 14C10.5858 14 9.87868 14 9.43934 14.4393C9 14.8787 9 15.5858 9 17V22" stroke="#000000" stroke-width="1.5"></path>
 								<path d="M14 9.5C14 10.6046 13.1046 11.5 12 11.5C10.8954 11.5 10 10.6046 10 9.5C10 8.39543 10.8954 7.5 12 7.5C13.1046 7.5 14 8.39543 14 9.5Z" stroke="#000000" stroke-width="1.5"></path>
 							</g>
+						</svg>
+					</button>
+					<button id="logoutBtn" class="hidden px-3 py-2 rounded-xl glass hover:bg-white/10 transition" title="Logout">
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+							stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+							<polyline points="16 17 21 12 16 7"/>
+							<line x1="21" y1="12" x2="9" y2="12"/>
 						</svg>
 					</button>
 					<button id="adminConfigBtn" type="button" class="hidden px-3 py-2 rounded-xl glass hover:bg-white/10 transition">

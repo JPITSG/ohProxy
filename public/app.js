@@ -209,6 +209,7 @@ const els = {
 	pause: document.getElementById('pauseBtn'),
 	voice: document.getElementById('voiceBtn'),
 	home: document.getElementById('homeBtn'),
+	logout: document.getElementById('logoutBtn'),
 	themeToggle: document.getElementById('themeToggleBtn'),
 	lightMode: document.getElementById('lightModeBtn'),
 	darkMode: document.getElementById('darkModeBtn'),
@@ -3481,6 +3482,15 @@ function updateAdminConfigBtnVisibility() {
 		btn.classList.remove('hidden');
 	} else {
 		btn.classList.add('hidden');
+	}
+}
+
+function updateLogoutBtnVisibility() {
+	if (!els.logout) return;
+	if (getUserRole() === 'admin') {
+		els.logout.classList.remove('hidden');
+	} else {
+		els.logout.classList.add('hidden');
 	}
 }
 
@@ -7616,8 +7626,19 @@ function restoreNormalPolling() {
 			openAdminConfigModal();
 		});
 	}
+	if (els.logout) {
+		els.logout.addEventListener('click', async () => {
+			haptic();
+			try {
+				await fetch('/api/logout', { method: 'POST' });
+			} catch (e) {}
+			window.location.href = '/';
+		});
+	}
 	updateAdminConfigBtnVisibility();
+	updateLogoutBtnVisibility();
 	window.addEventListener('resize', updateAdminConfigBtnVisibility);
+	window.addEventListener('resize', updateLogoutBtnVisibility);
 	if (els.voice) {
 		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 		if (SpeechRecognition) {
