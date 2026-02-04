@@ -867,6 +867,18 @@ body.theme-dark #backBtn svg {
 body.theme-dark #homeBtn svg {
 	filter: invert(1) drop-shadow(0 0 0.5px rgba(255,255,255,0.25));
 }
+#logoutBtn {
+	width: auto !important;
+}
+#logoutBtn svg {
+	width: 1.5rem;
+	height: 1.5rem;
+	display: block;
+	filter: drop-shadow(0 0 0.5px rgba(0,0,0,0.2));
+}
+body.theme-dark #logoutBtn svg {
+	filter: invert(1) drop-shadow(0 0 0.5px rgba(255,255,255,0.25));
+}
 #adminConfigBtn {
 	width: auto !important;
 }
