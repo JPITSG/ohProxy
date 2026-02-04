@@ -757,6 +757,17 @@ function validateConfig() {
 				errors.push(`server.auth.cookieDays must be > 0 when cookieKey is set but currently is ${describeValue(AUTH_COOKIE_DAYS)}`);
 			}
 		}
+		if (AUTH_MODE === 'html') {
+			if (!AUTH_COOKIE_KEY) {
+				errors.push(`server.auth.cookieKey is required when auth mode is "html" but currently is ${describeValue(AUTH_COOKIE_KEY)}`);
+			}
+			if (!AUTH_COOKIE_NAME) {
+				errors.push(`server.auth.cookieName is required when auth mode is "html" but currently is ${describeValue(AUTH_COOKIE_NAME)}`);
+			}
+			if (!Number.isFinite(AUTH_COOKIE_DAYS) || AUTH_COOKIE_DAYS <= 0) {
+				errors.push(`server.auth.cookieDays must be > 0 when auth mode is "html" but currently is ${describeValue(AUTH_COOKIE_DAYS)}`);
+			}
+		}
 	}
 
 	if (ensureObject(SERVER_CONFIG.securityHeaders, 'server.securityHeaders', errors)) {
@@ -942,6 +953,21 @@ function validateAdminConfig(config) {
 			}
 			if (!Number.isFinite(s.auth.cookieDays) || s.auth.cookieDays <= 0) {
 				errors.push('server.auth.cookieDays must be > 0 when cookieKey is set');
+			}
+		}
+		const effectiveMode = (typeof authMode === 'string' && authMode) ? authMode : liveConfig.authMode;
+		if (effectiveMode === 'html') {
+			const ck = (typeof s.auth.cookieKey === 'string') ? s.auth.cookieKey.trim() : liveConfig.authCookieKey;
+			const cn = s.auth.cookieName || liveConfig.authCookieName;
+			const cd = Number.isFinite(s.auth.cookieDays) ? s.auth.cookieDays : liveConfig.authCookieDays;
+			if (!ck) {
+				errors.push('server.auth.cookieKey is required when auth mode is "html"');
+			}
+			if (!cn) {
+				errors.push('server.auth.cookieName is required when auth mode is "html"');
+			}
+			if (!Number.isFinite(cd) || cd <= 0) {
+				errors.push('server.auth.cookieDays must be > 0 when auth mode is "html"');
 			}
 		}
 	}
@@ -1334,7 +1360,7 @@ function applySecurityHeaders(req, res) {
 		res.setHeader('Strict-Transport-Security', buildHstsHeader());
 	}
 	if (liveConfig.securityCsp.enabled) {
-		const policy = safeText(liveConfig.securityCsp.policy).trim();
+		const policy = safeText(liveConfig.securityCsp.policy).replace(/[\r\n]+/g, ' ').trim();
 		if (policy) {
 			const headerName = liveConfig.securityCsp.reportOnly
 				? 'Content-Security-Policy-Report-Only'
@@ -2641,16 +2667,18 @@ function rtspUrlHash(url) {
 }
 
 // Chart cache helpers
-function chartCacheKey(item, period, mode) {
+function chartCacheKey(item, period, mode, title) {
 	const assetVersion = liveConfig.assetVersion || 'v1';
+	const dateFmt = liveConfig.clientConfig?.dateFormat || '';
+	const timeFmt = liveConfig.clientConfig?.timeFormat || '';
 	return crypto.createHash('md5')
-		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}`)
+		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}`)
 		.digest('hex')
 		.substring(0, 16);
 }
 
-function getChartCachePath(item, period, mode) {
-	const hash = chartCacheKey(item, period, mode);
+function getChartCachePath(item, period, mode, title) {
+	const hash = chartCacheKey(item, period, mode, title);
 	return path.join(CHART_CACHE_DIR, `${hash}.html`);
 }
 
@@ -2796,15 +2824,16 @@ function processChartData(data, period, maxPoints = 500) {
 	const duration = periodSeconds[period] || 86400;
 	const cutoff = now - duration;
 
-	// Filter and track min/max
+	// Filter and track min/max (and their indices for extreme-preserving downsample)
 	let filtered = [];
 	let dataMin = Infinity, dataMax = -Infinity;
+	let dataMinIdx = -1, dataMaxIdx = -1;
 
 	for (const [ts, val] of data) {
 		if (ts >= cutoff) {
+			if (val < dataMin) { dataMin = val; dataMinIdx = filtered.length; }
+			if (val > dataMax) { dataMax = val; dataMaxIdx = filtered.length; }
 			filtered.push([ts, val]);
-			if (val < dataMin) dataMin = val;
-			if (val > dataMax) dataMax = val;
 		}
 	}
 
@@ -2814,36 +2843,35 @@ function processChartData(data, period, maxPoints = 500) {
 		const n = fallbackN[period] || 1440;
 		filtered = data.slice(-n);
 		dataMin = Infinity; dataMax = -Infinity;
-		for (const [, val] of filtered) {
-			if (val < dataMin) dataMin = val;
-			if (val > dataMax) dataMax = val;
+		dataMinIdx = -1; dataMaxIdx = -1;
+		for (let i = 0; i < filtered.length; i++) {
+			const val = filtered[i][1];
+			if (val < dataMin) { dataMin = val; dataMinIdx = i; }
+			if (val > dataMax) { dataMax = val; dataMaxIdx = i; }
 		}
 	}
 
-	// Downsample if needed
+	// Compute average from full dataset before downsampling
+	let dataAvg = null;
+	if (filtered.length > 0) {
+		let sum = 0;
+		for (const [, val] of filtered) sum += val;
+		dataAvg = sum / filtered.length;
+	}
+
+	// Downsample if needed (preserves pre-downsampled dataMin/dataMax/dataAvg)
 	if (filtered.length > maxPoints) {
 		const step = filtered.length / maxPoints;
-		const result = [];
-		dataMin = Infinity; dataMax = -Infinity;
+		const picked = new Set();
 		for (let i = 0; i < maxPoints; i++) {
-			const idx = Math.floor(i * step);
-			if (idx < filtered.length) {
-				const [ts, val] = filtered[idx];
-				result.push([ts, val]);
-				if (val < dataMin) dataMin = val;
-				if (val > dataMax) dataMax = val;
-			}
+			picked.add(Math.floor(i * step));
 		}
-		// Always include last point
-		if (result.length > 0 && filtered.length > 0) {
-			const last = filtered[filtered.length - 1];
-			if (result[result.length - 1][0] !== last[0]) {
-				result.push(last);
-				if (last[1] < dataMin) dataMin = last[1];
-				if (last[1] > dataMax) dataMax = last[1];
-			}
-		}
-		filtered = result;
+		// Always include last point and extreme points so the chart line hits actual min/max
+		picked.add(filtered.length - 1);
+		if (dataMinIdx >= 0) picked.add(dataMinIdx);
+		if (dataMaxIdx >= 0) picked.add(dataMaxIdx);
+		const indices = Array.from(picked).sort((a, b) => a - b);
+		filtered = indices.map(i => filtered[i]);
 	}
 
 	// Calculate nice Y-range
@@ -2865,7 +2893,7 @@ function processChartData(data, period, maxPoints = 500) {
 
 	if (yMin === yMax) { yMin -= 1; yMax += 1; }
 
-	return { data: filtered, yMin, yMax, dataMin, dataMax };
+	return { data: filtered, yMin, yMax, dataMin, dataMax, dataAvg };
 }
 
 function generateXLabels(data, period) {
@@ -2875,28 +2903,25 @@ function generateXLabels(data, period) {
 	const endTs = data[data.length - 1][0];
 	const duration = endTs - startTs;
 
-	const config = {
-		h: { interval: duration < 3600 ? 600 : 900, fmt: 'time' },
-		D: { interval: 7200, fmt: 'time' },
-		W: { interval: 86400, fmt: { weekday: 'short' } },
-		M: { interval: 432000, fmt: { month: 'short', day: 'numeric' } },
-		Y: { interval: 2592000, fmt: { month: 'short' } }
+	const intervals = {
+		h: duration < 3600 ? 600 : 900,
+		D: 7200,
+		W: 86400,
+		M: 432000,
+		Y: 2592000,
 	};
 
-	const { interval, fmt } = config[period] || config.D;
+	const interval = intervals[period] || intervals.D;
 	const labels = [];
-	const formatLabel = fmt === 'time'
-		? (d) => { const h = d.getHours(), m = d.getMinutes(); return h + ':' + (m < 10 ? '0' : '') + m; }
-		: (d) => new Intl.DateTimeFormat('en', fmt).format(d);
 
 	for (let ts = startTs; ts <= endTs; ts += interval) {
 		const pos = duration > 0 ? ((ts - startTs) / duration) * 100 : 50;
-		labels.push({ text: formatLabel(new Date(ts * 1000)), pos });
+		labels.push({ ts: ts * 1000, pos });
 	}
 
 	// Ensure end label
 	if (labels.length > 0 && labels[labels.length - 1].pos < 95) {
-		labels.push({ text: formatLabel(new Date(endTs * 1000)), pos: 100 });
+		labels.push({ ts: endTs * 1000, pos: 100 });
 	}
 
 	return labels;
@@ -2920,6 +2945,14 @@ function generateChartPoints(data) {
 function computeChartDataHash(rawData, period) {
 	if (!rawData || rawData.length === 0) return null;
 
+	// Filter to requested period window (same cutoff as processChartData)
+	const periodSeconds = { h: 3600, D: 86400, W: 604800, M: 2592000, Y: 31536000 };
+	const duration = periodSeconds[period] || 86400;
+	const now = Date.now() / 1000;
+	const cutoff = now - duration;
+	const periodData = rawData.filter(([ts]) => ts >= cutoff);
+	if (periodData.length === 0) return null;
+
 	// Sample rate and rounding based on period for stable hashing
 	const hashConfig = {
 		h: { sample: 1, decimals: 2, tsRound: 60 },
@@ -2930,7 +2963,7 @@ function computeChartDataHash(rawData, period) {
 	};
 	const cfg = hashConfig[period] || hashConfig.D;
 
-	const sampled = rawData.filter((_, i) => i % cfg.sample === 0);
+	const sampled = periodData.filter((_, i) => i % cfg.sample === 0);
 	const dataStr = sampled.map(([ts, val]) => {
 		const roundedTs = Math.floor(ts / cfg.tsRound) * cfg.tsRound;
 		const roundedVal = Number(val.toFixed(cfg.decimals));
@@ -3007,6 +3040,7 @@ window._chartYMax=${yMax};
 window._chartDataMin=${dataMin};
 window._chartDataMax=${dataMax};
 window._chartUnit=${JSON.stringify(unit)};
+window._chartPeriod=${JSON.stringify(period)};
 window._chartDateFormat=${JSON.stringify(liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY')};
 window._chartTimeFormat=${JSON.stringify(liveConfig.clientConfig?.timeFormat || 'H:mm:ss')};
 </script>
@@ -3027,7 +3061,7 @@ function generateChart(item, period, mode, title) {
 	if (!rawData) return null;
 
 	// Process data
-	const { data, yMin, yMax, dataMin, dataMax } = processChartData(rawData, period, 500);
+	const { data, yMin, yMax, dataMin, dataMax, dataAvg } = processChartData(rawData, period, 500);
 	if (!data || data.length === 0) return null;
 
 	// Deduce unit from title
@@ -3055,11 +3089,6 @@ function generateChart(item, period, mode, title) {
 	// Generate chart components
 	const chartData = generateChartPoints(data);
 	const xLabels = generateXLabels(data, period);
-
-	// Compute average from chart data
-	const dataAvg = chartData.length > 0
-		? chartData.reduce((sum, pt) => sum + pt.y, 0) / chartData.length
-		: null;
 
 	// Get current (latest) value from chart data
 	const dataCur = chartData.length > 0 ? chartData[chartData.length - 1].y : null;
@@ -3466,6 +3495,7 @@ async function pollItems() {
 
 	// Schedule next poll with dynamic interval
 	if (pollingActive && wss.clients.size > 0) {
+		if (pollingTimer) clearTimeout(pollingTimer);
 		pollingTimer = setTimeout(pollItems, currentPollingIntervalMs || getEffectivePollingInterval());
 	}
 }
@@ -5442,18 +5472,22 @@ app.use((req, res, next) => {
 		if (isHtmlPageRequest) {
 			// Redirect all paths to / for login
 			if (req.path !== '/') {
+				applySecurityHeaders(req, res);
 				res.redirect('/');
 				return;
 			}
 			// Set CSRF cookie for login page
 			const csrfToken = generateCsrfToken();
 			setCsrfCookie(res, csrfToken);
+			applySecurityHeaders(req, res);
 			res.setHeader('Content-Type', 'text/html; charset=utf-8');
+			res.setHeader('Cache-Control', 'no-store');
 			res.send(renderLoginHtml());
 			return;
 		}
 
 		// Static assets and API requests without auth - return 401
+		applySecurityHeaders(req, res);
 		res.status(401).json({ error: 'Authentication required' });
 		return;
 	}
@@ -6552,6 +6586,7 @@ app.get('/search-index', async (req, res) => {
 			continue;
 		}
 
+		await applyGroupStateOverrides(page);
 		const normalized = normalizeSearchWidgets(page, { path: pagePath });
 		for (const f of normalized) {
 			if (!f || !f.__section) continue;
@@ -6813,11 +6848,21 @@ app.post('/api/logout', (req, res) => {
 	clearAuthCookie(res);
 	clearSessionCookie(res);
 	if (liveConfig.authMode === 'basic') {
-		res.setHeader('WWW-Authenticate', `Basic realm="${liveConfig.authRealm}"`);
-		res.status(401).json({ ok: true, basicLogout: true });
+		res.json({ ok: true, basicLogout: true });
 	} else {
 		res.json({ ok: true });
 	}
+});
+
+app.get('/api/logout', (req, res) => {
+	clearAuthCookie(res);
+	clearSessionCookie(res);
+	res.setHeader('WWW-Authenticate', `Basic realm="${liveConfig.authRealm}"`);
+	res.status(401).type('text/html').send(
+		'<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Logged out</title></head>' +
+		'<body style="font-family:sans-serif;text-align:center;padding:3em">' +
+		'<p>You have been logged out.</p><a href="/">Log in</a></body></html>'
+	);
 });
 
 app.get(/^\/app\.v[\w.-]+\.js$/i, (req, res) => {
@@ -7107,7 +7152,8 @@ app.get('/chart', (req, res) => {
 		return res.status(400).type('text/plain').send('Invalid mode parameter');
 	}
 
-	const cachePath = getChartCachePath(item, period, mode);
+	const resolvedTitle = title || item;
+	const cachePath = getChartCachePath(item, period, mode, resolvedTitle);
 
 	// Check cache
 	if (isChartCacheValid(cachePath, period)) {
@@ -7124,7 +7170,7 @@ app.get('/chart', (req, res) => {
 
 	// Generate HTML chart from RRD
 	try {
-		const html = generateChart(item, period, mode, title || item);
+		const html = generateChart(item, period, mode, resolvedTitle);
 		if (!html) {
 			return res.status(404).type('text/plain').send('Chart data not available');
 		}
@@ -7179,7 +7225,7 @@ app.get('/api/chart-hash', (req, res) => {
 		return res.status(400).json({ error: 'Invalid mode' });
 	}
 
-	const cachePath = getChartCachePath(item, period, mode);
+	const cachePath = getChartCachePath(item, period, mode, title);
 
 	// Get RRD data for stable hash (not affected by label positioning)
 	const rrdDir = liveConfig.rrdPath || '';
