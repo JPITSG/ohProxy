@@ -18,7 +18,9 @@
 
 	var CHART_DATE_FMT = window._chartDateFormat || 'MMM Do, YYYY';
 	var CHART_TIME_FMT = window._chartTimeFormat || 'H:mm:ss';
+	var CHART_PERIOD = window._chartPeriod || 'D';
 	var MONTHS_S = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+	var DAYS_S = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 	function ordSuffix(n) {
 		if (n >= 11 && n <= 13) return n + 'th';
 		switch (n % 10) { case 1: return n + 'st'; case 2: return n + 'nd'; case 3: return n + 'rd'; default: return n + 'th'; }
@@ -28,6 +30,17 @@
 		var h24 = d.getHours(), h12 = h24 % 12 || 12;
 		var tokens = { YYYY: d.getFullYear(), MMM: MONTHS_S[d.getMonth()], Do: ordSuffix(d.getDate()), DD: pad(d.getDate()), HH: pad(h24), H: h24, hh: pad(h12), h: h12, mm: pad(d.getMinutes()), ss: pad(d.getSeconds()), A: h24 < 12 ? 'AM' : 'PM' };
 		return fmt.replace(/YYYY|MMM|Do|DD|HH|H|hh|h|mm|ss|A/g, function(m) { return tokens[m]; });
+	}
+
+	function fmtXLabel(ts) {
+		var d = new Date(ts);
+		switch (CHART_PERIOD) {
+			case 'h': case 'D': return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+			case 'W': return DAYS_S[d.getDay()];
+			case 'M': return MONTHS_S[d.getMonth()] + ' ' + d.getDate();
+			case 'Y': return MONTHS_S[d.getMonth()];
+			default: return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+		}
 	}
 
 	window.ChartRenderer = class {
@@ -180,7 +193,7 @@
 			var xStep = Math.max(1, Math.ceil(window._chartXLabels.length / maxXLabels));
 			window._chartXLabels.forEach((labelData, i) => {
 				if (i % xStep !== 0 && i !== window._chartXLabels.length - 1) return;
-				var labelText = typeof labelData === 'object' ? labelData.text : labelData;
+				var labelText = typeof labelData === 'object' ? (labelData.ts ? fmtXLabel(labelData.ts) : labelData.text) : labelData;
 				var labelPos = typeof labelData === 'object' ? labelData.pos : null;
 				var isLast = i === window._chartXLabels.length - 1;
 				var xPos = labelPos !== null

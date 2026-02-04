@@ -309,6 +309,7 @@ window.ohLang = {
 		olderBtn: 'Older \u25BE',
 
 		loading: 'Loading\u2026',
+		saveFailed: 'Save failed',
 
 		glowOperators: [
 			{ value: '=', label: '=' },

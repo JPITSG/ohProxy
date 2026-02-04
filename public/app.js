@@ -2034,6 +2034,7 @@ let historyOffsetStack = [];
 let historyMappings = [];
 let historyCursorStack = [];
 let historyGlowColor = null;
+let historyAbort = null;
 
 function ensureCardConfigModal() {
 	if (cardConfigModal) return;
@@ -2093,6 +2094,7 @@ function ensureCardConfigModal() {
 					<button type="button" class="card-config-add">${cc.addRuleBtn}</button>
 				</div>
 				<div class="card-config-footer">
+					<span class="card-config-status"></span>
 					<button type="button" class="card-config-cancel">${cc.closeBtn}</button>
 					<button type="button" class="card-config-save">${cc.saveBtn}</button>
 				</div>
@@ -2106,8 +2108,8 @@ function ensureCardConfigModal() {
 	wrap.querySelector('.card-config-cancel').addEventListener('click', () => { haptic(); closeCardConfigModal(); });
 	wrap.querySelector('.card-config-save').addEventListener('click', async () => {
 		haptic();
-		await saveCardConfig();
-		closeCardConfigModal();
+		const ok = await saveCardConfig();
+		if (ok) closeCardConfigModal();
 	});
 	wrap.querySelector('.card-config-add').addEventListener('click', () => { haptic(); addGlowRuleRow(); });
 	// Sync checked class on radio labels for browsers without :has() support
@@ -2121,6 +2123,7 @@ function ensureCardConfigModal() {
 	});
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape' && cardConfigModal && !cardConfigModal.classList.contains('hidden')) {
+			haptic();
 			closeCardConfigModal();
 		}
 	});
@@ -2238,12 +2241,9 @@ function createCustomSelect(options, initialValue, className) {
 		haptic();
 		e.preventDefault();
 		e.stopPropagation();
-		// Close other open menus
-		document.querySelectorAll('.glow-select-menu').forEach(m => {
-			if (m !== menu) m.style.display = 'none';
-		});
+		// Close other open menus (properly removes scroll listeners)
 		document.querySelectorAll('.glow-select-wrap.menu-open').forEach(w => {
-			if (w !== wrap) w.classList.remove('menu-open');
+			if (w !== wrap && typeof w._closeMenu === 'function') w._closeMenu();
 		});
 		if (wrap.classList.contains('menu-open')) {
 			closeMenu();
@@ -2252,14 +2252,21 @@ function createCustomSelect(options, initialValue, className) {
 		}
 	};
 
-	// Close on click outside
-	document.addEventListener('click', (e) => {
+	// Close on click outside (auto-removes when wrap is detached from DOM)
+	const onDocClick = (e) => {
+		if (!wrap.isConnected) {
+			document.removeEventListener('click', onDocClick);
+			return;
+		}
 		if (!wrap.contains(e.target) && !menu.contains(e.target)) {
 			closeMenu();
 		}
-	});
+	};
+	document.addEventListener('click', onDocClick);
 
 	wrap.appendChild(fakeSelect);
+	wrap._glowMenu = menu;
+	wrap._closeMenu = closeMenu;
 	document.body.appendChild(menu);
 	return wrap;
 }
@@ -2281,7 +2288,14 @@ function createGlowRuleRow(rule = {}) {
 	deleteBtn.type = 'button';
 	deleteBtn.className = 'glow-rule-delete';
 	deleteBtn.innerHTML = '<img src="icons/image-viewer-close.svg" alt="X" />';
-	deleteBtn.onclick = () => { haptic(); row.remove(); };
+	deleteBtn.onclick = () => {
+		haptic();
+		row.querySelectorAll('.glow-select-wrap').forEach(w => {
+			if (typeof w._closeMenu === 'function') w._closeMenu();
+			if (w._glowMenu) { w._glowMenu.remove(); w._glowMenu = null; }
+		});
+		row.remove();
+	};
 
 	row.appendChild(operatorSelect);
 	row.appendChild(valueInput);
@@ -2397,6 +2411,12 @@ function openCardConfigModal(widget, card) {
 			historySection.style.display = '';
 			historyOffsetStack = [];
 			historyCursorStack = [];
+			// Clear previous entries so loading state shows correctly
+			const hContainer = historySection.querySelector('.history-entries');
+			const hNav = historySection.querySelector('.history-nav');
+			if (hContainer) hContainer.innerHTML = '';
+			if (hNav) { hNav.innerHTML = ''; hNav.style.display = 'none'; }
+			if (historyAbort) historyAbort.abort();
 			if (GROUP_ITEMS_SET.has(itemName)) {
 				historyMappings = [];
 				loadGroupHistoryEntries(itemName, null);
@@ -2432,12 +2452,16 @@ async function loadHistoryEntries(itemName, offset) {
 		container.innerHTML = '<div class="history-loading">' + ohLang.cardConfig.loading + '</div>';
 		nav.style.display = 'none';
 	}
+	// Abort any previous pagination fetch
+	if (historyAbort) historyAbort.abort();
+	historyAbort = new AbortController();
+	const signal = historyAbort.signal;
 	try {
 		let historyUrl = '/api/card-config/' + encodeURIComponent(itemName) + '/history?offset=' + offset;
 		if (historyMappings.length) {
 			historyUrl += '&commands=' + encodeURIComponent(historyMappings.map(m => m.command).join(','));
 		}
-		const resp = await fetch(historyUrl);
+		const resp = await fetch(historyUrl, { signal });
 		const data = await resp.json();
 		if (!data.ok || !data.entries.length) {
 			section.style.display = 'none';
@@ -2504,7 +2528,8 @@ async function loadHistoryEntries(itemName, offset) {
 		} else {
 			nav.style.display = 'none';
 		}
-	} catch {
+	} catch (e) {
+		if (e.name === 'AbortError') return;
 		section.style.display = 'none';
 	}
 }
@@ -2518,12 +2543,16 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 		container.innerHTML = '<div class="history-loading">' + ohLang.cardConfig.loading + '</div>';
 		nav.style.display = 'none';
 	}
+	// Abort any previous pagination fetch
+	if (historyAbort) historyAbort.abort();
+	historyAbort = new AbortController();
+	const signal = historyAbort.signal;
 	try {
 		let historyUrl = '/api/card-config/' + encodeURIComponent(itemName) + '/history';
 		if (cursor) {
 			historyUrl += '?before=' + encodeURIComponent(cursor);
 		}
-		const resp = await fetch(historyUrl);
+		const resp = await fetch(historyUrl, { signal });
 		const data = await resp.json();
 		if (!data.ok || !data.entries.length) {
 			section.style.display = 'none';
@@ -2590,16 +2619,21 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 		} else {
 			nav.style.display = 'none';
 		}
-	} catch {
+	} catch (e) {
+		if (e.name === 'AbortError') return;
 		section.style.display = 'none';
 	}
 }
 
 function closeCardConfigModal() {
 	if (!cardConfigModal) return;
-	haptic();
-	// Remove dropdown menus from body
-	document.querySelectorAll('.glow-select-menu').forEach(m => m.remove());
+	// Abort any in-flight history fetches
+	if (historyAbort) { historyAbort.abort(); historyAbort = null; }
+	// Close any open select menus (removes scroll listeners) then remove from body
+	cardConfigModal.querySelectorAll('.glow-select-wrap').forEach(w => {
+		if (typeof w._closeMenu === 'function') w._closeMenu();
+		if (w._glowMenu) { w._glowMenu.remove(); w._glowMenu = null; }
+	});
 	cardConfigModal.classList.add('hidden');
 	document.body.classList.remove('card-config-open');
 	cardConfigWidgetKey = '';
@@ -2609,6 +2643,9 @@ function closeCardConfigModal() {
 
 async function saveCardConfig() {
 	if (!cardConfigModal || !cardConfigWidgetKey) return;
+
+	const statusEl = cardConfigModal.querySelector('.card-config-status');
+	if (statusEl) { statusEl.className = 'card-config-status'; statusEl.textContent = ''; }
 
 	// Get visibility
 	const visRadio = cardConfigModal.querySelector('input[name="visibility"]:checked');
@@ -2664,7 +2701,12 @@ async function saveCardConfig() {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ widgetId: cardConfigWidgetKey, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds }),
 		});
-		if (!resp.ok) return;
+		if (!resp.ok) {
+			let msg = ohLang.cardConfig.saveFailed;
+			try { const body = await resp.json(); if (body.error) msg = body.error; } catch (e) {}
+			if (statusEl) { statusEl.className = 'card-config-status error'; statusEl.textContent = msg; }
+			return false;
+		}
 
 		// Update local glow rules map
 		if (rules.length) {
@@ -2732,8 +2774,11 @@ async function saveCardConfig() {
 
 		// Re-render to apply visibility changes
 		render();
+		return true;
 	} catch (e) {
 		logJsError('applyGlowConfig failed', e);
+		if (statusEl) { statusEl.className = 'card-config-status error'; statusEl.textContent = ohLang.cardConfig.saveFailed; }
+		return false;
 	}
 }
 
@@ -2806,7 +2851,7 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'server.securityHeaders.csp.enabled', type: 'toggle' },
 			{ key: 'server.securityHeaders.csp.reportOnly', type: 'toggle' },
 			{ key: 'server.securityHeaders.csp.policy', type: 'textarea', allowEmpty: true },
-			{ key: 'server.securityHeaders.referrerPolicy', type: 'select', options: ['same-origin', 'no-referrer', 'no-referrer-when-downgrade', 'origin', 'origin-when-cross-origin', 'strict-origin', 'strict-origin-when-cross-origin', 'unsafe-url'] },
+			{ key: 'server.securityHeaders.referrerPolicy', type: 'select', options: ['', 'same-origin', 'no-referrer', 'no-referrer-when-downgrade', 'origin', 'origin-when-cross-origin', 'strict-origin', 'strict-origin-when-cross-origin', 'unsafe-url'] },
 		],
 	},
 	{
@@ -2947,6 +2992,7 @@ const ADMIN_CONFIG_SCHEMA = [
 ];
 
 let adminConfigModal = null;
+let adminConfigAbort = null;
 const adminSelectMenus = [];
 
 function adminGetNested(obj, path) {
@@ -2969,10 +3015,11 @@ function createAdminSelect(options, initialValue) {
 	const current = options.find(o => o === initialValue) || options[0];
 	wrap.dataset.value = current;
 
+	const displayLabel = (v) => v || '(none)';
 	const fakeSelect = document.createElement('button');
 	fakeSelect.type = 'button';
 	fakeSelect.className = 'admin-fake-select';
-	fakeSelect.textContent = current;
+	fakeSelect.textContent = displayLabel(current);
 
 	const menu = document.createElement('div');
 	menu.className = 'glow-select-menu';
@@ -3000,13 +3047,13 @@ function createAdminSelect(options, initialValue) {
 		optBtn.type = 'button';
 		optBtn.className = 'glow-select-option';
 		if (opt === current) optBtn.classList.add('active');
-		optBtn.textContent = opt;
+		optBtn.textContent = displayLabel(opt);
 		optBtn.dataset.value = opt;
 		optBtn.onclick = (e) => {
 			e.preventDefault();
 			e.stopPropagation();
 			wrap.dataset.value = opt;
-			fakeSelect.textContent = opt;
+			fakeSelect.textContent = displayLabel(opt);
 			menu.querySelectorAll('.glow-select-option').forEach(b => b.classList.remove('active'));
 			optBtn.classList.add('active');
 			closeMenu();
@@ -3055,7 +3102,10 @@ function createAdminSelect(options, initialValue) {
 	fakeSelect.onclick = (e) => {
 		e.preventDefault();
 		e.stopPropagation();
-		adminSelectMenus.forEach(m => { if (m !== menu) m.style.display = 'none'; });
+		// Close other open menus (properly removes scroll listeners)
+		document.querySelectorAll('.admin-select-wrap.menu-open').forEach(w => {
+			if (w !== wrap && typeof w._closeMenu === 'function') w._closeMenu();
+		});
 		if (wrap.classList.contains('menu-open')) {
 			closeMenu();
 		} else {
@@ -3063,13 +3113,20 @@ function createAdminSelect(options, initialValue) {
 		}
 	};
 
-	document.addEventListener('click', (e) => {
+	// Close on click outside (auto-removes when wrap is detached from DOM)
+	const onDocClick = (e) => {
+		if (!wrap.isConnected) {
+			document.removeEventListener('click', onDocClick);
+			return;
+		}
 		if (!wrap.contains(e.target) && !menu.contains(e.target)) {
 			closeMenu();
 		}
-	});
+	};
+	document.addEventListener('click', onDocClick);
 
 	wrap.appendChild(fakeSelect);
+	wrap._closeMenu = closeMenu;
 	document.body.appendChild(menu);
 	adminSelectMenus.push(menu);
 	return wrap;
@@ -3174,6 +3231,7 @@ function createAdminField(field, value) {
 			input.value = '';
 			input.placeholder = ohLang.adminConfig.secretPlaceholder;
 			input.dataset.masked = '1';
+			input.addEventListener('input', () => { delete input.dataset.masked; }, { once: true });
 		} else {
 			input.value = rawVal;
 			if (fieldPlaceholder) input.placeholder = fieldPlaceholder;
@@ -3341,21 +3399,34 @@ async function openAdminConfigModal() {
 	statusEl.textContent = '';
 	saveBtn.disabled = true;
 
+	// Clean up any select menus from a previous open
+	adminConfigModal.querySelectorAll('.admin-select-wrap.menu-open').forEach(w => {
+		if (typeof w._closeMenu === 'function') w._closeMenu();
+	});
+	adminSelectMenus.forEach(m => m.remove());
+	adminSelectMenus.length = 0;
+
 	// Show modal immediately with loading state
 	sectionsEl.innerHTML = '';
 	adminConfigModal.classList.remove('hidden');
 	document.body.classList.add('admin-config-open');
 
+	// Abort any in-flight config fetch
+	if (adminConfigAbort) adminConfigAbort.abort();
+	adminConfigAbort = new AbortController();
+	const signal = adminConfigAbort.signal;
+
 	// Fetch config
 	let config;
 	try {
-		const resp = await fetch('/api/admin/config');
+		const resp = await fetch('/api/admin/config', { signal });
 		if (!resp.ok) {
 			const err = await resp.json().catch(() => ({}));
 			throw new Error(err.error || `HTTP ${resp.status}`);
 		}
 		config = await resp.json();
 	} catch (e) {
+		if (e.name === 'AbortError') return;
 		statusEl.className = 'admin-config-status error';
 		statusEl.textContent = ohLang.adminConfig.loadFailed + e.message;
 		return;
@@ -3379,6 +3450,12 @@ async function openAdminConfigModal() {
 
 function closeAdminConfigModal() {
 	if (!adminConfigModal) return;
+	// Abort any in-flight config fetch
+	if (adminConfigAbort) { adminConfigAbort.abort(); adminConfigAbort = null; }
+	// Close any open select menus (removes scroll listeners)
+	document.querySelectorAll('.admin-select-wrap.menu-open').forEach(w => {
+		if (typeof w._closeMenu === 'function') w._closeMenu();
+	});
 	// Remove admin select menus from body
 	adminSelectMenus.forEach(m => m.remove());
 	adminSelectMenus.length = 0;
@@ -4679,7 +4756,7 @@ function getWidgetRenderInfo(w, afterImage) {
 	const rawVideoUrl = isVideo ? safeText(w?.label || '') : '';
 	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}&mode=${themeMode}` : '';
 	const videoHeight = isVideo ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
-	const chartHeight = isChart ? iframeHeightOverride : 0;
+	const chartHeight = isChart ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const mappingSig = mapping.map((m) => `${m.command}:${m.label}`).join('|');
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
@@ -4970,8 +5047,8 @@ function updateCard(card, w, afterImage, info) {
 		// Apply height override if configured
 		if (chartHeight > 0) {
 			frameContainer.style.height = `${chartHeight}px`;
-			frameContainer.style.aspectRatio = '';
-			frameContainer.style.paddingBottom = '';
+			frameContainer.style.aspectRatio = 'auto';
+			frameContainer.style.paddingBottom = '0';
 		} else {
 			frameContainer.style.height = '';
 			if (supportsAspectRatio) {
@@ -5033,8 +5110,8 @@ function updateCard(card, w, afterImage, info) {
 		// Height: if 0, use 16:9 aspect ratio; otherwise use specified height
 		if (webviewHeight > 0) {
 			frameContainer.style.height = `${webviewHeight}px`;
-			frameContainer.style.aspectRatio = '';
-			frameContainer.style.paddingBottom = '';
+			frameContainer.style.aspectRatio = 'auto';
+			frameContainer.style.paddingBottom = '0';
 		} else {
 			frameContainer.style.height = '';
 			if (supportsAspectRatio) {
@@ -5059,6 +5136,15 @@ function updateCard(card, w, afterImage, info) {
 		if (iconWrap) iconWrap.classList.add('hidden');
 		row.classList.add('hidden');
 		if (!videoUrl) {
+			const staleContainer = card.querySelector('.video-container');
+			if (staleContainer) {
+				const staleVideo = staleContainer.querySelector('video.video-stream');
+				if (staleVideo && staleVideo.src) {
+					staleVideo.src = '';
+					staleVideo.load();
+				}
+				staleContainer.remove();
+			}
 			row.classList.remove('hidden');
 			controls.classList.add('mt-3');
 			controls.innerHTML = `<div class="text-sm text-slate-400">Video URL not available</div>`;
@@ -5947,7 +6033,7 @@ function patchWidgets(widgets, nodes) {
 				node.replaceWith(card);
 			}
 		}
-		if (info.isImage) {
+		if (info.isImage || info.isChart || info.isWebview || info.isVideo) {
 			afterImage = true;
 		} else if (afterImage && info.t.includes('text')) {
 			afterImage = false;
@@ -5992,7 +6078,7 @@ function render() {
 		if (frameKeys.size && Array.isArray(state.searchWidgets)) {
 			for (const w of state.searchWidgets) {
 				const key = frameKeyFor(w?.__path, w?.__frame);
-				if (frameKeys.has(key)) extra.push(w);
+				if (frameKeys.has(key) && isWidgetVisible(w)) extra.push(w);
 			}
 		}
 
@@ -6077,7 +6163,7 @@ function render() {
 				header.textContent = w.label;
 				header.dataset.section = w.label;
 				header.addEventListener('click', (e) => {
-					if (e.ctrlKey || e.metaKey) {
+					if ((e.ctrlKey || e.metaKey) && getUserRole() === 'admin') {
 						e.preventDefault();
 						openCardConfigModal(w, header);
 					}
@@ -6090,7 +6176,7 @@ function render() {
 			const card = buildCard(w, afterImage);
 			fragment.appendChild(card);
 			const t = widgetType(w).toLowerCase();
-			if (t.includes('image')) {
+			if (t.includes('image') || t === 'chart' || t.includes('webview') || t === 'video') {
 				afterImage = true;
 			} else if (afterImage && t.includes('text')) {
 				afterImage = false;
@@ -6110,7 +6196,7 @@ function render() {
 	}
 
 	if (q && state.searchIndexReady) {
-		refreshSearchStates(matches).then((updated) => {
+		refreshSearchStates(widgets).then((updated) => {
 			if (updated) render();
 		});
 	}
@@ -7373,6 +7459,7 @@ function restoreNormalPolling() {
 	// Ctrl+click on cards opens item config modal
 	document.addEventListener('click', (e) => {
 		if (!(e.ctrlKey || e.metaKey) || state.isSlim) return;
+		if (getUserRole() !== 'admin') return;
 		// Cards are .glass elements with data-widget-key attribute inside #grid
 		const card = e.target.closest('#grid > .glass[data-widget-key]');
 		if (!card) return;
@@ -7388,6 +7475,7 @@ function restoreNormalPolling() {
 	// Right-click on non-iframe cards opens item config modal
 	document.addEventListener('contextmenu', (e) => {
 		if (state.isSlim) return;
+		if (getUserRole() !== 'admin') return;
 		const card = e.target.closest('#grid > .glass[data-widget-key]');
 		if (!card) return;
 		// Don't intercept right-click on iframe-based cards (webview, chart)
@@ -7630,7 +7718,12 @@ function restoreNormalPolling() {
 		els.logout.addEventListener('click', async () => {
 			haptic();
 			try {
-				await fetch('/api/logout', { method: 'POST' });
+				const res = await fetch('/api/logout', { method: 'POST' });
+				const data = await res.json();
+				if (data.basicLogout) {
+					window.location.href = '/api/logout';
+					return;
+				}
 			} catch (e) {}
 			window.location.href = '/';
 		});

@@ -51,6 +51,8 @@
 	form.addEventListener('submit', async function(e) {
 		e.preventDefault();
 
+		if (submitBtn.disabled) return;
+
 		const username = form.username.value.trim();
 		const password = form.password.value;
 
@@ -87,7 +89,10 @@
 			}
 
 			// Handle errors
-			if (response.status === 429 && data.lockedOut) {
+			if (response.status === 403) {
+				window.location.reload();
+				return;
+			} else if (response.status === 429 && data.lockedOut) {
 				lockedOut = true;
 				shake();
 				startLockoutCountdown(data.remainingSeconds || 900);
