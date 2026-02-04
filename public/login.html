@@ -132,6 +132,10 @@
 			color: rgba(255, 255, 255, 0.35);
 		}
 
+		.form-input::-ms-reveal {
+			filter: invert(1);
+		}
+
 		.form-input:focus {
 			border-color: rgba(118, 214, 152, 0.5);
 			box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.15), 0 0 10px rgba(118, 214, 152, 0.4);
@@ -198,6 +202,10 @@
 
 		.theme-light .form-input::placeholder {
 			color: rgba(150, 155, 170, 0.8);
+		}
+
+		.theme-light .form-input::-ms-reveal {
+			filter: none;
 		}
 
 		.theme-light .form-input:focus {
