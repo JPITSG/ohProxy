@@ -844,6 +844,9 @@ body.theme-light #searchWrap input:focus {
 	backdrop-filter: none !important;
 	-webkit-backdrop-filter: none !important;
 }
+#navWrap button.hidden {
+	display: none;
+}
 #backBtn,
 #homeBtn {
 	width: auto !important;
@@ -1810,6 +1813,10 @@ body.theme-light .glow-select-menu-scroll::-webkit-scrollbar-thumb:hover {
 		border-color: var(--color-control-off-border-hover);
 		box-shadow: 0 0 10px var(--color-control-off-shadow-hover);
 	}
+}
+.card-config-footer button:disabled {
+	opacity: .4;
+	cursor: default;
 }
 body.card-config-open {
 	overflow: hidden;
