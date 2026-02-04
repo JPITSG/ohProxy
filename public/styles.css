@@ -623,6 +623,7 @@ body.theme-light .selection-card .select-menu-scroll::-webkit-scrollbar-thumb:ho
 	height: 100%;
 	border: none;
 	border-radius: inherit;
+	touch-action: pan-y;
 }
 /* Webview iframe container - 16:9 aspect ratio */
 .webview-frame-container {
