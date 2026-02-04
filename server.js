@@ -367,10 +367,10 @@ const AI_CACHE_DIR = path.join(__dirname, 'cache', 'ai');
 const AI_STRUCTURE_MAP_WRITABLE = path.join(AI_CACHE_DIR, 'structuremap-writable.json');
 const ANTHROPIC_API_KEY = safeText(SERVER_CONFIG.apiKeys?.anthropic) || '';
 const WEATHERBIT_CONFIG = SERVER_CONFIG.weatherbit || {};
-const WEATHERBIT_API_KEY = safeText(WEATHERBIT_CONFIG.apiKey) || '';
-const WEATHERBIT_LATITUDE = safeText(WEATHERBIT_CONFIG.latitude) || '';
-const WEATHERBIT_LONGITUDE = safeText(WEATHERBIT_CONFIG.longitude) || '';
-const WEATHERBIT_UNITS = safeText(WEATHERBIT_CONFIG.units) || 'M';
+const WEATHERBIT_API_KEY = safeText(WEATHERBIT_CONFIG.apiKey).trim();
+const WEATHERBIT_LATITUDE = safeText(WEATHERBIT_CONFIG.latitude).trim();
+const WEATHERBIT_LONGITUDE = safeText(WEATHERBIT_CONFIG.longitude).trim();
+const WEATHERBIT_UNITS = safeText(WEATHERBIT_CONFIG.units).trim() || 'M';
 const WEATHERBIT_REFRESH_MS = configNumber(WEATHERBIT_CONFIG.refreshIntervalMs, 3600000);
 const WEATHERBIT_CACHE_DIR = path.join(__dirname, 'cache', 'weatherbit');
 const WEATHERBIT_FORECAST_FILE = path.join(WEATHERBIT_CACHE_DIR, 'forecast.json');
@@ -1526,9 +1526,13 @@ function maybeNotifyAuthFailure(ip) {
 	}
 }
 
-function sendAuthRequired(res) {
+function sendAuthRequired(req, res) {
 	res.setHeader('X-OhProxy-Authenticated', 'false');
-	res.setHeader('WWW-Authenticate', `Basic realm="${liveConfig.authRealm}"`);
+	// Skip WWW-Authenticate for API requests to prevent browser credential dialog spam
+	const reqPath = getRequestPath(req);
+	if (!reqPath.startsWith('/api/')) {
+		res.setHeader('WWW-Authenticate', `Basic realm="${liveConfig.authRealm}"`);
+	}
 	res.status(401).type('text/plain').send('Unauthorized');
 }
 
@@ -1850,12 +1854,17 @@ function reloadLiveConfig() {
 	// External services
 	liveConfig.anthropicApiKey = safeText(newServer.apiKeys?.anthropic) || '';
 	const newWeatherbit = newServer.weatherbit || {};
-	liveConfig.weatherbitApiKey = safeText(newWeatherbit.apiKey) || '';
-	liveConfig.weatherbitLatitude = safeText(newWeatherbit.latitude) || '';
-	liveConfig.weatherbitLongitude = safeText(newWeatherbit.longitude) || '';
-	liveConfig.weatherbitUnits = safeText(newWeatherbit.units) || 'M';
+	const prevWeatherbitUnits = liveConfig.weatherbitUnits;
+	liveConfig.weatherbitApiKey = safeText(newWeatherbit.apiKey).trim();
+	liveConfig.weatherbitLatitude = safeText(newWeatherbit.latitude).trim();
+	liveConfig.weatherbitLongitude = safeText(newWeatherbit.longitude).trim();
+	liveConfig.weatherbitUnits = safeText(newWeatherbit.units).trim() || 'M';
 	liveConfig.weatherbitRefreshMs = configNumber(newWeatherbit.refreshIntervalMs, 3600000);
 	updateBackgroundTaskInterval('weatherbit', isWeatherbitConfigured() ? liveConfig.weatherbitRefreshMs : 0);
+	if (liveConfig.weatherbitUnits !== prevWeatherbitUnits && isWeatherbitConfigured()) {
+		try { fs.unlinkSync(WEATHERBIT_FORECAST_FILE); } catch {}
+		fetchWeatherbitData();
+	}
 
 	// Video preview config
 	const newVideoPreview = newServer.videoPreview || {};
@@ -3738,6 +3747,14 @@ function renderWeatherWidget(forecastData, mode) {
 	const rainColor = '#3498db';
 
 	const days = Array.isArray(forecastData?.data) ? forecastData.data : [];
+	if (!days.length) {
+		return `<!DOCTYPE html>
+<html><head><title>Weather</title></head>
+<body style="font-family:system-ui;padding:2rem;text-align:center;">
+<h1>Weather data unavailable</h1>
+<p>Forecast data is empty or invalid. It will be refreshed automatically.</p>
+</body></html>`;
+	}
 	const cityName = escapeHtml(forecastData?.city_name || '');
 	const unitSymbol = liveConfig.weatherbitUnits === 'I' ? 'F' : 'C';
 
@@ -3745,7 +3762,7 @@ function renderWeatherWidget(forecastData, mode) {
 
 	const forecastCards = days.map((day) => {
 		const date = new Date(day.datetime);
-		const dayName = dayNames[date.getDay()];
+		const dayName = dayNames[date.getUTCDay()];
 		const icon = escapeHtml(day.weather?.icon || 'c01d');
 		const highTemp = Math.round(day.high_temp || 0);
 		const lowTemp = Math.round(day.low_temp || 0);
@@ -3860,6 +3877,7 @@ html, body {
 </style>
 </head>
 <body>
+<script>if(window.self===window.top)document.documentElement.style.background='${isDark ? '#0f172a' : '#ffffff'}'</script>
 <div class="weather-card">
 	<div class="forecast-container">
 		${forecastCards}
@@ -5461,7 +5479,7 @@ app.use((req, res, next) => {
 				res.status(429).type('text/plain').send('Too many authentication attempts');
 				return;
 			}
-			sendAuthRequired(res);
+			sendAuthRequired(req, res);
 			return;
 		}
 		authenticatedUser = user;
@@ -5476,7 +5494,7 @@ app.use((req, res, next) => {
 		}
 	}
 	if (!authenticatedUser) {
-		sendAuthRequired(res);
+		sendAuthRequired(req, res);
 		return;
 	}
 	// Check if user is disabled
@@ -6148,9 +6166,7 @@ app.get('/api/card-config/:itemName/history', async (req, res) => {
 	const QUERY_TIMEOUT_MS = 10000;
 	function queryWithTimeout(sql, params) {
 		return new Promise((resolve, reject) => {
-			const timeout = setTimeout(() => reject(new Error('Query timeout')), QUERY_TIMEOUT_MS);
-			conn.query(sql, params, (err, results) => {
-				clearTimeout(timeout);
+			conn.query({ sql, timeout: QUERY_TIMEOUT_MS }, params, (err, results) => {
 				if (err) reject(err);
 				else resolve(results);
 			});
@@ -6719,14 +6735,14 @@ app.get('/weather', (req, res) => {
 	}
 
 	const rawMode = typeof req.query?.mode === 'string' ? req.query.mode : '';
-	const mode = (rawMode && !hasAnyControlChars(rawMode) && rawMode.toLowerCase() === 'dark') ? 'dark' : 'light';
+	const mode = (rawMode && !hasAnyControlChars(rawMode) && rawMode.trim().toLowerCase() === 'dark') ? 'dark' : 'light';
 
 	// Read cached weather data
 	let weatherData = null;
 	try {
 		weatherData = JSON.parse(fs.readFileSync(WEATHERBIT_FORECAST_FILE, 'utf8'));
 	} catch {
-		res.status(503).setHeader('Content-Type', 'text/html; charset=utf-8').send(`<!DOCTYPE html>
+		res.status(503).setHeader('Content-Type', 'text/html; charset=utf-8').setHeader('Cache-Control', 'no-store').send(`<!DOCTYPE html>
 <html><head><title>Weather</title></head>
 <body style="font-family:system-ui;padding:2rem;text-align:center;">
 <h1>Weather data not available</h1>
@@ -7239,9 +7255,7 @@ app.get('/api/presence', async (req, res) => {
 	const QUERY_TIMEOUT_MS = 10000;
 	function queryWithTimeout(sql, params) {
 		return new Promise((resolve, reject) => {
-			const timeout = setTimeout(() => reject(new Error('Query timeout')), QUERY_TIMEOUT_MS);
-			conn.query(sql, params, (err, results) => {
-				clearTimeout(timeout);
+			conn.query({ sql, timeout: QUERY_TIMEOUT_MS }, params, (err, results) => {
 				if (err) reject(err);
 				else resolve(results);
 			});
@@ -7296,14 +7310,19 @@ app.get('/api/presence/nearby-days', async (req, res) => {
 
 	const lat = parseFloat(req.query.lat);
 	const lon = parseFloat(req.query.lon);
-	const offset = parseInt(req.query.offset, 10) || 0;
-	const radius = Math.min(Math.max(parseInt(req.query.radius, 10) || 100, 1), 50000);
+	const rawOffset = req.query.offset;
+	const rawRadius = req.query.radius;
+	const offset = rawOffset !== undefined ? parseInt(rawOffset, 10) : 0;
+	const radius = rawRadius !== undefined ? parseInt(rawRadius, 10) : 100;
 
 	if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) {
 		return res.status(400).json({ ok: false, error: 'Invalid coordinates' });
 	}
-	if (offset < 0 || offset > 10000) {
+	if (!Number.isFinite(offset) || offset < 0 || offset > 10000) {
 		return res.status(400).json({ ok: false, error: 'Invalid offset' });
+	}
+	if (!Number.isFinite(radius) || radius < 1 || radius > 50000) {
+		return res.status(400).json({ ok: false, error: 'Invalid radius' });
 	}
 
 	const latDelta = radius / 111111;
@@ -7369,9 +7388,7 @@ app.get('/presence', async (req, res) => {
 
 	function queryWithTimeout(sql, params) {
 		return new Promise((resolve, reject) => {
-			const timeout = setTimeout(() => reject(new Error('Query timeout')), QUERY_TIMEOUT_MS);
-			conn.query(sql, params, (err, results) => {
-				clearTimeout(timeout);
+			conn.query({ sql, timeout: QUERY_TIMEOUT_MS }, params, (err, results) => {
 				if (err) reject(err);
 				else resolve(results);
 			});
@@ -7422,7 +7439,7 @@ app.get('/presence', async (req, res) => {
 	}
 
 	markers.reverse();
-	const markersJson = JSON.stringify(markers);
+	const markersJson = JSON.stringify(markers).replace(/</g, '\\u003c');
 
 	const hLat = liveConfig.gpsHomeLat;
 	const hLon = liveConfig.gpsHomeLon;
@@ -7645,7 +7662,7 @@ inp.value=v;
 lastGood=v;
 });
 }
-setupInput(ddInput,function(v){return parseInt(v,10)<=31});
+setupInput(ddInput,function(v){var n=parseInt(v,10);return n>=1&&n<=31});
 setupInput(yyyyInput,function(v){
 var n=parseInt(v,10);
 if(v.length===1)return n===2;
@@ -7686,6 +7703,10 @@ var month=Array.prototype.indexOf.call(monthMenu.children,selItem);
 var day=parseInt(ddInput.value,10);
 var year=parseInt(yyyyInput.value,10);
 if(isNaN(month)||isNaN(day)||isNaN(year)||!ddInput.value||!yyyyInput.value)return;
+var maxDay=new Date(year,month+1,0).getDate();
+if(day<1||day>maxDay)return;
+var tomorrow=new Date();tomorrow.setDate(tomorrow.getDate()+1);tomorrow.setHours(0,0,0,0);
+if(new Date(year,month,day)>=tomorrow)return;
 loadDay(month,day,year);
 });
 
@@ -7810,13 +7831,20 @@ var now=Date.now();
 if(now-ctxThrottle>300){ctxThrottle=now;ctxOffset=0;loadNearbyDays()}
 },true);
 
-mapEl.addEventListener('contextmenu',function(e){
-e.preventDefault();
+var ctxDragEnded=false;
+function endCtxDrag(e){
 if(!ctxDragging)return;
 ctxDragging=false;
+ctxDragEnded=true;
 ctxMenu.style.pointerEvents='';
-ctxUpdatePos(e);
-loadNearbyDays();
+if(ctxUpdatePos(e)){loadNearbyDays()}else{closeCtxMenu()}
+}
+document.addEventListener('mouseup',function(e){
+if(e.button===2)endCtxDrag(e);
+},true);
+document.addEventListener('contextmenu',function(e){
+if(ctxDragging){e.preventDefault();endCtxDrag(e)}
+else if(ctxDragEnded){e.preventDefault();ctxDragEnded=false}
 },true);
 
 mapEl.addEventListener('click',closeCtxMenu);
@@ -8290,10 +8318,10 @@ function isWeatherbitConfigured() {
 	return !!(liveConfig.weatherbitApiKey && liveConfig.weatherbitLatitude && liveConfig.weatherbitLongitude);
 }
 
-function getWeatherbitCacheAgeMinutes() {
+function getWeatherbitCacheAgeMs() {
 	try {
 		const stats = fs.statSync(WEATHERBIT_FORECAST_FILE);
-		return Math.floor((Date.now() - stats.mtimeMs) / 60000);
+		return Date.now() - stats.mtimeMs;
 	} catch {
 		return Infinity;
 	}
@@ -8303,9 +8331,9 @@ async function fetchWeatherbitData() {
 	if (!isWeatherbitConfigured()) return;
 
 	// Check cache freshness - skip if younger than configured refresh interval
-	const cacheAgeMinutes = getWeatherbitCacheAgeMinutes();
-	if (cacheAgeMinutes < liveConfig.weatherbitRefreshMs / 60000) {
-		logMessage(`[Weather] Using cached data (${cacheAgeMinutes} minutes old)`);
+	const cacheAgeMs = getWeatherbitCacheAgeMs();
+	if (cacheAgeMs < liveConfig.weatherbitRefreshMs) {
+		logMessage(`[Weather] Using cached data (${Math.floor(cacheAgeMs / 60000)} minutes old)`);
 		return;
 	}
 
@@ -8366,9 +8394,11 @@ async function fetchWeatherbitData() {
 			logMessage(`[Weather] Using forecast as fallback: ${current}° (${currentDescription || 'no description'})`);
 		}
 
-		// Save combined data
+		// Save combined data (atomic write via temp + rename to avoid read races)
 		const combined = { forecast, current, currentDescription };
-		fs.writeFileSync(WEATHERBIT_FORECAST_FILE, JSON.stringify(combined, null, 2));
+		const tmpFile = WEATHERBIT_FORECAST_FILE + '.tmp';
+		fs.writeFileSync(tmpFile, JSON.stringify(combined, null, 2));
+		fs.renameSync(tmpFile, WEATHERBIT_FORECAST_FILE);
 		logMessage(`[Weather] Data cached successfully`);
 
 		// Cache weather icons

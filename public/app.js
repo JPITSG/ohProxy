@@ -62,7 +62,14 @@ function triggerReload() {
 const SOFT_RESET_TIMEOUT_MS = 1000; // Short timeout per attempt
 let _spinnerLock = false;
 
+let _softResetRunning = false;
 async function softReset() {
+	if (_softResetRunning) return;
+	_softResetRunning = true;
+	closeImageViewer();
+	exitVideoFullscreen();
+	closeCardConfigModal();
+	closeAdminConfigModal();
 	_spinnerLock = true;
 	showResumeSpinner(true);
 	reportGps();
@@ -76,6 +83,8 @@ async function softReset() {
 	}
 
 	// Clear transient state for fresh start
+	state.filter = '';
+	if (els.search) els.search.value = '';
 	state.searchWidgets = null;
 	state.searchIndexReady = false;
 	state.searchFrames = [];
@@ -104,6 +113,7 @@ async function softReset() {
 				connectWs();
 			}
 			fetchFullSitemap().catch(() => {});
+			_softResetRunning = false;
 			return; // Done!
 		} catch (e) {
 			// Fast path failed, fall through to sitemap fetch
@@ -170,6 +180,7 @@ async function softReset() {
 				connectWs();
 			}
 			fetchFullSitemap().catch(() => {});
+			_softResetRunning = false;
 			return; // Done!
 
 		} catch (e) {
@@ -1048,15 +1059,16 @@ function updateStatusBar() {
 
 function positionStatusTooltip(e) {
 	if (!els.statusTooltip) return;
-	// Position tooltip below and slightly left of cursor
-	const x = e.clientX - els.statusTooltip.offsetWidth - 16;
-	const y = e.clientY + 24;
+	const tw = els.statusTooltip.offsetWidth;
+	const th = els.statusTooltip.offsetHeight;
+	const x = Math.max(4, Math.min(e.clientX - tw - 16, window.innerWidth - tw - 4));
+	const y = Math.max(4, Math.min(e.clientY + 24, window.innerHeight - th - 4));
 	els.statusTooltip.style.left = x + 'px';
 	els.statusTooltip.style.top = y + 'px';
 }
 
 function showStatusTooltip(e) {
-	if (!els.statusTooltip || isTouchDevice()) return;
+	if (!els.statusTooltip) return;
 	const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
 	if (valueEl) {
 		if (isLanClient === true) {
@@ -1642,9 +1654,18 @@ function shouldBypassProxy(url) {
 		const host = u.hostname.toLowerCase();
 		const port = u.port || (u.protocol === 'https:' ? '443' : '80');
 		return WEBVIEW_NO_PROXY.some((entry) => {
-			if (!entry || typeof entry !== 'object') return false;
-			const entryHost = (entry.host || '').toLowerCase();
-			const entryPort = entry.port || '';
+			if (!entry) return false;
+			let entryHost, entryPort;
+			if (typeof entry === 'string') {
+				const parts = entry.trim().toLowerCase().split(':');
+				entryHost = parts[0];
+				entryPort = parts[1] || '';
+			} else if (typeof entry === 'object') {
+				entryHost = (entry.host || '').toLowerCase();
+				entryPort = String(entry.port || '');
+			} else {
+				return false;
+			}
 			return host === entryHost && (!entryPort || port === entryPort);
 		});
 	} catch (err) {
@@ -1753,6 +1774,14 @@ function resolveMediaUrl(imgEl, url) {
 	return resolveImageUrl(imgEl, url);
 }
 
+function clearImageTimer(el) {
+	if (!el || !el._ohTimer) return;
+	clearInterval(el._ohTimer);
+	const idx = imageTimers.indexOf(el._ohTimer);
+	if (idx !== -1) imageTimers.splice(idx, 1);
+	el._ohTimer = null;
+}
+
 function clearImageTimers() {
 	for (const t of imageTimers) clearInterval(t);
 	imageTimers = [];
@@ -1761,7 +1790,7 @@ function clearImageTimers() {
 }
 
 function hasProxyImagesInView() {
-	const imgs = Array.from(document.querySelectorAll('.image-viewer-trigger'));
+	const imgs = Array.from(document.querySelectorAll('.card-image'));
 	if (!imgs.length) return false;
 	const viewTop = 0;
 	const viewBottom = window.innerHeight || document.documentElement.clientHeight || 0;
@@ -1775,7 +1804,7 @@ function hasProxyImagesInView() {
 }
 
 function refreshVisibleProxyImages() {
-	const imgs = Array.from(document.querySelectorAll('.image-viewer-trigger'));
+	const imgs = Array.from(document.querySelectorAll('.card-image'));
 	if (!imgs.length) return;
 	const viewBottom = window.innerHeight || document.documentElement.clientHeight || 0;
 	const epoch = imageResizeEpoch;
@@ -1794,7 +1823,7 @@ function refreshVisibleProxyImages() {
 function hasStaleProxyImages() {
 	const epoch = imageResizeEpoch;
 	if (!epoch) return false;
-	const imgs = Array.from(document.querySelectorAll('.image-viewer-trigger'));
+	const imgs = Array.from(document.querySelectorAll('.card-image'));
 	for (const img of imgs) {
 		const url = safeText(img.dataset.mediaUrl || img.src || '');
 		if (!url.includes('proxy?url=') && !isChartUrl(url)) continue;
@@ -2080,6 +2109,12 @@ function ensureCardConfigModal() {
 		closeCardConfigModal();
 	});
 	wrap.querySelector('.card-config-add').addEventListener('click', () => { haptic(); addGlowRuleRow(); });
+	// Sync checked class on radio labels for browsers without :has() support
+	wrap.addEventListener('change', (e) => {
+		if (e.target.type !== 'radio') return;
+		const group = e.target.name;
+		wrap.querySelectorAll(`input[name="${group}"]`).forEach(r => r.closest('.item-config-radio')?.classList.toggle('checked', r.checked));
+	});
 	wrap.addEventListener('click', (e) => {
 		if (e.target === wrap) { haptic(); closeCardConfigModal(); }
 	});
@@ -2117,9 +2152,13 @@ function createCustomSelect(options, initialValue, className) {
 		menu.appendChild(scrollInner);
 	}
 
+	let scrollParent = null;
+	const onScrollParent = () => closeMenu();
+
 	const closeMenu = () => {
 		menu.style.display = 'none';
 		wrap.classList.remove('menu-open');
+		if (scrollParent) { scrollParent.removeEventListener('scroll', onScrollParent); scrollParent = null; }
 	};
 
 	for (const opt of options) {
@@ -2171,10 +2210,27 @@ function createCustomSelect(options, initialValue, className) {
 
 		const menuPadLeft = parseFloat(getComputedStyle(menu).paddingLeft || 0);
 		menu.style.left = (rect.left - menuPadLeft) + 'px';
-		menu.style.top = (rect.bottom + 4) + 'px';
 		if (!needsScroll) {
 			menu.style.minWidth = (rect.width + menuPadLeft * 2) + 'px';
 		}
+
+		// Measure menu height to decide direction
+		menu.style.top = '-9999px';
+		const menuH = menu.offsetHeight;
+		const spaceBelow = window.innerHeight - rect.bottom - 4;
+		const spaceAbove = rect.top - 4;
+
+		if (spaceBelow >= menuH || spaceBelow >= spaceAbove) {
+			menu.style.top = (rect.bottom + 4) + 'px';
+			menu.style.bottom = '';
+		} else {
+			menu.style.top = '';
+			menu.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+		}
+
+		// Close on scroll of nearest scrollable ancestor
+		scrollParent = fakeSelect.closest('.card-config-frame, .admin-config-sections');
+		if (scrollParent) scrollParent.addEventListener('scroll', onScrollParent, { passive: true });
 	};
 
 	fakeSelect.onclick = (e) => {
@@ -2251,7 +2307,10 @@ function openCardConfigModal(widget, card) {
 	// Load existing visibility
 	const visibility = widgetVisibilityMap.get(wKey) || 'all';
 	const visRadio = cardConfigModal.querySelector(`input[name="visibility"][value="${visibility}"]`);
-	if (visRadio) visRadio.checked = true;
+	if (visRadio) {
+		visRadio.checked = true;
+		cardConfigModal.querySelectorAll('input[name="visibility"]').forEach(r => r.closest('.item-config-radio')?.classList.toggle('checked', r.checked));
+	}
 
 	// Show/hide default sound section for video widgets
 	const wType = (widget?.type || '').toLowerCase();
@@ -2264,7 +2323,10 @@ function openCardConfigModal(widget, card) {
 			const videoConfig = widgetVideoConfigMap.get(wKey);
 			const defaultMutedValue = videoConfig?.defaultMuted !== false ? 'muted' : 'unmuted';
 			const soundRadio = cardConfigModal.querySelector(`input[name="defaultSound"][value="${defaultMutedValue}"]`);
-			if (soundRadio) soundRadio.checked = true;
+			if (soundRadio) {
+				soundRadio.checked = true;
+				cardConfigModal.querySelectorAll('input[name="defaultSound"]').forEach(r => r.closest('.item-config-radio')?.classList.toggle('checked', r.checked));
+			}
 		}
 	}
 
@@ -2923,9 +2985,13 @@ function createAdminSelect(options, initialValue) {
 		menu.appendChild(scrollInner);
 	}
 
+	let scrollParent = null;
+	const onScrollParent = () => closeMenu();
+
 	const closeMenu = () => {
 		menu.style.display = 'none';
 		wrap.classList.remove('menu-open');
+		if (scrollParent) { scrollParent.removeEventListener('scroll', onScrollParent); scrollParent = null; }
 	};
 
 	for (const opt of options) {
@@ -2964,8 +3030,25 @@ function createAdminSelect(options, initialValue) {
 
 		const menuPadLeft = parseFloat(getComputedStyle(menu).paddingLeft || 0);
 		menu.style.left = (rect.left - menuPadLeft) + 'px';
-		menu.style.top = (rect.bottom + 4) + 'px';
 		menu.style.minWidth = (rect.width + menuPadLeft * 2) + 'px';
+
+		// Measure menu height to decide direction
+		menu.style.top = '-9999px';
+		const menuH = menu.offsetHeight;
+		const spaceBelow = window.innerHeight - rect.bottom - 4;
+		const spaceAbove = rect.top - 4;
+
+		if (spaceBelow >= menuH || spaceBelow >= spaceAbove) {
+			menu.style.top = (rect.bottom + 4) + 'px';
+			menu.style.bottom = '';
+		} else {
+			menu.style.top = '';
+			menu.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+		}
+
+		// Close on scroll of nearest scrollable ancestor
+		scrollParent = fakeSelect.closest('.card-config-frame, .admin-config-sections');
+		if (scrollParent) scrollParent.addEventListener('scroll', onScrollParent, { passive: true });
 	};
 
 	fakeSelect.onclick = (e) => {
@@ -4302,7 +4385,7 @@ function normalizeMapping(mapping) {
 				if (!m || typeof m !== 'object') return null;
 				const command = safeText(m.command ?? '');
 				const label = safeText(m.label ?? m.command ?? '');
-				if (!command && !label) return null;
+				if (!command) return null;
 				return { command, label: label || command };
 			})
 			.filter(Boolean);
@@ -4311,13 +4394,15 @@ function normalizeMapping(mapping) {
 		if ('command' in mapping || 'label' in mapping) {
 			const command = safeText(mapping.command ?? '');
 			const label = safeText(mapping.label ?? mapping.command ?? '');
-			if (!command && !label) return [];
+			if (!command) return [];
 			return [{ command, label: label || command }];
 		}
-		return Object.entries(mapping).map(([command, label]) => ({
-			command: safeText(command),
-			label: safeText(label),
-		}));
+		return Object.entries(mapping)
+			.filter(([command]) => safeText(command))
+			.map(([command, label]) => ({
+				command: safeText(command),
+				label: safeText(label) || safeText(command),
+			}));
 	}
 	return [];
 }
@@ -4469,13 +4554,15 @@ function animateSliderValue(input, targetValue, valueBubble = null, positionCall
 		if (positionCallback) positionCallback();
 		return;
 	}
+	const step = Number(input.step) || 1;
+	const snap = (v) => Math.round(v / step) * step;
 	const startTime = performance.now();
 	const animate = (now) => {
 		const elapsed = now - startTime;
 		const progress = Math.min(elapsed / durationMs, 1);
 		// Ease-out cubic for smooth deceleration
 		const eased = 1 - Math.pow(1 - progress, 3);
-		const currentValue = Math.round(startValue + (endValue - startValue) * eased);
+		const currentValue = progress >= 1 ? endValue : snap(startValue + (endValue - startValue) * eased);
 		input.value = currentValue;
 		if (valueBubble) valueBubble.textContent = currentValue;
 		if (positionCallback) positionCallback();
@@ -4748,10 +4835,12 @@ function updateCard(card, w, afterImage, info) {
 	removeOverlaySelects(card);
 
 	if (!isImage && !isChart) {
+		for (const child of Array.from(controls.children)) clearImageTimer(child);
 		controls.innerHTML = '';
 	} else {
 		for (const child of Array.from(controls.children)) {
-			if (!child.classList || (!child.classList.contains('image-viewer-trigger') && !child.classList.contains('chart-frame-container'))) {
+			if (!child.classList || (!child.classList.contains('card-image') && !child.classList.contains('chart-frame-container'))) {
+				clearImageTimer(child);
 				child.remove();
 			}
 		}
@@ -4822,12 +4911,12 @@ function updateCard(card, w, afterImage, info) {
 			card.classList.remove('image-loading');
 			return true;
 		}
-		let imgEl = controls.querySelector('img.image-viewer-trigger');
+		let imgEl = controls.querySelector('img.card-image');
 		if (!imgEl) {
 			imgEl = document.createElement('img');
 			controls.appendChild(imgEl);
 		}
-		imgEl.className = 'w-full rounded-xl border border-white/10 bg-white/5 image-viewer-trigger';
+		imgEl.className = 'card-image w-full rounded-xl border border-white/10 bg-white/5' + (state.isSlim ? '' : ' image-viewer-trigger');
 		imgEl.onclick = state.isSlim ? null : (e) => {
 			e.preventDefault();
 			e.stopPropagation();
@@ -4915,25 +5004,39 @@ function updateCard(card, w, afterImage, info) {
 			controls.innerHTML = `<div class="text-sm text-slate-400">Webview URL not available</div>`;
 			return true;
 		}
-		let iframeEl = card.querySelector('iframe.webview-frame');
+		let frameContainer = card.querySelector('.webview-frame-container');
+		if (!frameContainer) {
+			frameContainer = document.createElement('div');
+			frameContainer.className = 'webview-frame-container';
+			card.appendChild(frameContainer);
+		}
+		let iframeEl = frameContainer.querySelector('iframe.webview-frame');
 		if (!iframeEl) {
 			iframeEl = document.createElement('iframe');
-			iframeEl.className = 'webview-frame w-full block rounded-2xl';
+			iframeEl.className = 'webview-frame';
 			iframeEl.setAttribute('frameborder', '0');
 			iframeEl.setAttribute('allowfullscreen', 'true');
-			card.appendChild(iframeEl);
+			frameContainer.appendChild(iframeEl);
 		}
 		card.style.padding = '0';
 		card.style.overflow = 'hidden';
 		// Height: if 0, use 16:9 aspect ratio; otherwise use specified height
 		if (webviewHeight > 0) {
-			iframeEl.style.height = `${webviewHeight}px`;
-			iframeEl.style.aspectRatio = '';
+			frameContainer.style.height = `${webviewHeight}px`;
+			frameContainer.style.aspectRatio = '';
+			frameContainer.style.paddingBottom = '';
 		} else {
-			iframeEl.style.height = '';
-			iframeEl.style.aspectRatio = '16 / 9';
+			frameContainer.style.height = '';
+			if (supportsAspectRatio) {
+				frameContainer.style.aspectRatio = '16 / 9';
+				frameContainer.style.paddingBottom = '';
+			} else {
+				frameContainer.style.aspectRatio = '';
+				frameContainer.style.paddingBottom = '56.25%';
+			}
 		}
-		if (iframeEl.src !== webviewUrl) {
+		const resolvedWebviewUrl = new URL(webviewUrl, location.href).href;
+		if (iframeEl.src !== resolvedWebviewUrl) {
 			iframeEl.src = webviewUrl;
 		}
 		return true;
@@ -5154,9 +5257,11 @@ function updateCard(card, w, afterImage, info) {
 	}
 
 	if (!itemName) {
-		navHint.classList.add('hidden');
-		controls.classList.add('mt-3');
-		controls.innerHTML = `<div class="text-sm text-slate-400">No item bound</div>`;
+		if (!isText) {
+			navHint.classList.add('hidden');
+			controls.classList.add('mt-3');
+			controls.innerHTML = `<div class="text-sm text-slate-400">No item bound</div>`;
+		}
 		return true;
 	}
 
@@ -5208,13 +5313,14 @@ function updateCard(card, w, afterImage, info) {
 
 			let sending = false;
 			const sendSelection = async (command, disableEl) => {
-				if (!command || safeText(command) === safeText(st) || sending) return;
+				if (!command || safeText(command) === safeText(widgetState(w)) || sending) return false;
 				sending = true;
 				if (disableEl) disableEl.disabled = true;
-				try { await sendCommand(itemName, command); await refresh(false); }
+				try { await sendCommand(itemName, command); await refresh(false); return true; }
 				catch (e) {
 					logJsError(`sendSelection failed for ${itemName}`, e);
 					alert(e.message);
+					return false;
 				}
 				finally {
 					if (disableEl) disableEl.disabled = false;
@@ -5228,7 +5334,7 @@ function updateCard(card, w, afterImage, info) {
 				fakeSelect.className = 'fake-select';
 				const syncFake = () => {
 					const opt = select.options[select.selectedIndex];
-					fakeSelect.textContent = opt ? opt.textContent : safeText(select.value);
+					fakeSelect.textContent = opt ? opt.textContent : currentLabel;
 				};
 				syncFake();
 				let released = false;
@@ -5242,10 +5348,12 @@ function updateCard(card, w, afterImage, info) {
 				select.onclick = () => haptic();
 				select.onchange = async () => {
 					haptic();
-					syncFake();
+					const prevValue = st;
 					released = true;
 					try {
-						await sendSelection(select.value, select);
+						const ok = await sendSelection(select.value, select);
+						if (ok) { syncFake(); }
+						else { select.value = prevValue; syncFake(); }
 					} finally {
 						releaseRefresh();
 					}
@@ -5288,13 +5396,15 @@ function updateCard(card, w, afterImage, info) {
 						haptic();
 						e.preventDefault();
 						e.stopPropagation();
-						if (safeText(m.command) === safeText(st)) {
+						if (safeText(m.command) === safeText(widgetState(w))) {
 							closeMenu();
 							return;
 						}
-						await sendSelection(m.command);
-						fakeSelect.textContent = m.label || m.command;
-						setActive(m.command);
+						const ok = await sendSelection(m.command);
+						if (ok) {
+							fakeSelect.textContent = m.label || m.command;
+							setActive(m.command);
+						}
 						closeMenu();
 					};
 					(scrollInner || menu).appendChild(optBtn);
@@ -5428,6 +5538,14 @@ function updateCard(card, w, afterImage, info) {
 						};
 					}
 				}
+				if (existingButtons.length === 1) {
+					card.classList.add('cursor-pointer');
+					card.onclick = (e) => {
+						if (e.target.closest('button, a, input, select, textarea')) return;
+						const btn = existingButtons[0];
+						if (btn && !btn.disabled) btn.click();
+					};
+				}
 			} else {
 				// Single ON/OFF switch - update class, text, and click handler
 				const isOn = st.toUpperCase() === 'ON';
@@ -5524,8 +5642,11 @@ function updateCard(card, w, afterImage, info) {
 			return true;
 		}
 
-		const val = parseInt(st, 10);
-		const current = Number.isFinite(val) ? Math.max(0, Math.min(100, val)) : 0;
+		const sliderMin = Number.isFinite(Number(w?.minValue)) ? Number(w.minValue) : 0;
+		const sliderMax = Number.isFinite(Number(w?.maxValue)) ? Number(w.maxValue) : 100;
+		const sliderStep = Number.isFinite(Number(w?.step)) && Number(w.step) > 0 ? Number(w.step) : 1;
+		const val = parseFloat(st);
+		const current = Number.isFinite(val) ? Math.max(sliderMin, Math.min(sliderMax, val)) : sliderMin;
 
 		const inlineSlider = document.createElement('div');
 		inlineSlider.className = 'inline-slider flex items-center min-w-0';
@@ -5538,8 +5659,9 @@ function updateCard(card, w, afterImage, info) {
 
 		const input = document.createElement('input');
 		input.type = 'range';
-		input.min = '0';
-		input.max = '100';
+		input.min = String(sliderMin);
+		input.max = String(sliderMax);
+		input.step = String(sliderStep);
 		// Start at previous value if available (for smooth animation), otherwise use current
 		const startValue = (previousSliderValue !== null && Number.isFinite(previousSliderValue))
 			? previousSliderValue : current;
@@ -5565,7 +5687,8 @@ function updateCard(card, w, afterImage, info) {
 
 		const ACTIVATION_TIMEOUT_MS = 800;
 		const ACTIVATION_CHECK_MS = 80;
-		const startedOff = current === 0;
+		const isDimmer = t.includes('dimmer');
+		const startedOff = isDimmer && (!Number.isFinite(val) || val <= 0);
 		let activationPending = false;
 		let activationValue = null;
 		let activationPendingValue = null;
@@ -5585,6 +5708,7 @@ function updateCard(card, w, afterImage, info) {
 			lastSentAt = Date.now();
 			try { await sendCommand(itemName, String(value), { optimistic }); }
 			catch (e) {
+				lastSentValue = null;
 				logJsError(`sendSliderValue failed for ${itemName}`, e);
 				console.error(e);
 			}
@@ -5640,7 +5764,7 @@ function updateCard(card, w, afterImage, info) {
 
 		const checkActivation = () => {
 			if (!activationPending) return;
-			const live = parseInt(widgetState(w), 10);
+			const live = parseFloat(widgetState(w));
 			const isOn = Number.isFinite(live) && live > 0;
 			if (isOn || (Date.now() - activationStartedAt) > ACTIVATION_TIMEOUT_MS) {
 				finishActivation();
@@ -5670,14 +5794,16 @@ function updateCard(card, w, afterImage, info) {
 				activationPendingValue = value;
 				return;
 			}
-			const live = parseInt(widgetState(w), 10);
-			const isOff = Number.isFinite(live) ? live <= 0 : startedOff;
-			if (isOff && value > 0) {
-				beginActivation(value);
-				return;
+			if (isDimmer) {
+				const live = parseFloat(widgetState(w));
+				const isOff = Number.isFinite(live) ? live <= 0 : startedOff;
+				if (isOff && value > 0) {
+					beginActivation(value);
+					return;
+				}
 			}
-			// Haptic when turning off (going to 0 from non-zero)
-			if (value === 0 && lastSentValue > 0) haptic();
+			// Haptic when turning off (going to min from above min)
+			if (value === sliderMin && lastSentValue > sliderMin) haptic();
 			queueSend(value, false);
 		});
 		input.addEventListener('change', () => {
@@ -5737,7 +5863,7 @@ function updateCard(card, w, afterImage, info) {
 
 		const toggleSlider = async () => {
 			haptic();
-			const next = current > 0 ? 0 : 100;
+			const next = current > sliderMin ? sliderMin : sliderMax;
 			try { await sendCommand(itemName, String(next)); await refresh(false); }
 			catch (e) {
 				logJsError(`toggleSlider failed for ${itemName}`, e);
@@ -5778,7 +5904,7 @@ function updateCard(card, w, afterImage, info) {
 		if (!labelParts.state) {
 			controls.classList.add('mt-3');
 			controls.innerHTML = `
-				<div class="stateValue text-sm text-slate-300 font-semibold">${escapeHtml(st) || '—'}</div>
+				<div class="stateValue text-sm text-slate-300 font-semibold break-words overflow-hidden">${escapeHtml(st) || '—'}</div>
 			`;
 		} else {
 			controls.innerHTML = '';
@@ -6752,6 +6878,11 @@ function doPing() {
 	fetch('/api/ping', { signal: controller.signal, cache: 'no-store' })
 		.then((res) => {
 			clearTimeout(timeoutId);
+			if (res.status === 401) {
+				syncAuthFromHeaders(res);
+				triggerReload();
+				return;
+			}
 			if (!res.ok) throw new Error('Ping failed');
 			const latency = performance.now() - start;
 			if (latency > PING_TIMEOUT_MS) {
@@ -7054,6 +7185,7 @@ function connectWs() {
 							invalidatePing();
 							startPingDelayed();
 						}
+						if (wasLan) updateStatusBar();
 					}
 					return;
 				}
