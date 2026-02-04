@@ -241,6 +241,7 @@ body {
 	min-height: 0;
 	background: var(--bg-primary);
 	overflow: hidden;
+	touch-action: pan-y;
 }
 
 .chart-svg {

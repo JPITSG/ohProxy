@@ -65,9 +65,10 @@
 		init() {
 			this.render();
 			this.container.addEventListener('click', e => this.onClick(e));
-			this.container.addEventListener('touchstart', e => this.onTouchStart(e), { passive: false });
-			this.container.addEventListener('touchmove', e => this.onTouchMove(e), { passive: false });
+			this.container.addEventListener('touchstart', e => this.onTouchStart(e), { passive: true });
+			this.container.addEventListener('touchmove', e => this.onTouchMove(e), { passive: true });
 			this.container.addEventListener('touchend', e => this.onTouchEnd(e));
+			this.container.addEventListener('touchcancel', e => this.onTouchEnd(e));
 			this.container.addEventListener('mousemove', e => this.onMouseMove(e));
 			this.container.addEventListener('mouseleave', e => this.onMouseLeave(e));
 
@@ -536,7 +537,6 @@
 		onTouchMove(e) {
 			if (!this.isTouching) return;
 
-			e.preventDefault(); // Prevent scrolling while dragging on chart
 			this.touchMoved = true;
 
 			var touch = e.touches[0];
