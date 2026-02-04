@@ -2141,6 +2141,8 @@ body.theme-light .admin-config-header {
 	flex: 1;
 	overflow-y: auto;
 	overflow-x: hidden;
+	overscroll-behavior: contain;
+	-webkit-overflow-scrolling: touch;
 	scrollbar-width: thin;
 	scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 }
@@ -2608,6 +2610,8 @@ body.theme-light .admin-config-footer {
 }
 body.admin-config-open {
 	overflow: hidden;
+	position: fixed;
+	width: 100%;
 }
 
 /* Admin field description */

@@ -911,6 +911,8 @@ function getScrollState() {
 function shouldHandleBounce(target) {
 	if (!target || typeof target.closest !== 'function') return false;
 	if (imageViewer && !imageViewer.classList.contains('hidden')) return false;
+	if (adminConfigModal && !adminConfigModal.classList.contains('hidden')) return false;
+	if (document.body.classList.contains('card-config-open')) return false;
 	if (target.closest('input, textarea, select, button, a')) return false;
 	if (target.closest('.inline-slider, .oh-select, .fake-select')) return false;
 	return true;
@@ -3409,6 +3411,8 @@ async function openAdminConfigModal() {
 	// Show modal immediately with loading state
 	sectionsEl.innerHTML = '';
 	adminConfigModal.classList.remove('hidden');
+	adminConfigModal._savedScrollY = window.scrollY;
+	document.body.style.top = `-${window.scrollY}px`;
 	document.body.classList.add('admin-config-open');
 
 	// Abort any in-flight config fetch
@@ -3461,6 +3465,8 @@ function closeAdminConfigModal() {
 	adminSelectMenus.length = 0;
 	adminConfigModal.classList.add('hidden');
 	document.body.classList.remove('admin-config-open');
+	document.body.style.top = '';
+	window.scrollTo(0, adminConfigModal._savedScrollY || 0);
 }
 
 function collectAdminConfigValues() {
@@ -3555,7 +3561,7 @@ async function saveAdminConfig() {
 function updateAdminConfigBtnVisibility() {
 	const btn = document.getElementById('adminConfigBtn');
 	if (!btn) return;
-	if (getUserRole() === 'admin' && window.matchMedia('(min-width: 768px)').matches) {
+	if (getUserRole() === 'admin') {
 		btn.classList.remove('hidden');
 	} else {
 		btn.classList.add('hidden');
