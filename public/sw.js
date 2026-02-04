@@ -44,7 +44,7 @@ function shouldHandleRequest(request, url) {
 	if (path.includes('/proxy')) return false;
 	if (path.includes('/search-index')) return false;
 	if (path.startsWith('/api/')) return false;
-	if (path === '/sitemap-full' || path === '/video-preview') return false;
+	if (path === '/sitemap-full' || path === '/video-preview' || path === '/weather') return false;
 	if (path.endsWith('/config.js')) return false; // User-specific, never cache
 	return true;
 }
@@ -60,20 +60,35 @@ self.addEventListener('fetch', (event) => {
 	const url = new URL(request.url);
 
 	if (request.mode === 'navigate') {
+		// Only cache navigations to the app shell itself, not iframe navigations
+		// (charts, webviews, weather, etc.) which would overwrite the cached index
+		const navPath = url.pathname;
+		const isAppShell = navPath === '/' || navPath.endsWith('/index.html') ||
+			navPath === self.registration.scope.replace(url.origin, '');
 		event.respondWith(
 			fetch(request)
 				.then((response) => {
-					const copy = response.clone();
-					caches.open(CACHE_NAME).then((cache) => {
-						cache.put('./index.html', copy);
-					});
+					if (isAppShell) {
+						const copy = response.clone();
+						caches.open(CACHE_NAME).then((cache) => {
+							cache.put('./index.html', copy);
+						});
+					}
 					return response;
 				})
-				.catch(() => caches.match('./index.html')
-					.then(cached => cached || new Response('Offline', {
+				.catch(() => {
+					if (isAppShell) {
+						return caches.match('./index.html')
+							.then(cached => cached || new Response('Offline', {
+								status: 503, statusText: 'Service Unavailable',
+								headers: { 'Content-Type': 'text/plain' },
+							}));
+					}
+					return new Response('Offline', {
 						status: 503, statusText: 'Service Unavailable',
 						headers: { 'Content-Type': 'text/plain' },
-					})))
+					});
+				})
 		);
 		return;
 	}
