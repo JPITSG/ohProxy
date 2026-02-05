@@ -7854,7 +7854,7 @@ loadDay(month,day,year);
 
 var ctxDragging=false;
 var mapEl=document.getElementById('map');
-function clampCtxMenu(){var r=ctxMenu.getBoundingClientRect();var mapR=mapEl.getBoundingClientRect();if(r.right>mapR.right)ctxMenu.style.left=Math.max(0,parseInt(ctxMenu.style.left)-r.right+mapR.right-8)+'px';if(r.bottom>mapR.bottom)ctxMenu.style.top=Math.max(0,parseInt(ctxMenu.style.top)-r.bottom+mapR.bottom-8)+'px'}
+function clampCtxMenu(){var r=ctxMenu.getBoundingClientRect();var mapR=mapEl.getBoundingClientRect();if(r.left<mapR.left)ctxMenu.style.left='8px';if(r.top<mapR.top)ctxMenu.style.top='8px';if(r.right>mapR.right)ctxMenu.style.left=Math.max(0,parseInt(ctxMenu.style.left)-r.right+mapR.right-8)+'px';if(r.bottom>mapR.bottom)ctxMenu.style.top=Math.max(0,parseInt(ctxMenu.style.top)-r.bottom+mapR.bottom-8)+'px'}
 
 function ctxUpdatePos(e){
 var rect=mapEl.getBoundingClientRect();
