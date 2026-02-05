@@ -7581,7 +7581,7 @@ app.get('/presence', async (req, res) => {
 .map-ctrl-btn svg{width:16px;height:16px;fill:currentColor}
 #map{position:absolute;top:0;left:0;right:0;bottom:0;z-index:0}
 body{margin:0;padding:0;overflow:hidden}
-.tooltip{position:absolute;background:#f1f2f9;border:1px solid #ccccd1;border-radius:10px;padding:0.5rem 0.75rem;font-size:.7rem;line-height:1.5;font-family:'Rubik',sans-serif;color:#0f172a;pointer-events:none;z-index:100;white-space:nowrap;box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.08),0 4px 6px -4px rgb(0 0 0 / 0.05)}
+.tooltip{position:absolute;background:#f1f2f9;border:1px solid #ccccd1;border-radius:10px;padding:0.5rem 0.75rem;font-size:.7rem;line-height:1.5;font-family:'Rubik',sans-serif;color:#0f172a;pointer-events:none;user-select:none;z-index:100;white-space:nowrap;box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.08),0 4px 6px -4px rgb(0 0 0 / 0.05)}
 .tooltip .tt-date{font-weight:500}
 .tooltip .tt-time{font-weight:300;margin-top:0.125rem}
 #hover-tooltip{display:none}
@@ -7726,9 +7726,20 @@ mapEl.style.cursor='';
 clickFeature:function(f){
 if(f.layer===previewLayer){
 loadDayFromCtx(f.attributes.month,f.attributes.day,f.attributes.year);
+}else if(f.layer===vector&&f.attributes.color==='blue'){
+var now=Date.now();
+if(lastClickFeature===f&&now-lastClickTime<400){
+var center=new OpenLayers.LonLat(f.geometry.x,f.geometry.y);
+var zoom=Math.min(map.getNumZoomLevels()-1,map.getZoom()+3);
+map.setCenter(center,zoom);
+lastClickFeature=null;lastClickTime=0;
+}else{
+lastClickFeature=f;lastClickTime=now;
+}
 }
 }
 });
+var lastClickFeature=null;var lastClickTime=0;
 map.addControl(hoverControl);
 hoverControl.activate();
 
