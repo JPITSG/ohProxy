@@ -6112,7 +6112,7 @@ app.post('/api/card-config', jsonParserLarge, (req, res) => {
 
 	// Validate cardWidth if provided
 	if (cardWidth !== undefined) {
-		const validWidths = ['standard', 'full'];
+		const validWidths = ['standard', 'full', 'stretch'];
 		if (typeof cardWidth !== 'string' || !validWidths.includes(cardWidth)) {
 			res.status(400).json({ error: `Invalid cardWidth: ${cardWidth}` });
 			return;

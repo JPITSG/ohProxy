@@ -1395,6 +1395,10 @@ body.theme-light .theme-overlay {
 	border-radius: 50%;
 	animation: resume-spin 1s linear infinite;
 }
+body.theme-light .resume-spinner-ring {
+	border-color: rgba(19, 21, 54, 0.12);
+	border-top-color: rgba(19, 21, 54, 0.95);
+}
 .slim .resume-spinner-ring {
 	animation: resume-spin 1s linear infinite !important;
 }
@@ -1897,6 +1901,21 @@ body.card-config-open {
 	gap: 8px;
 }
 
+/* Card Width Section */
+.card-width-section {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+/* Card stretch - at 1-col layout (< 640px), force single column to prevent resize flash */
+@media (max-width: 639px) {
+	.card-stretch {
+		grid-column: auto !important;
+	}
+}
+/* At 2+ cols, JS sets inline grid-column style */
+
 /* Glow Rules Section */
 .glow-rules-section {
 	display: flex;
@@ -2101,6 +2120,10 @@ html.fs-no-scroll body {
 .video-spinner-ring {
 	border: 5px solid var(--color-text-muted);
 	border-top-color: var(--color-text-primary);
+}
+body.theme-light .video-spinner-ring {
+	border-color: rgba(19, 21, 54, 0.12);
+	border-top-color: rgba(19, 21, 54, 0.95);
 }
 
 /* Hide preview/spinner in fullscreen */
