@@ -1458,12 +1458,11 @@ body.theme-light #grid .navHint svg path {
 }
 .card-config-frame {
 	width: 90vw;
-	max-width: 420px;
+	max-width: 600px;
 	max-height: 85vh;
-	overflow-y: auto;
-	scrollbar-width: thin;
-	scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
-	padding: 12px;
+	display: flex;
+	flex-direction: column;
+	padding: 0;
 	background: rgb(19, 20, 33);
 	border: var(--glass-border-width) solid var(--header-border);
 	border-radius: var(--glass-border-radius);
@@ -1471,31 +1470,78 @@ body.theme-light #grid .navHint svg path {
 }
 body.theme-light .card-config-frame {
 	background: rgb(245, 246, 250);
-	scrollbar-color: rgba(150, 150, 150, 0.35) transparent;
 }
-.card-config-frame::-webkit-scrollbar {
-	width: 4px;
+.card-config-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 16px 20px 12px;
+	border-bottom: 1px solid var(--glass-border-color);
+	flex-shrink: 0;
 }
-.card-config-frame::-webkit-scrollbar-track {
-	background: transparent;
+body.theme-light .card-config-header {
+	border-bottom-color: var(--header-border);
 }
-.card-config-frame::-webkit-scrollbar-thumb {
-	background: rgba(255, 255, 255, 0.25);
-	border-radius: 2px;
+.card-config-header h2 {
+	margin: 0;
+	font-size: .9rem;
+	font-weight: 400;
+	letter-spacing: .1em;
+	color: var(--color-text-primary);
 }
-.card-config-frame::-webkit-scrollbar-thumb:hover {
-	background: rgba(255, 255, 255, 0.4);
+.card-config-close {
+	background: none;
+	border: none;
+	color: var(--color-text-muted);
+	cursor: pointer;
+	padding: 4px;
+	line-height: 0;
+	border-radius: 6px;
+	transition: color .4s ease;
 }
-body.theme-light .card-config-frame::-webkit-scrollbar-thumb {
-	background: rgba(150, 150, 150, 0.35);
+.card-config-close svg {
+	width: 18px;
+	height: 18px;
 }
-body.theme-light .card-config-frame::-webkit-scrollbar-thumb:hover {
-	background: rgba(150, 150, 150, 0.55);
+@media (hover: hover) and (pointer: fine) {
+	.card-config-close:hover {
+		color: var(--color-text-primary);
+	}
 }
 .card-config-body {
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
+	flex: 1;
+	overflow-y: auto;
+	overflow-x: hidden;
+	padding: 12px 20px;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+	overscroll-behavior: contain;
+	-webkit-overflow-scrolling: touch;
+}
+body.theme-light .card-config-body {
+	scrollbar-color: rgba(150, 150, 150, 0.35) transparent;
+}
+.card-config-body::-webkit-scrollbar {
+	width: 4px;
+}
+.card-config-body::-webkit-scrollbar-track {
+	background: transparent;
+}
+.card-config-body::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.25);
+	border-radius: 2px;
+}
+.card-config-body::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.4);
+}
+body.theme-light .card-config-body::-webkit-scrollbar-thumb {
+	background: rgba(150, 150, 150, 0.35);
+}
+body.theme-light .card-config-body::-webkit-scrollbar-thumb:hover {
+	background: rgba(150, 150, 150, 0.55);
 }
 /* History Section */
 .history-section { display: flex; flex-direction: column; gap: 8px; }
@@ -1787,6 +1833,12 @@ body.theme-light .glow-select-menu-scroll::-webkit-scrollbar-thumb:hover {
 	justify-content: flex-end;
 	align-items: center;
 	gap: 8px;
+	padding: 12px 20px;
+	border-top: 1px solid var(--glass-border-color);
+	flex-shrink: 0;
+}
+body.theme-light .card-config-footer {
+	border-top-color: var(--header-border);
 }
 .card-config-status {
 	flex: 1;

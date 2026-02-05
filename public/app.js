@@ -2046,6 +2046,14 @@ function ensureCardConfigModal() {
 	const cc = ohLang.cardConfig;
 	wrap.innerHTML = `
 		<div class="card-config-frame glass">
+			<div class="card-config-header">
+				<h2>${cc.title}</h2>
+				<button type="button" class="card-config-close">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M18 6L6 18M6 6l12 12"/>
+					</svg>
+				</button>
+			</div>
 			<div class="card-config-body">
 				<div class="history-section" style="display:none;">
 					<div class="item-config-section-header">${cc.historyHeader}</div>
@@ -2095,11 +2103,11 @@ function ensureCardConfigModal() {
 					<div class="card-config-rules"></div>
 					<button type="button" class="card-config-add">${cc.addRuleBtn}</button>
 				</div>
-				<div class="card-config-footer">
-					<span class="card-config-status"></span>
-					<button type="button" class="card-config-cancel">${cc.closeBtn}</button>
-					<button type="button" class="card-config-save">${cc.saveBtn}</button>
-				</div>
+			</div>
+			<div class="card-config-footer">
+				<span class="card-config-status"></span>
+				<button type="button" class="card-config-cancel">${cc.closeBtn}</button>
+				<button type="button" class="card-config-save">${cc.saveBtn}</button>
 			</div>
 		</div>
 	`;
@@ -2107,6 +2115,7 @@ function ensureCardConfigModal() {
 	cardConfigModal = wrap;
 
 	// Event listeners
+	wrap.querySelector('.card-config-close').addEventListener('click', () => { haptic(); closeCardConfigModal(); });
 	wrap.querySelector('.card-config-cancel').addEventListener('click', () => { haptic(); closeCardConfigModal(); });
 	wrap.querySelector('.card-config-save').addEventListener('click', async () => {
 		haptic();
