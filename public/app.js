@@ -1065,7 +1065,7 @@ function positionStatusTooltip(e) {
 	const tw = els.statusTooltip.offsetWidth;
 	const th = els.statusTooltip.offsetHeight;
 	const x = Math.max(4, Math.min(e.clientX - tw - 16, window.innerWidth - tw - 4));
-	const y = Math.max(4, Math.min(e.clientY + 24, window.innerHeight - th - 4));
+	const y = Math.max(4, Math.min(e.clientY - th / 2 + 8, window.innerHeight - th - 4));
 	els.statusTooltip.style.left = x + 'px';
 	els.statusTooltip.style.top = y + 'px';
 }
@@ -4433,8 +4433,8 @@ function widgetKey(widget) {
 
 function splitLabelState(label) {
 	const raw = safeText(label);
-	// Strip trailing empty brackets [] (openHAB 4.x sends these when no state)
-	const cleaned = raw.replace(/\s*\[\]\s*$/, '');
+	// Strip trailing empty brackets [] or [-] (openHAB uses these when no state)
+	const cleaned = raw.replace(/\s*\[(-?)\]\s*$/, '');
 	const match = cleaned.match(/^(.*)\s*\[(.+)\]\s*$/);
 	if (!match) return { title: cleaned, state: '' };
 	return { title: match[1].trim(), state: match[2].trim() };
