@@ -3,7 +3,7 @@
 
 window.ohLang = {
 	adminConfig: {
-		title: 'Settings',
+		title: 'System Settings',
 		closeBtn: 'Close',
 		saveBtn: 'Save',
 		groupServer: 'Server',
