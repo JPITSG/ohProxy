@@ -3066,6 +3066,8 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'server.weatherbit.longitude', type: 'text', allowEmpty: true },
 			{ key: 'server.weatherbit.units', type: 'select', options: ['M', 'I'] },
 			{ key: 'server.weatherbit.refreshIntervalMs', type: 'number', min: 1 },
+			{ key: 'server.voice.model', type: 'select', options: ['browser', 'vosk'] },
+			{ key: 'server.voice.voskHost', type: 'text', allowEmpty: true },
 		],
 	},
 	{
@@ -7534,7 +7536,8 @@ function restoreNormalPolling() {
 		logJsError('init failed', err);
 	}
 	// Show voice button if Speech Recognition API and microphone permission available
-	if (els.voice && (window.SpeechRecognition || window.webkitSpeechRecognition)) {
+	var voiceModel = (window.__OH_CONFIG__?.voiceModel || 'browser').toLowerCase();
+	if (els.voice && (voiceModel === 'vosk' || window.SpeechRecognition || window.webkitSpeechRecognition)) {
 		(async () => {
 			try {
 				// Try permissions API first
@@ -7918,22 +7921,94 @@ function restoreNormalPolling() {
 	window.addEventListener('resize', updateAdminConfigBtnVisibility);
 	window.addEventListener('resize', updateLogoutBtnVisibility);
 	if (els.voice) {
-		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-		if (SpeechRecognition) {
-			const VOICE_RESPONSE_TIMEOUT_MS = configNumber(CLIENT_CONFIG.voiceResponseTimeoutMs, 10000);
+		var useVosk = voiceModel === 'vosk';
+		var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+		if (useVosk || SpeechRecognition) {
+			var VOICE_RESPONSE_TIMEOUT_MS = configNumber(CLIENT_CONFIG.voiceResponseTimeoutMs, 10000);
 
-			let recognition = null;
-			let isListening = false;
-			let isProcessing = false;
-			let voiceRequestId = 0;
-			let voiceTimeoutId = null;
+			var recognition = null;
+			var isListening = false;
+			var isProcessing = false;
+			var voiceRequestId = 0;
+			var voiceTimeoutId = null;
+
+			// Vosk recording state
+			var voskStream = null;
+			var voskAudioCtx = null;
+			var voskProcessor = null;
+			var voskChunks = [];
 
 			// Text-to-speech
 			function speakText(text) {
 				if (!window.speechSynthesis || !text) return;
-				const utterance = new SpeechSynthesisUtterance(text);
+				var utterance = new SpeechSynthesisUtterance(text);
 				utterance.lang = navigator.language || 'en-US';
 				speechSynthesis.speak(utterance);
+			}
+
+			// Send transcript to voice command API and handle response
+			async function sendVoiceCommand(transcript) {
+				isListening = false;
+				els.voice.classList.remove('listening');
+				els.voice.classList.add('processing');
+				isProcessing = true;
+
+				var currentRequestId = ++voiceRequestId;
+
+				voiceTimeoutId = setTimeout(function() {
+					if (voiceRequestId === currentRequestId) {
+						els.voice.classList.remove('processing');
+						isProcessing = false;
+						voiceRequestId++;
+					}
+				}, VOICE_RESPONSE_TIMEOUT_MS);
+
+				try {
+					var response = await fetch('/api/voice', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ command: transcript }),
+					});
+					var data = await response.json();
+
+					clearTimeout(voiceTimeoutId);
+					voiceTimeoutId = null;
+
+					if (voiceRequestId !== currentRequestId) return;
+
+					els.voice.classList.remove('processing');
+					isProcessing = false;
+
+					if (data.response) {
+						speakText(data.response);
+					}
+				} catch (err) {
+					logJsError('voice request failed', err);
+					if (voiceTimeoutId) {
+						clearTimeout(voiceTimeoutId);
+						voiceTimeoutId = null;
+					}
+					if (voiceRequestId === currentRequestId) {
+						els.voice.classList.remove('processing');
+						isProcessing = false;
+					}
+				}
+			}
+
+			// Stop Vosk recording and clean up audio resources
+			function stopVoskRecording() {
+				if (voskProcessor) {
+					voskProcessor.disconnect();
+					voskProcessor = null;
+				}
+				if (voskStream) {
+					voskStream.getTracks().forEach(function(t) { t.stop(); });
+					voskStream = null;
+				}
+				if (voskAudioCtx) {
+					voskAudioCtx.close().catch(function() {});
+					voskAudioCtx = null;
+				}
 			}
 
 			// Reset all voice states to passive
@@ -7947,12 +8022,14 @@ function restoreNormalPolling() {
 				isProcessing = false;
 				els.voice.classList.remove('listening', 'processing');
 				if (recognition) {
-					try { recognition.abort(); } catch {}
+					try { recognition.abort(); } catch (e) {}
 					recognition = null;
 				}
+				stopVoskRecording();
+				voskChunks = [];
 			}
 
-			els.voice.addEventListener('click', () => {
+			els.voice.addEventListener('click', function() {
 				haptic();
 
 				// If processing, cancel wait and reset to passive
@@ -7961,95 +8038,173 @@ function restoreNormalPolling() {
 					return;
 				}
 
-				// If listening, abort everything (no request sent)
-				if (isListening) {
-					resetVoiceState();
-					return;
-				}
-
-				// Create new recognition instance
-				recognition = new SpeechRecognition();
-				recognition.lang = navigator.language || 'en-US';
-				recognition.interimResults = false;
-				recognition.maxAlternatives = 1;
-
-				// Show listening state immediately (solid green)
-				isListening = true;
-				els.voice.classList.add('listening');
-
-				recognition.onresult = async (event) => {
-					const transcript = event.results[0][0].transcript;
-
-					// Transition to processing state (flashing green)
-					isListening = false;
-					els.voice.classList.remove('listening');
-					els.voice.classList.add('processing');
-					isProcessing = true;
-
-					const currentRequestId = ++voiceRequestId;
-
-					// Set timeout for response
-					voiceTimeoutId = setTimeout(() => {
-						if (voiceRequestId === currentRequestId) {
-							els.voice.classList.remove('processing');
-							isProcessing = false;
-							voiceRequestId++;
-						}
-					}, VOICE_RESPONSE_TIMEOUT_MS);
-
-					try {
-						const response = await fetch('/api/voice', {
-							method: 'POST',
-							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({ command: transcript }),
-						});
-						const data = await response.json();
-
-						clearTimeout(voiceTimeoutId);
-						voiceTimeoutId = null;
-
-						// Ignore late/cancelled response
-						if (voiceRequestId !== currentRequestId) return;
-
-						els.voice.classList.remove('processing');
-						isProcessing = false;
-
-						if (data.response) {
-							speakText(data.response);
-						}
-					} catch (err) {
-						logJsError('voice request failed', err);
-						if (voiceTimeoutId) {
-							clearTimeout(voiceTimeoutId);
-							voiceTimeoutId = null;
-						}
-						if (voiceRequestId === currentRequestId) {
-							els.voice.classList.remove('processing');
-							isProcessing = false;
-						}
-					}
-				};
-
-				recognition.onerror = (e) => {
-					console.log('Speech recognition error:', e.error);
-					logJsError(`speech recognition error: ${e.error || 'unknown'}`, e);
-					resetVoiceState();
-				};
-
-				recognition.onend = () => {
-					// Only reset listening state if not transitioning to processing
-					if (!isProcessing) {
+				if (useVosk) {
+					// --- Vosk mode ---
+					if (isListening) {
+						// Second click: stop recording and send to Vosk
 						isListening = false;
 						els.voice.classList.remove('listening');
-					}
-					recognition = null;
-				};
 
-				try {
-					recognition.start();
-				} catch (err) {
-					logJsError('speech recognition start failed', err);
-					resetVoiceState();
+						// Gather collected chunks
+						var totalLen = 0;
+						for (var i = 0; i < voskChunks.length; i++) totalLen += voskChunks[i].length;
+						var pcm = new Int16Array(totalLen);
+						var offset = 0;
+						for (var j = 0; j < voskChunks.length; j++) {
+							pcm.set(voskChunks[j], offset);
+							offset += voskChunks[j].length;
+						}
+						voskChunks = [];
+						stopVoskRecording();
+
+						if (pcm.length === 0) return;
+
+						// Transition to processing
+						els.voice.classList.add('processing');
+						isProcessing = true;
+						var currentRequestId = ++voiceRequestId;
+
+						voiceTimeoutId = setTimeout(function() {
+							if (voiceRequestId === currentRequestId) {
+								els.voice.classList.remove('processing');
+								isProcessing = false;
+								voiceRequestId++;
+							}
+						}, VOICE_RESPONSE_TIMEOUT_MS);
+
+						fetch('/api/voice/transcribe', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/octet-stream' },
+							body: pcm.buffer,
+						}).then(function(r) { return r.json(); }).then(function(data) {
+							clearTimeout(voiceTimeoutId);
+							voiceTimeoutId = null;
+							if (voiceRequestId !== currentRequestId) return;
+							els.voice.classList.remove('processing');
+							isProcessing = false;
+
+							if (data.text && data.text.trim()) {
+								sendVoiceCommand(data.text.trim());
+							}
+						}).catch(function(err) {
+							logJsError('vosk transcribe failed', err);
+							if (voiceTimeoutId) {
+								clearTimeout(voiceTimeoutId);
+								voiceTimeoutId = null;
+							}
+							if (voiceRequestId === currentRequestId) {
+								els.voice.classList.remove('processing');
+								isProcessing = false;
+							}
+						});
+						return;
+					}
+
+					// First click: start recording
+					navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } }).then(function(stream) {
+						voskStream = stream;
+						var AudioCtx = window.AudioContext || window.webkitAudioContext;
+						voskAudioCtx = new AudioCtx({ sampleRate: 16000 });
+						var source = voskAudioCtx.createMediaStreamSource(stream);
+						var actualRate = voskAudioCtx.sampleRate;
+						var downsampleRatio = Math.round(actualRate / 16000);
+						voskProcessor = voskAudioCtx.createScriptProcessor(4096, 1, 1);
+						voskChunks = [];
+
+						// Silence detection: auto-stop after speech ends
+						var silenceThreshold = 0.015;
+						var silenceDurationMs = 1500;
+						var minRecordMs = 500;
+						var hadSpeech = false;
+						var silenceStart = 0;
+						var recordStart = Date.now();
+
+						voskProcessor.onaudioprocess = function(e) {
+							var input = e.inputBuffer.getChannelData(0);
+							var samples;
+							if (downsampleRatio > 1) {
+								var outLen = Math.floor(input.length / downsampleRatio);
+								samples = new Int16Array(outLen);
+								for (var k = 0; k < outLen; k++) {
+									var s = input[k * downsampleRatio];
+									samples[k] = s < 0 ? Math.max(-32768, s * 32768 | 0) : Math.min(32767, s * 32768 | 0);
+								}
+							} else {
+								samples = new Int16Array(input.length);
+								for (var m = 0; m < input.length; m++) {
+									var v = input[m];
+									samples[m] = v < 0 ? Math.max(-32768, v * 32768 | 0) : Math.min(32767, v * 32768 | 0);
+								}
+							}
+							voskChunks.push(samples);
+
+							// Compute RMS for silence detection
+							var sum = 0;
+							for (var r = 0; r < input.length; r++) sum += input[r] * input[r];
+							var rms = Math.sqrt(sum / input.length);
+							var now = Date.now();
+
+							if (rms > silenceThreshold) {
+								hadSpeech = true;
+								silenceStart = 0;
+							} else if (hadSpeech && (now - recordStart) > minRecordMs) {
+								if (!silenceStart) silenceStart = now;
+								if ((now - silenceStart) >= silenceDurationMs) {
+									// Auto-stop: simulate voice button click
+									els.voice.click();
+								}
+							}
+						};
+
+						source.connect(voskProcessor);
+						voskProcessor.connect(voskAudioCtx.destination);
+
+						isListening = true;
+						els.voice.classList.add('listening');
+					}).catch(function(err) {
+						logJsError('vosk getUserMedia failed', err);
+						resetVoiceState();
+					});
+				} else {
+					// --- Google mode (existing SpeechRecognition flow) ---
+					if (isListening) {
+						resetVoiceState();
+						return;
+					}
+
+					recognition = new SpeechRecognition();
+					recognition.lang = navigator.language || 'en-US';
+					recognition.interimResults = false;
+					recognition.maxAlternatives = 1;
+
+					isListening = true;
+					els.voice.classList.add('listening');
+
+					recognition.onresult = function(event) {
+						var transcript = event.results[0][0].transcript;
+						sendVoiceCommand(transcript);
+					};
+
+					recognition.onerror = function(e) {
+						console.log('Speech recognition error:', e.error);
+						logJsError('speech recognition error: ' + (e.error || 'unknown'), e);
+						resetVoiceState();
+					};
+
+					recognition.onend = function() {
+						if (!isProcessing) {
+							isListening = false;
+							els.voice.classList.remove('listening');
+						}
+						recognition = null;
+					};
+
+					try {
+						recognition.start();
+					} catch (err) {
+						logJsError('speech recognition start failed', err);
+						resetVoiceState();
+					}
 				}
 			});
 		}

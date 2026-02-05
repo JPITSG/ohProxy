@@ -250,6 +250,12 @@ module.exports = {
 			// Data refresh interval in milliseconds (default: 1 hour).
 			refreshIntervalMs: 3600000,
 		},
+		voice: {
+			// Speech-to-text engine ('browser' = browser SpeechRecognition, 'vosk' = local Vosk server).
+			model: 'browser',
+			// Vosk WebSocket server host:port (required when model is 'vosk').
+			voskHost: '',
+		},
 	},
 
 	// Client-visible settings.
