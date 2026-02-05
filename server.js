@@ -5144,12 +5144,18 @@ async function refreshSitemapCache(options = {}) {
 		}
 	}
 
-	// Trigger initial video preview capture on first successful sitemap pull
+	// Trigger initial video preview capture on first successful sitemap pull,
+	// but only if the task is due (respects restart persistence)
 	if (!videoPreviewInitialCaptureDone && liveConfig.videoPreviewIntervalMs > 0) {
 		videoPreviewInitialCaptureDone = true;
-		captureVideoPreviewsTask().catch((err) => {
-			logMessage(`Initial video preview capture failed: ${err.message || err}`);
-		});
+		const persistedTimes = loadTaskLastRunTimes();
+		const lastRun = persistedTimes['video-preview'] || 0;
+		const elapsed = Date.now() - lastRun;
+		if (elapsed >= liveConfig.videoPreviewIntervalMs) {
+			captureVideoPreviewsTask().catch((err) => {
+				logMessage(`Initial video preview capture failed: ${err.message || err}`);
+			});
+		}
 	}
 
 	return true;
