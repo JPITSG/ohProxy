@@ -370,6 +370,9 @@ const CHART_PERIOD_TTL = {
 const AI_CACHE_DIR = path.join(__dirname, 'cache', 'ai');
 const AI_STRUCTURE_MAP_WRITABLE = path.join(AI_CACHE_DIR, 'structuremap-writable.json');
 const ANTHROPIC_API_KEY = safeText(SERVER_CONFIG.apiKeys?.anthropic) || '';
+const VOICE_CONFIG = SERVER_CONFIG.voice || {};
+const VOICE_MODEL = (safeText(VOICE_CONFIG.model) || 'browser').toLowerCase();
+const VOSK_HOST = safeText(VOICE_CONFIG.voskHost) || '';
 const WEATHERBIT_CONFIG = SERVER_CONFIG.weatherbit || {};
 const WEATHERBIT_API_KEY = safeText(WEATHERBIT_CONFIG.apiKey).trim();
 const WEATHERBIT_LATITUDE = safeText(WEATHERBIT_CONFIG.latitude).trim();
@@ -1170,6 +1173,17 @@ function validateAdminConfig(config) {
 			ensureNumber(s.weatherbit.refreshIntervalMs, 'server.weatherbit.refreshIntervalMs', { min: 1 }, errors);
 		}
 	}
+	if (isPlainObject(s.voice)) {
+		if (s.voice.model !== undefined) {
+			const validModels = ['browser', 'vosk'];
+			if (!validModels.includes(s.voice.model)) {
+				errors.push('server.voice.model must be one of: ' + validModels.join(', '));
+			}
+		}
+		if (s.voice.voskHost !== undefined) {
+			ensureString(s.voice.voskHost || '', 'server.voice.voskHost', { allowEmpty: true, maxLen: 256 }, errors);
+		}
+	}
 
 	// Client config
 	if (isPlainObject(c)) {
@@ -1674,6 +1688,8 @@ const liveConfig = {
 	binConvert: BIN_CONVERT,
 	binShell: BIN_SHELL,
 	anthropicApiKey: ANTHROPIC_API_KEY,
+	voiceModel: VOICE_MODEL,
+	voskHost: VOSK_HOST,
 	weatherbitApiKey: WEATHERBIT_API_KEY,
 	weatherbitLatitude: WEATHERBIT_LATITUDE,
 	weatherbitLongitude: WEATHERBIT_LONGITUDE,
@@ -1886,6 +1902,9 @@ function reloadLiveConfig() {
 
 	// External services
 	liveConfig.anthropicApiKey = safeText(newServer.apiKeys?.anthropic) || '';
+	const newVoice = newServer.voice || {};
+	liveConfig.voiceModel = (safeText(newVoice.model) || 'browser').toLowerCase();
+	liveConfig.voskHost = safeText(newVoice.voskHost) || '';
 	const newWeatherbit = newServer.weatherbit || {};
 	const prevWeatherbitUnits = liveConfig.weatherbitUnits;
 	liveConfig.weatherbitApiKey = safeText(newWeatherbit.apiKey).trim();
@@ -5683,6 +5702,7 @@ app.get('/config.js', (req, res) => {
 		userRole: userRole,
 		trackGps: trackGps,
 		groupItems: liveConfig.groupItems || [],
+		voiceModel: liveConfig.voiceModel,
 	})};`);
 });
 
@@ -6390,6 +6410,68 @@ app.get('/api/card-config/:itemName/history', async (req, res) => {
 	} catch (err) {
 		logMessage(`[History API] Query failed for ${rawItemName}: ${err.message || err}`);
 		res.status(504).json({ ok: false, error: 'Query failed' });
+	}
+});
+
+app.post('/api/voice/transcribe', express.raw({ type: 'application/octet-stream', limit: '5mb' }), async (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+
+	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
+	const username = user?.username || 'anonymous';
+
+	if (!liveConfig.voskHost) {
+		res.status(503).json({ error: 'Vosk host not configured' });
+		return;
+	}
+
+	if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+		res.status(400).json({ error: 'Empty or invalid audio data' });
+		return;
+	}
+
+	const startTime = Date.now();
+
+	try {
+		const text = await new Promise((resolve, reject) => {
+			const ws = new WebSocket(`ws://${liveConfig.voskHost}`);
+			let result = '';
+			const timeout = setTimeout(() => {
+				ws.terminate();
+				reject(new Error('Vosk timeout'));
+			}, 30000);
+
+			ws.on('open', () => {
+				ws.send(JSON.stringify({ config: { sample_rate: 16000 } }));
+				ws.send(req.body);
+				ws.send(JSON.stringify({ eof: 1 }));
+			});
+
+			ws.on('message', (data) => {
+				try {
+					const msg = JSON.parse(data);
+					if (msg.text !== undefined) result = msg.text;
+				} catch {}
+			});
+
+			ws.on('close', () => {
+				clearTimeout(timeout);
+				resolve(result);
+			});
+
+			ws.on('error', (err) => {
+				clearTimeout(timeout);
+				reject(err);
+			});
+		});
+
+		const elapsed = Date.now() - startTime;
+		logMessage(`[Voice] [${username}] Vosk transcribed: "${text}" (${elapsed}ms)`);
+
+		res.json({ text: text || '' });
+	} catch (err) {
+		logMessage(`[Voice] [${username}] Vosk transcription failed: ${err.message || err}`);
+		res.status(502).json({ error: 'Vosk transcription failed' });
 	}
 });
 

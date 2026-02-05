@@ -34,8 +34,10 @@ describe('Input Surface Coverage', () => {
 			/const\s+body\s*=\s*req\.body\s*;/,
 			/const\s+incoming\s*=\s*req\.body\s*;/,
 			/const\s+rawWidgetId\s*=\s*req\.params\.widgetId\s*;/,
-			/const\s+\{\s*widgetId,\s*rules,\s*visibility,\s*defaultMuted,\s*iframeHeight,\s*proxyCacheSeconds\s*\}\s*=\s*req\.body\s*;/,
+			/const\s+\{\s*widgetId,\s*rules,\s*visibility,\s*defaultMuted,\s*iframeHeight,\s*proxyCacheSeconds,\s*cardWidth\s*\}\s*=\s*req\.body\s*;/,
 			/const\s+\{\s*command\s*\}\s*=\s*req\.body\s*;/,
+			/if\s*\(!Buffer\.isBuffer\(req\.body\)\s*\|\|\s*req\.body\.length\s*===\s*0\)/,
+			/ws\.send\(req\.body\)\s*;/,
 			/const\s+rawTheme\s*=\s*req\.query\?\.theme\s*;/,
 			/const\s+rawRoot\s*=\s*typeof\s+req\.query\?\.root\s*===\s*'string'\s*\?\s*req\.query\.root\s*:\s*''\s*;/,
 			/const\s+rawSitemap\s*=\s*typeof\s+req\.query\?\.sitemap\s*===\s*'string'\s*\?\s*req\.query\.sitemap\s*:\s*''\s*;/,
@@ -66,6 +68,8 @@ describe('Input Surface Coverage', () => {
 			/const\s+offset\s*=\s*Math\.max\(0,\s*parseInt\(req\.query\.offset,\s*10\)\s*\|\|\s*0\)\s*;/,
 			/const\s+rawCommands\s*=\s*typeof\s+req\.query\.commands\s*===\s*'string'\s*\?\s*req\.query\.commands\s*:\s*''\s*;/,
 			/const\s+rawBefore\s*=\s*typeof\s+req\.query\.before\s*===\s*'string'\s*\?\s*req\.query\.before\s*:\s*''\s*;/,
+			/const\s+rawOffset\s*=\s*req\.query\.offset\s*;/,
+			/const\s+rawRadius\s*=\s*req\.query\.radius\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));
