@@ -301,6 +301,9 @@ window.ohLang = {
 		visAll: 'All',
 		visNormal: 'Normal',
 		visAdmin: 'Admin',
+		cardWidthHeader: 'CARD WIDTH',
+		widthStandard: 'Standard',
+		widthFull: 'Full',
 
 		heightPlaceholder: 'pixels',
 		cachePlaceholder: 'seconds',

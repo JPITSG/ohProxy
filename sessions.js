@@ -90,6 +90,15 @@ function initDb() {
 		);
 	`);
 
+	// Create widget card width config table (for full-width cards)
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS widget_card_width (
+			widget_id TEXT PRIMARY KEY,
+			width TEXT NOT NULL DEFAULT 'standard',
+			updated_at INTEGER DEFAULT (strftime('%s','now'))
+		);
+	`);
+
 	// Create server settings table (key-value store for persistent server state)
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS server_settings (
@@ -485,6 +494,41 @@ function setProxyCacheConfig(widgetId, cacheSeconds) {
 }
 
 // ============================================
+// Widget Card Width Functions
+// ============================================
+
+/**
+ * Get all card width configs.
+ * @returns {Array} - Array of {widgetId, width} objects
+ */
+function getAllCardWidths() {
+	if (!db) initDb();
+	const rows = db.prepare('SELECT widget_id, width FROM widget_card_width').all();
+	return rows.map(r => ({ widgetId: r.widget_id, width: r.width }));
+}
+
+/**
+ * Set card width for a widget. If width is 'standard' (default), deletes the entry.
+ * @param {string} widgetId - The widget ID
+ * @param {string} width - 'standard' or 'full'
+ * @returns {boolean} - True if successful
+ */
+function setCardWidth(widgetId, width) {
+	if (!db) initDb();
+	const now = Math.floor(Date.now() / 1000);
+
+	if (width === 'standard') {
+		db.prepare('DELETE FROM widget_card_width WHERE widget_id = ?').run(widgetId);
+	} else {
+		db.prepare(`
+			INSERT INTO widget_card_width (widget_id, width, updated_at) VALUES (?, ?, ?)
+			ON CONFLICT(widget_id) DO UPDATE SET width = excluded.width, updated_at = excluded.updated_at
+		`).run(widgetId, width, now);
+	}
+	return true;
+}
+
+// ============================================
 // User Management Functions
 // ============================================
 
@@ -703,6 +747,9 @@ module.exports = {
 	// Proxy cache config
 	getAllProxyCacheConfigs,
 	setProxyCacheConfig,
+	// Card width
+	getAllCardWidths,
+	setCardWidth,
 	// User management
 	getAllUsers,
 	getUser,

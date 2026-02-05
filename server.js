@@ -5714,6 +5714,7 @@ app.get('/config.js', (req, res) => {
 		widgetVideoConfigs: sessions.getAllVideoConfigs(),
 		widgetIframeConfigs: sessions.getAllIframeConfigs(),
 		widgetProxyCacheConfigs: sessions.getAllProxyCacheConfigs(),
+		widgetCardWidths: sessions.getAllCardWidths(),
 		userRole: userRole,
 		trackGps: trackGps,
 		groupItems: liveConfig.groupItems || [],
@@ -6004,7 +6005,7 @@ app.post('/api/card-config', jsonParserLarge, (req, res) => {
 		return;
 	}
 
-	const { widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds } = req.body;
+	const { widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth } = req.body;
 	if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200 || hasAnyControlChars(widgetId)) {
 		res.status(400).json({ error: 'Missing or invalid widgetId' });
 		return;
@@ -6109,6 +6110,15 @@ app.post('/api/card-config', jsonParserLarge, (req, res) => {
 		}
 	}
 
+	// Validate cardWidth if provided
+	if (cardWidth !== undefined) {
+		const validWidths = ['standard', 'full'];
+		if (typeof cardWidth !== 'string' || !validWidths.includes(cardWidth)) {
+			res.status(400).json({ error: `Invalid cardWidth: ${cardWidth}` });
+			return;
+		}
+	}
+
 	// Save to database
 	try {
 		if (rules !== undefined) {
@@ -6126,7 +6136,10 @@ app.post('/api/card-config', jsonParserLarge, (req, res) => {
 		if (proxyCacheSeconds !== undefined) {
 			sessions.setProxyCacheConfig(widgetId, cacheNum);
 		}
-		res.json({ ok: true, widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds });
+		if (cardWidth !== undefined) {
+			sessions.setCardWidth(widgetId, cardWidth);
+		}
+		res.json({ ok: true, widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth });
 	} catch (err) {
 		logMessage(`Failed to save card config: ${err.message || err}`, 'error');
 		res.status(500).json({ error: 'Failed to save config' });
