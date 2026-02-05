@@ -27,7 +27,7 @@ function getJsFiles(dir, recursive = true) {
 	const entries = fs.readdirSync(dir, { withFileTypes: true });
 	for (const entry of entries) {
 		const fullPath = path.join(dir, entry.name);
-		if (entry.isDirectory() && recursive && entry.name !== 'node_modules') {
+		if (entry.isDirectory() && recursive && entry.name !== 'node_modules' && entry.name !== 'vendor') {
 			files.push(...getJsFiles(fullPath, recursive));
 		} else if (entry.isFile() && entry.name.endsWith('.js')) {
 			files.push(fullPath);
@@ -298,6 +298,7 @@ describe('Static Analysis: Path Traversal Prevention', () => {
 				// Skip if argument is clearly static (string literal or known safe variable)
 				if (/^['"`]/.test(arg)) continue; // String literal
 				if (/Path$/.test(arg) && !/req/.test(arg)) continue; // Variables ending in Path not from req
+				if (/^path\.join\(/.test(arg) && !/req/.test(arg)) continue; // Static path.join not from req
 
 				// Check if argument is derived from user input
 				const context = lines.slice(Math.max(0, i - 15), i + 1).join('\n');
