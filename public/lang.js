@@ -304,6 +304,7 @@ window.ohLang = {
 		cardWidthHeader: 'CARD WIDTH',
 		widthStandard: 'Standard',
 		widthFull: 'Full',
+		widthStretch: 'Stretched',
 
 		heightPlaceholder: 'pixels',
 		cachePlaceholder: 'seconds',

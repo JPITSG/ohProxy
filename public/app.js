@@ -1865,6 +1865,50 @@ function scheduleImageResizeRefresh() {
 	}, 250);
 }
 
+// Recalculate stretch card spans based on their position in the grid row
+let stretchResizeTimer = null;
+function recalculateStretchCards() {
+	if (!els.grid) return;
+	const children = Array.from(els.grid.children);
+	if (!children.length) return;
+	// Determine column count based on viewport (matches Tailwind breakpoints: lg:3, sm:2, default:1)
+	const cols = window.matchMedia('(min-width: 1024px)').matches ? 3
+		: window.matchMedia('(min-width: 640px)').matches ? 2 : 1;
+	let currentCol = 0;
+	for (const el of children) {
+		// Section headers span full width, reset column counter
+		if (el.classList.contains('section-header')) {
+			currentCol = 0;
+			continue;
+		}
+		// Only process widget cards (have data-widget-key)
+		if (!el.dataset.widgetKey) continue;
+		// Check full width based on active breakpoint
+		const isFullWidth = (cols === 3 && el.classList.contains('lg:col-span-3')) ||
+			(cols === 2 && el.classList.contains('sm:col-span-2'));
+		const isStretch = el.classList.contains('card-stretch');
+		if (isStretch) {
+			const remaining = cols - currentCol;
+			el.style.gridColumn = remaining > 1 ? `span ${remaining}` : '';
+			currentCol = 0; // Stretch fills to end of row
+		} else if (isFullWidth) {
+			el.style.gridColumn = '';
+			currentCol = 0; // Full width uses entire row
+		} else {
+			el.style.gridColumn = '';
+			currentCol = (currentCol + 1) % cols;
+		}
+	}
+}
+
+function scheduleStretchRecalc() {
+	if (stretchResizeTimer) clearTimeout(stretchResizeTimer);
+	stretchResizeTimer = setTimeout(() => {
+		stretchResizeTimer = null;
+		recalculateStretchCards();
+	}, 100);
+}
+
 function scheduleImageScrollRefresh() {
 	if (!imageResizePending) return;
 	if (imageScrollTimer) clearTimeout(imageScrollTimer);
@@ -2116,6 +2160,10 @@ function ensureCardConfigModal() {
 						<label class="item-config-radio">
 							<input type="radio" name="cardWidth" value="standard" checked>
 							<span>${cc.widthStandard}</span>
+						</label>
+						<label class="item-config-radio">
+							<input type="radio" name="cardWidth" value="stretch">
+							<span>${cc.widthStretch}</span>
 						</label>
 						<label class="item-config-radio">
 							<input type="radio" name="cardWidth" value="full">
@@ -4965,9 +5013,12 @@ function updateCard(card, w, info) {
 		'switch-many',
 		'switch-single'
 	);
-	const cardWidthFull = widgetCardWidthMap.get(card.dataset.widgetKey) === 'full';
+	const cardWidth = widgetCardWidthMap.get(card.dataset.widgetKey);
+	const cardWidthFull = cardWidth === 'full';
+	const cardWidthStretch = cardWidth === 'stretch';
 	card.classList.toggle('sm:col-span-2', isImage || isChart || isWebview || isVideo || cardWidthFull);
 	card.classList.toggle('lg:col-span-3', isImage || isChart || isWebview || isVideo || cardWidthFull);
+	card.classList.toggle('card-stretch', cardWidthStretch);
 	// Reset webview/video inline styles
 	card.style.padding = '';
 	card.style.overflow = '';
@@ -6270,6 +6321,9 @@ function render() {
 			if (updated) render();
 		});
 	}
+
+	// Recalculate stretch card spans after grid is populated
+	recalculateStretchCards();
 }
 
 // --- Navigation / Data ---
@@ -7625,6 +7679,8 @@ function restoreNormalPolling() {
 	window.addEventListener('keydown', noteActivity, { passive: true });
 	window.addEventListener('resize', scheduleImageResizeRefresh, { passive: true });
 	window.addEventListener('orientationchange', scheduleImageResizeRefresh, { passive: true });
+	window.addEventListener('resize', scheduleStretchRecalc, { passive: true });
+	window.addEventListener('orientationchange', scheduleStretchRecalc, { passive: true });
 	// Instant offline/online detection
 	window.addEventListener('offline', () => {
 		clearInflightFetches(); // Clear stuck requests to prevent deadlocks
