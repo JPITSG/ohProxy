@@ -1,6 +1,10 @@
 'use strict';
 
 (function() {
+	function haptic(ms) {
+		if (navigator.vibrate) navigator.vibrate(ms || 30);
+	}
+
 	const form = document.getElementById('login-form');
 	const submitBtn = form.querySelector('.submit-btn');
 	const loginCard = document.querySelector('.login-card');
@@ -50,6 +54,7 @@
 
 	form.addEventListener('submit', async function(e) {
 		e.preventDefault();
+		haptic();
 
 		if (submitBtn.disabled) return;
 

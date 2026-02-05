@@ -2517,6 +2517,7 @@ async function loadHistoryEntries(itemName, offset) {
 				btn.className = 'history-newer';
 				btn.textContent = ohLang.cardConfig.newerBtn;
 				btn.addEventListener('click', () => {
+					haptic();
 					const prevOffset = historyOffsetStack.pop() || 0;
 					loadHistoryEntries(itemName, prevOffset);
 				});
@@ -2528,6 +2529,7 @@ async function loadHistoryEntries(itemName, offset) {
 				btn.className = 'history-older';
 				btn.textContent = ohLang.cardConfig.olderBtn;
 				btn.addEventListener('click', () => {
+					haptic();
 					historyOffsetStack.push(offset);
 					loadHistoryEntries(itemName, data.nextOffset);
 				});
@@ -2608,6 +2610,7 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 				btn.className = 'history-newer';
 				btn.textContent = ohLang.cardConfig.newerBtn;
 				btn.addEventListener('click', () => {
+					haptic();
 					const prevCursor = historyCursorStack.pop() || null;
 					loadGroupHistoryEntries(itemName, prevCursor);
 				});
@@ -2619,6 +2622,7 @@ async function loadGroupHistoryEntries(itemName, cursor) {
 				btn.className = 'history-older';
 				btn.textContent = ohLang.cardConfig.olderBtn;
 				btn.addEventListener('click', () => {
+					haptic();
 					historyCursorStack.push(cursor);
 					loadGroupHistoryEntries(itemName, data.nextCursor);
 				});
@@ -3063,6 +3067,7 @@ function createAdminSelect(options, initialValue) {
 		optBtn.onclick = (e) => {
 			e.preventDefault();
 			e.stopPropagation();
+			haptic();
 			wrap.dataset.value = opt;
 			fakeSelect.textContent = displayLabel(opt);
 			menu.querySelectorAll('.glow-select-option').forEach(b => b.classList.remove('active'));
@@ -3113,6 +3118,7 @@ function createAdminSelect(options, initialValue) {
 	fakeSelect.onclick = (e) => {
 		e.preventDefault();
 		e.stopPropagation();
+		haptic();
 		// Close other open menus (properly removes scroll listeners)
 		document.querySelectorAll('.admin-select-wrap.menu-open').forEach(w => {
 			if (w !== wrap && typeof w._closeMenu === 'function') w._closeMenu();
@@ -3254,6 +3260,7 @@ function createAdminField(field, value) {
 		eyeBtn.addEventListener('click', (e) => {
 			e.preventDefault();
 			e.stopPropagation();
+			haptic();
 			input.type = input.type === 'password' ? 'text' : 'password';
 		});
 		wrap.appendChild(input);
@@ -3315,6 +3322,7 @@ function renderAdminConfigSection(section, config) {
 	const header = document.createElement('div');
 	header.className = 'admin-config-section-header';
 	header.onclick = () => {
+		haptic();
 		const wasCollapsed = sectionEl.classList.toggle('collapsed');
 		if (!wasCollapsed) {
 			sectionEl.querySelectorAll('textarea').forEach(autoResizeTextarea);
@@ -3387,11 +3395,11 @@ function ensureAdminConfigModal() {
 	document.body.appendChild(wrap);
 	adminConfigModal = wrap;
 
-	wrap.querySelector('.admin-config-close').addEventListener('click', () => closeAdminConfigModal());
-	wrap.querySelector('.admin-config-cancel').addEventListener('click', () => closeAdminConfigModal());
-	wrap.querySelector('.admin-config-save').addEventListener('click', () => saveAdminConfig());
+	wrap.querySelector('.admin-config-close').addEventListener('click', () => { haptic(); closeAdminConfigModal(); });
+	wrap.querySelector('.admin-config-cancel').addEventListener('click', () => { haptic(); closeAdminConfigModal(); });
+	wrap.querySelector('.admin-config-save').addEventListener('click', () => { haptic(); saveAdminConfig(); });
 	wrap.addEventListener('click', (e) => {
-		if (e.target === wrap) closeAdminConfigModal();
+		if (e.target === wrap) { haptic(); closeAdminConfigModal(); }
 	});
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape' && adminConfigModal && !adminConfigModal.classList.contains('hidden')) {
