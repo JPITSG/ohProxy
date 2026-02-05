@@ -6,6 +6,8 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 
+const { generateStructureMap } = require('./lib/structure-map');
+
 const CACHE_DIR = path.join(__dirname, 'cache');
 const AI_CACHE_DIR = path.join(CACHE_DIR, 'ai');
 const STRUCTURE_MAP_ALL = path.join(AI_CACHE_DIR, 'structuremap-all.json');
@@ -122,160 +124,7 @@ async function getSitemapFull(sitemapName) {
 	return await fetchOpenhab(`/rest/sitemaps/${sitemapName}?type=json&includeHidden=true`);
 }
 
-function extractWidgets(widget, result = [], path = []) {
-	if (!widget) return result;
-
-	// Determine current section name from Frame label or linkedPage title
-	let currentPath = path;
-	if (widget.type === 'Frame' && widget.label) {
-		// Clean label - remove [%s] style placeholders
-		const cleanLabel = widget.label.replace(/\s*\[.*?\]\s*$/, '').trim();
-		if (cleanLabel) {
-			currentPath = [...path, cleanLabel];
-		}
-	}
-
-	// Extract relevant info from this widget
-	if (widget.item || widget.type) {
-		const entry = {
-			type: widget.type,
-			label: widget.label || '',
-			section: currentPath.length > 0 ? currentPath.join(' / ') : null,
-		};
-		if (widget.item) {
-			entry.item = widget.item.name;
-			entry.itemType = widget.item.type?.replace('Item', '') || widget.item.type;
-			entry.state = widget.item.state;
-			if (widget.item.stateDescription?.options) {
-				// Include both value and label for options
-				entry.options = widget.item.stateDescription.options.map(o => ({
-					value: o.value,
-					label: o.label || o.value
-				}));
-			}
-		}
-		// Handle both 'mapping' and 'mappings'
-		const mappings = widget.mappings || widget.mapping;
-		if (mappings && mappings.length > 0) {
-			entry.mappings = mappings.map(m => ({ cmd: m.command, label: m.label }));
-		}
-		result.push(entry);
-	}
-
-	// Recurse into children - handle both 'widget' and 'widgets' (singular and plural)
-	const children = widget.widgets || widget.widget;
-	if (children) {
-		const childArray = Array.isArray(children) ? children : [children];
-		for (const child of childArray) {
-			extractWidgets(child, result, currentPath);
-		}
-	}
-
-	// Recurse into linked pages - use linkedPage title as section
-	if (widget.linkedPage) {
-		const linkedTitle = widget.linkedPage.title || widget.label;
-		const cleanLinkedTitle = linkedTitle ? linkedTitle.replace(/\s*\[.*?\]\s*$/, '').trim() : null;
-		const linkedPath = cleanLinkedTitle ? [...path, cleanLinkedTitle] : path;
-
-		const linkedChildren = widget.linkedPage.widgets || widget.linkedPage.widget;
-		if (linkedChildren) {
-			const linkedArray = Array.isArray(linkedChildren) ? linkedChildren : [linkedChildren];
-			for (const child of linkedArray) {
-				extractWidgets(child, result, linkedPath);
-			}
-		}
-	}
-
-	return result;
-}
-
-function isWritableWidget(w) {
-	// A widget is writable if it has commands available
-	if (w.mappings && w.mappings.length > 0) return true;
-	if (w.options && w.options.length > 0) return true;
-	if (['Switch', 'Dimmer', 'Rollershutter', 'Color', 'Player'].includes(w.itemType)) return true;
-	return false;
-}
-
-function buildStructureMapPrompt(sitemap, widgets, type = 'all') {
-	// Group widgets by section
-	const itemWidgets = widgets.filter(w => w.item);
-	const sections = new Map();
-
-	for (const w of itemWidgets) {
-		const section = w.section || 'Home';
-		if (!sections.has(section)) {
-			sections.set(section, []);
-		}
-		sections.get(section).push(w);
-	}
-
-	// Build output grouped by section
-	const lines = [];
-	for (const [section, items] of sections) {
-		lines.push(`## ${section}`);
-		for (const w of items) {
-			// Clean label - remove [%s] style state placeholders
-			const cleanLabel = (w.label || '').replace(/\s*\[.*?\]\s*$/, '').trim();
-			let line = `- ${w.item} (${w.itemType || 'Unknown'}): "${cleanLabel}"`;
-			if (w.mappings) {
-				// Include both command and label: "2=2 Minutes, 1=1 Minute"
-				line += ` [commands: ${w.mappings.map(m => m.label ? `${m.cmd}="${m.label}"` : m.cmd).join(', ')}]`;
-			} else if (w.options) {
-				// Include both value and label for options
-				line += ` [options: ${w.options.map(o => o.label && o.label !== o.value ? `${o.value}="${o.label}"` : o.value).join(', ')}]`;
-			} else if (w.itemType === 'Switch') {
-				line += ` [commands: ON, OFF]`;
-			} else if (w.itemType === 'Dimmer') {
-				line += ` [commands: ON, OFF, 0-100]`;
-			} else if (w.itemType === 'Rollershutter') {
-				line += ` [commands: UP, DOWN, STOP, 0-100]`;
-			}
-			lines.push(line);
-		}
-		lines.push(''); // Empty line between sections
-	}
-	const itemSummary = lines.join('\n').trim();
-
-	return {
-		model: 'claude-3-haiku-20240307',
-		max_tokens: 4096,
-		system: `You are an assistant that creates structured mappings for home automation voice commands.
-Your task is to analyze the provided openHAB items and create a concise structure map that can be used to match voice commands to item actions.
-
-Output a JSON object with the following structure:
-{
-  "items": [
-    {
-      "name": "ItemName",
-      "aliases": ["living room light", "main light", "living room"],
-      "actions": {
-        "on": "ON",
-        "off": "OFF",
-        "toggle": "TOGGLE"
-      }
-    }
-  ],
-  "rooms": ["living room", "kitchen", "bedroom"],
-  "capabilities": ["lights", "temperature", "locks", "blinds"]
-}
-
-Be concise. Extract room names and device types from labels. Create natural language aliases people would use in voice commands.`,
-		messages: [
-			{
-				role: 'user',
-				content: `Here is the sitemap "${sitemap.name}" (${sitemap.label || 'Home'}) with its ${type === 'readable' ? 'read-only' : type === 'writable' ? 'controllable' : ''} items:
-
-${itemSummary}
-
-Create a structure map JSON for voice command matching.`
-			}
-		]
-	};
-}
-
 async function genStructureMap(options = {}) {
-	const dryRun = options.dryRun || args.includes('--dry-run');
 	let sitemapName = options.sitemap;
 
 	// Find --sitemap argument
@@ -284,69 +133,42 @@ async function genStructureMap(options = {}) {
 		sitemapName = args[sitemapIdx + 1];
 	}
 
-	console.log('Fetching sitemap list from openHAB...');
+	console.log('Fetching sitemap from openHAB...');
 
 	try {
-		const sitemaps = await getSitemapList();
-		if (sitemaps.length === 0) {
-			console.error('Error: No sitemaps found in openHAB');
-			process.exit(1);
-		}
-
-		// Auto-detect or validate sitemap name
-		if (!sitemapName) {
-			sitemapName = sitemaps[0].name;
-			console.log(`Auto-detected sitemap: ${sitemapName}`);
-		} else {
-			const found = sitemaps.find(s => s.name === sitemapName);
-			if (!found) {
-				console.error(`Error: Sitemap "${sitemapName}" not found`);
-				console.error(`Available sitemaps: ${sitemaps.map(s => s.name).join(', ')}`);
-				process.exit(1);
+		const fetchList = async () => {
+			const sitemaps = await getSitemapList();
+			if (sitemaps.length === 0) {
+				throw new Error('No sitemaps found in openHAB');
 			}
-		}
+			return sitemaps;
+		};
 
-		console.log(`Fetching full sitemap: ${sitemapName}...`);
-		const sitemap = await getSitemapFull(sitemapName);
+		const fetchFull = async (name) => {
+			return await getSitemapFull(name);
+		};
 
-		// Extract all widgets recursively
-		const widgets = [];
-		const homepageWidgets = sitemap.homepage?.widgets || sitemap.homepage?.widget;
-		if (homepageWidgets) {
-			const widgetArray = Array.isArray(homepageWidgets) ? homepageWidgets : [homepageWidgets];
-			for (const widget of widgetArray) {
-				extractWidgets(widget, widgets);
-			}
-		}
+		const result = await generateStructureMap(fetchList, fetchFull, { sitemapName });
 
-		// Split widgets into readable and writable
-		const itemWidgets = widgets.filter(w => w.item);
-		const writableWidgets = itemWidgets.filter(isWritableWidget);
-		const readableWidgets = itemWidgets.filter(w => !isWritableWidget(w));
-
-		console.log(`Found ${widgets.length} widgets, ${itemWidgets.length} with items`);
-		console.log(`  - Writable (has commands): ${writableWidgets.length}`);
-		console.log(`  - Readable (no commands): ${readableWidgets.length}`);
+		console.log(`Using sitemap: ${result.sitemapName}`);
+		console.log(`Found ${result.stats.total} items with items`);
+		console.log(`  - Writable (has commands): ${result.stats.writable}`);
+		console.log(`  - Readable (no commands): ${result.stats.readable}`);
 		console.log('');
-
-		// Build prompts for each type
-		const requestAll = buildStructureMapPrompt(sitemap, itemWidgets, 'all');
-		const requestWritable = buildStructureMapPrompt(sitemap, writableWidgets, 'writable');
-		const requestReadable = buildStructureMapPrompt(sitemap, readableWidgets, 'readable');
 
 		console.log('='.repeat(80));
 		console.log('ANTHROPIC API REQUEST - ALL ITEMS');
 		console.log('='.repeat(80));
 		console.log('');
 		console.log(`Endpoint: POST https://api.anthropic.com/v1/messages`);
-		console.log(`Model: ${requestAll.model}`);
-		console.log(`Max Tokens: ${requestAll.max_tokens}`);
+		console.log(`Model: ${result.all.request.model}`);
+		console.log(`Max Tokens: ${result.all.request.max_tokens}`);
 		console.log('');
 		console.log('--- SYSTEM PROMPT ---');
-		console.log(requestAll.system);
+		console.log(result.all.request.system);
 		console.log('');
 		console.log('--- USER MESSAGE ---');
-		console.log(requestAll.messages[0].content);
+		console.log(result.all.request.messages[0].content);
 		console.log('');
 		console.log('='.repeat(80));
 
@@ -360,28 +182,28 @@ async function genStructureMap(options = {}) {
 			// Save all items
 			fs.writeFileSync(STRUCTURE_MAP_ALL, JSON.stringify({
 				generatedAt,
-				sitemap: sitemapName,
+				sitemap: result.sitemapName,
 				type: 'all',
-				itemCount: itemWidgets.length,
-				request: requestAll,
+				itemCount: result.all.itemCount,
+				request: result.all.request,
 			}, null, 2));
 
 			// Save writable items
 			fs.writeFileSync(STRUCTURE_MAP_WRITABLE, JSON.stringify({
 				generatedAt,
-				sitemap: sitemapName,
+				sitemap: result.sitemapName,
 				type: 'writable',
-				itemCount: writableWidgets.length,
-				request: requestWritable,
+				itemCount: result.writable.itemCount,
+				request: result.writable.request,
 			}, null, 2));
 
 			// Save readable items
 			fs.writeFileSync(STRUCTURE_MAP_READABLE, JSON.stringify({
 				generatedAt,
-				sitemap: sitemapName,
+				sitemap: result.sitemapName,
 				type: 'readable',
-				itemCount: readableWidgets.length,
-				request: requestReadable,
+				itemCount: result.readable.itemCount,
+				request: result.readable.request,
 			}, null, 2));
 
 			console.log('');
@@ -391,12 +213,6 @@ async function genStructureMap(options = {}) {
 			console.log(`  - Readable: ${STRUCTURE_MAP_READABLE}`);
 		} catch (saveErr) {
 			console.error(`Warning: Failed to save cache: ${saveErr.message}`);
-		}
-
-		if (!dryRun) {
-			console.log('');
-			console.log('Note: Use --dry-run flag to preview without API call');
-			console.log('      Full API integration coming soon...');
 		}
 
 	} catch (err) {

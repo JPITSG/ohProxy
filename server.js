@@ -17,6 +17,7 @@ const WebSocket = require('ws');
 const net = require('net');
 const mysql = require('mysql2');
 const sessions = require('./sessions');
+const { generateStructureMap } = require('./lib/structure-map');
 
 // Keep-alive agents for openHAB backend connections (eliminates TIME_WAIT buildup)
 const ohHttpAgent = new http.Agent({ keepAlive: true });
@@ -332,6 +333,9 @@ const SECURITY_REFERRER_POLICY = safeText(SECURITY_HEADERS.referrerPolicy || '')
 const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(
 	process.env.SITEMAP_REFRESH_MS || TASK_CONFIG.sitemapRefreshMs
+);
+const STRUCTURE_MAP_REFRESH_MS = configNumber(
+	process.env.STRUCTURE_MAP_REFRESH_MS || TASK_CONFIG.structureMapRefreshMs
 );
 const WEBSOCKET_CONFIG = SERVER_CONFIG.websocket || {};
 const WS_MODE = ['atmosphere', 'sse'].includes(WEBSOCKET_CONFIG.mode) ? WEBSOCKET_CONFIG.mode : 'polling';
@@ -1649,6 +1653,7 @@ const liveConfig = {
 	securityCsp: SECURITY_CSP,
 	securityReferrerPolicy: SECURITY_REFERRER_POLICY,
 	sitemapRefreshMs: SITEMAP_REFRESH_MS,
+	structureMapRefreshMs: STRUCTURE_MAP_REFRESH_MS,
 	clientConfig: CLIENT_CONFIG,
 	wsMode: WS_MODE,
 	wsPollingIntervalMs: WS_POLLING_INTERVAL_MS,
@@ -1834,6 +1839,8 @@ function reloadLiveConfig() {
 	liveConfig.securityReferrerPolicy = safeText(newSecurityHeaders.referrerPolicy || '');
 	const prevSitemapRefreshMs = liveConfig.sitemapRefreshMs;
 	liveConfig.sitemapRefreshMs = configNumber(newTasks.sitemapRefreshMs);
+	const prevStructureMapRefreshMs = liveConfig.structureMapRefreshMs;
+	liveConfig.structureMapRefreshMs = configNumber(newTasks.structureMapRefreshMs);
 	liveConfig.clientConfig = newConfig.client || {};
 
 	// WebSocket config - handle mode changes
@@ -1925,6 +1932,10 @@ function reloadLiveConfig() {
 
 	if (liveConfig.sitemapRefreshMs !== prevSitemapRefreshMs) {
 		updateBackgroundTaskInterval('sitemap-cache', liveConfig.sitemapRefreshMs);
+	}
+
+	if (liveConfig.structureMapRefreshMs !== prevStructureMapRefreshMs) {
+		updateBackgroundTaskInterval('structure-map', liveConfig.structureMapRefreshMs);
 	}
 
 	// If mode changed and clients are connected, switch modes
@@ -5034,6 +5045,49 @@ function getAiStructureMap() {
 	} catch {
 		return null;
 	}
+}
+
+async function refreshStructureMapCache() {
+	const fetchList = async () => {
+		const res = await fetchOpenhab('/rest/sitemaps?type=json');
+		if (!res?.ok) throw new Error('Failed to fetch sitemap list');
+		const data = JSON.parse(res.body);
+		if (Array.isArray(data)) return data;
+		if (data?.sitemap) return [data.sitemap];
+		if (data?.name) return [data];
+		return [];
+	};
+
+	const fetchFull = async (name) => {
+		const res = await fetchOpenhab(`/rest/sitemaps/${name}?type=json&includeHidden=true`);
+		if (!res?.ok) throw new Error(`Failed to fetch sitemap ${name}`);
+		return JSON.parse(res.body);
+	};
+
+	const result = await generateStructureMap(fetchList, fetchFull);
+
+	// Write cache files
+	if (!fs.existsSync(AI_CACHE_DIR)) {
+		fs.mkdirSync(AI_CACHE_DIR, { recursive: true });
+	}
+
+	const generatedAt = new Date().toISOString();
+	for (const type of ['all', 'writable', 'readable']) {
+		const filePath = path.join(AI_CACHE_DIR, `structuremap-${type}.json`);
+		fs.writeFileSync(filePath, JSON.stringify({
+			generatedAt,
+			sitemap: result.sitemapName,
+			type,
+			itemCount: result[type].itemCount,
+			request: result[type].request
+		}, null, 2));
+	}
+
+	// Invalidate cache
+	aiStructureMapCache = null;
+	aiStructureMapMtime = 0;
+
+	logMessage(`[StructureMap] Generated: ${result.stats.total} items (${result.stats.writable} writable, ${result.stats.readable} readable)`);
 }
 
 async function refreshSitemapCache(options = {}) {
@@ -8301,6 +8355,7 @@ app.use((req, res) => {
 
 registerBackgroundTask('sitemap-cache', SITEMAP_REFRESH_MS, refreshSitemapCache);
 registerBackgroundTask('group-member-map', 60000, refreshGroupMemberMap);
+registerBackgroundTask('structure-map', STRUCTURE_MAP_REFRESH_MS, refreshStructureMapCache);
 
 // Video preview capture function
 async function captureRtspPreview(rtspUrl) {

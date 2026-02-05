@@ -166,6 +166,8 @@ module.exports = {
 		backgroundTasks: {
 			// Sitemap refresh interval (ms; >=1000).
 			sitemapRefreshMs: 60000,
+			// AI structure map regeneration interval (ms; 0 = disabled).
+			structureMapRefreshMs: 24 * 60 * 60 * 1000, // 24 hours
 		},
 
 		// === WebSocket ===
