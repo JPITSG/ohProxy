@@ -33,7 +33,7 @@ const CONTROL_CHARS_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
 const ANY_CONTROL_CHARS_RE = /[\x00-\x1F\x7F]/;
 
 function authHeader() {
-	// Prefer API token (Bearer) for OH 3.x, fall back to Basic Auth for OH 1.x/2.x
+	// Prefer API token (Bearer) for OH 3.x+, fall back to Basic Auth for OH 1.x/2.x
 	if (liveConfig.ohApiToken) {
 		return `Bearer ${liveConfig.ohApiToken}`;
 	}
@@ -2342,7 +2342,7 @@ function setBackendStatus(ok, errorMessage) {
 function parseAtmosphereUpdate(body) {
 	try {
 		const data = JSON.parse(body);
-		// Support both OH 1.x 'widget' and OH 3.x 'widgets' formats
+		// Support both OH 1.x 'widget' and OH 3.x+ 'widgets' formats
 		const widgetSource = data?.widgets || data?.widget;
 		if (!data || !widgetSource) return null;
 		const changes = [];
@@ -2350,7 +2350,7 @@ function parseAtmosphereUpdate(body) {
 			if (widget.item && widget.item.name && widget.item.state !== undefined) {
 				changes.push({ name: widget.item.name, state: widget.item.state });
 			}
-			// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
+			// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
 			const children = widget.widgets || widget.widget;
 			if (Array.isArray(children)) {
 				children.forEach(extractItems);
@@ -2461,7 +2461,7 @@ let atmosphereNoUpdateWarned = false;
 let atmosphereLastItemUpdateAt = 0;
 let atmosphereMonitorStartedAt = 0;
 
-// SSE (Server-Sent Events) state for openHAB 3.x real-time updates
+// SSE (Server-Sent Events) state for openHAB 3.x+ real-time updates
 let sseConnection = null;
 let sseReconnectTimer = null;
 const SSE_RECONNECT_MS = 5000;
@@ -2650,7 +2650,7 @@ function extractPageIds(data, pages = new Set()) {
 		pages.add(data.linkedPage.id);
 		extractPageIds(data.linkedPage, pages);
 	}
-	// Recurse into widgets - support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
+	// Recurse into widgets - support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
 	const widgetSource = data.widgets || data.widget;
 	const widgets = Array.isArray(widgetSource) ? widgetSource : (widgetSource ? [widgetSource] : []);
 	for (const w of widgets) {
@@ -2674,7 +2674,7 @@ function extractRtspUrls(data, urls = new Set()) {
 			urls.add(label);
 		}
 	}
-	// Recurse into widgets - support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
+	// Recurse into widgets - support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
 	const widgetSource = data.widgets || data.widget;
 	const widgets = Array.isArray(widgetSource) ? widgetSource : (widgetSource ? [widgetSource] : []);
 	for (const w of widgets) {
@@ -3222,10 +3222,10 @@ function stopAllAtmosphereConnections() {
 	stopAtmosphereNoUpdateMonitor();
 }
 
-// --- SSE Mode (openHAB 3.x) ---
+// --- SSE Mode (openHAB 3.x+) ---
 
 function handleSSEEvent(eventData) {
-	// Parse OH 3.x SSE event format:
+	// Parse OH 3.x+ SSE event format:
 	// {"topic":"openhab/items/ItemName/statechanged","payload":"{\"type\":\"Decimal\",\"value\":\"123\",\"oldType\":\"Decimal\",\"oldValue\":\"456\"}","type":"ItemStateChangedEvent"}
 	try {
 		const data = JSON.parse(eventData);
@@ -3277,7 +3277,7 @@ function connectSSE() {
 	const ah = authHeader();
 	if (ah) headers.Authorization = ah;
 
-	logMessage('[SSE] Connecting to openHAB 3.x event stream...');
+	logMessage('[SSE] Connecting to openHAB 3.x+ event stream...');
 
 	const req = client.request({
 		method: 'GET',
@@ -4186,7 +4186,7 @@ function sendVersionedAsset(res, filePath, contentType) {
 }
 
 function normalizeWidgets(page) {
-	// Support both OH 1.x 'widget' and OH 3.x 'widgets'
+	// Support both OH 1.x 'widget' and OH 3.x+ 'widgets'
 	let w = page?.widgets || page?.widget;
 	if (!w) return [];
 	if (!Array.isArray(w)) {
@@ -4200,7 +4200,7 @@ function normalizeWidgets(page) {
 			if (item?.type === 'Frame') {
 				const label = safeText(item?.label || item?.item?.label || item?.item?.name || '');
 				out.push({ __section: true, label });
-				// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
+				// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
 				let kids = item.widgets || item.widget;
 				if (kids) {
 					if (!Array.isArray(kids)) {
@@ -4281,7 +4281,7 @@ function widgetPageLink(widget) {
 }
 
 function normalizeSearchWidgets(page, ctx) {
-	// Support both OH 1.x 'widget' and OH 3.x 'widgets' formats
+	// Support both OH 1.x 'widget' and OH 3.x+ 'widgets' formats
 	let w = page?.widgets || page?.widget;
 	if (!w) return [];
 
@@ -4297,7 +4297,7 @@ function normalizeSearchWidgets(page, ctx) {
 			if (item?.type === 'Frame') {
 				const label = sectionLabel(item);
 				if (label) out.push({ __section: true, label });
-				// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
+				// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
 				let kids = item.widgets || item.widget;
 				if (kids) {
 					if (!Array.isArray(kids)) {
@@ -4393,7 +4393,7 @@ function mappingsSignature(mapping) {
 }
 
 function widgetSnapshot(widget) {
-	// Support both OH 1.x 'mapping' and OH 3.x 'mappings'
+	// Support both OH 1.x 'mapping' and OH 3.x+ 'mappings'
 	const widgetMapping = widget?.mappings || widget?.mapping;
 	const mappingSig = mappingsSignature(widgetMapping);
 	return {
@@ -4602,7 +4602,7 @@ async function applyGroupStateOverrides(page) {
 		}
 	};
 
-	// Support both OH 1.x 'widget' and OH 3.x 'widgets'
+	// Support both OH 1.x 'widget' and OH 3.x+ 'widgets'
 	await processWidgets(page?.widgets || page?.widget);
 }
 
@@ -6847,12 +6847,12 @@ app.get('/sitemap-full', async (req, res) => {
 							queue.push(rel);
 						}
 					}
-					// Recurse into nested widgets (Frames) - support both OH 1.x and 3.x
+					// Recurse into nested widgets (Frames) - support both OH 1.x and 3.x+
 					if (w?.widget) findLinks(w.widget);
 					if (w?.widgets) findLinks(w.widgets);
 				}
 			};
-			// Support both OH 1.x 'widget' and OH 3.x 'widgets'
+			// Support both OH 1.x 'widget' and OH 3.x+ 'widgets'
 			findLinks(page?.widgets || page?.widget);
 		}
 
