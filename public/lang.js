@@ -284,6 +284,7 @@ window.ohLang = {
 	},
 
 	cardConfig: {
+		title: 'Item Settings',
 		historyHeader: 'HISTORICAL VALUES',
 		soundHeader: 'DEFAULT SOUND',
 		heightHeader: 'HEIGHT',
