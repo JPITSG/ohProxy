@@ -1243,7 +1243,7 @@ function getRemoteIp(req) {
 
 function ipToLong(ip) {
 	if (!isValidIpv4(ip)) return null;
-	return ip.split('.').reduce((acc, part) => (acc << 8) + Number(part), 0);
+	return ip.split('.').reduce((acc, part) => (acc << 8) + Number(part), 0) >>> 0;
 }
 
 function ipInSubnet(ip, cidr) {
@@ -4894,7 +4894,7 @@ function fetchOpenhab(pathname) {
 	});
 }
 
-function sendOpenhabCommand(itemName, command) {
+function sendItemCommand(itemName, command, { timeoutMs = 0, timeoutLabel = 'request' } = {}) {
 	return new Promise((resolve, reject) => {
 		const target = new URL(liveConfig.ohTarget);
 		const isHttps = target.protocol === 'https:';
@@ -4928,9 +4928,9 @@ function sendOpenhabCommand(itemName, command) {
 			}));
 		});
 
-		if (liveConfig.ohTimeoutMs > 0) {
-			req.setTimeout(liveConfig.ohTimeoutMs, () => {
-				req.destroy(new Error('openHAB command timed out'));
+		if (timeoutMs > 0) {
+			req.setTimeout(timeoutMs, () => {
+				req.destroy(new Error(`${timeoutLabel} timed out`));
 			});
 		}
 		req.on('error', reject);
@@ -4939,47 +4939,12 @@ function sendOpenhabCommand(itemName, command) {
 	});
 }
 
+function sendOpenhabCommand(itemName, command) {
+	return sendItemCommand(itemName, command, { timeoutMs: liveConfig.ohTimeoutMs, timeoutLabel: 'openHAB command' });
+}
+
 function sendCmdApiCommand(itemName, command) {
-	return new Promise((resolve, reject) => {
-		const target = new URL(liveConfig.ohTarget);
-		const isHttps = target.protocol === 'https:';
-		const basePath = target.pathname && target.pathname !== '/' ? target.pathname.replace(/\/$/, '') : '';
-		const reqPath = `${basePath}/rest/items/${encodeURIComponent(itemName)}`;
-		const client = isHttps ? https : http;
-		const headers = {
-			'Content-Type': 'text/plain',
-			'Accept': 'application/json',
-			'User-Agent': liveConfig.userAgent,
-		};
-		const ah = authHeader();
-		if (ah) headers.Authorization = ah;
-
-		const req = client.request({
-			method: 'POST',
-			hostname: target.hostname,
-			port: target.port || (isHttps ? 443 : 80),
-			path: reqPath,
-			headers,
-			agent: getOhAgent(),
-		}, (res) => {
-			let body = '';
-			res.setEncoding('utf8');
-			res.on('data', (chunk) => { body += chunk; });
-			res.on('error', reject);
-			res.on('end', () => resolve({
-				status: res.statusCode || 500,
-				ok: res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
-				body,
-			}));
-		});
-
-		req.setTimeout(CMDAPI_TIMEOUT_MS, () => {
-			req.destroy(new Error('CMD API request timed out'));
-		});
-		req.on('error', reject);
-		req.write(String(command));
-		req.end();
-	});
+	return sendItemCommand(itemName, command, { timeoutMs: CMDAPI_TIMEOUT_MS, timeoutLabel: 'CMD API request' });
 }
 
 function callAnthropicApi(requestBody) {
@@ -7366,6 +7331,10 @@ app.get('/api/presence', async (req, res) => {
 	if (!username) {
 		return res.status(401).json({ ok: false, error: 'Unauthorized' });
 	}
+	const user = sessions.getUser(username);
+	if (!user || !user.trackgps) {
+		return res.status(403).json({ ok: false, error: 'GPS tracking not enabled' });
+	}
 
 	const conn = getMysqlConnection();
 	if (!conn) {
@@ -7432,6 +7401,10 @@ app.get('/api/presence/nearby-days', async (req, res) => {
 	const username = req.ohProxyUser;
 	if (!username) {
 		return res.status(401).json({ ok: false, error: 'Unauthorized' });
+	}
+	const user = sessions.getUser(username);
+	if (!user || !user.trackgps) {
+		return res.status(403).json({ ok: false, error: 'GPS tracking not enabled' });
 	}
 
 	const conn = getMysqlConnection();
@@ -7522,6 +7495,10 @@ app.get('/presence', async (req, res) => {
 	if (!username) {
 		return res.status(401).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
 	}
+	const user = sessions.getUser(username);
+	if (!user || !user.trackgps) {
+		return res.status(403).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
+	}
 
 	const QUERY_TIMEOUT_MS = 10000;
 
@@ -7602,7 +7579,7 @@ app.get('/presence', async (req, res) => {
 .map-ctrl-btn{width:36px;height:36px;border-radius:10px;border:1px solid rgba(19,21,54,0.2);background:rgba(19,21,54,0.08);color:#0f172a;font-size:18px;font-weight:300;font-family:'Rubik',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;outline:none;transition:background-color .4s ease,border-color .4s ease,box-shadow .4s ease}
 .map-ctrl-btn:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}
 .map-ctrl-btn svg{width:16px;height:16px;fill:currentColor}
-#map{position:absolute;top:0;left:0;right:0;bottom:0}
+#map{position:absolute;top:0;left:0;right:0;bottom:0;z-index:0}
 body{margin:0;padding:0;overflow:hidden}
 .tooltip{position:absolute;background:#f1f2f9;border:1px solid #ccccd1;border-radius:10px;padding:0.5rem 0.75rem;font-size:.7rem;line-height:1.5;font-family:'Rubik',sans-serif;color:#0f172a;pointer-events:none;z-index:100;white-space:nowrap;box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.08),0 4px 6px -4px rgb(0 0 0 / 0.05)}
 .tooltip .tt-date{font-weight:500}
@@ -7646,7 +7623,7 @@ body{margin:0;padding:0;overflow:hidden}
 .ctx-nav .ctx-older,.ctx-nav .ctx-newer{margin-top:0}
 .ctx-empty,.ctx-loading{font-size:0.625rem;font-weight:300;letter-spacing:0.08em;color:rgba(19,21,54,0.5);font-family:'Rubik',sans-serif}
 </style>
-<script src="https://openlayers.org/api/OpenLayers.js"></script>
+<script src="/vendor/OpenLayers.js"></script>
 </head>
 <body>
 <div id="map"></div>
@@ -8345,6 +8322,20 @@ app.get('/proxy', async (req, res, next) => {
 	}
 });
 
+// --- Gated vendor assets ---
+app.get('/vendor/OpenLayers.js', (req, res) => {
+	const username = req.ohProxyUser;
+	if (!username) {
+		return res.status(401).send('Unauthorized');
+	}
+	const user = sessions.getUser(username);
+	if (!user || !user.trackgps) {
+		return res.status(403).send('GPS tracking not enabled');
+	}
+	res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+	res.sendFile(path.join(PUBLIC_DIR, 'vendor', 'OpenLayers.js'));
+});
+
 // --- Static modern UI ---
 app.use(express.static(PUBLIC_DIR, {
 	extensions: ['html'],
@@ -8492,15 +8483,16 @@ async function captureVideoPreviewsTask() {
 
 	// Capture screenshots sequentially
 	for (const url of rtspUrls) {
+		const safeUrl = redactUrlCredentials(url);
 		try {
 			const ok = await captureRtspPreview(url);
 			if (ok) {
-				logMessage(`[RTSP] Preview captured screenshot for ${url}`);
+				logMessage(`[RTSP] Preview captured screenshot for ${safeUrl}`);
 			} else {
-				logMessage(`[RTSP] Preview failed to capture ${url}`);
+				logMessage(`[RTSP] Preview failed to capture ${safeUrl}`);
 			}
 		} catch (err) {
-			logMessage(`[RTSP] Preview error capturing ${url}: ${err.message || err}`);
+			logMessage(`[RTSP] Preview error capturing ${safeUrl}: ${err.message || err}`);
 		}
 	}
 
