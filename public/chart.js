@@ -1,4 +1,8 @@
 (function() {
+	function haptic(ms) {
+		if (navigator.vibrate) navigator.vibrate(ms || 30);
+	}
+
 	// Set theme from URL param, localStorage, or system preference
 	var params = new URLSearchParams(window.location.search);
 	var mode = params.get('mode');
@@ -507,6 +511,7 @@
 			var closest = this.findClosestPoint(touch.clientX);
 
 			if (closest) {
+				haptic();
 				this.showTapCircle(closest);
 				this.showMobileTooltip(closest);
 				if (this.hideTimer) clearTimeout(this.hideTimer);
