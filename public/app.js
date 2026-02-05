@@ -402,13 +402,25 @@ const widgetIframeConfigMap = new Map();
 	}
 })();
 
-// Widget proxy cache configs: Map from widgetId to {cacheSeconds: number}
+/// Widget proxy cache configs: Map from widgetId to {cacheSeconds: number}
 const widgetProxyCacheConfigMap = new Map();
 (function initWidgetProxyCacheConfigs() {
 	const configs = Array.isArray(OH_CONFIG.widgetProxyCacheConfigs) ? OH_CONFIG.widgetProxyCacheConfigs : [];
 	for (const entry of configs) {
 		if (entry.widgetId) {
 			widgetProxyCacheConfigMap.set(entry.widgetId, entry);
+		}
+	}
+})();
+
+// Widget card width configs: Map from widgetId to width ('standard' or 'full')
+const widgetCardWidthMap = new Map();
+(function initWidgetCardWidths() {
+	if (Array.isArray(OH_CONFIG.widgetCardWidths)) {
+		for (const entry of OH_CONFIG.widgetCardWidths) {
+			if (entry?.widgetId && entry?.width) {
+				widgetCardWidthMap.set(entry.widgetId, entry.width);
+			}
 		}
 	}
 })();
@@ -2098,6 +2110,19 @@ function ensureCardConfigModal() {
 						</label>
 					</div>
 				</div>
+				<div class="card-width-section" style="display:none;">
+					<div class="item-config-section-header">${cc.cardWidthHeader}</div>
+					<div class="item-config-visibility">
+						<label class="item-config-radio">
+							<input type="radio" name="cardWidth" value="standard" checked>
+							<span>${cc.widthStandard}</span>
+						</label>
+						<label class="item-config-radio">
+							<input type="radio" name="cardWidth" value="full">
+							<span>${cc.widthFull}</span>
+						</label>
+					</div>
+				</div>
 				<div class="glow-rules-section">
 					<div class="item-config-section-header">${cc.glowHeader}</div>
 					<div class="card-config-rules"></div>
@@ -2380,6 +2405,23 @@ function openCardConfigModal(widget, card) {
 			if (cacheInput) {
 				const cacheConfig = widgetProxyCacheConfigMap.get(wKey);
 				cacheInput.value = cacheConfig?.cacheSeconds ? String(cacheConfig.cacheSeconds) : '';
+			}
+		}
+	}
+
+	// Card width section - show for non-media widgets (media widgets are already full width)
+	const cardWidthSection = cardConfigModal.querySelector('.card-width-section');
+	const isMediaWidget = wType.includes('image') || wType === 'chart' || wType.includes('webview') || wType === 'video';
+	if (cardWidthSection) {
+		cardWidthSection.style.display = isMediaWidget ? 'none' : '';
+		if (!isMediaWidget) {
+			const cardWidth = widgetCardWidthMap.get(wKey) || 'standard';
+			const widthRadio = cardConfigModal.querySelector(`input[name="cardWidth"][value="${cardWidth}"]`);
+			if (widthRadio) {
+				widthRadio.checked = true;
+				cardConfigModal.querySelectorAll('input[name="cardWidth"]').forEach(r =>
+					r.closest('.item-config-radio')?.classList.toggle('checked', r.checked)
+				);
 			}
 		}
 	}
@@ -2695,6 +2737,14 @@ async function saveCardConfig() {
 		proxyCacheSeconds = rawValue;
 	}
 
+	// Get cardWidth for non-media cards (only if section is visible)
+	const cardWidthSection = cardConfigModal.querySelector('.card-width-section');
+	let cardWidth;
+	if (cardWidthSection && cardWidthSection.style.display !== 'none') {
+		const cardWidthRadio = cardConfigModal.querySelector('input[name="cardWidth"]:checked');
+		cardWidth = cardWidthRadio?.value || 'standard';
+	}
+
 	// Get glow rules
 	const rows = cardConfigModal.querySelectorAll('.glow-rule-row');
 	const rules = [];
@@ -2715,7 +2765,7 @@ async function saveCardConfig() {
 		const resp = await fetch('/api/card-config', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ widgetId: cardConfigWidgetKey, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds }),
+			body: JSON.stringify({ widgetId: cardConfigWidgetKey, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth }),
 		});
 		if (!resp.ok) {
 			let msg = ohLang.cardConfig.saveFailed;
@@ -2767,6 +2817,15 @@ async function saveCardConfig() {
 				widgetProxyCacheConfigMap.delete(cardConfigWidgetKey);
 			} else {
 				widgetProxyCacheConfigMap.set(cardConfigWidgetKey, { widgetId: cardConfigWidgetKey, cacheSeconds: cacheNum });
+			}
+		}
+
+		// Update local card width map
+		if (cardWidth !== undefined) {
+			if (cardWidth !== 'standard') {
+				widgetCardWidthMap.set(cardConfigWidgetKey, cardWidth);
+			} else {
+				widgetCardWidthMap.delete(cardConfigWidgetKey);
 			}
 		}
 
@@ -4906,8 +4965,9 @@ function updateCard(card, w, info) {
 		'switch-many',
 		'switch-single'
 	);
-	card.classList.toggle('sm:col-span-2', isImage || isChart || isWebview || isVideo);
-	card.classList.toggle('lg:col-span-3', isImage || isChart || isWebview || isVideo);
+	const cardWidthFull = widgetCardWidthMap.get(card.dataset.widgetKey) === 'full';
+	card.classList.toggle('sm:col-span-2', isImage || isChart || isWebview || isVideo || cardWidthFull);
+	card.classList.toggle('lg:col-span-3', isImage || isChart || isWebview || isVideo || cardWidthFull);
 	// Reset webview/video inline styles
 	card.style.padding = '';
 	card.style.overflow = '';
