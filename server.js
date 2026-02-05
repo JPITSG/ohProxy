@@ -7396,7 +7396,7 @@ app.get('/api/presence/nearby-days', async (req, res) => {
 		rows = await new Promise((resolve, reject) => {
 			const timeout = setTimeout(() => reject(new Error('Query timeout')), QUERY_TIMEOUT_MS);
 			conn.query(
-				'SELECT lat, lon, DATE(timestamp) AS day_date FROM log_gps WHERE username = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT 5000',
+				'SELECT lat, lon, timestamp, DATE(timestamp) AS day_date FROM log_gps WHERE username = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT 5000',
 				[username, latMin, latMax, lonMin, lonMax],
 				(err, results) => { clearTimeout(timeout); if (err) reject(err); else resolve(results); }
 			);
@@ -7408,7 +7408,7 @@ app.get('/api/presence/nearby-days', async (req, res) => {
 
 	const toRad = (deg) => deg * Math.PI / 180;
 	const R = 6371000;
-	const dayCounts = {};
+	const dayData = {};
 	for (const row of rows) {
 		const dLat = toRad(row.lat - lat);
 		const dLon = toRad(row.lon - lon);
@@ -7416,15 +7416,23 @@ app.get('/api/presence/nearby-days', async (req, res) => {
 		const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 		if (dist <= radius) {
 			const key = row.day_date instanceof Date ? row.day_date.getFullYear() + '-' + String(row.day_date.getMonth() + 1).padStart(2, '0') + '-' + String(row.day_date.getDate()).padStart(2, '0') : String(row.day_date);
-			dayCounts[key] = (dayCounts[key] || 0) + 1;
+			if (!dayData[key]) {
+				dayData[key] = { count: 0, lat: row.lat, lon: row.lon, timestamp: row.timestamp };
+			}
+			dayData[key].count++;
 		}
 	}
 
-	const sorted = Object.entries(dayCounts).sort((a, b) => b[0].localeCompare(a[0]));
+	const sorted = Object.entries(dayData).sort((a, b) => b[0].localeCompare(a[0]));
 	const page = sorted.slice(offset, offset + 5);
-	const days = page.map(([dateStr, count]) => {
+	const dateFormat = liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY';
+	const timeFormat = liveConfig.clientConfig?.timeFormat || 'H:mm:ss';
+	const days = page.map(([dateStr, data]) => {
 		const parts = dateStr.split('-');
-		return { year: parseInt(parts[0], 10), month: parseInt(parts[1], 10) - 1, day: parseInt(parts[2], 10), label: dateStr, count };
+		const d = data.timestamp instanceof Date ? data.timestamp : new Date(data.timestamp);
+		const formattedDate = formatDT(d, dateFormat);
+		const formattedTime = formatDT(d, timeFormat);
+		return { year: parseInt(parts[0], 10), month: parseInt(parts[1], 10) - 1, day: parseInt(parts[2], 10), label: dateStr, count: data.count, lat: data.lat, lon: data.lon, tooltip: '<div class="tt-date">' + formattedDate + '</div><div class="tt-time">' + formattedTime + '</div>' };
 	});
 
 	res.json({ ok: true, days, hasMore: sorted.length > offset + 5 });
@@ -7525,6 +7533,8 @@ body{margin:0;padding:0;overflow:hidden}
 .tooltip .tt-date{font-weight:500}
 .tooltip .tt-time{font-weight:300;margin-top:0.125rem}
 #hover-tooltip{display:none}
+#preview-tooltip{display:none}
+.ctx-drag-handle{cursor:move;user-select:none}
 @media(max-width:767px){#search-modal{display:none!important}}
 #search-modal{position:fixed;top:16px;right:16px;z-index:150;background:rgb(245,246,250);border:1px solid rgba(150,150,150,0.3);border-radius:18px;box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:12px;font-family:'Rubik',sans-serif}
 .search-header{display:flex;justify-content:space-between;align-items:center;font-size:0.625rem;font-weight:500;letter-spacing:0.08em;color:rgba(19,21,54,0.5);margin-bottom:8px}
@@ -7567,6 +7577,7 @@ body{margin:0;padding:0;overflow:hidden}
 <div id="map"></div>
 <div id="red-tooltip" class="tooltip"></div>
 <div id="hover-tooltip" class="tooltip"></div>
+<div id="preview-tooltip" class="tooltip"></div>
 <div id="ctx-menu"></div>
 <div id="map-controls">
 <button class="map-ctrl-btn" id="zoom-in" type="button">+</button>
@@ -7603,6 +7614,48 @@ vector.addFeatures(feature);
 });
 
 map.addLayer(vector);
+
+var previewLayer=new OpenLayers.Layer.Vector("Preview",{
+styleMap:new OpenLayers.StyleMap({
+"default":new OpenLayers.Style({
+externalGraphic:'/images/marker-blue.png',
+graphicHeight:41,
+graphicWidth:25,
+graphicXOffset:-12,
+graphicYOffset:-41,
+graphicOpacity:0.5,
+cursor:'pointer'
+})
+})
+});
+map.addLayer(previewLayer);
+
+var previewTooltip=document.getElementById('preview-tooltip');
+var previewControl=new OpenLayers.Control.SelectFeature(previewLayer,{
+hover:true,
+highlightOnly:true,
+overFeature:function(f){
+previewTooltip.innerHTML=f.attributes.tooltip;
+previewTooltip.style.display='block';
+document.getElementById('map').style.cursor='pointer';
+},
+outFeature:function(){
+previewTooltip.style.display='none';
+document.getElementById('map').style.cursor='';
+},
+clickFeature:function(feature){
+loadDayFromCtx(feature.attributes.month,feature.attributes.day,feature.attributes.year);
+}
+});
+map.addControl(previewControl);
+previewControl.activate();
+
+map.events.register('mousemove',map,function(e){
+if(previewTooltip.style.display==='block'){
+previewTooltip.style.left=(e.xy.x+15)+'px';
+previewTooltip.style.top=(e.xy.y+15)+'px';
+}
+});
 
 var red=markers.length?markers[markers.length-1]:null;
 var redTooltip=document.getElementById('red-tooltip');
@@ -7738,6 +7791,7 @@ if(!data.ok){searchEmpty.textContent=data.error||'Request failed';searchEmpty.st
 if(!data.markers.length){searchEmpty.textContent='No results found';searchEmpty.style.display='block';return}
 searchEmpty.style.display='none';
 vector.removeAllFeatures();
+previewLayer.removeAllFeatures();
 markers=data.markers;
 markers.forEach(function(m,i){
 var feature=new OpenLayers.Feature.Vector(
@@ -7778,7 +7832,7 @@ loadDay(m,d,y);
 var ctxMenu=document.getElementById('ctx-menu');
 var ctxLat=0,ctxLon=0,ctxOffset=0,ctxRadius=100;
 
-function closeCtxMenu(){ctxMenu.style.display='none'}
+function closeCtxMenu(){ctxMenu.style.display='none';previewLayer.removeAllFeatures();previewTooltip.style.display='none';document.getElementById('map').style.cursor=''}
 
 var radiusCtx=document.createElement('canvas').getContext('2d');
 function sizeRadius(inp){
@@ -7805,18 +7859,44 @@ sizeRadius(inp);
 inp.addEventListener('click',function(e){e.stopPropagation()});
 }
 
-function ctxHeader(){return '<div class="ctx-header"><span>NEARBY DAYS</span><span><input class="ctx-radius" type="text" value="'+ctxRadius+'" maxlength="5">m</span></div>'}
+function ctxHeader(){return '<div class="ctx-header"><span class="ctx-drag-handle">NEARBY DAYS</span><span><input class="ctx-radius" type="text" value="'+ctxRadius+'" maxlength="5">m</span></div>'}
+
+var ctxDragActive=false,ctxDragStartX=0,ctxDragStartY=0,ctxMenuStartX=0,ctxMenuStartY=0;
+function bindCtxDrag(){
+var handle=ctxMenu.querySelector('.ctx-drag-handle');
+if(!handle)return;
+handle.addEventListener('mousedown',function(e){
+if(e.button!==0)return;
+e.preventDefault();
+e.stopPropagation();
+ctxDragActive=true;
+ctxDragStartX=e.clientX;
+ctxDragStartY=e.clientY;
+ctxMenuStartX=parseInt(ctxMenu.style.left)||0;
+ctxMenuStartY=parseInt(ctxMenu.style.top)||0;
+});
+}
+document.addEventListener('mousemove',function(e){
+if(!ctxDragActive)return;
+e.preventDefault();
+e.stopPropagation();
+var dx=e.clientX-ctxDragStartX;
+var dy=e.clientY-ctxDragStartY;
+ctxMenu.style.left=(ctxMenuStartX+dx)+'px';
+ctxMenu.style.top=(ctxMenuStartY+dy)+'px';
+},true);
+document.addEventListener('mouseup',function(){ctxDragActive=false},true)
 
 function loadNearbyDays(){
 if(!ctxDragging){
 ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-loading">Loading\\u2026</div>';
-bindRadiusInput();
+bindRadiusInput();bindCtxDrag();
 }
 ctxMenu.style.display='block';
 fetch('/api/presence/nearby-days?lat='+ctxLat+'&lon='+ctxLon+'&offset='+ctxOffset+'&radius='+ctxRadius).then(function(r){return r.json()}).then(function(data){
-if(!data.ok){ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-empty">'+(data.error||'Request failed')+'</div>';bindRadiusInput();return}
+if(!data.ok){ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-empty">'+(data.error||'Request failed')+'</div>';bindRadiusInput();bindCtxDrag();previewLayer.removeAllFeatures();return}
 var html=ctxHeader();
-if(!data.days.length){html+='<div class="ctx-empty">No entries nearby</div>';ctxMenu.innerHTML=html;bindRadiusInput();return}
+if(!data.days.length){html+='<div class="ctx-empty">No entries nearby</div>';ctxMenu.innerHTML=html;bindRadiusInput();bindCtxDrag();previewLayer.removeAllFeatures();return}
 data.days.forEach(function(d){
 html+='<div class="ctx-day" data-month="'+d.month+'" data-day="'+d.day+'" data-year="'+d.year+'"><span>'+d.label+'</span><span class="ctx-count">'+d.count+'</span></div>';
 });
@@ -7828,7 +7908,17 @@ if(data.hasMore)html+='<button class="ctx-older" type="button">Older \\u25BE</bu
 if(hasNewer&&data.hasMore)html+='</div>';
 }
 ctxMenu.innerHTML=html;
-bindRadiusInput();
+bindRadiusInput();bindCtxDrag();
+previewLayer.removeAllFeatures();
+data.days.forEach(function(d){
+if(d.lat!==undefined&&d.lon!==undefined){
+var feature=new OpenLayers.Feature.Vector(
+new OpenLayers.Geometry.Point(d.lon,d.lat).transform(wgs84,proj),
+{month:d.month,day:d.day,year:d.year,tooltip:d.tooltip}
+);
+previewLayer.addFeatures(feature);
+}
+});
 ctxMenu.querySelectorAll('.ctx-day').forEach(function(el){
 el.addEventListener('click',function(e){
 e.stopPropagation();
@@ -7840,7 +7930,7 @@ if(newerBtn)newerBtn.addEventListener('click',function(e){e.stopPropagation();ct
 var olderBtn=ctxMenu.querySelector('.ctx-older');
 if(olderBtn)olderBtn.addEventListener('click',function(e){e.stopPropagation();ctxOffset+=5;loadNearbyDays()});
 clampCtxMenu();
-}).catch(function(){ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-empty">Request failed</div>';bindRadiusInput()});
+}).catch(function(){ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-empty">Request failed</div>';bindRadiusInput();bindCtxDrag();previewLayer.removeAllFeatures()});
 }
 
 function loadDayFromCtx(month,day,year){
@@ -7877,7 +7967,7 @@ ctxDragging=true;
 ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-loading">Release to search</div>';
 ctxMenu.style.display='block';
 ctxMenu.style.pointerEvents='none';
-bindRadiusInput();
+bindRadiusInput();bindCtxDrag();
 },true);
 
 var ctxThrottle=0;
