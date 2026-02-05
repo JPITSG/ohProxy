@@ -4893,6 +4893,10 @@ function getWidgetRenderInfo(w) {
 	const mappingSig = mapping.map((m) => `${m.command}:${m.label}`).join('|');
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
+	// Get config values that affect rendering
+	const cardWidthConfig = widgetCardWidthMap.get(wKey) || 'standard';
+	const videoConfig = isVideo ? widgetVideoConfigMap.get(wKey) : null;
+	const defaultMutedConfig = videoConfig ? String(videoConfig.defaultMuted) : '';
 	const signature = [
 		type,
 		label,
@@ -4914,6 +4918,8 @@ function getWidgetRenderInfo(w) {
 		state.headerMode === 'none' ? 'header-none' : '',
 		path,
 		frame,
+		cardWidthConfig,
+		defaultMutedConfig,
 	].join('||');
 	return {
 		type,
