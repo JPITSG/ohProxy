@@ -7328,7 +7328,7 @@ app.get('/api/presence', async (req, res) => {
 	}
 
 	const markers = [];
-	let last = null;
+	const seen = new Set();
 	let first = true;
 
 	for (const row of rows) {
@@ -7336,10 +7336,11 @@ app.get('/api/presence', async (req, res) => {
 			Math.round(row.lat * 10000000) / 10000000,
 			Math.round(row.lon * 10000000) / 10000000,
 		];
-		if (last && current[0] === last[0] && current[1] === last[1]) {
+		const key = current[0] + ',' + current[1];
+		if (seen.has(key)) {
 			continue;
 		}
-		last = current;
+		seen.add(key);
 		const ts = row.timestamp ? (() => {
 			const d = new Date(row.timestamp);
 			const date = formatDT(d, liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY');
@@ -7481,7 +7482,7 @@ app.get('/presence', async (req, res) => {
 	}
 
 	const markers = [];
-	let last = null;
+	const seen = new Set();
 	let first = true;
 
 	for (const row of rows) {
@@ -7489,10 +7490,11 @@ app.get('/presence', async (req, res) => {
 			Math.round(row.lat * 10000000) / 10000000,
 			Math.round(row.lon * 10000000) / 10000000,
 		];
-		if (last && current[0] === last[0] && current[1] === last[1]) {
+		const key = current[0] + ',' + current[1];
+		if (seen.has(key)) {
 			continue;
 		}
-		last = current;
+		seen.add(key);
 		const ts = row.timestamp ? (() => {
 			const d = new Date(row.timestamp);
 			const date = formatDT(d, liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY');
@@ -7883,8 +7885,16 @@ e.preventDefault();
 e.stopPropagation();
 var dx=e.clientX-ctxDragStartX;
 var dy=e.clientY-ctxDragStartY;
-ctxMenu.style.left=(ctxMenuStartX+dx)+'px';
-ctxMenu.style.top=(ctxMenuStartY+dy)+'px';
+var newX=ctxMenuStartX+dx;
+var newY=ctxMenuStartY+dy;
+var mapRect=document.getElementById('map').getBoundingClientRect();
+var menuRect=ctxMenu.getBoundingClientRect();
+var minX=8;
+var minY=8;
+var maxX=mapRect.width-menuRect.width-8;
+var maxY=mapRect.height-menuRect.height-8;
+ctxMenu.style.left=Math.max(minX,Math.min(maxX,newX))+'px';
+ctxMenu.style.top=Math.max(minY,Math.min(maxY,newY))+'px';
 },true);
 document.addEventListener('mouseup',function(){ctxDragActive=false},true)
 
@@ -7996,7 +8006,6 @@ else if(ctxDragEnded){e.preventDefault();ctxDragEnded=false}
 },true);
 
 mapEl.addEventListener('click',closeCtxMenu);
-map.events.register('movestart',map,function(){if(!ctxDragging)closeCtxMenu()});
 ctxMenu.addEventListener('click',function(e){e.stopPropagation()});
 ctxMenu.addEventListener('contextmenu',function(e){e.stopPropagation();e.preventDefault()});
 ctxMenu.addEventListener('mousedown',function(e){e.stopPropagation()});
