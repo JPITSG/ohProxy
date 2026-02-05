@@ -4743,7 +4743,7 @@ function removeOverlaySelects(card) {
 	}
 }
 
-function getWidgetRenderInfo(w, afterImage) {
+function getWidgetRenderInfo(w) {
 	const type = widgetType(w);
 	const t = type.toLowerCase();
 	const isImage = t.includes('image');
@@ -4802,7 +4802,6 @@ function getWidgetRenderInfo(w, afterImage) {
 		videoUrl,
 		String(videoHeight),
 		safeText(w?.refresh ?? ''),
-		afterImage ? 'after' : '',
 		state.isSlim ? 'slim' : '',
 		state.headerMode === 'small' ? 'header-small' : '',
 		state.headerMode === 'none' ? 'header-none' : '',
@@ -4838,8 +4837,8 @@ function getWidgetRenderInfo(w, afterImage) {
 	};
 }
 
-function updateCard(card, w, afterImage, info) {
-	const data = info || getWidgetRenderInfo(w, afterImage);
+function updateCard(card, w, info) {
+	const data = info || getWidgetRenderInfo(w);
 	if (!card) return false;
 
 	const titleEl = card.querySelector('.title');
@@ -4907,8 +4906,8 @@ function updateCard(card, w, afterImage, info) {
 		'switch-many',
 		'switch-single'
 	);
-	card.classList.toggle('sm:col-span-2', isImage || isChart || isWebview || isVideo || (afterImage && isText));
-	card.classList.toggle('lg:col-span-3', isImage || isChart || isWebview || isVideo || (afterImage && isText));
+	card.classList.toggle('sm:col-span-2', isImage || isChart || isWebview || isVideo);
+	card.classList.toggle('lg:col-span-3', isImage || isChart || isWebview || isVideo);
 	// Reset webview/video inline styles
 	card.style.padding = '';
 	card.style.overflow = '';
@@ -6036,33 +6035,26 @@ function updateCard(card, w, afterImage, info) {
 	return true;
 }
 
-function buildCard(w, afterImage) {
+function buildCard(w) {
 	const card = createCardElement();
-	updateCard(card, w, afterImage);
+	updateCard(card, w);
 	return card;
 }
 
 function patchWidgets(widgets, nodes) {
-	let afterImage = false;
 	for (let i = 0; i < widgets.length; i += 1) {
 		const w = widgets[i];
 		const node = nodes[i];
 		if (w?.__section) {
 			if (node.textContent !== w.label) node.textContent = w.label;
-			afterImage = false;
 			continue;
 		}
-		const info = getWidgetRenderInfo(w, afterImage);
+		const info = getWidgetRenderInfo(w);
 		if (node && node.dataset.renderSig !== info.signature) {
-			if (!updateCard(node, w, afterImage, info)) {
-				const card = buildCard(w, afterImage);
+			if (!updateCard(node, w, info)) {
+				const card = buildCard(w);
 				node.replaceWith(card);
 			}
-		}
-		if (info.isImage || info.isChart || info.isWebview || info.isVideo) {
-			afterImage = true;
-		} else if (afterImage && info.t.includes('text')) {
-			afterImage = false;
 		}
 	}
 }
@@ -6181,7 +6173,6 @@ function render() {
 		nodes.forEach(runCardCleanups);
 		clearImageTimers();
 		const fragment = document.createDocumentFragment();
-		let afterImage = false;
 		for (const w of widgets) {
 			if (w?.__section) {
 				const header = document.createElement('div');
@@ -6195,18 +6186,11 @@ function render() {
 					}
 				});
 				fragment.appendChild(header);
-				afterImage = false;
 				continue;
 			}
 
-			const card = buildCard(w, afterImage);
+			const card = buildCard(w);
 			fragment.appendChild(card);
-			const t = widgetType(w).toLowerCase();
-			if (t.includes('image') || t === 'chart' || t.includes('webview') || t === 'video') {
-				afterImage = true;
-			} else if (afterImage && t.includes('text')) {
-				afterImage = false;
-			}
 		}
 		els.grid.innerHTML = '';
 		els.grid.appendChild(fragment);
