@@ -4280,7 +4280,7 @@ function flattenWidgets(list, out, ctx) {
 		if (w?.type === 'Frame') {
 			const label = sectionLabel(w);
 			if (label) out.push({ __section: true, label });
-			// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x)
+			// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
 			let kids = w.widgets || w.widget;
 			if (kids) {
 				if (Array.isArray(kids)) {
@@ -4303,7 +4303,7 @@ function flattenWidgets(list, out, ctx) {
 function normalizeWidgets(page, ctx) {
 	// openHAB sitemap JSON structures vary a bit; handle a few shapes.
 	// OH 1.x: { id, title, widget: [ ... ] } or { widget: { item: [...] } }
-	// OH 3.x: { id, title, widgets: [ ... ] }
+	// OH 3.x+: { id, title, widgets: [ ... ] }
 	let w = page?.widgets || page?.widget;
 
 	if (!w) return [];
@@ -4475,7 +4475,7 @@ function syncDeltaToCache(pageUrl, changes) {
 		}
 	};
 
-	// Support both OH 1.x 'widget' and OH 3.x 'widgets'
+	// Support both OH 1.x 'widget' and OH 3.x+ 'widgets'
 	updateWidgets(cachedPage?.widgets || cachedPage?.widget);
 	// No need to call updatePageInCache - we modified the object in place
 }
@@ -4516,7 +4516,7 @@ function syncItemsToAllCachedPages(changes) {
 		}
 	};
 
-	// Update all cached pages - support both OH 1.x 'widget' and OH 3.x 'widgets'
+	// Update all cached pages - support both OH 1.x 'widget' and OH 3.x+ 'widgets'
 	for (const page of state.sitemapCache.values()) {
 		const widgetSource = page?.widgets || page?.widget;
 		if (widgetSource) updateWidgets(widgetSource);
@@ -4866,7 +4866,7 @@ function getWidgetRenderInfo(w) {
 	const st = widgetState(w);
 	const icon = widgetIconName(w);
 	const itemName = safeText(w?.item?.name || w?.itemName || '');
-	// Support both OH 1.x 'mapping' and OH 3.x 'mappings'
+	// Support both OH 1.x 'mapping' and OH 3.x+ 'mappings'
 	const mapping = normalizeMapping(w?.mappings || w?.mapping);
 	const pageLink = widgetPageLink(w);
 	const labelParts = splitLabelState(label);
