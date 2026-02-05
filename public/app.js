@@ -7502,6 +7502,59 @@ function restoreNormalPolling() {
 		e.preventDefault();
 		openCardConfigModal(widget, card);
 	}, true);
+	// Two-finger long press (2s) on cards opens item config modal (touch devices)
+	let twoFingerTimer = null;
+	let twoFingerCard = null;
+	let twoFingerStartTouches = null;
+	const TWO_FINGER_HOLD_MS = 2000;
+	const TWO_FINGER_MOVE_THRESHOLD = 30;
+	function clearTwoFingerHold() {
+		if (twoFingerTimer) { clearTimeout(twoFingerTimer); twoFingerTimer = null; }
+		twoFingerCard = null;
+		twoFingerStartTouches = null;
+	}
+	document.addEventListener('touchstart', (e) => {
+		if (e.touches.length !== 2) { clearTwoFingerHold(); return; }
+		if (getUserRole() !== 'admin') return;
+		const card = e.target.closest('#grid > .glass[data-widget-key]');
+		if (!card) return;
+		const key = card.dataset.widgetKey;
+		if (!key || !key.startsWith('widget:')) return;
+		// Verify both touches are on same card
+		const touch1El = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+		const touch2El = document.elementFromPoint(e.touches[1].clientX, e.touches[1].clientY);
+		const card1 = touch1El?.closest('#grid > .glass[data-widget-key]');
+		const card2 = touch2El?.closest('#grid > .glass[data-widget-key]');
+		if (card1 !== card2 || card1 !== card) return;
+		twoFingerCard = card;
+		twoFingerStartTouches = [
+			{ x: e.touches[0].clientX, y: e.touches[0].clientY },
+			{ x: e.touches[1].clientX, y: e.touches[1].clientY }
+		];
+		twoFingerTimer = setTimeout(() => {
+			const widget = findWidgetByKey(key);
+			if (widget && twoFingerCard) {
+				haptic();
+				openCardConfigModal(widget, twoFingerCard);
+			}
+			clearTwoFingerHold();
+		}, TWO_FINGER_HOLD_MS);
+	}, { passive: true });
+	document.addEventListener('touchmove', (e) => {
+		if (!twoFingerTimer || !twoFingerStartTouches) return;
+		if (e.touches.length !== 2) { clearTwoFingerHold(); return; }
+		// Check if fingers moved too far
+		for (let i = 0; i < 2; i++) {
+			const dx = e.touches[i].clientX - twoFingerStartTouches[i].x;
+			const dy = e.touches[i].clientY - twoFingerStartTouches[i].y;
+			if (Math.sqrt(dx * dx + dy * dy) > TWO_FINGER_MOVE_THRESHOLD) {
+				clearTwoFingerHold();
+				return;
+			}
+		}
+	}, { passive: true });
+	document.addEventListener('touchend', clearTwoFingerHold, { passive: true });
+	document.addEventListener('touchcancel', clearTwoFingerHold, { passive: true });
 	// Disable pointer-events on iframes when ctrl/meta held so clicks pass through to cards
 	const setIframePointerEvents = (enabled) => {
 		const value = enabled ? '' : 'none';
