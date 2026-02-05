@@ -2126,6 +2126,7 @@ function ensureCardConfigModal() {
 	// Sync checked class on radio labels for browsers without :has() support
 	wrap.addEventListener('change', (e) => {
 		if (e.target.type !== 'radio') return;
+		haptic();
 		const group = e.target.name;
 		wrap.querySelectorAll(`input[name="${group}"]`).forEach(r => r.closest('.item-config-radio')?.classList.toggle('checked', r.checked));
 	});
@@ -3211,6 +3212,7 @@ function createAdminField(field, value) {
 		input.type = 'checkbox';
 		input.checked = value === true;
 		input.dataset.key = field.key;
+		input.addEventListener('change', () => haptic());
 		const track = document.createElement('span');
 		track.className = 'admin-toggle-track';
 		const dot = document.createElement('span');
@@ -3403,6 +3405,7 @@ function ensureAdminConfigModal() {
 	});
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape' && adminConfigModal && !adminConfigModal.classList.contains('hidden')) {
+			haptic();
 			closeAdminConfigModal();
 		}
 	});
