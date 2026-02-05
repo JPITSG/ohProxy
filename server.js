@@ -7631,32 +7631,7 @@ cursor:'pointer'
 map.addLayer(previewLayer);
 
 var previewTooltip=document.getElementById('preview-tooltip');
-var previewControl=new OpenLayers.Control.SelectFeature(previewLayer,{
-hover:true,
-highlightOnly:true,
-overFeature:function(f){
-previewTooltip.innerHTML=f.attributes.tooltip;
-previewTooltip.style.display='block';
-document.getElementById('map').style.cursor='pointer';
-},
-outFeature:function(){
-previewTooltip.style.display='none';
-document.getElementById('map').style.cursor='';
-},
-clickFeature:function(feature){
-loadDayFromCtx(feature.attributes.month,feature.attributes.day,feature.attributes.year);
-}
-});
-map.addControl(previewControl);
-previewControl.activate();
-
-map.events.register('mousemove',map,function(e){
-if(previewTooltip.style.display==='block'){
-previewTooltip.style.left=(e.xy.x+15)+'px';
-previewTooltip.style.top=(e.xy.y+15)+'px';
-}
-});
-
+var hoverTooltip=document.getElementById('hover-tooltip');
 var red=markers.length?markers[markers.length-1]:null;
 var redTooltip=document.getElementById('red-tooltip');
 if(red)redTooltip.innerHTML=red[3];
@@ -7671,23 +7646,49 @@ redTooltip.style.top=(px.y-60)+'px';
 }
 }
 
-var hoverTooltip=document.getElementById('hover-tooltip');
-var hover=new OpenLayers.Control.SelectFeature(vector,{
+var hoverControl=new OpenLayers.Control.SelectFeature([previewLayer,vector],{
 hover:true,
-onSelect:function(f){
-if(f.attributes.color==='blue'&&f.attributes.timestamp){
+highlightOnly:true,
+overFeature:function(f){
+var mapEl=document.getElementById('map');
+if(f.layer===previewLayer&&f.attributes.tooltip){
+previewTooltip.innerHTML=f.attributes.tooltip;
+previewTooltip.style.display='block';
+mapEl.style.cursor='pointer';
+}else if(f.layer===vector&&f.attributes.color==='blue'&&f.attributes.timestamp){
 hoverTooltip.innerHTML=f.attributes.timestamp;
 hoverTooltip.style.display='block';
+mapEl.style.cursor='pointer';
 }
 },
-onUnselect:function(){hoverTooltip.style.display='none';}
+outFeature:function(f){
+var mapEl=document.getElementById('map');
+if(f.layer===previewLayer){
+previewTooltip.style.display='none';
+mapEl.style.cursor='';
+}else if(f.layer===vector&&f.attributes.color==='blue'){
+hoverTooltip.style.display='none';
+mapEl.style.cursor='';
+}
+},
+clickFeature:function(f){
+if(f.layer===previewLayer){
+loadDayFromCtx(f.attributes.month,f.attributes.day,f.attributes.year);
+}
+}
 });
-map.addControl(hover);
-hover.activate();
+map.addControl(hoverControl);
+hoverControl.activate();
 
 map.events.register('mousemove',map,function(e){
+if(previewTooltip.style.display==='block'){
+previewTooltip.style.left=(e.xy.x+15)+'px';
+previewTooltip.style.top=(e.xy.y+15)+'px';
+}
+if(hoverTooltip.style.display==='block'){
 hoverTooltip.style.left=(e.xy.x+15)+'px';
 hoverTooltip.style.top=(e.xy.y+15)+'px';
+}
 });
 
 map.events.register('move',map,updateRedTooltip);
