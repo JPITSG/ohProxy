@@ -2203,8 +2203,10 @@ body.theme-light .admin-config-header {
 	border-radius: 6px;
 	transition: color .4s ease;
 }
-.admin-config-close:hover {
-	color: var(--color-text-primary);
+@media (hover: hover) and (pointer: fine) {
+	.admin-config-close:hover {
+		color: var(--color-text-primary);
+	}
 }
 .admin-config-close svg {
 	width: 18px;
@@ -2594,8 +2596,10 @@ body.theme-light .admin-toggle input:checked ~ .admin-toggle-dot {
 	line-height: 0;
 	border-radius: 4px;
 }
-.admin-secret-eye:hover {
-	color: var(--color-text-primary);
+@media (hover: hover) and (pointer: fine) {
+	.admin-secret-eye:hover {
+		color: var(--color-text-primary);
+	}
 }
 .admin-secret-eye svg {
 	width: 16px;
