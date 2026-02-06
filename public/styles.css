@@ -1478,6 +1478,8 @@ body.theme-light .card-config-header {
 	font-weight: 400;
 	letter-spacing: .1em;
 	color: var(--color-text-primary);
+	cursor: grab;
+	touch-action: none;
 }
 .card-config-close {
 	background: none;
@@ -2197,6 +2199,8 @@ body.theme-light .admin-config-header {
 	font-weight: 400;
 	letter-spacing: .1em;
 	color: var(--color-text-primary);
+	cursor: grab;
+	touch-action: none;
 }
 .admin-config-close {
 	background: none;
