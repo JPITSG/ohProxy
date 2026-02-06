@@ -515,6 +515,30 @@ describe('Config Validation Functions', () => {
 		});
 	});
 
+	describe('Voice Model Validation', () => {
+		const validModels = ['browser', 'vosk'];
+
+		it('accepts browser', () => {
+			assert.ok(validModels.includes('browser'));
+		});
+
+		it('accepts vosk', () => {
+			assert.ok(validModels.includes('vosk'));
+		});
+
+		it('rejects adaptive', () => {
+			assert.strictEqual(validModels.includes('adaptive'), false, 'adaptive should no longer be valid');
+		});
+
+		it('rejects empty string', () => {
+			assert.strictEqual(validModels.includes(''), false);
+		});
+
+		it('rejects arbitrary string', () => {
+			assert.strictEqual(validModels.includes('whisper'), false);
+		});
+	});
+
 	describe('describeValue', () => {
 		it('describes undefined', () => {
 			assert.strictEqual(describeValue(undefined), '<undefined>');

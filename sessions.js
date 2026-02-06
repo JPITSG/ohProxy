@@ -125,6 +125,11 @@ function initDb() {
 		db.exec(`ALTER TABLE users ADD COLUMN trackgps INTEGER DEFAULT 0`);
 	} catch (e) { /* column already exists */ }
 
+	// Migration: add voice_preference column to users table
+	try {
+		db.exec(`ALTER TABLE users ADD COLUMN voice_preference TEXT DEFAULT 'config'`);
+	} catch (e) { /* column already exists */ }
+
 	// Run cleanup on startup
 	cleanupSessions();
 
@@ -542,7 +547,7 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_-]{1,20}$/;
 function getAllUsers() {
 	if (!db) initDb();
 	const rows = db.prepare(`
-		SELECT u.username, u.role, u.created_at, u.disabled, u.trackgps, MAX(s.last_seen) as last_active
+		SELECT u.username, u.role, u.created_at, u.disabled, u.trackgps, u.voice_preference, MAX(s.last_seen) as last_active
 		FROM users u
 		LEFT JOIN sessions s ON u.username = s.username
 		GROUP BY u.username
@@ -553,6 +558,7 @@ function getAllUsers() {
 		createdAt: row.created_at,
 		disabled: row.disabled === 1,
 		trackgps: row.trackgps === 1,
+		voicePreference: row.voice_preference || 'config',
 		lastActive: row.last_active
 	}));
 }
@@ -572,7 +578,8 @@ function getUser(username) {
 		role: row.role,
 		createdAt: row.created_at,
 		disabled: row.disabled === 1,
-		trackgps: row.trackgps === 1
+		trackgps: row.trackgps === 1,
+		voicePreference: row.voice_preference || 'config'
 	};
 }
 
@@ -694,6 +701,21 @@ function updateUserTrackGps(username, enabled) {
 	return result.changes > 0;
 }
 
+/**
+ * Update voice preference for a user.
+ * @param {string} username
+ * @param {string} preference - 'config', 'browser', or 'vosk'
+ * @returns {boolean} - True if user was found and updated
+ */
+function updateUserVoicePreference(username, preference) {
+	if (!db) initDb();
+	const valid = ['config', 'browser', 'vosk'];
+	if (!valid.includes(preference)) return false;
+	const result = db.prepare('UPDATE users SET voice_preference = ? WHERE username = ?')
+		.run(preference, username);
+	return result.changes > 0;
+}
+
 // ============================================
 // Server Settings Functions (Key-Value Store)
 // ============================================
@@ -762,6 +784,7 @@ module.exports = {
 	disableAllUsers,
 	enableAllUsers,
 	updateUserTrackGps,
+	updateUserVoicePreference,
 	// Server settings
 	getServerSetting,
 	setServerSetting,

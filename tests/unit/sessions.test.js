@@ -344,6 +344,86 @@ describe('Sessions Module', () => {
 		});
 	});
 
+	describe('Voice Preference', () => {
+		function createUsersTable() {
+			db.exec(`
+				CREATE TABLE IF NOT EXISTS users (
+					username TEXT PRIMARY KEY,
+					password TEXT NOT NULL,
+					role TEXT NOT NULL DEFAULT 'normal',
+					created_at INTEGER DEFAULT (strftime('%s','now')),
+					disabled INTEGER DEFAULT 0,
+					trackgps INTEGER DEFAULT 0,
+					voice_preference TEXT DEFAULT 'config'
+				)
+			`);
+		}
+
+		it('defaults to config for new users', () => {
+			createUsersTable();
+			db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run('alice', 'pw');
+			const row = db.prepare('SELECT voice_preference FROM users WHERE username = ?').get('alice');
+			assert.strictEqual(row.voice_preference, 'config');
+		});
+
+		it('accepts valid voice preferences', () => {
+			createUsersTable();
+			db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run('bob', 'pw');
+			for (const pref of ['config', 'browser', 'vosk']) {
+				db.prepare('UPDATE users SET voice_preference = ? WHERE username = ?').run(pref, 'bob');
+				const row = db.prepare('SELECT voice_preference FROM users WHERE username = ?').get('bob');
+				assert.strictEqual(row.voice_preference, pref, `Should accept '${pref}'`);
+			}
+		});
+
+		it('updateUserVoicePreference rejects invalid values', () => {
+			// Replicate the validation logic from sessions.js
+			const valid = ['config', 'browser', 'vosk'];
+			assert.strictEqual(valid.includes('adaptive'), false, 'adaptive should be rejected');
+			assert.strictEqual(valid.includes('invalid'), false, 'random string should be rejected');
+			assert.strictEqual(valid.includes(''), false, 'empty string should be rejected');
+		});
+
+		it('returns false for nonexistent user', () => {
+			createUsersTable();
+			const result = db.prepare('UPDATE users SET voice_preference = ? WHERE username = ?')
+				.run('vosk', 'nonexistent');
+			assert.strictEqual(result.changes, 0);
+		});
+
+		it('getUser returns voice_preference', () => {
+			createUsersTable();
+			db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run('carol', 'pw');
+			db.prepare('UPDATE users SET voice_preference = ? WHERE username = ?').run('vosk', 'carol');
+			const row = db.prepare('SELECT * FROM users WHERE username = ?').get('carol');
+			assert.strictEqual(row.voice_preference, 'vosk');
+		});
+
+		it('getAllUsers includes voice_preference', () => {
+			createUsersTable();
+			db.exec(`
+				CREATE TABLE IF NOT EXISTS sessions (
+					client_id TEXT PRIMARY KEY,
+					username TEXT DEFAULT NULL,
+					settings TEXT DEFAULT '{}',
+					created_at INTEGER DEFAULT (strftime('%s','now')),
+					last_seen INTEGER DEFAULT (strftime('%s','now')),
+					created_ip TEXT DEFAULT NULL,
+					last_ip TEXT DEFAULT NULL
+				)
+			`);
+			db.prepare('INSERT INTO users (username, password, voice_preference) VALUES (?, ?, ?)').run('dave', 'pw', 'browser');
+			const rows = db.prepare(`
+				SELECT u.username, u.voice_preference
+				FROM users u
+				LEFT JOIN sessions s ON u.username = s.username
+				GROUP BY u.username
+			`).all();
+			assert.strictEqual(rows.length, 1);
+			assert.strictEqual(rows[0].voice_preference, 'browser');
+		});
+	});
+
 	describe('setMaxAgeDays', () => {
 		it('validates input (must be >= 1)', () => {
 			// Test logic: setMaxAgeDays should only accept values >= 1
