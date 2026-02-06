@@ -28,11 +28,12 @@
 					: window.__OH_SESSION__?.darkMode === false ? 'light' : null;
 				let stored = null;
 				try { stored = localStorage.getItem('ohTheme'); } catch {}
+				const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 				const mode = (modeParam === 'dark' || modeParam === 'light')
 					? modeParam
 					: serverMode
 						? serverMode
-						: (stored === 'dark' || stored === 'light') ? stored : 'dark';
+						: (stored === 'dark' || stored === 'light') ? stored : (prefersDark ? 'dark' : 'light');
 				const themeColor = mode === 'light' ? '#f5f6fa' : '#1e1e1e';
 				const metaTheme = document.querySelector('meta[name="theme-color"]');
 				if (metaTheme) metaTheme.setAttribute('content', themeColor);
