@@ -151,6 +151,7 @@
 	--header-bg: rgb(19, 20, 33);
 	--header-blur: blur(8px) saturate(1.1);
 	--header-border: var(--glass-border-color);
+	--header-grid-shadow: 0 20px 30px -16px rgba(0, 0, 0, 0.95), 0 8px 18px -10px rgba(0, 0, 0, 0.7);
 }
 
 
@@ -259,6 +260,7 @@ body.theme-light {
 	/* Header */
 	--header-bg: rgba(19, 21, 54, 0.08);
 	--header-border: rgba(150, 150, 150, 0.3);
+	--header-grid-shadow: 0 16px 24px -14px rgba(19, 21, 54, 0.34), 0 6px 12px -8px rgba(19, 21, 54, 0.22);
 
 	background-color: var(--color-body-bg);
 	color: var(--color-body-text);
@@ -296,6 +298,7 @@ header {
 	backdrop-filter: var(--header-blur) !important;
 	-webkit-backdrop-filter: var(--header-blur) !important;
 	border-color: var(--header-border) !important;
+	box-shadow: var(--header-grid-shadow);
 }
 
 #headerBottom.gap-3 {
@@ -787,7 +790,7 @@ html.error-state #grid {
 	pointer-events: none;
 }
 html:not(.slim) #grid {
-	margin-top: -7px;
+	margin-top: -2px;
 }
 
 /* Header buttons */
@@ -2301,14 +2304,22 @@ body.theme-light .admin-config-section:not(.collapsed) .admin-config-section-bod
 	color: var(--color-text-muted);
 	flex: 1;
 }
-.admin-restart-badge {
+.admin-restart-badge,
+.admin-reload-badge {
 	font-size: .65rem;
 	padding: 2px 8px;
 	border-radius: 999px;
+	white-space: nowrap;
+}
+.admin-restart-badge {
 	background: rgba(245, 158, 11, 0.15);
 	color: rgb(245, 158, 11);
 	border: 1px solid rgba(245, 158, 11, 0.3);
-	white-space: nowrap;
+}
+.admin-reload-badge {
+	background: rgba(59, 130, 246, 0.15);
+	color: rgb(59, 130, 246);
+	border: 1px solid rgba(59, 130, 246, 0.3);
 }
 .admin-config-chevron {
 	width: 14px;
