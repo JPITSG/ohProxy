@@ -3018,6 +3018,7 @@ const ADMIN_CONFIG_SCHEMA = [
 		fields: [
 			{ key: 'server.sessionMaxAgeDays', type: 'number', min: 1 },
 			{ key: 'server.backgroundTasks.sitemapRefreshMs', type: 'number', min: 1000 },
+			{ key: 'server.backgroundTasks.structureMapRefreshMs', type: 'number', min: 0 },
 		],
 	},
 	{
