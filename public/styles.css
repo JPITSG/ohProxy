@@ -906,8 +906,8 @@ body.theme-dark #adminConfigBtn svg {
 	width: auto !important;
 }
 #pauseBtn svg {
-	width: 1.65rem;
-	height: 1.65rem;
+	width: 1.5rem;
+	height: 1.5rem;
 	display: block;
 	filter: drop-shadow(0 0 0.5px rgba(0,0,0,0.2));
 }
@@ -927,8 +927,8 @@ body.theme-dark #pauseBtn svg {
 	display: none !important;
 }
 #voiceBtn svg {
-	width: 1.65rem;
-	height: 1.65rem;
+	width: 1.5rem;
+	height: 1.5rem;
 	display: block;
 	filter: drop-shadow(0 0 0.5px rgba(0,0,0,0.2));
 }
