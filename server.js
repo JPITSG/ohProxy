@@ -6254,6 +6254,9 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 		return JSON.stringify(oldVal) !== JSON.stringify(newVal);
 	});
 
+	// Check if client config changed (requires browser reload)
+	const needsReload = JSON.stringify(CLIENT_CONFIG) !== JSON.stringify(incoming?.client || {});
+
 	// Write config.local.js atomically
 	const content = '\'use strict\';\n\nmodule.exports = ' + JSON.stringify(incoming, null, '\t') + ';\n';
 	const tmpPath = LOCAL_CONFIG_PATH + '.tmp';
@@ -6268,7 +6271,7 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 	}
 
 	logMessage(`[Admin] Config updated by ${user.username || 'unknown'}`);
-	res.json({ ok: true, restartRequired: needsRestart });
+	res.json({ ok: true, restartRequired: needsRestart, reloadRequired: needsReload });
 });
 
 app.get('/api/card-config/:itemName/history', async (req, res) => {

@@ -9,11 +9,13 @@ window.ohLang = {
 		groupServer: 'Server',
 		groupClient: 'Client',
 		restartBadge: 'Restart Required',
+		reloadBadge: 'Reload Required',
 		secretPlaceholder: '(unchanged)',
 		listAddBtn: '+ Add',
 
 		loadFailed: 'Failed to load config: ',
 		savedRestart: 'Saved. Restart required for some changes.',
+		savedReload: 'Saved. Reload required for some changes.',
 		savedOk: 'Saved successfully.',
 		saveFailed: 'Save failed: ',
 		saveFailedGeneric: 'Save failed',

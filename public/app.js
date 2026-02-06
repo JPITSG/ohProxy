@@ -3116,7 +3116,7 @@ const ADMIN_CONFIG_SCHEMA = [
 		],
 	},
 	{
-		id: 'client-ui', group: 'client',
+		id: 'client-ui', group: 'client', reloadRequired: true,
 		fields: [
 			{ key: 'client.siteName', type: 'text', allowEmpty: true },
 			{ key: 'client.statusNotification', type: 'toggle' },
@@ -3124,7 +3124,7 @@ const ADMIN_CONFIG_SCHEMA = [
 		],
 	},
 	{
-		id: 'client-timing', group: 'client',
+		id: 'client-timing', group: 'client', reloadRequired: true,
 		fields: [
 			{ key: 'client.pageFadeOutMs', type: 'number', min: 0 },
 			{ key: 'client.pageFadeInMs', type: 'number', min: 0 },
@@ -3138,7 +3138,7 @@ const ADMIN_CONFIG_SCHEMA = [
 		],
 	},
 	{
-		id: 'client-polling', group: 'client',
+		id: 'client-polling', group: 'client', reloadRequired: true,
 		fields: [
 			{ key: 'client.pollIntervalsMs.default.active', type: 'number', min: 1 },
 			{ key: 'client.pollIntervalsMs.default.idle', type: 'number', min: 1 },
@@ -3153,7 +3153,7 @@ const ADMIN_CONFIG_SCHEMA = [
 		],
 	},
 	{
-		id: 'client-format', group: 'client',
+		id: 'client-format', group: 'client', reloadRequired: true,
 		fields: [
 			{ key: 'client.dateFormat', type: 'text' },
 			{ key: 'client.timeFormat', type: 'text' },
@@ -3507,6 +3507,12 @@ function renderAdminConfigSection(section, config) {
 		badge.textContent = ohLang.adminConfig.restartBadge;
 		header.appendChild(badge);
 	}
+	if (section.reloadRequired) {
+		const badge = document.createElement('span');
+		badge.className = 'admin-reload-badge';
+		badge.textContent = ohLang.adminConfig.reloadBadge;
+		header.appendChild(badge);
+	}
 
 	const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 	chevron.setAttribute('viewBox', '0 0 24 24');
@@ -3731,6 +3737,9 @@ async function saveAdminConfig() {
 		if (result.restartRequired) {
 			statusEl.className = 'admin-config-status warning';
 			statusEl.textContent = ohLang.adminConfig.savedRestart;
+		} else if (result.reloadRequired) {
+			statusEl.className = 'admin-config-status warning';
+			statusEl.textContent = ohLang.adminConfig.savedReload;
 		} else {
 			statusEl.className = 'admin-config-status success';
 			statusEl.textContent = ohLang.adminConfig.savedOk;
