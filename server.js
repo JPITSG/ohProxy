@@ -174,9 +174,8 @@ function setAuthResponseHeaders(res, authInfo) {
 	else res.removeHeader('X-OhProxy-Username');
 }
 
-const BOOT_LOG_FILE = safeText(process.env.LOG_FILE || '');
 function bootLog(message) {
-	writeLogLine(BOOT_LOG_FILE, message);
+	writeLogLine('', message);
 }
 
 function loadUserConfig() {
@@ -282,13 +281,13 @@ const HTTPS_HTTP2 = typeof HTTPS_CONFIG.http2 === 'boolean' ? HTTPS_CONFIG.http2
 const ALLOW_SUBNETS = SERVER_CONFIG.allowSubnets;
 const TRUST_PROXY = SERVER_CONFIG.trustProxy === true;
 const DENY_XFF_SUBNETS = SERVER_CONFIG.denyXFFSubnets;
-const OH_TARGET = safeText(process.env.OH_TARGET || SERVER_CONFIG.openhab?.target);
-const OH_USER = safeText(process.env.OH_USER || SERVER_CONFIG.openhab?.user || '');
-const OH_PASS = safeText(process.env.OH_PASS || SERVER_CONFIG.openhab?.pass || '');
-const OH_API_TOKEN = safeText(process.env.OH_API_TOKEN || SERVER_CONFIG.openhab?.apiToken || '');
+const OH_TARGET = safeText(SERVER_CONFIG.openhab?.target);
+const OH_USER = safeText(SERVER_CONFIG.openhab?.user || '');
+const OH_PASS = safeText(SERVER_CONFIG.openhab?.pass || '');
+const OH_API_TOKEN = safeText(SERVER_CONFIG.openhab?.apiToken || '');
 const OPENHAB_REQUEST_TIMEOUT_MS = configNumber(SERVER_CONFIG.openhab?.timeoutMs, 15000);
-const ICON_VERSION = safeText(process.env.ICON_VERSION || SERVER_CONFIG.assets?.iconVersion);
-const USER_AGENT = safeText(process.env.USER_AGENT || SERVER_CONFIG.userAgent);
+const ICON_VERSION = safeText(SERVER_CONFIG.assets?.iconVersion);
+const USER_AGENT = safeText(SERVER_CONFIG.userAgent);
 const ASSET_VERSION = safeText(SERVER_CONFIG.assets?.assetVersion);
 const APPLE_TOUCH_VERSION_RAW = safeText(SERVER_CONFIG.assets?.appleTouchIconVersion);
 const APPLE_TOUCH_VERSION = APPLE_TOUCH_VERSION_RAW || '';
@@ -296,13 +295,13 @@ const ICON_SIZE = configNumber(SERVER_CONFIG.iconSize);
 const ICON_CACHE_CONCURRENCY = Math.max(1, Math.floor(configNumber(SERVER_CONFIG.iconCacheConcurrency, 5)));
 const DELTA_CACHE_LIMIT = configNumber(SERVER_CONFIG.deltaCacheLimit);
 const GROUP_ITEMS = Array.isArray(SERVER_CONFIG.groupItems) ? SERVER_CONFIG.groupItems.map(safeText).filter(Boolean) : [];
-const PROXY_LOG_LEVEL = safeText(process.env.PROXY_LOG_LEVEL || SERVER_CONFIG.proxyMiddlewareLogLevel);
-const LOG_FILE = safeText(process.env.LOG_FILE || SERVER_CONFIG.logFile);
-const ACCESS_LOG = safeText(process.env.ACCESS_LOG || SERVER_CONFIG.accessLog);
-const ACCESS_LOG_LEVEL = safeText(process.env.ACCESS_LOG_LEVEL || SERVER_CONFIG.accessLogLevel || 'all')
+const PROXY_LOG_LEVEL = safeText(SERVER_CONFIG.proxyMiddlewareLogLevel);
+const LOG_FILE = safeText(SERVER_CONFIG.logFile);
+const ACCESS_LOG = safeText(SERVER_CONFIG.accessLog);
+const ACCESS_LOG_LEVEL = safeText(SERVER_CONFIG.accessLogLevel || 'all')
 	.trim()
 	.toLowerCase();
-const JS_LOG_FILE = safeText(process.env.JS_LOG_FILE || SERVER_CONFIG.jsLogFile || '');
+const JS_LOG_FILE = safeText(SERVER_CONFIG.jsLogFile || '');
 const JS_LOG_ENABLED = SERVER_CONFIG.jsLogEnabled === true;
 const SLOW_QUERY_MS = configNumber(SERVER_CONFIG.slowQueryMs, 0);
 const AUTH_REALM = safeText(SERVER_AUTH.realm || 'openHAB Proxy');
@@ -331,12 +330,8 @@ const SECURITY_HSTS = SECURITY_HEADERS.hsts || {};
 const SECURITY_CSP = SECURITY_HEADERS.csp || {};
 const SECURITY_REFERRER_POLICY = safeText(SECURITY_HEADERS.referrerPolicy || '');
 const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
-const SITEMAP_REFRESH_MS = configNumber(
-	process.env.SITEMAP_REFRESH_MS || TASK_CONFIG.sitemapRefreshMs
-);
-const STRUCTURE_MAP_REFRESH_MS = configNumber(
-	process.env.STRUCTURE_MAP_REFRESH_MS || TASK_CONFIG.structureMapRefreshMs
-);
+const SITEMAP_REFRESH_MS = configNumber(TASK_CONFIG.sitemapRefreshMs);
+const STRUCTURE_MAP_REFRESH_MS = configNumber(TASK_CONFIG.structureMapRefreshMs);
 const WEBSOCKET_CONFIG = SERVER_CONFIG.websocket || {};
 const WS_MODE = ['atmosphere', 'sse'].includes(WEBSOCKET_CONFIG.mode) ? WEBSOCKET_CONFIG.mode : 'polling';
 const WS_POLLING_INTERVAL_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalMs) || 500;
@@ -814,6 +809,7 @@ function validateConfig() {
 
 	if (ensureObject(SERVER_CONFIG.backgroundTasks, 'server.backgroundTasks', errors)) {
 		ensureNumber(SITEMAP_REFRESH_MS, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
+		ensureNumber(STRUCTURE_MAP_REFRESH_MS, 'server.backgroundTasks.structureMapRefreshMs', { min: 0 }, errors);
 	}
 
 	if (ensureObject(SERVER_CONFIG.videoPreview, 'server.videoPreview', errors)) {
@@ -1066,6 +1062,9 @@ function validateAdminConfig(config) {
 	// Background tasks
 	if (isPlainObject(s.backgroundTasks)) {
 		ensureNumber(s.backgroundTasks.sitemapRefreshMs, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
+		if (s.backgroundTasks.structureMapRefreshMs !== undefined) {
+			ensureNumber(s.backgroundTasks.structureMapRefreshMs, 'server.backgroundTasks.structureMapRefreshMs', { min: 0 }, errors);
+		}
 	}
 
 	// WebSocket
