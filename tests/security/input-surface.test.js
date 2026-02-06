@@ -87,11 +87,11 @@ describe('Input Validation Coverage', () => {
 		assert.ok(content.includes("!password || typeof password !== 'string' || hasAnyControlChars(password) || password.length > 200"));
 
 		assert.ok(content.includes('const allowedKeys = ['));
-		const requiredKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode', 'paused'];
+		const requiredKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode'];
 		for (const key of requiredKeys) {
 			assert.ok(content.includes(`'${key}'`), `Missing settings whitelist key: ${key}`);
 		}
-		assert.ok(content.includes("const boolKeys = new Set(['slimMode', 'compactView', 'showLabels', 'darkMode', 'paused'])"));
+		assert.ok(content.includes("const boolKeys = new Set(['slimMode', 'compactView', 'showLabels', 'darkMode'])"));
 		assert.ok(content.includes("const size = parseOptionalInt(val, { min: 8, max: 32 });"));
 		assert.ok(content.includes("theme !== 'light' && theme !== 'dark'"));
 

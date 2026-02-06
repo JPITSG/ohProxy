@@ -107,11 +107,9 @@ async function softReset() {
 			showResumeSpinner(false);
 
 			// Restart background services
-			if (!state.isPaused) {
-				startPolling();
-				resumePingPending = true;
-				connectWs();
-			}
+			startPolling();
+			resumePingPending = true;
+			connectWs();
 			fetchFullSitemap().catch(() => {});
 			_softResetRunning = false;
 			return; // Done!
@@ -174,11 +172,9 @@ async function softReset() {
 			showResumeSpinner(false);
 
 			// Restart background services
-			if (!state.isPaused) {
-				startPolling();
-				resumePingPending = true;
-				connectWs();
-			}
+			startPolling();
+			resumePingPending = true;
+			connectWs();
 			fetchFullSitemap().catch(() => {});
 			_softResetRunning = false;
 			return; // Done!
@@ -206,7 +202,6 @@ const els = {
 	statusText: document.getElementById('statusText'),
 	search: document.getElementById('search'),
 	back: document.getElementById('backBtn'),
-	pause: document.getElementById('pauseBtn'),
 	voice: document.getElementById('voiceBtn'),
 	home: document.getElementById('homeBtn'),
 	logout: document.getElementById('logoutBtn'),
@@ -242,7 +237,6 @@ const state = {
 	isIdle: false,
 	lastActivity: 0,
 	pollInterval: 0,
-	isPaused: false,
 	isSlim: false,
 	headerMode: 'full',
 	forcedMode: null,
@@ -1021,14 +1015,6 @@ function queueScrollTop() {
 	state.pendingScrollTop = true;
 }
 
-function updatePauseButton() {
-	if (!els.pause) return;
-	const pauseIcon = els.pause.querySelector('.pause-icon');
-	const playIcon = els.pause.querySelector('.play-icon');
-	if (pauseIcon) pauseIcon.classList.toggle('hidden', state.isPaused);
-	if (playIcon) playIcon.classList.toggle('hidden', !state.isPaused);
-}
-
 function updateStatusBar() {
 	if (!els.statusBar || !els.statusText) return;
 	if (!state.connectionReady) {
@@ -1382,16 +1368,6 @@ function initTheme(forcedMode) {
 	}
 	setTheme(mode, false); // Don't sync to server on init
 	serverSettingsLoaded = true; // Settings already loaded from server via injection
-}
-
-function initPaused() {
-	try {
-		if (window.__OH_SESSION__ && window.__OH_SESSION__.paused === true) {
-			state.isPaused = true;
-		}
-	} catch (err) {
-		logJsError('initPaused failed', err);
-	}
 }
 
 async function saveSettingsToServer(settings) {
@@ -6352,7 +6328,6 @@ function updateNavButtons() {
 	const hasSearch = !!state.filter.trim();
 	els.back.disabled = (state.stack.length === 0 && !hasSearch) || !state.connectionOk;
 	els.home.disabled = !state.rootPageUrl || (!hasSearch && state.pageUrl === state.rootPageUrl) || !state.connectionOk;
-	if (els.pause) els.pause.disabled = !state.connectionOk;
 	if (els.voice) els.voice.disabled = !state.connectionOk;
 }
 
@@ -6750,7 +6725,6 @@ async function refresh(showLoading) {
 
 function startPolling() {
 	stopPolling();
-	if (state.isPaused) return;
 	setPollInterval(activeInterval());
 	armIdleTimer();
 	startChartHashCheck();
@@ -6782,7 +6756,6 @@ function idleInterval() {
 function armIdleTimer() {
 	if (state.idleTimer) clearTimeout(state.idleTimer);
 	state.idleTimer = setTimeout(() => {
-		if (state.isPaused) return;
 		state.isIdle = true;
 		// Don't change polling if WebSocket is connected
 		if (!wsConnected) {
@@ -6793,7 +6766,6 @@ function armIdleTimer() {
 }
 
 function noteActivity() {
-	if (state.isPaused) return;
 	const now = Date.now();
 	const throttle = state.isSlim ? 1000 : ACTIVITY_THROTTLE_MS;
 	if (now - state.lastActivity < throttle) return;
@@ -6912,7 +6884,7 @@ function swapChartIframe(iframe, newSrc, baseUrl) {
 }
 
 async function checkChartHashes() {
-	if (chartHashCheckInProgress || state.isPaused) return;
+	if (chartHashCheckInProgress) return;
 	const iframes = document.querySelectorAll('iframe.chart-frame');
 	if (iframes.length === 0) return;
 
@@ -7330,7 +7302,6 @@ function getWsUrl() {
 
 function connectWs() {
 	if (wsConnection) return;
-	if (state.isPaused) return;
 	if (CLIENT_CONFIG.websocketDisabled === true) return;
 	if (wsFailCount >= WS_MAX_FAILURES) return;
 
@@ -7449,8 +7420,8 @@ function connectWs() {
 			wsConnected = false;
 			wsConnection = null;
 			isLanClient = null;  // Reset LAN status; will be set on reconnect
-			// Don't count as failure if paused (intentional stop) or clean close
-			if (!state.isPaused && !timedOut && (!wasConnected || event.code === 1002 || event.code === 1006)) {
+			// Don't count as failure if clean close or timeout
+			if (!timedOut && (!wasConnected || event.code === 1002 || event.code === 1006)) {
 				wsFailCount++;
 				invalidatePing();
 				if (wsFailCount >= WS_MAX_FAILURES) {
@@ -7458,7 +7429,7 @@ function connectWs() {
 					return;
 				}
 			}
-			if (!state.isPaused && !timedOut) {
+			if (!timedOut) {
 				scheduleWsReconnect();
 			}
 		};
@@ -7492,7 +7463,7 @@ function scheduleWsReconnect() {
 	if (wsReconnectTimer) return;
 	wsReconnectTimer = setTimeout(() => {
 		wsReconnectTimer = null;
-		if (!state.isPaused) connectWs();
+		connectWs();
 	}, WS_RECONNECT_MS);
 }
 
@@ -7520,31 +7491,12 @@ function restoreNormalPolling() {
 		state.isSlim = params.get('slim') === 'true';
 		const headerParam = (params.get('header') || '').toLowerCase();
 		state.headerMode = (headerParam === 'small' || headerParam === 'none') ? headerParam : 'full';
-		const pauseParam = params.get('pause');
 		const modeParam = params.get('mode');
 		state.forcedMode = (modeParam === 'dark' || modeParam === 'light') ? modeParam : null;
 		if (state.isSlim) document.documentElement.classList.add('slim');
 		if (state.headerMode === 'small') document.documentElement.classList.add('header-small');
 		if (state.headerMode === 'none') document.documentElement.classList.add('header-none');
 		if (!('ontouchstart' in window) && navigator.maxTouchPoints === 0) document.documentElement.classList.add('hover-device');
-		// Pause button visibility: URL param overrides and persists to localStorage
-		if (els.pause) {
-			let showPause = false;
-			if (pauseParam !== null) {
-				showPause = pauseParam !== 'false';
-				try { localStorage.setItem('ohPauseEnabled', showPause ? '1' : '0'); } catch (err) {
-					logJsError('init pause localStorage set failed', err);
-				}
-			} else {
-				try {
-					const saved = localStorage.getItem('ohPauseEnabled');
-					if (saved === '1') showPause = true;
-				} catch (err) {
-					logJsError('init pause localStorage get failed', err);
-				}
-			}
-			els.pause.classList.toggle('pause-hidden', !showPause);
-		}
 	} catch (err) {
 		logJsError('init failed', err);
 	}
@@ -7752,12 +7704,10 @@ function restoreNormalPolling() {
 		} else {
 			// Brief hide - resume where we left off
 			resumeVideoStreamsFromVisibility();
-			if (!state.isPaused) {
-				noteActivity();
-				refresh(false);
-				if (!wsConnection) connectWs();
-				startPingDelayed();
-			}
+			noteActivity();
+			refresh(false);
+			if (!wsConnection) connectWs();
+			startPingDelayed();
 		}
 		if (state.connectionOk) showStatusNotification();
 	}
@@ -7882,25 +7832,6 @@ function restoreNormalPolling() {
 		haptic();
 		if (clearSearchFilter()) return;
 		popPage();
-	});
-	els.pause.addEventListener('click', () => {
-		haptic();
-		state.isPaused = !state.isPaused;
-		if (state.isPaused) {
-			stopPolling();
-			stopWs();
-			clearImageTimers();
-			clearImageViewerTimer();
-		} else {
-			refresh(false);
-			if (imageViewer && !imageViewer.classList.contains('hidden') && imageViewerUrl) {
-				setImageViewerSource(imageViewerUrl, imageViewerRefreshMs);
-			}
-			startPolling();
-			connectWs();
-		}
-		updatePauseButton();
-		saveSettingsToServer({ paused: state.isPaused });
 	});
 	els.home.addEventListener('click', () => {
 		haptic();
@@ -8232,8 +8163,6 @@ function restoreNormalPolling() {
 	if (els.lightMode) els.lightMode.addEventListener('click', () => { haptic(); setTheme('light'); });
 	if (els.darkMode) els.darkMode.addEventListener('click', () => { haptic(); setTheme('dark'); });
 	initTheme(state.forcedMode);
-	initPaused();
-	updatePauseButton();
 	state.initialStatusText = safeText(els.statusText ? els.statusText.textContent : '');
 	scheduleConnectionPending();
 	updateStatusBar();
@@ -8274,11 +8203,9 @@ function restoreNormalPolling() {
 			await refresh(true);
 		}
 
-		if (!state.isPaused) {
-			startPolling();
-			connectWs();
-			startPingDelayed();
-		}
+		startPolling();
+		connectWs();
+		startPingDelayed();
 
 		reportGps();
 	} catch (e) {
@@ -8289,11 +8216,9 @@ function restoreNormalPolling() {
 			setStatus('');
 			setConnectionStatus(false, e.message);
 			render();
-			if (!state.isPaused) {
-				startPolling();
-				startPingDelayed();
-				connectWs();
-			}
+			startPolling();
+			startPingDelayed();
+			connectWs();
 		} else {
 			setStatus(`Init failed: ${e.message}`);
 			setConnectionStatus(false, e.message);

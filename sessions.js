@@ -5,7 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const DB_PATH = path.join(__dirname, 'sessions.db');
-const DEFAULT_SETTINGS = { darkMode: true, paused: false };
+const DEFAULT_SETTINGS = { darkMode: true };
 
 let sessionMaxAgeDays = 14; // Default, can be overridden via setMaxAgeDays()
 

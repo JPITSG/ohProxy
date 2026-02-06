@@ -113,13 +113,13 @@ function createValidationTestApp() {
 			return res.status(400).json({ error: 'Invalid settings' });
 		}
 
-		const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode', 'paused'];
+		const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode'];
 		const allowedKeySet = new Set(allowedKeys);
 		const incomingKeys = Object.keys(newSettings);
 		if (incomingKeys.some((key) => !allowedKeySet.has(key))) {
 			return res.status(400).json({ error: 'Invalid settings key' });
 		}
-		const boolKeys = new Set(['slimMode', 'compactView', 'showLabels', 'darkMode', 'paused']);
+		const boolKeys = new Set(['slimMode', 'compactView', 'showLabels', 'darkMode']);
 		const sanitized = {};
 		for (const key of incomingKeys) {
 			const val = newSettings[key];
