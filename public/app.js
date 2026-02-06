@@ -2532,6 +2532,8 @@ function openCardConfigModal(widget, card) {
 	}
 
 	cardConfigModal.classList.remove('hidden');
+	cardConfigModal._savedScrollY = window.scrollY;
+	document.body.style.top = `-${window.scrollY}px`;
 	document.body.classList.add('card-config-open');
 }
 
@@ -2742,6 +2744,8 @@ function closeCardConfigModal() {
 	});
 	cardConfigModal.classList.add('hidden');
 	document.body.classList.remove('card-config-open');
+	document.body.style.top = '';
+	window.scrollTo(0, cardConfigModal._savedScrollY || 0);
 	cardConfigWidgetKey = '';
 	cardConfigWidgetLabel = '';
 	historyGlowColor = null;
