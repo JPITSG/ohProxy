@@ -2069,6 +2069,7 @@ let historyMappings = [];
 let historyCursorStack = [];
 let historyGlowColor = null;
 let historyAbort = null;
+let cardConfigInitialStateJson = null;
 
 function makeFrameDraggable(frame, handle) {
 	let dragging = false;
@@ -2427,6 +2428,67 @@ function addGlowRuleRow() {
 	rulesContainer.appendChild(createGlowRuleRow());
 }
 
+function collectCardConfigValues() {
+	if (!cardConfigModal || !cardConfigWidgetKey) return null;
+
+	// Get visibility
+	const visRadio = cardConfigModal.querySelector('input[name="visibility"]:checked');
+	const visibility = visRadio?.value || 'all';
+
+	// Get defaultMuted for video widgets (only if section is visible)
+	const defaultSoundSection = cardConfigModal.querySelector('.default-sound-section');
+	let defaultMuted;
+	if (defaultSoundSection && defaultSoundSection.style.display !== 'none') {
+		const soundRadio = cardConfigModal.querySelector('input[name="defaultSound"]:checked');
+		defaultMuted = soundRadio?.value === 'muted';
+	}
+
+	// Get iframeHeight for iframe cards (only if section is visible)
+	const iframeHeightSection = cardConfigModal.querySelector('.iframe-height-section');
+	let iframeHeight;
+	if (iframeHeightSection && iframeHeightSection.style.display !== 'none') {
+		const heightInput = iframeHeightSection.querySelector('.iframe-height-input');
+		const rawValue = heightInput?.value?.trim() || '';
+		// Pass empty string to clear, or the numeric value
+		iframeHeight = rawValue;
+	}
+
+	// Get proxyCacheSeconds for image cards (only if section is visible)
+	const proxyCacheSection = cardConfigModal.querySelector('.proxy-cache-section');
+	let proxyCacheSeconds;
+	if (proxyCacheSection && proxyCacheSection.style.display !== 'none') {
+		const cacheInput = proxyCacheSection.querySelector('.proxy-cache-input');
+		const rawValue = cacheInput?.value?.trim() || '';
+		// Pass empty string to clear, or the numeric value
+		proxyCacheSeconds = rawValue;
+	}
+
+	// Get cardWidth for non-media cards (only if section is visible)
+	const cardWidthSection = cardConfigModal.querySelector('.card-width-section');
+	let cardWidth;
+	if (cardWidthSection && cardWidthSection.style.display !== 'none') {
+		const cardWidthRadio = cardConfigModal.querySelector('input[name="cardWidth"]:checked');
+		cardWidth = cardWidthRadio?.value || 'standard';
+	}
+
+	// Get glow rules
+	const rows = cardConfigModal.querySelectorAll('.glow-rule-row');
+	const rules = [];
+	for (const row of rows) {
+		const operator = row.querySelector('.glow-operator-select')?.dataset.value || '=';
+		const value = row.querySelector('.glow-rule-value').value;
+		const color = row.querySelector('.glow-color-select')?.dataset.value || 'green';
+		// Skip empty catch-all rules without color
+		if (operator === '*' && !value) {
+			rules.push({ operator, value: '', color });
+		} else if (value || operator === '*') {
+			rules.push({ operator, value, color });
+		}
+	}
+
+	return { widgetId: cardConfigWidgetKey, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth };
+}
+
 function openCardConfigModal(widget, card) {
 	if (state.isSlim) return;
 	if (getUserRole() !== 'admin') return;
@@ -2562,6 +2624,14 @@ function openCardConfigModal(widget, card) {
 			historySection.style.display = 'none';
 		}
 	}
+
+	const statusEl = cardConfigModal.querySelector('.card-config-status');
+	if (statusEl) {
+		statusEl.className = 'card-config-status';
+		statusEl.textContent = '';
+	}
+	const initialCardConfig = collectCardConfigValues();
+	cardConfigInitialStateJson = initialCardConfig ? JSON.stringify(initialCardConfig) : null;
 
 	cardConfigModal.classList.remove('hidden');
 	cardConfigModal._savedScrollY = window.scrollY;
@@ -2783,6 +2853,7 @@ function closeCardConfigModal() {
 	cardConfigWidgetKey = '';
 	cardConfigWidgetLabel = '';
 	historyGlowColor = null;
+	cardConfigInitialStateJson = null;
 }
 
 async function saveCardConfig() {
@@ -2792,68 +2863,28 @@ async function saveCardConfig() {
 	const saveBtn = cardConfigModal.querySelector('.card-config-save');
 	if (statusEl) { statusEl.className = 'card-config-status'; statusEl.textContent = ''; }
 	if (saveBtn) saveBtn.disabled = true;
-
-	// Get visibility
-	const visRadio = cardConfigModal.querySelector('input[name="visibility"]:checked');
-	const visibility = visRadio?.value || 'all';
-
-	// Get defaultMuted for video widgets (only if section is visible)
-	const defaultSoundSection = cardConfigModal.querySelector('.default-sound-section');
-	let defaultMuted;
-	if (defaultSoundSection && defaultSoundSection.style.display !== 'none') {
-		const soundRadio = cardConfigModal.querySelector('input[name="defaultSound"]:checked');
-		defaultMuted = soundRadio?.value === 'muted';
+	const payload = collectCardConfigValues();
+	if (!payload) {
+		if (saveBtn) saveBtn.disabled = false;
+		return false;
 	}
-
-	// Get iframeHeight for iframe cards (only if section is visible)
-	const iframeHeightSection = cardConfigModal.querySelector('.iframe-height-section');
-	let iframeHeight;
-	if (iframeHeightSection && iframeHeightSection.style.display !== 'none') {
-		const heightInput = iframeHeightSection.querySelector('.iframe-height-input');
-		const rawValue = heightInput?.value?.trim() || '';
-		// Pass empty string to clear, or the numeric value
-		iframeHeight = rawValue;
-	}
-
-	// Get proxyCacheSeconds for image cards (only if section is visible)
-	const proxyCacheSection = cardConfigModal.querySelector('.proxy-cache-section');
-	let proxyCacheSeconds;
-	if (proxyCacheSection && proxyCacheSection.style.display !== 'none') {
-		const cacheInput = proxyCacheSection.querySelector('.proxy-cache-input');
-		const rawValue = cacheInput?.value?.trim() || '';
-		// Pass empty string to clear, or the numeric value
-		proxyCacheSeconds = rawValue;
-	}
-
-	// Get cardWidth for non-media cards (only if section is visible)
-	const cardWidthSection = cardConfigModal.querySelector('.card-width-section');
-	let cardWidth;
-	if (cardWidthSection && cardWidthSection.style.display !== 'none') {
-		const cardWidthRadio = cardConfigModal.querySelector('input[name="cardWidth"]:checked');
-		cardWidth = cardWidthRadio?.value || 'standard';
-	}
-
-	// Get glow rules
-	const rows = cardConfigModal.querySelectorAll('.glow-rule-row');
-	const rules = [];
-	for (const row of rows) {
-		const operator = row.querySelector('.glow-operator-select')?.dataset.value || '=';
-		const value = row.querySelector('.glow-rule-value').value;
-		const color = row.querySelector('.glow-color-select')?.dataset.value || 'green';
-		// Skip empty catch-all rules without color
-		if (operator === '*' && !value) {
-			rules.push({ operator, value: '', color });
-		} else if (value || operator === '*') {
-			rules.push({ operator, value, color });
+	const payloadJson = JSON.stringify(payload);
+	if (cardConfigInitialStateJson !== null && payloadJson === cardConfigInitialStateJson) {
+		if (statusEl) {
+			statusEl.className = 'card-config-status success';
+			statusEl.textContent = ohLang.cardConfig.noChanges;
 		}
+		if (saveBtn) saveBtn.disabled = false;
+		return false;
 	}
+	const { visibility, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth, rules } = payload;
 
 	try {
 		// Save widget config (rules, visibility, etc.)
 		const resp = await fetch('/api/card-config', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ widgetId: cardConfigWidgetKey, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth }),
+			body: JSON.stringify(payload),
 		});
 		if (!resp.ok) {
 			let msg = ohLang.cardConfig.saveFailed;
@@ -2938,6 +2969,7 @@ async function saveCardConfig() {
 
 		// Re-render to apply visibility changes
 		render();
+		cardConfigInitialStateJson = payloadJson;
 		if (statusEl) { statusEl.className = 'card-config-status success'; statusEl.textContent = ohLang.cardConfig.savedOk; }
 		if (saveBtn) saveBtn.disabled = false;
 		return true;
@@ -3177,6 +3209,7 @@ const ADMIN_CONFIG_GROUP_LABELS = {
 let adminConfigModal = null;
 let adminConfigAbort = null;
 const adminSelectMenus = [];
+let adminConfigInitialStateJson = null;
 
 function adminGetNested(obj, path) {
 	return path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj);
@@ -3651,6 +3684,7 @@ async function openAdminConfigModal() {
 		}
 		sectionsEl.appendChild(renderAdminConfigSection(section, config));
 	}
+	adminConfigInitialStateJson = JSON.stringify(collectAdminConfigValues());
 
 	saveBtn.disabled = false;
 }
@@ -3672,6 +3706,7 @@ function closeAdminConfigModal() {
 	document.body.classList.remove('admin-config-open');
 	document.body.style.top = '';
 	window.scrollTo(0, adminConfigModal._savedScrollY || 0);
+	adminConfigInitialStateJson = null;
 }
 
 function collectAdminConfigValues() {
@@ -3731,6 +3766,13 @@ async function saveAdminConfig() {
 	saveBtn.disabled = true;
 
 	const config = collectAdminConfigValues();
+	const configJson = JSON.stringify(config);
+	if (adminConfigInitialStateJson !== null && configJson === adminConfigInitialStateJson) {
+		statusEl.className = 'admin-config-status warning';
+		statusEl.textContent = ohLang.adminConfig.noChanges;
+		saveBtn.disabled = false;
+		return;
+	}
 
 	try {
 		const resp = await fetch('/api/admin/config', {
@@ -3758,6 +3800,7 @@ async function saveAdminConfig() {
 			statusEl.className = 'admin-config-status success';
 			statusEl.textContent = ohLang.adminConfig.savedOk;
 		}
+		adminConfigInitialStateJson = configJson;
 	} catch (e) {
 		statusEl.className = 'admin-config-status error';
 		statusEl.textContent = ohLang.adminConfig.saveFailed + e.message;

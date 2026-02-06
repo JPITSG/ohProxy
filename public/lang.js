@@ -18,6 +18,7 @@ window.ohLang = {
 		savedRestart: 'Saved. Restart required for some changes.',
 		savedReload: 'Saved. Reload required for some changes.',
 		savedOk: 'Saved successfully.',
+		noChanges: 'No changes were made.',
 		saveFailed: 'Save failed: ',
 		saveFailedGeneric: 'Save failed',
 
@@ -330,6 +331,7 @@ window.ohLang = {
 
 		loading: 'Loading\u2026',
 		savedOk: 'Saved successfully.',
+		noChanges: 'No changes were made.',
 		saveFailed: 'Save failed',
 
 		glowOperators: [
