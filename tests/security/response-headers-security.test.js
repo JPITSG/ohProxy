@@ -13,8 +13,11 @@ const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert');
 const http = require('http');
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 
 const { basicAuthHeader, TEST_USERS } = require('../test-helpers');
+const SERVER_FILE = path.join(__dirname, '..', '..', 'server.js');
 
 function createSecurityHeadersTestApp() {
 	const app = express();
@@ -90,6 +93,21 @@ function createSecurityHeadersTestApp() {
 
 	return app;
 }
+
+describe('Production Security Header Middleware', () => {
+	it('server.js applies clickjacking and nosniff headers in applySecurityHeaders', () => {
+		const content = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(content, /function applySecurityHeaders\s*\(/, 'applySecurityHeaders() should exist');
+		assert.match(content, /setHeader\('X-Frame-Options',\s*'SAMEORIGIN'\)/, 'X-Frame-Options should be set in production middleware');
+		assert.match(content, /setHeader\('X-Content-Type-Options',\s*'nosniff'\)/, 'X-Content-Type-Options should be set in production middleware');
+		assert.match(content, /setHeader\('X-XSS-Protection',\s*'1; mode=block'\)/, 'X-XSS-Protection should be set in production middleware');
+	});
+
+	it('server.js CSP policy includes frame-ancestors fallback', () => {
+		const content = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(content, /frame-ancestors 'self'/, 'CSP should include a frame-ancestors fallback');
+	});
+});
 
 describe('Clickjacking Protection', () => {
 	let server;

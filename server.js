@@ -87,6 +87,10 @@ function normalizeHeaderValue(value, maxLen = 1000) {
 	return cleaned.length > maxLen ? cleaned.slice(0, maxLen) : cleaned;
 }
 
+function formatPermissionMode(mode) {
+	return `0${(mode & 0o777).toString(8).padStart(3, '0')}`;
+}
+
 function parseOptionalInt(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
 	if (value === '' || value === null || value === undefined) return null;
 	if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) {
@@ -1374,11 +1378,17 @@ function buildHstsHeader() {
 
 function applySecurityHeaders(req, res) {
 	if (!liveConfig.securityHeadersEnabled) return;
+	res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+	res.setHeader('X-Content-Type-Options', 'nosniff');
+	res.setHeader('X-XSS-Protection', '1; mode=block');
 	if (liveConfig.securityHsts.enabled && isSecureRequest(req)) {
 		res.setHeader('Strict-Transport-Security', buildHstsHeader());
 	}
 	if (liveConfig.securityCsp.enabled) {
-		const policy = safeText(liveConfig.securityCsp.policy).replace(/[\r\n]+/g, ' ').trim();
+		let policy = safeText(liveConfig.securityCsp.policy).replace(/[\r\n]+/g, ' ').trim();
+		if (policy && !/(?:^|;)\s*frame-ancestors\s+/i.test(policy)) {
+			policy = `${policy.replace(/;\s*$/, '')}; frame-ancestors 'self'`;
+		}
 		if (policy) {
 			const headerName = liveConfig.securityCsp.reportOnly
 				? 'Content-Security-Policy-Report-Only'
@@ -1630,9 +1640,35 @@ if (configErrors.length) {
 }
 
 const LOCAL_CONFIG_PATH = path.join(__dirname, 'config.local.js');
+const SESSIONS_DB_PATH = path.join(__dirname, 'sessions.db');
+const SENSITIVE_FILE_MODE = 0o600;
 let lastConfigMtime = 0;
 let configRestartScheduled = false;
 let configRestartTriggered = false;
+
+function ensureSensitiveFilePermissions(filePath, label) {
+	const target = safeText(filePath).trim();
+	if (!target) return;
+	try {
+		if (!fs.existsSync(target)) return;
+		const stat = fs.statSync(target);
+		if (!stat.isFile()) return;
+		const currentMode = stat.mode & 0o777;
+		// Keep stricter perms as-is; only tighten when current mode is broader.
+		if ((currentMode & ~SENSITIVE_FILE_MODE) === 0) return;
+		fs.chmodSync(target, SENSITIVE_FILE_MODE);
+		logMessage(`[Security] Hardened file permissions for ${label || target}: ${formatPermissionMode(currentMode)} -> ${formatPermissionMode(SENSITIVE_FILE_MODE)}`);
+	} catch (err) {
+		logMessage(`[Security] Failed to harden file permissions for ${label || target}: ${err.message || err}`);
+	}
+}
+
+function hardenSensitiveFilePermissions() {
+	ensureSensitiveFilePermissions(LOCAL_CONFIG_PATH, 'config.local.js');
+	ensureSensitiveFilePermissions(SESSIONS_DB_PATH, 'sessions.db');
+	ensureSensitiveFilePermissions(HTTPS_KEY_FILE, 'HTTPS key file');
+	ensureSensitiveFilePermissions(HTTPS_CERT_FILE, 'HTTPS certificate file');
+}
 
 // Live config - values that can be hot-reloaded without restart
 const liveConfig = {
@@ -6220,8 +6256,9 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 	const content = '\'use strict\';\n\nmodule.exports = ' + JSON.stringify(incoming, null, '\t') + ';\n';
 	const tmpPath = LOCAL_CONFIG_PATH + '.tmp';
 	try {
-		fs.writeFileSync(tmpPath, content, 'utf8');
+		fs.writeFileSync(tmpPath, content, { encoding: 'utf8', mode: SENSITIVE_FILE_MODE });
 		fs.renameSync(tmpPath, LOCAL_CONFIG_PATH);
+		ensureSensitiveFilePermissions(LOCAL_CONFIG_PATH, 'config.local.js');
 	} catch (err) {
 		logMessage(`Failed to write admin config: ${err.message || err}`);
 		res.status(500).json({ error: 'Failed to write config: ' + err.message });
@@ -6528,7 +6565,7 @@ app.post('/api/voice', jsonParserSmall, async (req, res) => {
 	try {
 		const aiResponse = await callAnthropicApi({
 			model: 'claude-3-haiku-20240307',
-			max_tokens: 1024,
+			max_tokens: 4096,
 			system: `You are a home automation voice command interpreter. Your job is to match voice commands to the available smart home items and determine what actions to take.
 
 You will receive a list of controllable items organized by room/section (## headers). Each item shows:
@@ -6579,12 +6616,24 @@ Rules:
 			return;
 		}
 
-		// Parse JSON response
+		// Parse JSON response - strip markdown fences or surrounding text if present
+		let jsonText = textContent.text.trim();
+		const fenceMatch = jsonText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+		if (fenceMatch) {
+			jsonText = fenceMatch[1].trim();
+		} else {
+			const firstBrace = jsonText.indexOf('{');
+			const lastBrace = jsonText.lastIndexOf('}');
+			if (firstBrace !== -1 && lastBrace > firstBrace) {
+				jsonText = jsonText.slice(firstBrace, lastBrace + 1);
+			}
+		}
+
 		let parsed;
 		try {
-			parsed = JSON.parse(textContent.text);
+			parsed = JSON.parse(jsonText);
 		} catch {
-			logMessage(`[Voice] [${username}] "${trimmed}" - invalid AI JSON`);
+			logMessage(`[Voice] [${username}] "${trimmed}" - invalid AI JSON: ${textContent.text}`);
 			res.status(502).json({ error: 'Invalid response from AI' });
 			return;
 		}
@@ -8621,6 +8670,7 @@ try {
 	sessions.setMaxAgeDays(SESSION_MAX_AGE_DAYS);
 	sessions.initDb();
 	logMessage(`[Sessions] Database initialized (max age: ${SESSION_MAX_AGE_DAYS} days)`);
+	hardenSensitiveFilePermissions();
 } catch (err) {
 	logMessage(`[Sessions] Failed to initialize database: ${err.message || err}`);
 }
