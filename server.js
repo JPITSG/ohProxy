@@ -31,6 +31,7 @@ const CONFIG_PATH = path.join(__dirname, 'config.js');
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 const CONTROL_CHARS_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
 const ANY_CONTROL_CHARS_RE = /[\x00-\x1F\x7F]/;
+const FORBIDDEN_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function authHeader() {
 	// Prefer API token (Bearer) for OH 3.x+, fall back to Basic Auth for OH 1.x/2.x
@@ -1232,6 +1233,58 @@ function validateAdminConfig(config) {
 		if (isPlainObject(c.searchStateConcurrency)) {
 			ensureNumber(c.searchStateConcurrency.default, 'client.searchStateConcurrency.default', { min: 1 }, errors);
 			ensureNumber(c.searchStateConcurrency.slim, 'client.searchStateConcurrency.slim', { min: 1 }, errors);
+		}
+	}
+
+	return errors;
+}
+
+function findForbiddenObjectKeyPath(value, path = '') {
+	if (!value || typeof value !== 'object') return null;
+	if (Array.isArray(value)) {
+		for (let i = 0; i < value.length; i++) {
+			const nestedPath = findForbiddenObjectKeyPath(value[i], `${path}[${i}]`);
+			if (nestedPath) return nestedPath;
+		}
+		return null;
+	}
+	for (const key of Object.keys(value)) {
+		if (FORBIDDEN_OBJECT_KEYS.has(key)) {
+			return path ? `${path}.${key}` : key;
+		}
+		const nestedPath = findForbiddenObjectKeyPath(value[key], path ? `${path}.${key}` : key);
+		if (nestedPath) return nestedPath;
+	}
+	return null;
+}
+
+function normalizeUserVoicePreference(preference, fallbackPreference = 'config') {
+	if (preference === 'config' || preference === 'browser' || preference === 'vosk') return preference;
+	return (fallbackPreference === 'config' || fallbackPreference === 'browser' || fallbackPreference === 'vosk')
+		? fallbackPreference
+		: 'config';
+}
+
+function validateAdminUserConfig(userConfig) {
+	const errors = [];
+	if (userConfig === undefined) return errors;
+	if (!isPlainObject(userConfig)) {
+		errors.push('user must be an object');
+		return errors;
+	}
+
+	const allowedUserKeys = new Set(['trackGps', 'voiceModel']);
+	for (const key of Object.keys(userConfig)) {
+		if (!allowedUserKeys.has(key)) {
+			errors.push(`user.${key} is not supported`);
+		}
+	}
+	if (Object.prototype.hasOwnProperty.call(userConfig, 'trackGps') && typeof userConfig.trackGps !== 'boolean') {
+		errors.push('user.trackGps must be true/false');
+	}
+	if (Object.prototype.hasOwnProperty.call(userConfig, 'voiceModel')) {
+		if (userConfig.voiceModel !== 'config' && userConfig.voiceModel !== 'browser' && userConfig.voiceModel !== 'vosk') {
+			errors.push('user.voiceModel must be "config", "browser", or "vosk"');
 		}
 	}
 
@@ -6202,6 +6255,10 @@ app.get('/api/admin/config', (req, res) => {
 		}
 	}
 
+	if (!isPlainObject(config.user)) config.user = {};
+	config.user.trackGps = user.trackgps === true;
+	config.user.voiceModel = normalizeUserVoicePreference(user.voicePreference, 'config');
+
 	res.json(config);
 });
 
@@ -6219,6 +6276,19 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 		res.status(400).json({ error: 'Invalid config' });
 		return;
 	}
+	const forbiddenKeyPath = findForbiddenObjectKeyPath(incoming);
+	if (forbiddenKeyPath) {
+		res.status(400).json({ error: `Invalid config key: ${forbiddenKeyPath}` });
+		return;
+	}
+	const userErrors = validateAdminUserConfig(incoming.user);
+	if (userErrors.length > 0) {
+		res.status(400).json({ errors: userErrors });
+		return;
+	}
+
+	const incomingConfig = JSON.parse(JSON.stringify(incoming));
+	delete incomingConfig.user;
 
 	// Restore masked sensitive values from current config
 	let currentLocal;
@@ -6228,19 +6298,19 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 	} catch { currentLocal = {}; }
 
 	for (const keyPath of SENSITIVE_CONFIG_KEYS) {
-		const val = getNestedValue(incoming, keyPath);
+		const val = getNestedValue(incomingConfig, keyPath);
 		if (val === SENSITIVE_MASK) {
 			const currentVal = getNestedValue(currentLocal, keyPath);
 			if (currentVal !== undefined) {
-				setNestedValue(incoming, keyPath, currentVal);
+				setNestedValue(incomingConfig, keyPath, currentVal);
 			} else {
-				setNestedValue(incoming, keyPath, '');
+				setNestedValue(incomingConfig, keyPath, '');
 			}
 		}
 	}
 
 	// Validate
-	const errors = validateAdminConfig(incoming);
+	const errors = validateAdminConfig(incomingConfig);
 	if (errors.length > 0) {
 		res.status(400).json({ errors });
 		return;
@@ -6250,25 +6320,65 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 	// because config.local.js may omit keys that have default values)
 	const needsRestart = restartRequiredKeys.some(key => {
 		const oldVal = getNestedValue(SERVER_CONFIG, key);
-		const newVal = getNestedValue(incoming?.server || {}, key);
+		const newVal = getNestedValue(incomingConfig.server || {}, key);
 		return JSON.stringify(oldVal) !== JSON.stringify(newVal);
 	});
 
 	// Check if client config changed (requires browser reload)
-	const needsReload = JSON.stringify(CLIENT_CONFIG) !== JSON.stringify(incoming?.client || {});
+	const needsClientReload = JSON.stringify(CLIENT_CONFIG) !== JSON.stringify(incomingConfig.client || {});
+
+	const previousTrackGps = user.trackgps === true;
+	const previousVoicePreference = normalizeUserVoicePreference(user.voicePreference, 'config');
+	const nextTrackGps = isPlainObject(incoming.user) && Object.prototype.hasOwnProperty.call(incoming.user, 'trackGps')
+		? incoming.user.trackGps
+		: previousTrackGps;
+	const nextVoicePreference = isPlainObject(incoming.user) && Object.prototype.hasOwnProperty.call(incoming.user, 'voiceModel')
+		? incoming.user.voiceModel
+		: previousVoicePreference;
+	const updateTrackGps = nextTrackGps !== previousTrackGps;
+	const updateVoiceModel = nextVoicePreference !== previousVoicePreference;
+
+	let userTrackUpdated = false;
+	let userVoiceUpdated = false;
+
+	if (updateTrackGps) {
+		if (!sessions.updateUserTrackGps(user.username, nextTrackGps)) {
+			res.status(500).json({ error: 'Failed to update user GPS setting' });
+			return;
+		}
+		userTrackUpdated = true;
+	}
+	if (updateVoiceModel) {
+		if (!sessions.updateUserVoicePreference(user.username, nextVoicePreference)) {
+			if (userTrackUpdated && !sessions.updateUserTrackGps(user.username, previousTrackGps)) {
+				logMessage(`[Admin] Failed to roll back user GPS setting for ${user.username || 'unknown'}`, 'error');
+			}
+			res.status(500).json({ error: 'Failed to update user voice setting' });
+			return;
+		}
+		userVoiceUpdated = true;
+	}
 
 	// Write config.local.js atomically
-	const content = '\'use strict\';\n\nmodule.exports = ' + JSON.stringify(incoming, null, '\t') + ';\n';
+	const content = '\'use strict\';\n\nmodule.exports = ' + JSON.stringify(incomingConfig, null, '\t') + ';\n';
 	const tmpPath = LOCAL_CONFIG_PATH + '.tmp';
 	try {
 		fs.writeFileSync(tmpPath, content, { encoding: 'utf8', mode: SENSITIVE_FILE_MODE });
 		fs.renameSync(tmpPath, LOCAL_CONFIG_PATH);
 		ensureSensitiveFilePermissions(LOCAL_CONFIG_PATH, 'config.local.js');
 	} catch (err) {
+		if (userTrackUpdated && !sessions.updateUserTrackGps(user.username, previousTrackGps)) {
+			logMessage(`[Admin] Failed to roll back user GPS setting for ${user.username || 'unknown'}`, 'error');
+		}
+		if (userVoiceUpdated && !sessions.updateUserVoicePreference(user.username, previousVoicePreference)) {
+			logMessage(`[Admin] Failed to roll back user voice setting for ${user.username || 'unknown'}`, 'error');
+		}
 		logMessage(`Failed to write admin config: ${err.message || err}`);
 		res.status(500).json({ error: 'Failed to write config: ' + err.message });
 		return;
 	}
+
+	const needsReload = needsClientReload || userTrackUpdated || userVoiceUpdated;
 
 	logMessage(`[Admin] Config updated by ${user.username || 'unknown'}`);
 	res.json({ ok: true, restartRequired: needsRestart, reloadRequired: needsReload });

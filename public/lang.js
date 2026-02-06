@@ -6,6 +6,7 @@ window.ohLang = {
 		title: 'System Settings',
 		closeBtn: 'Close',
 		saveBtn: 'Save',
+		groupUser: 'User',
 		groupServer: 'Server',
 		groupClient: 'Client',
 		restartBadge: 'Restart Required',
@@ -21,6 +22,7 @@ window.ohLang = {
 		saveFailedGeneric: 'Save failed',
 
 		sectionTitles: {
+			'user-preferences': 'PREFERENCES',
 			'listeners': 'LISTENERS',
 			'openhab': 'OPENHAB CONNECTION',
 			'database': 'DATABASE',
@@ -44,6 +46,8 @@ window.ohLang = {
 		},
 
 		fieldLabels: {
+			'user.trackGps': 'GPS Tracking',
+			'user.voiceModel': 'Voice STT Engine',
 			'server.http.enabled': 'HTTP Enabled',
 			'server.http.host': 'HTTP Host',
 			'server.http.port': 'HTTP Port',
@@ -154,6 +158,8 @@ window.ohLang = {
 		},
 
 		fieldDescs: {
+			'user.trackGps': 'Allow this account to send location updates',
+			'user.voiceModel': 'Speech-to-text engine for this account (config uses System Settings value)',
 			'server.http.enabled': 'Enable HTTP listener',
 			'server.http.host': 'HTTP bind address',
 			'server.http.port': 'HTTP bind port',
