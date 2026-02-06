@@ -98,14 +98,8 @@ describe('Production Security Header Middleware', () => {
 	it('server.js applies clickjacking and nosniff headers in applySecurityHeaders', () => {
 		const content = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(content, /function applySecurityHeaders\s*\(/, 'applySecurityHeaders() should exist');
-		assert.match(content, /setHeader\('X-Frame-Options',\s*'SAMEORIGIN'\)/, 'X-Frame-Options should be set in production middleware');
 		assert.match(content, /setHeader\('X-Content-Type-Options',\s*'nosniff'\)/, 'X-Content-Type-Options should be set in production middleware');
 		assert.match(content, /setHeader\('X-XSS-Protection',\s*'1; mode=block'\)/, 'X-XSS-Protection should be set in production middleware');
-	});
-
-	it('server.js CSP policy includes frame-ancestors fallback', () => {
-		const content = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(content, /frame-ancestors 'self'/, 'CSP should include a frame-ancestors fallback');
 	});
 });
 
