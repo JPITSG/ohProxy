@@ -1175,7 +1175,7 @@ function validateAdminConfig(config) {
 	}
 	if (isPlainObject(s.voice)) {
 		if (s.voice.model !== undefined) {
-			const validModels = ['browser', 'vosk'];
+			const validModels = ['browser', 'vosk', 'adaptive'];
 			if (!validModels.includes(s.voice.model)) {
 				errors.push('server.voice.model must be one of: ' + validModels.join(', '));
 			}
@@ -5703,6 +5703,7 @@ app.get('/config.js', (req, res) => {
 		trackGps: trackGps,
 		groupItems: liveConfig.groupItems || [],
 		voiceModel: liveConfig.voiceModel,
+		voskAvailable: !!liveConfig.voskHost,
 	})};`);
 });
 
