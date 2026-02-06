@@ -127,7 +127,7 @@ function initDb() {
 
 	// Migration: add voice_preference column to users table
 	try {
-		db.exec(`ALTER TABLE users ADD COLUMN voice_preference TEXT DEFAULT 'config'`);
+		db.exec(`ALTER TABLE users ADD COLUMN voice_preference TEXT DEFAULT 'system'`);
 	} catch (e) { /* column already exists */ }
 
 	// Run cleanup on startup
@@ -539,6 +539,7 @@ function setCardWidth(widgetId, width) {
 
 const VALID_ROLES = ['admin', 'normal', 'readonly'];
 const USERNAME_REGEX = /^[a-zA-Z0-9_-]{1,20}$/;
+const VALID_VOICE_PREFERENCES = new Set(['system', 'browser', 'vosk']);
 
 /**
  * Get all users.
@@ -558,7 +559,7 @@ function getAllUsers() {
 		createdAt: row.created_at,
 		disabled: row.disabled === 1,
 		trackgps: row.trackgps === 1,
-		voicePreference: row.voice_preference || 'config',
+		voicePreference: VALID_VOICE_PREFERENCES.has(row.voice_preference) ? row.voice_preference : 'system',
 		lastActive: row.last_active
 	}));
 }
@@ -579,7 +580,7 @@ function getUser(username) {
 		createdAt: row.created_at,
 		disabled: row.disabled === 1,
 		trackgps: row.trackgps === 1,
-		voicePreference: row.voice_preference || 'config'
+		voicePreference: VALID_VOICE_PREFERENCES.has(row.voice_preference) ? row.voice_preference : 'system'
 	};
 }
 
@@ -597,8 +598,8 @@ function createUser(username, password, role = 'normal') {
 
 	const now = Math.floor(Date.now() / 1000);
 	try {
-		db.prepare('INSERT INTO users (username, password, role, created_at) VALUES (?, ?, ?, ?)')
-			.run(username, password, role, now);
+		db.prepare('INSERT INTO users (username, password, role, created_at, voice_preference) VALUES (?, ?, ?, ?, ?)')
+			.run(username, password, role, now, 'system');
 		return true;
 	} catch (err) {
 		return false; // Duplicate username
@@ -704,13 +705,12 @@ function updateUserTrackGps(username, enabled) {
 /**
  * Update voice preference for a user.
  * @param {string} username
- * @param {string} preference - 'config', 'browser', or 'vosk'
+ * @param {string} preference - 'system', 'browser', or 'vosk'
  * @returns {boolean} - True if user was found and updated
  */
 function updateUserVoicePreference(username, preference) {
 	if (!db) initDb();
-	const valid = ['config', 'browser', 'vosk'];
-	if (!valid.includes(preference)) return false;
+	if (!VALID_VOICE_PREFERENCES.has(preference)) return false;
 	const result = db.prepare('UPDATE users SET voice_preference = ? WHERE username = ?')
 		.run(preference, username);
 	return result.changes > 0;

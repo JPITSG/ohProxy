@@ -2988,7 +2988,7 @@ const ADMIN_CONFIG_SCHEMA = [
 		id: 'user-preferences', group: 'user', reloadRequired: true,
 		fields: [
 			{ key: 'user.trackGps', type: 'toggle' },
-			{ key: 'user.voiceModel', type: 'select', options: ['config', 'browser', 'vosk'] },
+			{ key: 'user.voiceModel', type: 'select', options: ['system', 'browser', 'vosk'] },
 		],
 	},
 	{

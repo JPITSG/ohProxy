@@ -354,22 +354,22 @@ describe('Sessions Module', () => {
 					created_at INTEGER DEFAULT (strftime('%s','now')),
 					disabled INTEGER DEFAULT 0,
 					trackgps INTEGER DEFAULT 0,
-					voice_preference TEXT DEFAULT 'config'
+					voice_preference TEXT DEFAULT 'system'
 				)
 			`);
 		}
 
-		it('defaults to config for new users', () => {
+		it('defaults to system for new users', () => {
 			createUsersTable();
 			db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run('alice', 'pw');
 			const row = db.prepare('SELECT voice_preference FROM users WHERE username = ?').get('alice');
-			assert.strictEqual(row.voice_preference, 'config');
+			assert.strictEqual(row.voice_preference, 'system');
 		});
 
 		it('accepts valid voice preferences', () => {
 			createUsersTable();
 			db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run('bob', 'pw');
-			for (const pref of ['config', 'browser', 'vosk']) {
+			for (const pref of ['system', 'browser', 'vosk']) {
 				db.prepare('UPDATE users SET voice_preference = ? WHERE username = ?').run(pref, 'bob');
 				const row = db.prepare('SELECT voice_preference FROM users WHERE username = ?').get('bob');
 				assert.strictEqual(row.voice_preference, pref, `Should accept '${pref}'`);
@@ -378,7 +378,7 @@ describe('Sessions Module', () => {
 
 		it('updateUserVoicePreference rejects invalid values', () => {
 			// Replicate the validation logic from sessions.js
-			const valid = ['config', 'browser', 'vosk'];
+			const valid = ['system', 'browser', 'vosk'];
 			assert.strictEqual(valid.includes('adaptive'), false, 'adaptive should be rejected');
 			assert.strictEqual(valid.includes('invalid'), false, 'random string should be rejected');
 			assert.strictEqual(valid.includes(''), false, 'empty string should be rejected');
