@@ -2070,6 +2070,62 @@ let historyCursorStack = [];
 let historyGlowColor = null;
 let historyAbort = null;
 
+function makeFrameDraggable(frame, handle) {
+	let dragging = false;
+	let startX = 0, startY = 0;
+	let offsetX = 0, offsetY = 0;
+
+	function onPointerDown(e) {
+		dragging = true;
+		startX = e.clientX - offsetX;
+		startY = e.clientY - offsetY;
+		handle.setPointerCapture(e.pointerId);
+		handle.style.cursor = 'grabbing';
+		// Close any open select dropdown menus inside the frame
+		frame.querySelectorAll('.glow-select-wrap.menu-open, .admin-select-wrap.menu-open').forEach(w => {
+			if (typeof w._closeMenu === 'function') w._closeMenu();
+		});
+	}
+
+	function onPointerMove(e) {
+		if (!dragging) return;
+		let newX = e.clientX - startX;
+		let newY = e.clientY - startY;
+		// Clamp so all 4 edges stay within viewport
+		const rect = frame.getBoundingClientRect();
+		const fw = rect.width, fh = rect.height;
+		const vw = window.innerWidth, vh = window.innerHeight;
+		// Natural center (where the frame sits at zero offset)
+		const centerX = (rect.left + rect.right) / 2 - offsetX;
+		const centerY = (rect.top + rect.bottom) / 2 - offsetY;
+		// Clamp: left edge >= 0, right edge <= vw
+		const minX = -centerX + fw / 2;
+		const maxX = vw - centerX - fw / 2;
+		const minY = -centerY + fh / 2;
+		const maxY = vh - centerY - fh / 2;
+		newX = Math.max(minX, Math.min(maxX, newX));
+		newY = Math.max(minY, Math.min(maxY, newY));
+		offsetX = newX;
+		offsetY = newY;
+		frame.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px)';
+	}
+
+	function onPointerUp() {
+		dragging = false;
+		handle.style.cursor = '';
+	}
+
+	handle.addEventListener('pointerdown', onPointerDown);
+	handle.addEventListener('pointermove', onPointerMove);
+	handle.addEventListener('pointerup', onPointerUp);
+
+	frame._resetDragPosition = function() {
+		offsetX = 0;
+		offsetY = 0;
+		frame.style.transform = '';
+	};
+}
+
 function ensureCardConfigModal() {
 	if (cardConfigModal) return;
 	const wrap = document.createElement('div');
@@ -2187,6 +2243,7 @@ function ensureCardConfigModal() {
 			closeCardConfigModal();
 		}
 	});
+	makeFrameDraggable(wrap.querySelector('.card-config-frame'), wrap.querySelector('.card-config-header h2'));
 }
 
 function createCustomSelect(options, initialValue, className) {
@@ -2718,6 +2775,8 @@ function closeCardConfigModal() {
 		if (w._glowMenu) { w._glowMenu.remove(); w._glowMenu = null; }
 	});
 	cardConfigModal.classList.add('hidden');
+	var cardFrame = cardConfigModal.querySelector('.card-config-frame');
+	if (cardFrame._resetDragPosition) cardFrame._resetDragPosition();
 	document.body.classList.remove('card-config-open');
 	document.body.style.top = '';
 	window.scrollTo(0, cardConfigModal._savedScrollY || 0);
@@ -3512,6 +3571,7 @@ function ensureAdminConfigModal() {
 			closeAdminConfigModal();
 		}
 	});
+	makeFrameDraggable(wrap.querySelector('.admin-config-frame'), wrap.querySelector('.admin-config-header h2'));
 }
 
 async function openAdminConfigModal() {
@@ -3587,6 +3647,8 @@ function closeAdminConfigModal() {
 	adminSelectMenus.forEach(m => m.remove());
 	adminSelectMenus.length = 0;
 	adminConfigModal.classList.add('hidden');
+	var adminFrame = adminConfigModal.querySelector('.admin-config-frame');
+	if (adminFrame._resetDragPosition) adminFrame._resetDragPosition();
 	document.body.classList.remove('admin-config-open');
 	document.body.style.top = '';
 	window.scrollTo(0, adminConfigModal._savedScrollY || 0);
