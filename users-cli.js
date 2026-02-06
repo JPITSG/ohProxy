@@ -26,7 +26,7 @@ Commands:
   disable <username|*>              Disable user (* = all users)
   enable <username|*>               Enable user (* = all users)
   gps <username> <true|false>       Enable/disable GPS tracking
-  voice <username> <config|browser|vosk>  Set voice preference
+  voice <username> <system|browser|vosk>  Set voice preference
 
 Examples:
   node users-cli.js list
@@ -57,7 +57,7 @@ function listUsers() {
 	for (const user of users) {
 		const status = user.disabled ? 'disabled' : 'active';
 		const gps = user.trackgps ? 'on' : 'off';
-		const voice = (user.voicePreference || 'config');
+		const voice = (user.voicePreference || 'system');
 		console.log(
 			user.username.padEnd(20) +
 			user.role.padEnd(12) +
@@ -242,13 +242,13 @@ function setGps(username, value) {
 
 function setVoice(username, value) {
 	if (!username || value === undefined) {
-		console.error('Error: Username and config/browser/vosk required');
+		console.error('Error: Username and system/browser/vosk required');
 		usage();
 		process.exit(1);
 	}
-	const validValues = ['config', 'browser', 'vosk'];
+	const validValues = ['system', 'browser', 'vosk'];
 	if (!validValues.includes(value)) {
-		console.error('Error: Voice preference must be config, browser, or vosk');
+		console.error('Error: Voice preference must be system, browser, or vosk');
 		process.exit(1);
 	}
 	if (sessions.updateUserVoicePreference(username, value)) {

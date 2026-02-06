@@ -160,7 +160,7 @@ window.ohLang = {
 
 		fieldDescs: {
 			'user.trackGps': 'Allow this account to send location updates',
-			'user.voiceModel': 'Speech-to-text engine for this account (config uses System Settings value)',
+			'user.voiceModel': 'Speech-to-text engine for this account (system uses System Settings value)',
 			'server.http.enabled': 'Enable HTTP listener',
 			'server.http.host': 'HTTP bind address',
 			'server.http.port': 'HTTP bind port',

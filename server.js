@@ -1258,11 +1258,8 @@ function findForbiddenObjectKeyPath(value, path = '') {
 	return null;
 }
 
-function normalizeUserVoicePreference(preference, fallbackPreference = 'config') {
-	if (preference === 'config' || preference === 'browser' || preference === 'vosk') return preference;
-	return (fallbackPreference === 'config' || fallbackPreference === 'browser' || fallbackPreference === 'vosk')
-		? fallbackPreference
-		: 'config';
+function isValidUserVoicePreference(value) {
+	return value === 'system' || value === 'browser' || value === 'vosk';
 }
 
 function validateAdminUserConfig(userConfig) {
@@ -1283,8 +1280,8 @@ function validateAdminUserConfig(userConfig) {
 		errors.push('user.trackGps must be true/false');
 	}
 	if (Object.prototype.hasOwnProperty.call(userConfig, 'voiceModel')) {
-		if (userConfig.voiceModel !== 'config' && userConfig.voiceModel !== 'browser' && userConfig.voiceModel !== 'vosk') {
-			errors.push('user.voiceModel must be "config", "browser", or "vosk"');
+		if (userConfig.voiceModel !== 'system' && userConfig.voiceModel !== 'browser' && userConfig.voiceModel !== 'vosk') {
+			errors.push('user.voiceModel must be "system", "browser", or "vosk"');
 		}
 	}
 
@@ -5778,8 +5775,9 @@ app.get('/config.js', (req, res) => {
 		const user = sessions.getUser(req.ohProxyUser);
 		userRole = user?.role || null;
 		if (user?.trackgps) trackGps = true;
-		if (user?.voicePreference && user.voicePreference !== 'config') {
-			effectiveVoiceModel = user.voicePreference;
+		const userVoicePreference = isValidUserVoicePreference(user?.voicePreference) ? user.voicePreference : 'system';
+		if (userVoicePreference !== 'system') {
+			effectiveVoiceModel = userVoicePreference;
 		}
 	}
 
@@ -6257,7 +6255,7 @@ app.get('/api/admin/config', (req, res) => {
 
 	if (!isPlainObject(config.user)) config.user = {};
 	config.user.trackGps = user.trackgps === true;
-	config.user.voiceModel = normalizeUserVoicePreference(user.voicePreference, 'config');
+	config.user.voiceModel = isValidUserVoicePreference(user.voicePreference) ? user.voicePreference : 'system';
 
 	res.json(config);
 });
@@ -6328,7 +6326,7 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 	const needsClientReload = JSON.stringify(CLIENT_CONFIG) !== JSON.stringify(incomingConfig.client || {});
 
 	const previousTrackGps = user.trackgps === true;
-	const previousVoicePreference = normalizeUserVoicePreference(user.voicePreference, 'config');
+	const previousVoicePreference = isValidUserVoicePreference(user.voicePreference) ? user.voicePreference : 'system';
 	const nextTrackGps = isPlainObject(incoming.user) && Object.prototype.hasOwnProperty.call(incoming.user, 'trackGps')
 		? incoming.user.trackGps
 		: previousTrackGps;

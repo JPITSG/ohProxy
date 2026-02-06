@@ -111,7 +111,7 @@ describe('Input Validation Coverage', () => {
 		assert.ok(content.includes('const userErrors = validateAdminUserConfig(incoming.user);'));
 		assert.ok(content.includes("const allowedUserKeys = new Set(['trackGps', 'voiceModel']);"));
 		assert.ok(content.includes("errors.push('user.trackGps must be true/false');"));
-		assert.ok(content.includes("errors.push('user.voiceModel must be \"config\", \"browser\", or \"vosk\"');"));
+		assert.ok(content.includes("errors.push('user.voiceModel must be \"system\", \"browser\", or \"vosk\"');"));
 	});
 
 	it('validates GET query keys and values', () => {
