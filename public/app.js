@@ -3205,11 +3205,19 @@ function createAdminSelect(options, initialValue) {
 				const btnM = parseFloat(getComputedStyle(btns[1]).marginTop || 0);
 				scrollInner.style.maxHeight = `${(btnH * 5) + (btnM * 5)}px`;
 			}
+			const scrollStyle = getComputedStyle(scrollInner);
+			const scrollPad = parseFloat(scrollStyle.paddingRight || 0);
+			const scrollbarW = scrollInner.offsetWidth - scrollInner.clientWidth;
+			const menuStyle = getComputedStyle(menu);
+			const menuPad = parseFloat(menuStyle.paddingLeft || 0) + parseFloat(menuStyle.paddingRight || 0);
+			menu.style.minWidth = `${rect.width + scrollPad + scrollbarW + menuPad}px`;
 		}
 
 		const menuPadLeft = parseFloat(getComputedStyle(menu).paddingLeft || 0);
 		menu.style.left = (rect.left - menuPadLeft) + 'px';
-		menu.style.minWidth = (rect.width + menuPadLeft * 2) + 'px';
+		if (!needsScroll) {
+			menu.style.minWidth = (rect.width + menuPadLeft * 2) + 'px';
+		}
 
 		// Measure menu height to decide direction
 		menu.style.top = '-9999px';

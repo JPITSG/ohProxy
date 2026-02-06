@@ -1670,23 +1670,32 @@ body.theme-light .glow-rule-row input:focus {
 .glow-color-select {
 	width: 80px;
 }
-.glow-fake-select {
+.glow-fake-select,
+.admin-fake-select {
 	box-sizing: border-box;
 	width: 100%;
-	height: var(--row-control-height);
-	padding: 0 12px;
+	padding: 11px 12px;
 	font-size: .75rem;
-	line-height: var(--row-control-height);
-	color: var(--color-text-primary);
+	line-height: 1;
+	color: var(--color-control-off-text);
 	background: var(--color-control-off-bg);
 	border: var(--glass-border-width) solid var(--color-control-off-border);
 	border-radius: 10px;
-	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	text-align: center;
+	position: relative;
+	z-index: 1;
+	-webkit-appearance: none;
+	appearance: none;
+	box-shadow: 0 0 8px var(--color-control-off-shadow);
+	cursor: pointer;
 	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
 }
 @media (hover: hover) and (pointer: fine) {
-	.glow-fake-select:hover {
+	.glow-fake-select:hover,
+	.admin-fake-select:hover {
 		background-color: var(--color-control-off-hover);
 		border-color: var(--color-control-off-border-hover);
 		box-shadow: 0 0 10px var(--color-control-off-shadow-hover);
@@ -1715,6 +1724,8 @@ body.theme-light .glow-rule-row input:focus {
 	border-radius: 10px;
 	text-align: center;
 	cursor: pointer;
+	white-space: nowrap;
+	box-shadow: 0 0 8px var(--color-select-option-shadow-card);
 	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
 }
 .glow-select-option + .glow-select-option {
@@ -2613,28 +2624,7 @@ body.theme-light .admin-toggle input:checked ~ .admin-toggle-dot {
 	flex-shrink: 0;
 	width: 100%;
 }
-.admin-fake-select {
-	box-sizing: border-box;
-	width: 100%;
-	height: var(--row-control-height);
-	padding: 0 12px;
-	font-size: .75rem;
-	line-height: var(--row-control-height);
-	color: var(--color-text-primary);
-	background: var(--color-control-off-bg);
-	border: var(--glass-border-width) solid var(--color-control-off-border);
-	border-radius: 10px;
-	cursor: pointer;
-	text-align: center;
-	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
-}
-@media (hover: hover) and (pointer: fine) {
-	.admin-fake-select:hover {
-		background-color: var(--color-control-off-hover);
-		border-color: var(--color-control-off-border-hover);
-		box-shadow: 0 0 10px var(--color-control-off-shadow-hover);
-	}
-}
+/* .admin-fake-select shares selection-style dropdown trigger styles above */
 
 /* Footer */
 .admin-config-footer {
