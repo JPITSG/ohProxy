@@ -1877,6 +1877,8 @@ body.theme-light .card-config-footer {
 }
 body.card-config-open {
 	overflow: hidden;
+	position: fixed;
+	width: 100%;
 }
 
 /* Item Config Section Headers */
