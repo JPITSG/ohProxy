@@ -2080,7 +2080,7 @@ function makeFrameDraggable(frame, handle) {
 		startX = e.clientX - offsetX;
 		startY = e.clientY - offsetY;
 		handle.setPointerCapture(e.pointerId);
-		handle.style.cursor = 'grabbing';
+		handle.style.cursor = 'move';
 		// Close any open select dropdown menus inside the frame
 		frame.querySelectorAll('.glow-select-wrap.menu-open, .admin-select-wrap.menu-open').forEach(w => {
 			if (typeof w._closeMenu === 'function') w._closeMenu();
@@ -4619,7 +4619,7 @@ function widgetKey(widget) {
 function splitLabelState(label) {
 	const raw = safeText(label);
 	// Strip trailing empty brackets [] or [-] (openHAB uses these when no state)
-	const cleaned = raw.replace(/\s*\[(-?)\]\s*$/, '');
+	const cleaned = raw.replace(/\s*\[\s*-?\s*\]\s*$/, '');
 	const match = cleaned.match(/^(.*)\s*\[(.+)\]\s*$/);
 	if (!match) return { title: cleaned, state: '' };
 	return { title: match[1].trim(), state: match[2].trim() };
@@ -4628,8 +4628,8 @@ function splitLabelState(label) {
 function labelPathSegments(label) {
 	const parts = splitLabelState(label);
 	const segs = [];
-	if (parts.title) segs.push(parts.title);
-	if (parts.state) segs.push(parts.state);
+	if (parts.title && parts.title !== '-') segs.push(parts.title);
+	if (parts.state && parts.state !== '-') segs.push(parts.state);
 	return segs;
 }
 
@@ -6640,7 +6640,7 @@ async function buildSearchIndex() {
 			const link = widgetPageLink(w);
 			if (link) {
 				const segs = labelPathSegments(widgetLabel(w));
-				const nextPath = pagePath.concat(segs.length ? segs : [widgetLabel(w)]).filter(Boolean);
+				const nextPath = pagePath.concat(segs.length ? segs : [widgetLabel(w)]).filter(s => s && s !== '-');
 				queue.push({ url: link, path: nextPath });
 			}
 			const key = w?.widgetId || `${w?.item?.name || ''}|${w?.label || ''}|${link || ''}`;
