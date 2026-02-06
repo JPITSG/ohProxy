@@ -4259,8 +4259,8 @@ function widgetLabel(widget) {
 
 function splitLabelState(label) {
 	const raw = safeText(label);
-	// Strip trailing empty brackets [] (openHAB 3.x+ sends these when no state)
-	const cleaned = raw.replace(/\s*\[\]\s*$/, '');
+	// Strip trailing empty brackets [] or [-] (openHAB uses these when no state)
+	const cleaned = raw.replace(/\s*\[\s*-?\s*\]\s*$/, '');
 	const match = cleaned.match(/^(.*)\s*\[(.+)\]\s*$/);
 	if (!match) return { title: cleaned, state: '' };
 	return { title: match[1].trim(), state: match[2].trim() };
@@ -4269,8 +4269,8 @@ function splitLabelState(label) {
 function labelPathSegments(label) {
 	const parts = splitLabelState(label);
 	const segs = [];
-	if (parts.title) segs.push(parts.title);
-	if (parts.state) segs.push(parts.state);
+	if (parts.title && parts.title !== '-') segs.push(parts.title);
+	if (parts.state && parts.state !== '-') segs.push(parts.state);
 	return segs;
 }
 
@@ -6731,7 +6731,7 @@ app.get('/search-index', async (req, res) => {
 				if (rel && rel.includes('/rest/sitemaps/')) {
 					const label = widgetLabel(w);
 					const segs = labelPathSegments(label);
-					const nextPath = pagePath.concat(segs.length ? segs : [label]).filter(Boolean);
+					const nextPath = pagePath.concat(segs.length ? segs : [label]).filter(s => s && s !== '-');
 					queue.push({ url: rel, path: nextPath });
 				}
 			}
