@@ -1051,6 +1051,17 @@ body.theme-dark #themeToggleBtn svg {
 	margin-right: 0 !important;
 }
 
+@media (max-width: 639px) {
+	html.search-focus-expanded #searchWrap {
+		flex: 1 1 100% !important;
+		width: 100% !important;
+		min-width: 0 !important;
+	}
+	html.search-focus-expanded #navWrap {
+		display: none !important;
+	}
+}
+
 /* Switch card styles */
 .switch-card .labelStack {
 	flex: 0 1 40%;
