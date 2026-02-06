@@ -3808,8 +3808,8 @@ function renderWeatherWidget(forecastData, mode) {
 	const days = Array.isArray(forecastData?.data) ? forecastData.data : [];
 	if (!days.length) {
 		return `<!DOCTYPE html>
-<html><head><title>Weather</title></head>
-<body style="font-family:system-ui;padding:2rem;text-align:center;">
+<html><head><title>Weather</title><style>@font-face{font-family:'Rubik';src:url('/fonts/rubik-300.woff2') format('woff2');font-weight:300;font-display:swap}body{font-family:'Rubik',system-ui,sans-serif;font-weight:300;padding:2rem;text-align:center}</style></head>
+<body>
 <h1>Weather data unavailable</h1>
 <p>Forecast data is empty or invalid. It will be refreshed automatically.</p>
 </body></html>`;
@@ -5732,7 +5732,7 @@ app.post('/api/settings', jsonParserSmall, (req, res) => {
 		return;
 	}
 	// Whitelist allowed settings keys
-	const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode', 'paused'];
+	const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode'];
 	const allowedKeySet = new Set(allowedKeys);
 	const incomingKeys = Object.keys(newSettings);
 	if (incomingKeys.some((key) => !allowedKeySet.has(key))) {
@@ -5740,7 +5740,7 @@ app.post('/api/settings', jsonParserSmall, (req, res) => {
 		return;
 	}
 	const sanitized = {};
-	const boolKeys = new Set(['slimMode', 'compactView', 'showLabels', 'darkMode', 'paused']);
+	const boolKeys = new Set(['slimMode', 'compactView', 'showLabels', 'darkMode']);
 	for (const key of incomingKeys) {
 		const val = newSettings[key];
 		if (boolKeys.has(key)) {
@@ -6898,8 +6898,8 @@ app.get('/weather', (req, res) => {
 		weatherData = JSON.parse(fs.readFileSync(WEATHERBIT_FORECAST_FILE, 'utf8'));
 	} catch {
 		res.status(503).setHeader('Content-Type', 'text/html; charset=utf-8').setHeader('Cache-Control', 'no-store').send(`<!DOCTYPE html>
-<html><head><title>Weather</title></head>
-<body style="font-family:system-ui;padding:2rem;text-align:center;">
+<html><head><title>Weather</title><style>@font-face{font-family:'Rubik';src:url('/fonts/rubik-300.woff2') format('woff2');font-weight:300;font-display:swap}body{font-family:'Rubik',system-ui,sans-serif;font-weight:300;padding:2rem;text-align:center}</style></head>
+<body>
 <h1>Weather data not available</h1>
 <p>Weather data has not been fetched yet. Please check the server configuration.</p>
 </body></html>`);
@@ -6936,8 +6936,9 @@ app.get('/logout', (req, res) => {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Log out</title>
+<style>@font-face{font-family:'Rubik';src:url('/fonts/rubik-300.woff2') format('woff2');font-weight:300;font-display:swap}body{font-family:'Rubik',system-ui,sans-serif;font-weight:300;padding:2rem}</style>
 </head>
-<body style="font-family: system-ui, sans-serif; padding: 2rem;">
+<body>
 <h1>Log out</h1>
 <p>Confirm to sign out.</p>
 <form method="POST" action="/logout">
@@ -6979,9 +6980,9 @@ app.get('/api/logout', (req, res) => {
 	clearSessionCookie(res);
 	res.setHeader('WWW-Authenticate', `Basic realm="${liveConfig.authRealm}"`);
 	res.status(401).type('text/html').send(
-		'<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Logged out</title></head>' +
-		'<body style="font-family:sans-serif;text-align:center;padding:3em">' +
-		'<p>You have been logged out.</p><a href="/">Log in</a></body></html>'
+		'<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Logged out</title>' +
+		'<style>@font-face{font-family:\'Rubik\';src:url(\'/fonts/rubik-300.woff2\') format(\'woff2\');font-weight:300;font-display:swap}body{font-family:\'Rubik\',system-ui,sans-serif;font-weight:300;text-align:center;padding:3em}</style></head>' +
+		'<body><p>You have been logged out.</p><a href="/">Log in</a></body></html>'
 	);
 });
 
