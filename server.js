@@ -754,6 +754,9 @@ function validateConfig() {
 		ensureString(AUTH_COOKIE_NAME, 'server.auth.cookieName', { allowEmpty: true }, errors);
 		ensureNumber(AUTH_COOKIE_DAYS, 'server.auth.cookieDays', { min: 0 }, errors);
 		ensureString(AUTH_COOKIE_KEY, 'server.auth.cookieKey', { allowEmpty: true }, errors);
+		if (AUTH_COOKIE_KEY && AUTH_COOKIE_KEY.length < 32) {
+			errors.push(`server.auth.cookieKey must be at least 32 characters for HMAC security but is ${AUTH_COOKIE_KEY.length} characters`);
+		}
 		ensureString(SERVER_AUTH.authFailNotifyCmd, 'server.auth.authFailNotifyCmd', { allowEmpty: true }, errors);
 		ensureNumber(AUTH_FAIL_NOTIFY_INTERVAL_MINS, 'server.auth.authFailNotifyIntervalMins', { min: 1 }, errors);
 		if (AUTH_COOKIE_KEY) {
@@ -953,6 +956,9 @@ function validateAdminConfig(config) {
 		ensureString(s.auth.cookieName || '', 'server.auth.cookieName', { allowEmpty: true, maxLen: 256 }, errors);
 		ensureNumber(s.auth.cookieDays, 'server.auth.cookieDays', { min: 0 }, errors);
 		ensureString(s.auth.cookieKey || '', 'server.auth.cookieKey', { allowEmpty: true, maxLen: 256 }, errors);
+		if (s.auth.cookieKey && typeof s.auth.cookieKey === 'string' && s.auth.cookieKey.trim() && s.auth.cookieKey.trim().length < 32) {
+			errors.push('server.auth.cookieKey must be at least 32 characters for HMAC security');
+		}
 		ensureString(s.auth.authFailNotifyCmd || '', 'server.auth.authFailNotifyCmd', { allowEmpty: true, maxLen: 1024 }, errors);
 		ensureNumber(s.auth.authFailNotifyIntervalMins, 'server.auth.authFailNotifyIntervalMins', { min: 1 }, errors);
 		if (s.auth.cookieKey && typeof s.auth.cookieKey === 'string' && s.auth.cookieKey.trim()) {
@@ -1378,7 +1384,6 @@ function buildHstsHeader() {
 
 function applySecurityHeaders(req, res) {
 	if (!liveConfig.securityHeadersEnabled) return;
-	res.setHeader('X-Frame-Options', 'SAMEORIGIN');
 	res.setHeader('X-Content-Type-Options', 'nosniff');
 	res.setHeader('X-XSS-Protection', '1; mode=block');
 	if (liveConfig.securityHsts.enabled && isSecureRequest(req)) {
@@ -1386,9 +1391,6 @@ function applySecurityHeaders(req, res) {
 	}
 	if (liveConfig.securityCsp.enabled) {
 		let policy = safeText(liveConfig.securityCsp.policy).replace(/[\r\n]+/g, ' ').trim();
-		if (policy && !/(?:^|;)\s*frame-ancestors\s+/i.test(policy)) {
-			policy = `${policy.replace(/;\s*$/, '')}; frame-ancestors 'self'`;
-		}
 		if (policy) {
 			const headerName = liveConfig.securityCsp.reportOnly
 				? 'Content-Security-Policy-Report-Only'
@@ -8910,6 +8912,8 @@ function startHttpsServer() {
 		tlsOptions = {
 			key: fs.readFileSync(HTTPS_KEY_FILE),
 			cert: fs.readFileSync(HTTPS_CERT_FILE),
+			minVersion: 'TLSv1.2',
+			honorCipherOrder: true,
 		};
 	} catch (err) {
 		logMessage(`Failed to read HTTPS credentials: ${err.message || err}`);
