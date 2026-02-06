@@ -3047,7 +3047,7 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'server.weatherbit.longitude', type: 'text', allowEmpty: true },
 			{ key: 'server.weatherbit.units', type: 'select', options: ['M', 'I'] },
 			{ key: 'server.weatherbit.refreshIntervalMs', type: 'number', min: 1 },
-			{ key: 'server.voice.model', type: 'select', options: ['browser', 'vosk', 'adaptive'] },
+			{ key: 'server.voice.model', type: 'select', options: ['browser', 'vosk'] },
 			{ key: 'server.voice.voskHost', type: 'text', allowEmpty: true },
 		],
 	},
@@ -7503,13 +7503,7 @@ function restoreNormalPolling() {
 	// Show voice button if Speech Recognition API and microphone permission available
 	var voiceModel = (window.__OH_CONFIG__?.voiceModel || 'browser').toLowerCase();
 	var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-	var effectiveVoiceMode;
-	if (voiceModel === 'adaptive') {
-		effectiveVoiceMode = SpeechRecognition ? 'browser' : (window.__OH_CONFIG__?.voskAvailable ? 'vosk' : null);
-	} else {
-		effectiveVoiceMode = voiceModel;
-	}
-	if (els.voice && (effectiveVoiceMode === 'vosk' || SpeechRecognition)) {
+	if (els.voice && (voiceModel === 'vosk' || SpeechRecognition)) {
 		(async () => {
 			try {
 				// Try permissions API first
@@ -7872,7 +7866,7 @@ function restoreNormalPolling() {
 	window.addEventListener('resize', updateAdminConfigBtnVisibility);
 	window.addEventListener('resize', updateLogoutBtnVisibility);
 	if (els.voice) {
-		var useVosk = effectiveVoiceMode === 'vosk';
+		var useVosk = voiceModel === 'vosk';
 		if (useVosk || SpeechRecognition) {
 			var VOICE_RESPONSE_TIMEOUT_MS = configNumber(CLIENT_CONFIG.voiceResponseTimeoutMs, 10000);
 

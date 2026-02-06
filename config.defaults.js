@@ -251,7 +251,7 @@ module.exports = {
 			refreshIntervalMs: 3600000,
 		},
 		voice: {
-			// Speech-to-text engine ('browser' = browser SpeechRecognition, 'vosk' = local Vosk server, 'adaptive' = browser with vosk fallback).
+			// Speech-to-text engine ('browser' = browser SpeechRecognition, 'vosk' = local Vosk server).
 			model: 'browser',
 			// Vosk WebSocket server host:port (required when model is 'vosk').
 			voskHost: '',

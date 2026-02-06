@@ -26,6 +26,7 @@ Commands:
   disable <username|*>              Disable user (* = all users)
   enable <username|*>               Enable user (* = all users)
   gps <username> <true|false>       Enable/disable GPS tracking
+  voice <username> <config|browser|vosk>  Set voice preference
 
 Examples:
   node users-cli.js list
@@ -36,6 +37,7 @@ Examples:
   node users-cli.js disable john
   node users-cli.js enable '*'
   node users-cli.js gps john true
+  node users-cli.js voice john vosk
 `);
 }
 
@@ -50,16 +52,18 @@ function listUsers() {
 		console.log('No users found.');
 		return;
 	}
-	console.log('Username'.padEnd(20) + 'Role'.padEnd(12) + 'Status'.padEnd(10) + 'GPS'.padEnd(5) + 'Created'.padEnd(22) + 'Last Active');
-	console.log('-'.repeat(92));
+	console.log('Username'.padEnd(20) + 'Role'.padEnd(12) + 'Status'.padEnd(10) + 'GPS'.padEnd(5) + 'Voice'.padEnd(9) + 'Created'.padEnd(22) + 'Last Active');
+	console.log('-'.repeat(101));
 	for (const user of users) {
 		const status = user.disabled ? 'disabled' : 'active';
 		const gps = user.trackgps ? 'on' : 'off';
+		const voice = (user.voicePreference || 'config');
 		console.log(
 			user.username.padEnd(20) +
 			user.role.padEnd(12) +
 			status.padEnd(10) +
 			gps.padEnd(5) +
+			voice.padEnd(9) +
 			formatDate(user.createdAt).padEnd(22) +
 			formatDate(user.lastActive)
 		);
@@ -236,6 +240,25 @@ function setGps(username, value) {
 	}
 }
 
+function setVoice(username, value) {
+	if (!username || value === undefined) {
+		console.error('Error: Username and config/browser/vosk required');
+		usage();
+		process.exit(1);
+	}
+	const validValues = ['config', 'browser', 'vosk'];
+	if (!validValues.includes(value)) {
+		console.error('Error: Voice preference must be config, browser, or vosk');
+		process.exit(1);
+	}
+	if (sessions.updateUserVoicePreference(username, value)) {
+		console.log(`Voice preference set to '${value}' for '${username}'`);
+	} else {
+		console.error(`Error: User '${username}' not found`);
+		process.exit(1);
+	}
+}
+
 // Initialize DB
 sessions.initDb();
 
@@ -265,6 +288,9 @@ sessions.initDb();
 			break;
 		case 'gps':
 			setGps(args[1], args[2]);
+			break;
+		case 'voice':
+			setVoice(args[1], args[2]);
 			break;
 		default:
 			usage();

@@ -366,7 +366,8 @@ const AI_CACHE_DIR = path.join(__dirname, 'cache', 'ai');
 const AI_STRUCTURE_MAP_WRITABLE = path.join(AI_CACHE_DIR, 'structuremap-writable.json');
 const ANTHROPIC_API_KEY = safeText(SERVER_CONFIG.apiKeys?.anthropic) || '';
 const VOICE_CONFIG = SERVER_CONFIG.voice || {};
-const VOICE_MODEL = (safeText(VOICE_CONFIG.model) || 'browser').toLowerCase();
+const VOICE_MODEL = (['browser', 'vosk'].includes((safeText(VOICE_CONFIG.model) || '').toLowerCase()))
+	? safeText(VOICE_CONFIG.model).toLowerCase() : 'browser';
 const VOSK_HOST = safeText(VOICE_CONFIG.voskHost) || '';
 const WEATHERBIT_CONFIG = SERVER_CONFIG.weatherbit || {};
 const WEATHERBIT_API_KEY = safeText(WEATHERBIT_CONFIG.apiKey).trim();
@@ -1174,7 +1175,7 @@ function validateAdminConfig(config) {
 	}
 	if (isPlainObject(s.voice)) {
 		if (s.voice.model !== undefined) {
-			const validModels = ['browser', 'vosk', 'adaptive'];
+			const validModels = ['browser', 'vosk'];
 			if (!validModels.includes(s.voice.model)) {
 				errors.push('server.voice.model must be one of: ' + validModels.join(', '));
 			}
@@ -1902,7 +1903,8 @@ function reloadLiveConfig() {
 	// External services
 	liveConfig.anthropicApiKey = safeText(newServer.apiKeys?.anthropic) || '';
 	const newVoice = newServer.voice || {};
-	liveConfig.voiceModel = (safeText(newVoice.model) || 'browser').toLowerCase();
+	const vm = (safeText(newVoice.model) || 'browser').toLowerCase();
+	liveConfig.voiceModel = (vm === 'browser' || vm === 'vosk') ? vm : 'browser';
 	liveConfig.voskHost = safeText(newVoice.voskHost) || '';
 	const newWeatherbit = newServer.weatherbit || {};
 	const prevWeatherbitUnits = liveConfig.weatherbitUnits;
@@ -5677,13 +5679,17 @@ app.get('/config.js', (req, res) => {
 	res.setHeader('Cache-Control', 'no-cache');
 	const clientConfig = liveConfig.clientConfig && typeof liveConfig.clientConfig === 'object' ? liveConfig.clientConfig : {};
 
-	// Get user role and GPS tracking flag if authenticated
+	// Get user role, GPS tracking flag, and voice preference if authenticated
 	let userRole = null;
 	let trackGps = false;
+	let effectiveVoiceModel = liveConfig.voiceModel;
 	if (req.ohProxyUser) {
 		const user = sessions.getUser(req.ohProxyUser);
 		userRole = user?.role || null;
 		if (user?.trackgps) trackGps = true;
+		if (user?.voicePreference && user.voicePreference !== 'config') {
+			effectiveVoiceModel = user.voicePreference;
+		}
 	}
 
 	res.send(`window.__OH_CONFIG__=${JSON.stringify({
@@ -5701,8 +5707,7 @@ app.get('/config.js', (req, res) => {
 		userRole: userRole,
 		trackGps: trackGps,
 		groupItems: liveConfig.groupItems || [],
-		voiceModel: liveConfig.voiceModel,
-		voskAvailable: !!liveConfig.voskHost,
+		voiceModel: effectiveVoiceModel,
 	})};`);
 });
 
