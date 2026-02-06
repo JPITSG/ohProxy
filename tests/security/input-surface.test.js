@@ -105,6 +105,13 @@ describe('Input Validation Coverage', () => {
 		assert.ok(content.includes('command.length > 500'));
 		assert.ok(content.includes('const trimmed = command.trim();'));
 		assert.ok(content.includes('trimmed.length > 500'));
+
+		assert.ok(content.includes("const FORBIDDEN_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);"));
+		assert.ok(content.includes('const forbiddenKeyPath = findForbiddenObjectKeyPath(incoming);'));
+		assert.ok(content.includes('const userErrors = validateAdminUserConfig(incoming.user);'));
+		assert.ok(content.includes("const allowedUserKeys = new Set(['trackGps', 'voiceModel']);"));
+		assert.ok(content.includes("errors.push('user.trackGps must be true/false');"));
+		assert.ok(content.includes("errors.push('user.voiceModel must be \"config\", \"browser\", or \"vosk\"');"));
 	});
 
 	it('validates GET query keys and values', () => {

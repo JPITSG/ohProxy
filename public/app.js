@@ -2953,6 +2953,13 @@ async function saveCardConfig() {
 
 const ADMIN_CONFIG_SCHEMA = [
 	{
+		id: 'user-preferences', group: 'user', reloadRequired: true,
+		fields: [
+			{ key: 'user.trackGps', type: 'toggle' },
+			{ key: 'user.voiceModel', type: 'select', options: ['config', 'browser', 'vosk'] },
+		],
+	},
+	{
 		id: 'listeners', group: 'server', restartRequired: true,
 		fields: [
 			{ key: 'server.http.enabled', type: 'toggle' },
@@ -3160,6 +3167,12 @@ const ADMIN_CONFIG_SCHEMA = [
 		],
 	},
 ];
+
+const ADMIN_CONFIG_GROUP_LABELS = {
+	user: 'groupUser',
+	server: 'groupServer',
+	client: 'groupClient',
+};
 
 let adminConfigModal = null;
 let adminConfigAbort = null;
@@ -3625,14 +3638,15 @@ async function openAdminConfigModal() {
 		return;
 	}
 
-	// Render sections grouped by server/client
+	// Render sections grouped by user/server/client
 	let currentGroup = '';
 	for (const section of ADMIN_CONFIG_SCHEMA) {
 		if (section.group && section.group !== currentGroup) {
 			currentGroup = section.group;
 			const groupHeader = document.createElement('div');
 			groupHeader.className = 'admin-config-group-header';
-			groupHeader.textContent = currentGroup === 'server' ? ohLang.adminConfig.groupServer : ohLang.adminConfig.groupClient;
+			const groupLabelKey = ADMIN_CONFIG_GROUP_LABELS[currentGroup];
+			groupHeader.textContent = (groupLabelKey && ohLang.adminConfig[groupLabelKey]) || currentGroup;
 			sectionsEl.appendChild(groupHeader);
 		}
 		sectionsEl.appendChild(renderAdminConfigSection(section, config));
