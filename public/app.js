@@ -341,6 +341,10 @@ const MIN_IMAGE_REFRESH_MS = configNumber(CLIENT_CONFIG.minImageRefreshMs, 5000)
 const IMAGE_LOAD_TIMEOUT_MS = configNumber(CLIENT_CONFIG.imageLoadTimeoutMs, 15000);
 const CONNECTION_PENDING_DELAY_MS = 500;
 const IMAGE_VIEWER_MAX_VIEWPORT = 0.9;
+const VIDEO_ZOOM_MAX_SCALE = 4;
+const VIDEO_ZOOM_DESKTOP_SCALE = 2;
+const VIDEO_ZOOM_PAN_SPEED = 1.5;
+const VIDEO_ZOOM_RESET_THRESHOLD = 1.05;
 const SITEMAP_CACHE_RETRY_BASE_MS = 2000;
 const SITEMAP_CACHE_RETRY_MAX_MS = 60000;
 const CHART_IFRAME_SWAP_TIMEOUT_MS = 15000;
@@ -390,6 +394,7 @@ let videoFullscreenFake = false;
 let videoFsEscHandler = null;
 let videoFsPlaceholder = null;
 let videosPausedForVisibility = false;
+const videoZoomStateMap = new WeakMap();
 
 // Widget iframe configs: Map from widgetId to {height: number}
 const widgetIframeConfigMap = new Map();
@@ -600,6 +605,7 @@ function isVideoLandscape(videoEl) {
 
 async function enterVideoFullscreen(videoEl, videoContainer) {
 	if (videoFullscreenActive) return;
+	resetVideoZoom(videoEl);
 
 	// iOS: use native video fullscreen player
 	if (isIOSSafari()) {
@@ -669,6 +675,7 @@ async function enterVideoFullscreen(videoEl, videoContainer) {
 
 function exitVideoFullscreen() {
 	if (!videoFullscreenActive) return;
+	resetVideoZoom(videoFullscreenVideoEl);
 	if (videoFullscreenFake) {
 		cleanupVideoFullscreen();
 		return;
@@ -683,6 +690,7 @@ function cleanupVideoFullscreen() {
 	if (!videoFullscreenVideoEl) return;
 	const videoEl = videoFullscreenVideoEl;
 	const videoContainer = videoFullscreenContainer;
+	resetVideoZoom(videoEl);
 
 	videoEl.classList.remove('fs-rotated');
 	try { screen.orientation.unlock(); } catch (_) {}
@@ -714,6 +722,201 @@ function cleanupVideoFullscreen() {
 	videoFullscreenFake = false;
 	videoFullscreenVideoEl = null;
 	videoFullscreenContainer = null;
+}
+
+function getVideoZoomState(videoEl) {
+	if (!videoEl) return null;
+	let zoomState = videoZoomStateMap.get(videoEl);
+	if (!zoomState) {
+		zoomState = {
+			scale: 1,
+			translateX: 0,
+			translateY: 0,
+			pinchStartDist: 0,
+			pinchStartScale: 1,
+			panStartX: 0,
+			panStartY: 0,
+			panStartTranslateX: 0,
+			panStartTranslateY: 0,
+			isPanning: false,
+		};
+		videoZoomStateMap.set(videoEl, zoomState);
+	}
+	return zoomState;
+}
+
+function clampVideoZoomTranslate(zoomState, zoomStage) {
+	if (!zoomState || !zoomStage) return;
+	if (zoomState.scale <= 1) {
+		zoomState.translateX = 0;
+		zoomState.translateY = 0;
+		return;
+	}
+	const rect = zoomStage.getBoundingClientRect();
+	if (!rect.width || !rect.height) {
+		zoomState.translateX = 0;
+		zoomState.translateY = 0;
+		return;
+	}
+	const baseWidth = rect.width / zoomState.scale;
+	const baseHeight = rect.height / zoomState.scale;
+	const maxX = (baseWidth * (zoomState.scale - 1)) / 2;
+	const maxY = (baseHeight * (zoomState.scale - 1)) / 2;
+	zoomState.translateX = Math.min(maxX, Math.max(-maxX, zoomState.translateX));
+	zoomState.translateY = Math.min(maxY, Math.max(-maxY, zoomState.translateY));
+}
+
+function applyVideoZoom(videoEl) {
+	if (!videoEl) return;
+	const zoomState = getVideoZoomState(videoEl);
+	const zoomStage = videoEl.closest('.video-zoom-stage');
+	if (!zoomState || !zoomStage) return;
+	const zoomed = zoomState.scale > 1;
+	zoomStage.classList.toggle('zoomed', zoomed);
+	if (!zoomed) {
+		zoomState.scale = 1;
+		zoomState.translateX = 0;
+		zoomState.translateY = 0;
+		zoomStage.style.transform = '';
+		zoomStage.style.transformOrigin = '50% 50%';
+		return;
+	}
+	clampVideoZoomTranslate(zoomState, zoomStage);
+	zoomStage.style.transform = `translate(${zoomState.translateX}px, ${zoomState.translateY}px) scale(${zoomState.scale})`;
+}
+
+function setVideoZoomOriginFromPoint(videoEl, clientX, clientY) {
+	if (!videoEl) return;
+	const zoomStage = videoEl.closest('.video-zoom-stage');
+	if (!zoomStage) return;
+	const rect = zoomStage.getBoundingClientRect();
+	if (!rect.width || !rect.height) return;
+	const x = Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100));
+	const y = Math.min(100, Math.max(0, ((clientY - rect.top) / rect.height) * 100));
+	zoomStage.style.transformOrigin = `${x}% ${y}%`;
+}
+
+function isVideoZoomReady(videoEl) {
+	if (!videoEl) return false;
+	const zoomStage = videoEl.closest('.video-zoom-stage');
+	return !!zoomStage && zoomStage.classList.contains('zoom-ready');
+}
+
+function setVideoZoomReady(videoEl, ready) {
+	if (!videoEl) return;
+	const zoomStage = videoEl.closest('.video-zoom-stage');
+	if (!zoomStage) return;
+	const zoomReady = !!ready;
+	zoomStage.classList.toggle('zoom-ready', zoomReady);
+	if (!zoomReady) {
+		resetVideoZoom(videoEl);
+	}
+}
+
+function resetVideoZoom(videoEl) {
+	if (!videoEl) return;
+	const zoomState = getVideoZoomState(videoEl);
+	if (!zoomState) return;
+	zoomState.scale = 1;
+	zoomState.translateX = 0;
+	zoomState.translateY = 0;
+	zoomState.pinchStartDist = 0;
+	zoomState.pinchStartScale = 1;
+	zoomState.panStartX = 0;
+	zoomState.panStartY = 0;
+	zoomState.panStartTranslateX = 0;
+	zoomState.panStartTranslateY = 0;
+	zoomState.isPanning = false;
+	const zoomStage = videoEl.closest('.video-zoom-stage');
+	if (zoomStage) {
+		zoomStage.classList.remove('zoomed');
+		zoomStage.style.transform = '';
+		zoomStage.style.transformOrigin = '50% 50%';
+	}
+}
+
+function initVideoZoom(videoEl, zoomStage) {
+	if (!videoEl || !zoomStage) return;
+	if (videoEl.dataset.zoomInit === '1') return;
+	videoEl.dataset.zoomInit = '1';
+	const zoomState = getVideoZoomState(videoEl);
+	if (!zoomState) return;
+
+	if (!isTouchDevice()) {
+		zoomStage.addEventListener('click', (e) => {
+			if (!isVideoZoomReady(videoEl)) return;
+			e.preventDefault();
+			e.stopPropagation();
+			if (zoomState.scale > 1) {
+				resetVideoZoom(videoEl);
+				return;
+			}
+			zoomState.scale = VIDEO_ZOOM_DESKTOP_SCALE;
+			zoomState.translateX = 0;
+			zoomState.translateY = 0;
+			setVideoZoomOriginFromPoint(videoEl, e.clientX, e.clientY);
+			applyVideoZoom(videoEl);
+		});
+		zoomStage.addEventListener('pointermove', (e) => {
+			if (!isVideoZoomReady(videoEl)) return;
+			if (zoomState.scale <= 1) return;
+			setVideoZoomOriginFromPoint(videoEl, e.clientX, e.clientY);
+		});
+		return;
+	}
+
+	zoomStage.addEventListener('touchstart', (e) => {
+		if (!isVideoZoomReady(videoEl)) return;
+		if (e.touches.length === 2) {
+			e.preventDefault();
+			zoomState.isPanning = false;
+			const dx = e.touches[0].clientX - e.touches[1].clientX;
+			const dy = e.touches[0].clientY - e.touches[1].clientY;
+			zoomState.pinchStartDist = Math.hypot(dx, dy);
+			zoomState.pinchStartScale = zoomState.scale;
+		} else if (e.touches.length === 1 && zoomState.scale > 1) {
+			zoomState.isPanning = true;
+			zoomState.panStartX = e.touches[0].clientX;
+			zoomState.panStartY = e.touches[0].clientY;
+			zoomState.panStartTranslateX = zoomState.translateX;
+			zoomState.panStartTranslateY = zoomState.translateY;
+		}
+	}, { passive: false });
+
+	zoomStage.addEventListener('touchmove', (e) => {
+		if (!isVideoZoomReady(videoEl)) return;
+		if (e.touches.length === 2 && zoomState.pinchStartDist > 0) {
+			e.preventDefault();
+			const dx = e.touches[0].clientX - e.touches[1].clientX;
+			const dy = e.touches[0].clientY - e.touches[1].clientY;
+			const dist = Math.hypot(dx, dy);
+			zoomState.scale = Math.min(VIDEO_ZOOM_MAX_SCALE, Math.max(1, zoomState.pinchStartScale * (dist / zoomState.pinchStartDist)));
+			applyVideoZoom(videoEl);
+		} else if (e.touches.length === 1 && zoomState.isPanning && zoomState.scale > 1) {
+			e.preventDefault();
+			const dx = (e.touches[0].clientX - zoomState.panStartX) * VIDEO_ZOOM_PAN_SPEED;
+			const dy = (e.touches[0].clientY - zoomState.panStartY) * VIDEO_ZOOM_PAN_SPEED;
+			zoomState.translateX = zoomState.panStartTranslateX + dx;
+			zoomState.translateY = zoomState.panStartTranslateY + dy;
+			applyVideoZoom(videoEl);
+		}
+	}, { passive: false });
+
+	zoomStage.addEventListener('touchend', (e) => {
+		if (e.touches.length < 2) {
+			zoomState.pinchStartDist = 0;
+		}
+		if (e.touches.length === 0) {
+			zoomState.isPanning = false;
+			if (zoomState.scale < VIDEO_ZOOM_RESET_THRESHOLD) {
+				resetVideoZoom(videoEl);
+			}
+		}
+	});
+
+	zoomStage.addEventListener('touchcancel', () => {
+		resetVideoZoom(videoEl);
+	});
 }
 
 function showResumeSpinner(show) {
@@ -795,6 +998,8 @@ function applyHomeSnapshot(snapshot) {
 function stopAllVideoStreams() {
 	const videos = document.querySelectorAll('video.video-stream');
 	for (const video of videos) {
+		setVideoZoomReady(video, false);
+		resetVideoZoom(video);
 		if (video.src) {
 			video.src = '';
 			video.load();
@@ -805,6 +1010,8 @@ function stopAllVideoStreams() {
 function pauseVideoStreamsForVisibility() {
 	const videos = document.querySelectorAll('video.video-stream');
 	for (const video of videos) {
+		setVideoZoomReady(video, false);
+		resetVideoZoom(video);
 		if (video.src) {
 			video.dataset.savedSrc = video.src;
 			// Save preview image URL for use as poster during resume
@@ -826,6 +1033,8 @@ function resumeVideoStreamsFromVisibility() {
 	videosPausedForVisibility = false;
 	const videos = document.querySelectorAll('video.video-stream');
 	for (const video of videos) {
+		setVideoZoomReady(video, false);
+		resetVideoZoom(video);
 		if (video.dataset.savedSrc) {
 			const container = video.closest('.video-container');
 			const spinner = container?.querySelector('.video-spinner');
@@ -5238,6 +5447,8 @@ function updateCard(card, w, info) {
 	// Stop any active video stream to terminate FFmpeg process
 	const existingVideo = card.querySelector('video.video-stream');
 	if (existingVideo && existingVideo.src) {
+		setVideoZoomReady(existingVideo, false);
+		resetVideoZoom(existingVideo);
 		existingVideo.src = '';
 		existingVideo.load();
 	}
@@ -5489,6 +5700,8 @@ function updateCard(card, w, info) {
 			if (staleContainer) {
 				const staleVideo = staleContainer.querySelector('video.video-stream');
 				if (staleVideo && staleVideo.src) {
+					setVideoZoomReady(staleVideo, false);
+					resetVideoZoom(staleVideo);
 					staleVideo.src = '';
 					staleVideo.load();
 				}
@@ -5546,7 +5759,13 @@ function updateCard(card, w, info) {
 			spinner.appendChild(spinnerInner);
 			videoContainer.appendChild(spinner);
 		}
-		// Get or create video element
+		// Get or create zoom stage + video element
+		let zoomStage = videoContainer.querySelector('.video-zoom-stage');
+		if (!zoomStage) {
+			zoomStage = document.createElement('div');
+			zoomStage.className = 'video-zoom-stage';
+			videoContainer.appendChild(zoomStage);
+		}
 		let videoEl = videoContainer.querySelector('video.video-stream');
 		const isNewVideo = !videoEl;
 		if (isNewVideo) {
@@ -5567,12 +5786,23 @@ function updateCard(card, w, info) {
 		// Video z-15 covers preview z-10 and spinner z-12 when playing
 
 		if (isNewVideo) {
+			const disableVideoZoom = () => setVideoZoomReady(videoEl, false);
+			videoEl.addEventListener('loadstart', disableVideoZoom);
+			videoEl.addEventListener('waiting', disableVideoZoom);
+			videoEl.addEventListener('stalled', disableVideoZoom);
+			videoEl.addEventListener('pause', disableVideoZoom);
+			videoEl.addEventListener('ended', disableVideoZoom);
+			videoEl.addEventListener('emptied', disableVideoZoom);
+			videoEl.addEventListener('abort', disableVideoZoom);
+			videoEl.addEventListener('error', disableVideoZoom);
 
 			// Auto-reconnect on error - aggressive retry
 			videoEl.addEventListener('error', () => {
 				const retry = () => {
 					if (videosPausedForVisibility) return;
 					if (videoEl.src && document.contains(videoEl)) {
+						setVideoZoomReady(videoEl, false);
+						resetVideoZoom(videoEl);
 						const src = videoEl.src;
 						videoEl.src = '';
 						videoEl.src = src;
@@ -5594,6 +5824,8 @@ function updateCard(card, w, info) {
 				setTimeout(() => {
 					if (videosPausedForVisibility) return;
 					if (videoEl.src && document.contains(videoEl)) {
+						setVideoZoomReady(videoEl, false);
+						resetVideoZoom(videoEl);
 						const src = videoEl.src;
 						videoEl.src = '';
 						videoEl.src = src;
@@ -5610,6 +5842,8 @@ function updateCard(card, w, info) {
 				if (videosPausedForVisibility) return;
 				if (videoEl.src && videoEl.paused && !videoEl.ended) {
 					videoEl.play().catch(() => {
+						setVideoZoomReady(videoEl, false);
+						resetVideoZoom(videoEl);
 						const src = videoEl.src;
 						videoEl.src = '';
 						videoEl.src = src;
@@ -5647,6 +5881,7 @@ function updateCard(card, w, info) {
 
 			// Show mute button when video starts playing
 			videoEl.addEventListener('playing', () => {
+				setVideoZoomReady(videoEl, true);
 				muteBtn.style.opacity = '1';
 				muteBtn.style.pointerEvents = 'auto';
 			});
@@ -5662,28 +5897,34 @@ function updateCard(card, w, info) {
 			fsBtn.addEventListener('click', (e) => {
 				haptic();
 				e.stopPropagation();
+				resetVideoZoom(videoEl);
 				if (videoFullscreenActive) exitVideoFullscreen();
 				else enterVideoFullscreen(videoEl, videoContainer);
 			});
 
 			// Show fullscreen button when video starts playing
 			videoEl.addEventListener('playing', () => {
+				setVideoZoomReady(videoEl, true);
 				fsBtn.style.opacity = '1';
 				fsBtn.style.pointerEvents = 'auto';
 			});
 
-			videoContainer.appendChild(videoEl);
 		}
+		if (videoEl.parentNode !== zoomStage) zoomStage.appendChild(videoEl);
+		initVideoZoom(videoEl, zoomStage);
+		setVideoZoomReady(videoEl, !videoEl.paused && !videoEl.ended);
 
 		// Height: if 0, use 16:9 aspect ratio; otherwise use specified height
 		if (videoHeight > 0) {
 			videoContainer.style.height = `${videoHeight}px`;
 			videoContainer.style.aspectRatio = '';
+			zoomStage.style.height = '100%';
 			videoEl.style.height = '100%';
 			videoEl.style.aspectRatio = '';
 		} else {
 			videoContainer.style.height = '';
 			videoContainer.style.aspectRatio = '16 / 9';
+			zoomStage.style.height = '100%';
 			videoEl.style.height = '';
 			videoEl.style.aspectRatio = '';
 		}
@@ -5691,6 +5932,8 @@ function updateCard(card, w, info) {
 		// Defer to next frame so container has layout dimensions
 		if (videoEl.dataset.baseUrl !== videoUrl) {
 			videoEl.dataset.baseUrl = videoUrl;
+			setVideoZoomReady(videoEl, false);
+			resetVideoZoom(videoEl);
 			requestAnimationFrame(() => {
 				const containerWidth = videoContainer.offsetWidth || videoContainer.clientWidth || 640;
 				const videoSrc = `${videoUrl}&w=${containerWidth}`;
