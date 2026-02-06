@@ -321,6 +321,7 @@ window.ohLang = {
 		olderBtn: 'Older \u25BE',
 
 		loading: 'Loading\u2026',
+		savedOk: 'Saved successfully.',
 		saveFailed: 'Save failed',
 
 		glowOperators: [

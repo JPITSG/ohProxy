@@ -1849,6 +1849,9 @@ body.theme-light .card-config-footer {
 .card-config-status.error {
 	color: var(--color-status-error);
 }
+.card-config-status.success {
+	color: var(--color-status-ok);
+}
 .card-config-footer button {
 	padding: 11px 12px;
 	font-size: .75rem;

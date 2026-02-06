@@ -2168,8 +2168,7 @@ function ensureCardConfigModal() {
 	wrap.querySelector('.card-config-cancel').addEventListener('click', () => { haptic(); closeCardConfigModal(); });
 	wrap.querySelector('.card-config-save').addEventListener('click', async () => {
 		haptic();
-		const ok = await saveCardConfig();
-		if (ok) closeCardConfigModal();
+		await saveCardConfig();
 	});
 	wrap.querySelector('.card-config-add').addEventListener('click', () => { haptic(); addGlowRuleRow(); });
 	// Sync checked class on radio labels for browsers without :has() support
@@ -2731,7 +2730,9 @@ async function saveCardConfig() {
 	if (!cardConfigModal || !cardConfigWidgetKey) return;
 
 	const statusEl = cardConfigModal.querySelector('.card-config-status');
+	const saveBtn = cardConfigModal.querySelector('.card-config-save');
 	if (statusEl) { statusEl.className = 'card-config-status'; statusEl.textContent = ''; }
+	if (saveBtn) saveBtn.disabled = true;
 
 	// Get visibility
 	const visRadio = cardConfigModal.querySelector('input[name="visibility"]:checked');
@@ -2799,6 +2800,7 @@ async function saveCardConfig() {
 			let msg = ohLang.cardConfig.saveFailed;
 			try { const body = await resp.json(); if (body.error) msg = body.error; } catch (e) {}
 			if (statusEl) { statusEl.className = 'card-config-status error'; statusEl.textContent = msg; }
+			if (saveBtn) saveBtn.disabled = false;
 			return false;
 		}
 
@@ -2877,10 +2879,13 @@ async function saveCardConfig() {
 
 		// Re-render to apply visibility changes
 		render();
+		if (statusEl) { statusEl.className = 'card-config-status success'; statusEl.textContent = ohLang.cardConfig.savedOk; }
+		if (saveBtn) saveBtn.disabled = false;
 		return true;
 	} catch (e) {
 		logJsError('applyGlowConfig failed', e);
 		if (statusEl) { statusEl.className = 'card-config-status error'; statusEl.textContent = ohLang.cardConfig.saveFailed; }
+		if (saveBtn) saveBtn.disabled = false;
 		return false;
 	}
 }
