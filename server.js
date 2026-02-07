@@ -4060,6 +4060,7 @@ html, body {
 
 const HOMEPAGE_DATA_TIMEOUT_MS = 500;
 const SITEMAP_CACHE_TIMEOUT_MS = 2000;
+const HOMEPAGE_INLINE_ICON_LIMIT = 80;
 
 async function getFullSitemapData(sitemapName) {
 	if (!sitemapName) return null;
@@ -4218,12 +4219,14 @@ async function getHomepageData(req) {
 			if (vis === 'normal') return userRole === 'normal' || userRole === 'readonly';
 			return true;
 		});
+		const inlineIcons = await buildHomepageInlineIcons(visibleWidgets);
 
 		return {
 			sitemapName,
 			pageUrl: `/rest/sitemaps/${encodeURIComponent(sitemapName)}/${encodeURIComponent(sitemapName)}?type=json`,
 			pageTitle: page.title || sitemapName,
 			widgets: visibleWidgets,
+			inlineIcons,
 		};
 	} catch {
 		return null;
@@ -4343,6 +4346,10 @@ function widgetLabel(widget) {
 	if (widget?.label) return safeText(widget.label);
 	if (widget?.item?.label) return safeText(widget.item.label);
 	return safeText(widget?.item?.name || widget?.name || '');
+}
+
+function widgetIconName(widget) {
+	return safeText(widget?.icon || widget?.item?.icon || widget?.item?.category || '');
 }
 
 function splitLabelState(label) {
@@ -4491,10 +4498,83 @@ function widgetSnapshot(widget) {
 		itemName: safeText(widget?.item?.name || widget?.itemName || ''),
 		label: safeText(widget?.label || widget?.item?.label || widget?.item?.name || ''),
 		state: safeText(widget?.item?.state ?? widget?.state ?? ''),
-		icon: safeText(widget?.icon || widget?.item?.icon || widget?.item?.category || ''),
+		icon: widgetIconName(widget),
 		mappings: mappingSig,
 		mapping: mappingSig ? normalizeMappings(widgetMapping) : [],
 	};
+}
+
+function normalizeIconName(icon) {
+	const raw = safeText(icon).replace(/\\/g, '/').trim();
+	if (!raw) return '';
+	const rel = raw.replace(/^\/+/, '');
+	if (!rel) return '';
+	const segments = rel.split('/');
+	if (segments.some((seg) => seg === '.' || seg === '..' || seg === '')) return '';
+	return segments.join('/');
+}
+
+function resolveInlineIconCachePath(iconName) {
+	const normalizedIcon = normalizeIconName(iconName);
+	if (!normalizedIcon) return null;
+	const parsed = path.posix.parse(`${normalizedIcon}.png`);
+	const cacheRel = path.posix.join(parsed.dir, `${parsed.name}.png`);
+	const cacheRoot = path.resolve(getIconCacheDir());
+	const cachePath = path.resolve(cacheRoot, cacheRel);
+	if (cachePath !== cacheRoot && !cachePath.startsWith(cacheRoot + path.sep)) {
+		return null;
+	}
+	return { cachePath, normalizedIcon };
+}
+
+async function buildInlineIconDataUri(iconName, iconVersion) {
+	const resolved = resolveInlineIconCachePath(iconName);
+	if (!resolved) return '';
+	const version = safeText(iconVersion).trim() || 'v1';
+	const candidates = [
+		{ sourcePath: `/images/${version}/${resolved.normalizedIcon}.png`, sourceExt: '.png' },
+		{ sourcePath: `/openhab.app/images/${version}/${resolved.normalizedIcon}.png`, sourceExt: '.png' },
+		{ sourcePath: `/openhab.app/images/${version}/${resolved.normalizedIcon}.svg`, sourceExt: '.svg' },
+	];
+
+	for (const candidate of candidates) {
+		try {
+			const buffer = await getCachedIcon(resolved.cachePath, candidate.sourcePath, candidate.sourceExt);
+			if (Buffer.isBuffer(buffer) && buffer.length) {
+				return `data:image/png;base64,${buffer.toString('base64')}`;
+			}
+		} catch {
+			// Try next candidate.
+		}
+	}
+	return '';
+}
+
+async function buildHomepageInlineIcons(widgets) {
+	const list = Array.isArray(widgets) ? widgets : [];
+	const iconVersion = safeText(liveConfig.iconVersion || ICON_VERSION || 'v1').trim() || 'v1';
+	const icons = [];
+	const seen = new Set();
+	for (const widget of list) {
+		if (!widget || widget.__section) continue;
+		const iconName = normalizeIconName(widgetIconName(widget));
+		if (!iconName || seen.has(iconName)) continue;
+		seen.add(iconName);
+		icons.push(iconName);
+		if (icons.length >= HOMEPAGE_INLINE_ICON_LIMIT) break;
+	}
+	if (!icons.length) return {};
+
+	const inlineIcons = {};
+	for (const iconName of icons) {
+		try {
+			const dataUri = await buildInlineIconDataUri(iconName, iconVersion);
+			if (dataUri) inlineIcons[iconName] = dataUri;
+		} catch (err) {
+			logMessage(`[Icons] Homepage inline icon failed for ${iconName}: ${err.message || err}`);
+		}
+	}
+	return inlineIcons;
 }
 
 function buildSnapshot(page) {

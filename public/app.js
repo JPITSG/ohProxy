@@ -502,6 +502,7 @@ const MAX_ICON_CACHE = Math.max(0, Math.round(configNumber(CLIENT_CONFIG.maxIcon
 const MAX_CHART_HASHES = Math.max(0, Math.round(configNumber(CLIENT_CONFIG.maxChartHashes, 500)));
 
 const iconCache = new Map();
+const homeInlineIcons = new Map();
 let imageTimers = [];
 let imageLoadQueue = [];
 let imageLoadProcessing = false;
@@ -530,6 +531,43 @@ function setBoundedCache(cache, key, value, maxSize) {
 		const oldest = cache.keys().next().value;
 		if (oldest !== undefined) cache.delete(oldest);
 	}
+}
+
+function isInlineIconDataUri(value) {
+	if (typeof value !== 'string') return false;
+	const text = value.trim();
+	return text.startsWith('data:image/') && text.includes(';base64,');
+}
+
+function replaceHomeInlineIcons(value) {
+	homeInlineIcons.clear();
+	if (!value || typeof value !== 'object') return;
+	for (const [rawKey, rawDataUri] of Object.entries(value)) {
+		const iconKey = safeText(rawKey).trim();
+		const dataUri = typeof rawDataUri === 'string' ? rawDataUri.trim() : '';
+		if (!iconKey || !isInlineIconDataUri(dataUri)) continue;
+		homeInlineIcons.set(iconKey, dataUri);
+	}
+}
+
+function mergeHomeInlineIcons(value) {
+	if (!value || typeof value !== 'object') return;
+	for (const [rawKey, rawDataUri] of Object.entries(value)) {
+		const iconKey = safeText(rawKey).trim();
+		const dataUri = typeof rawDataUri === 'string' ? rawDataUri.trim() : '';
+		if (!iconKey || !isInlineIconDataUri(dataUri)) continue;
+		homeInlineIcons.set(iconKey, dataUri);
+	}
+}
+
+function getHomeInlineIcon(icon) {
+	const key = safeText(icon).trim();
+	if (!key) return '';
+	const direct = homeInlineIcons.get(key);
+	if (direct) return direct;
+	const normalized = key.replace(/^\/+/, '');
+	if (!normalized || normalized === key) return '';
+	return homeInlineIcons.get(normalized) || '';
 }
 
 function registerCardCleanup(card, cleanup) {
@@ -946,6 +984,7 @@ function saveHomeSnapshot() {
 		ohOrigin: state.ohOrigin,
 		rawWidgets: state.rawWidgets,
 		iconCache: Object.fromEntries(iconCache),
+		inlineIcons: Object.fromEntries(homeInlineIcons),
 		savedAt: Date.now(),
 	};
 	try {
@@ -989,6 +1028,9 @@ function applyHomeSnapshot(snapshot) {
 				iconCache.set(key, url);
 			}
 		}
+	}
+	if (snapshot.inlineIcons && typeof snapshot.inlineIcons === 'object') {
+		mergeHomeInlineIcons(snapshot.inlineIcons);
 	}
 	updateNavButtons();
 	syncHistory(true);
@@ -5045,6 +5087,8 @@ function iconCandidates(icon) {
 	// openHAB 1.x icons are mostly static; avoid state-suffixed probes to reduce 404 noise.
 	const cands = [];
 	if (icon) {
+		const inline = getHomeInlineIcon(icon);
+		if (inline) cands.push(inline);
 		cands.push(`images/${ICON_VERSION}/${icon}.png`);
 		cands.push(`openhab.app/images/${ICON_VERSION}/${icon}.png`);
 		cands.push(`openhab.app/images/${ICON_VERSION}/${icon}.svg`);
@@ -8634,6 +8678,7 @@ function restoreNormalPolling() {
 		if (window.__OH_HOMEPAGE__) {
 			// Use embedded homepage data - no fetch needed
 			const hp = window.__OH_HOMEPAGE__;
+			replaceHomeInlineIcons(hp.inlineIcons);
 			state.sitemapName = hp.sitemapName;
 			state.pageUrl = hp.pageUrl;
 			state.rootPageUrl = hp.pageUrl;

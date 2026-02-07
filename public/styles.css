@@ -730,8 +730,8 @@ body.theme-light .image-viewer {
 	z-index: 2;
 }
 .image-viewer-close {
-	width: 2.5rem;
-	height: 2.5rem;
+	width: 32px;
+	height: 32px;
 	border: 0;
 	background: transparent;
 	display: inline-flex;
@@ -750,8 +750,8 @@ body.theme-light .image-viewer {
 	opacity: .9;
 }
 .image-viewer-download {
-	width: 2.5rem;
-	height: 2.5rem;
+	width: 32px;
+	height: 32px;
 	border: 0;
 	background: transparent;
 	display: inline-flex;
