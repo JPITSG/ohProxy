@@ -6475,6 +6475,7 @@ function updateCard(card, w, info) {
 		const sliderMin = Number.isFinite(Number(w?.minValue)) ? Number(w.minValue) : 0;
 		const sliderMax = Number.isFinite(Number(w?.maxValue)) ? Number(w.maxValue) : 100;
 		const sliderStep = Number.isFinite(Number(w?.step)) && Number(w.step) > 0 ? Number(w.step) : 1;
+		const releaseOnly = w?.releaseOnly === true || w?.releaseOnly === 'true';
 		const val = parseFloat(st);
 		const current = Number.isFinite(val) ? Math.max(sliderMin, Math.min(sliderMax, val)) : sliderMin;
 
@@ -6624,7 +6625,7 @@ function updateCard(card, w, info) {
 				activationPendingValue = value;
 				return;
 			}
-			if (isDimmer) {
+			if (isDimmer && !releaseOnly) {
 				const live = parseFloat(widgetState(w));
 				const isOff = Number.isFinite(live) ? live <= 0 : startedOff;
 				if (isOff && value > 0) {
@@ -6634,10 +6635,15 @@ function updateCard(card, w, info) {
 			}
 			// Haptic when turning off (going to min from above min)
 			if (value === sliderMin && lastSentValue > sliderMin) haptic();
-			queueSend(value, false);
+			if (!releaseOnly) queueSend(value, false);
 		});
 		input.addEventListener('change', () => {
-			flushSend();
+			if (releaseOnly) {
+				const value = Number(input.value);
+				if (Number.isFinite(value)) void sendValue(value, { force: true });
+			} else {
+				flushSend();
+			}
 			releaseSliderRefresh();
 			// Refresh after slider change to pick up visibility changes in sitemap
 			setTimeout(() => refresh(false), 150);
