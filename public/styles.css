@@ -1172,8 +1172,8 @@ body.theme-dark #themeToggleBtn svg {
 .setpoint-card .setpoint-value {
 	min-width: 2.5rem;
 	text-align: center;
-	font-size: .8rem;
-	font-weight: 600;
+	font-size: .75rem;
+	font-weight: 500;
 	white-space: nowrap;
 }
 
