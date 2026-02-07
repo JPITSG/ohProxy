@@ -70,6 +70,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawBefore\s*=\s*typeof\s+req\.query\.before\s*===\s*'string'\s*\?\s*req\.query\.before\s*:\s*''\s*;/,
 			/const\s+rawOffset\s*=\s*req\.query\.offset\s*;/,
 			/const\s+rawRadius\s*=\s*req\.query\.radius\s*;/,
+			/const\s+rawLegend\s*=\s*req\.query\?\.legend\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));

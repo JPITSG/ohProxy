@@ -2786,18 +2786,18 @@ function rtspUrlHash(url) {
 }
 
 // Chart cache helpers
-function chartCacheKey(item, period, mode, title) {
+function chartCacheKey(item, period, mode, title, legend) {
 	const assetVersion = liveConfig.assetVersion || 'v1';
 	const dateFmt = liveConfig.clientConfig?.dateFormat || '';
 	const timeFmt = liveConfig.clientConfig?.timeFormat || '';
 	return crypto.createHash('md5')
-		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}`)
+		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}|${legend}`)
 		.digest('hex')
 		.substring(0, 16);
 }
 
-function getChartCachePath(item, period, mode, title) {
-	const hash = chartCacheKey(item, period, mode, title);
+function getChartCachePath(item, period, mode, title, legend) {
+	const hash = chartCacheKey(item, period, mode, title, legend);
 	return path.join(CHART_CACHE_DIR, `${hash}.html`);
 }
 
@@ -3113,22 +3113,26 @@ function formatChartValue(n) {
 	return result;
 }
 
-function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg, dataCur, period) {
+function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg, dataCur, period, legend) {
 	const theme = mode === 'dark' ? 'dark' : 'light';
 	const safeTitle = escapeHtml(title);
 	const unitDisplay = unit !== '?' ? escapeHtml(unit) : '';
-	const legendHtml = unitDisplay ? `<div class="chart-legend"><span class="legend-line"></span><span>${unitDisplay}</span></div>` : '';
 	const assetVersion = liveConfig.assetVersion || 'v1';
 	const dataHashAttr = dataHash ? ` data-hash="${dataHash}"` : '';
 
-	// Format stats values with unit
-	const statUnit = unitDisplay ? ' ' + unitDisplay : '';
-	const fmtAvg = typeof dataAvg === 'number' ? formatChartValue(dataAvg) + statUnit : '';
-	const fmtMin = typeof dataMin === 'number' ? formatChartValue(dataMin) + statUnit : '';
-	const fmtMax = typeof dataMax === 'number' ? formatChartValue(dataMax) + statUnit : '';
-	const fmtCur = (period === 'h' && typeof dataCur === 'number') ? formatChartValue(dataCur) + statUnit : '';
-	const curHtml = fmtCur ? `<span class="stat-item" id="statCur"><span class="stat-label">Cur</span> <span class="stat-value">${fmtCur}</span></span>` : '';
-	const statsHtml = fmtAvg ? `<div class="chart-stats" id="chartStats">${curHtml}<span class="stat-item"><span class="stat-label">Avg</span> <span class="stat-value">${fmtAvg}</span></span><span class="stat-item" id="statMin"><span class="stat-label">Min</span> <span class="stat-value">${fmtMin}</span></span><span class="stat-item" id="statMax"><span class="stat-label">Max</span> <span class="stat-value">${fmtMax}</span></span></div>` : '';
+	let legendHtml = '';
+	let statsHtml = '';
+	if (legend !== false) {
+		legendHtml = unitDisplay ? `<div class="chart-legend"><span class="legend-line"></span><span>${unitDisplay}</span></div>` : '';
+		// Format stats values with unit
+		const statUnit = unitDisplay ? ' ' + unitDisplay : '';
+		const fmtAvg = typeof dataAvg === 'number' ? formatChartValue(dataAvg) + statUnit : '';
+		const fmtMin = typeof dataMin === 'number' ? formatChartValue(dataMin) + statUnit : '';
+		const fmtMax = typeof dataMax === 'number' ? formatChartValue(dataMax) + statUnit : '';
+		const fmtCur = (period === 'h' && typeof dataCur === 'number') ? formatChartValue(dataCur) + statUnit : '';
+		const curHtml = fmtCur ? `<span class="stat-item" id="statCur"><span class="stat-label">Cur</span> <span class="stat-value">${fmtCur}</span></span>` : '';
+		statsHtml = fmtAvg ? `<div class="chart-stats" id="chartStats">${curHtml}<span class="stat-item"><span class="stat-label">Avg</span> <span class="stat-value">${fmtAvg}</span></span><span class="stat-item" id="statMin"><span class="stat-label">Min</span> <span class="stat-value">${fmtMin}</span></span><span class="stat-item" id="statMax"><span class="stat-label">Max</span> <span class="stat-value">${fmtMax}</span></span></div>` : '';
+	}
 
 	return `<!DOCTYPE html>
 <html lang="en" data-theme="${theme}"${dataHashAttr}>
@@ -3168,7 +3172,7 @@ window._chartTimeFormat=${JSON.stringify(liveConfig.clientConfig?.timeFormat || 
 </html>`;
 }
 
-function generateChart(item, period, mode, title) {
+function generateChart(item, period, mode, title, legend) {
 	const rrdDir = liveConfig.rrdPath || '';
 	if (!rrdDir) return null;
 
@@ -3216,7 +3220,7 @@ function generateChart(item, period, mode, title) {
 	const dataHash = computeChartDataHash(rawData, period);
 
 	// Generate HTML
-	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg, dataCur, period);
+	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg, dataCur, period, legend);
 }
 
 async function fetchAllPages() {
@@ -7500,6 +7504,8 @@ app.get('/chart', (req, res) => {
 	const rawPeriod = req.query?.period;
 	const rawMode = req.query?.mode;
 	const rawTitle = req.query?.title;
+	const rawLegend = req.query?.legend;
+	const legend = rawLegend === 'false' ? false : true;
 	if (typeof rawItem !== 'string' || typeof rawPeriod !== 'string') {
 		return res.status(400).type('text/plain').send('Invalid item parameter');
 	}
@@ -7533,7 +7539,7 @@ app.get('/chart', (req, res) => {
 	}
 
 	const resolvedTitle = title || item;
-	const cachePath = getChartCachePath(item, period, mode, resolvedTitle);
+	const cachePath = getChartCachePath(item, period, mode, resolvedTitle, legend);
 
 	// Check cache
 	if (isChartCacheValid(cachePath, period)) {
@@ -7550,7 +7556,7 @@ app.get('/chart', (req, res) => {
 
 	// Generate HTML chart from RRD
 	try {
-		const html = generateChart(item, period, mode, resolvedTitle);
+		const html = generateChart(item, period, mode, resolvedTitle, legend);
 		if (!html) {
 			return res.status(404).type('text/plain').send('Chart data not available');
 		}
@@ -7577,6 +7583,8 @@ app.get('/api/chart-hash', (req, res) => {
 	const rawPeriod = req.query?.period;
 	const rawMode = req.query?.mode;
 	const rawTitle = req.query?.title;
+	const rawLegend = req.query?.legend;
+	const legend = rawLegend === 'false' ? false : true;
 	if (typeof rawItem !== 'string' || typeof rawPeriod !== 'string') {
 		return res.status(400).json({ error: 'Invalid item' });
 	}
@@ -7605,7 +7613,7 @@ app.get('/api/chart-hash', (req, res) => {
 		return res.status(400).json({ error: 'Invalid mode' });
 	}
 
-	const cachePath = getChartCachePath(item, period, mode, title);
+	const cachePath = getChartCachePath(item, period, mode, title, legend);
 
 	// Get RRD data for stable hash (not affected by label positioning)
 	const rrdDir = liveConfig.rrdPath || '';
@@ -7649,7 +7657,7 @@ app.get('/api/chart-hash', (req, res) => {
 		}
 
 		// Data changed - regenerate HTML (hash is embedded by generateChart)
-		const html = generateChart(item, period, mode, title);
+		const html = generateChart(item, period, mode, title, legend);
 		if (!html) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Generation failed' });
