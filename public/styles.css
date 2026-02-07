@@ -1132,6 +1132,51 @@ body.theme-dark #themeToggleBtn svg {
 	max-width: 85%;
 }
 
+/* Setpoint card styles */
+.setpoint-card .labelStack {
+	flex: 0 1 auto;
+	min-width: 0;
+}
+.setpoint-card .inline-controls {
+	flex: 0 0 auto;
+	justify-content: flex-end;
+	gap: .375rem;
+}
+.setpoint-card .setpoint-btn {
+	width: 36px;
+	height: 36px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 10px;
+	border-width: var(--glass-border-width);
+	font-size: 1rem;
+	line-height: 1;
+	transition: background-color .2s ease, border-color .2s ease, color .2s ease, box-shadow .2s ease;
+	background-color: var(--color-control-off-bg) !important;
+	border-color: var(--color-control-off-border) !important;
+	color: var(--color-control-off-text) !important;
+	box-shadow: 0 0 8px var(--color-control-off-shadow);
+}
+@media (hover: hover) and (pointer: fine) {
+	.setpoint-card .setpoint-btn:hover {
+		background-color: var(--color-control-off-hover) !important;
+		border-color: var(--color-control-off-border-hover) !important;
+		box-shadow: 0 0 10px var(--color-control-off-shadow-hover);
+	}
+}
+.setpoint-card .setpoint-btn:disabled {
+	opacity: .4;
+	pointer-events: none;
+}
+.setpoint-card .setpoint-value {
+	min-width: 2.5rem;
+	text-align: center;
+	font-size: .8rem;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
 /* Slider card styles */
 .slider-card .labelRow {
 	justify-content: flex-start;
