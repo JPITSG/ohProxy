@@ -4880,6 +4880,8 @@ function applyDeltaChanges(changes) {
 					if (w.mappings) w.mappings = change.mapping;
 					else w.mapping = change.mapping;
 				}
+				if (change.labelcolor !== undefined) w.labelcolor = change.labelcolor;
+				if (change.valuecolor !== undefined) w.valuecolor = change.valuecolor;
 				updated = true;
 			}
 		}
@@ -4922,6 +4924,8 @@ function syncDeltaToCache(pageUrl, changes) {
 					if (w.mappings) w.mappings = change.mapping;
 					else w.mapping = change.mapping;
 				}
+				if (change.labelcolor !== undefined) w.labelcolor = change.labelcolor;
+				if (change.valuecolor !== undefined) w.valuecolor = change.valuecolor;
 			}
 			// Recurse into nested widgets (Frames, etc.)
 			if (w.widget) updateWidgets(w.widget);
@@ -5355,6 +5359,8 @@ function getWidgetRenderInfo(w) {
 	const cardWidthConfig = widgetCardWidthMap.get(wKey) || 'standard';
 	const videoConfig = isVideo ? widgetVideoConfigMap.get(wKey) : null;
 	const defaultMutedConfig = videoConfig ? String(videoConfig.defaultMuted) : '';
+	const labelcolor = safeText(w?.labelcolor || '');
+	const valuecolor = safeText(w?.valuecolor || '');
 	const signature = [
 		type,
 		label,
@@ -5378,6 +5384,8 @@ function getWidgetRenderInfo(w) {
 		frame,
 		cardWidthConfig,
 		defaultMutedConfig,
+		labelcolor,
+		valuecolor,
 	].join('||');
 	return {
 		type,
@@ -5404,6 +5412,8 @@ function getWidgetRenderInfo(w) {
 		videoUrl,
 		videoHeight,
 		rawVideoUrl,
+		labelcolor,
+		valuecolor,
 		signature,
 	};
 }
@@ -5546,6 +5556,13 @@ function updateCard(card, w, info) {
 		metaEl.textContent = labelParts.state;
 	}
 	if (labelParts.state && !isSelection && !isSwitchType && !isSetpoint) card.classList.add('has-meta');
+	// Apply openHAB labelcolor / valuecolor
+	const lc = data.labelcolor;
+	const vc = data.valuecolor;
+	const lcRgb = lc ? resolveColorToRgb(lc) : null;
+	const vcRgb = vc ? resolveColorToRgb(vc) : null;
+	titleEl.style.color = lcRgb ? `rgb(${lcRgb.r},${lcRgb.g},${lcRgb.b})` : '';
+	metaEl.style.color = vcRgb ? `rgb(${vcRgb.r},${vcRgb.g},${vcRgb.b})` : '';
 	// Apply glow from ohProxy rules
 	const glowColor = getWidgetGlowOverride(widgetKey(w), labelParts.state || st);
 	if (glowColor) {

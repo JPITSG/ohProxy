@@ -4501,6 +4501,8 @@ function widgetSnapshot(widget) {
 		icon: widgetIconName(widget),
 		mappings: mappingSig,
 		mapping: mappingSig ? normalizeMappings(widgetMapping) : [],
+		labelcolor: safeText(widget?.labelcolor || ''),
+		valuecolor: safeText(widget?.valuecolor || ''),
 	};
 }
 
@@ -4605,6 +4607,8 @@ function buildSnapshot(page) {
 			state: e.state,
 			icon: e.icon,
 			mappings: e.mappings,
+			labelcolor: e.labelcolor,
+			valuecolor: e.valuecolor,
 		})),
 	}));
 
@@ -4829,7 +4833,9 @@ async function computeDeltaResponse(url, since) {
 			prev.label !== current.label ||
 			prev.state !== current.state ||
 			prev.icon !== current.icon ||
-			prev.mappings !== current.mappings
+			prev.mappings !== current.mappings ||
+			prev.labelcolor !== current.labelcolor ||
+			prev.valuecolor !== current.valuecolor
 		) {
 			changes.push(current);
 		}
@@ -7380,7 +7386,9 @@ app.use('/rest', async (req, res, next) => {
 			prev.label !== current.label ||
 			prev.state !== current.state ||
 			prev.icon !== current.icon ||
-			prev.mappings !== current.mappings
+			prev.mappings !== current.mappings ||
+			prev.labelcolor !== current.labelcolor ||
+			prev.valuecolor !== current.valuecolor
 		) {
 			changes.push(current);
 		}
