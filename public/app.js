@@ -2027,6 +2027,8 @@ function chartWidgetUrl(widget) {
 	const title = labelParts.title || '';
 	let url = `chart?item=${encodeURIComponent(itemName)}&period=${encodeURIComponent(period)}&mode=${mode}`;
 	if (title) url += `&title=${encodeURIComponent(title)}`;
+	const legend = widget?.legend;
+	if (legend === false || legend === 'false') url += '&legend=false';
 	return url;
 }
 
@@ -7544,8 +7546,10 @@ async function checkChartHashes() {
 			const prevHash = chartHashes.get(cacheKey) || null;
 
 			try {
+				const legend = urlObj.searchParams.get('legend');
 				const hashUrl = `/api/chart-hash?item=${encodeURIComponent(item)}&period=${period}&mode=${mode}` +
-					(title ? `&title=${encodeURIComponent(title)}` : '');
+					(title ? `&title=${encodeURIComponent(title)}` : '') +
+					(legend === 'false' ? '&legend=false' : '');
 				const res = await fetch(hashUrl, { cache: 'no-store' });
 				if (!res.ok) continue;
 				const data = await res.json();
