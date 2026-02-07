@@ -6476,6 +6476,7 @@ function updateCard(card, w, info) {
 		const sliderMax = Number.isFinite(Number(w?.maxValue)) ? Number(w.maxValue) : 100;
 		const sliderStep = Number.isFinite(Number(w?.step)) && Number(w.step) > 0 ? Number(w.step) : 1;
 		const releaseOnly = w?.releaseOnly === true || w?.releaseOnly === 'true';
+		const switchSupport = w?.switchSupport === true || w?.switchSupport === 'true';
 		const val = parseFloat(st);
 		const current = Number.isFinite(val) ? Math.max(sliderMin, Math.min(sliderMax, val)) : sliderMin;
 
@@ -6730,21 +6731,23 @@ function updateCard(card, w, info) {
 			animateSliderValue(input, current, valueBubble, positionBubble);
 		}
 
-		const toggleSlider = async () => {
-			haptic();
-			const next = current > sliderMin ? sliderMin : sliderMax;
-			try { await sendCommand(itemName, String(next)); await refresh(false); }
-			catch (e) {
-				logJsError(`toggleSlider failed for ${itemName}`, e);
-				alert(e.message);
-			}
-		};
-		card.classList.add('cursor-pointer');
-		card.onclick = (e) => {
-			if (e.target.closest('button, a, input, select, textarea')) return;
-			haptic();
-			toggleSlider();
-		};
+		if (switchSupport) {
+			const toggleSlider = async () => {
+				haptic();
+				const next = current > sliderMin ? sliderMin : sliderMax;
+				try { await sendCommand(itemName, String(next)); await refresh(false); }
+				catch (e) {
+					logJsError(`toggleSlider failed for ${itemName}`, e);
+					alert(e.message);
+				}
+			};
+			card.classList.add('cursor-pointer');
+			card.onclick = (e) => {
+				if (e.target.closest('button, a, input, select, textarea')) return;
+				haptic();
+				toggleSlider();
+			};
+		}
 
 		// Extra buttons for rollershutter-like controls
 		if (t.includes('roller') || t.includes('rollershutter')) {
