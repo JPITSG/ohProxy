@@ -5454,6 +5454,16 @@ function updateCard(card, w, info) {
 	} = data;
 
 	card.dataset.widgetKey = widgetKey(w);
+	// Keep existing slider interactions intact while a drag is active.
+	const isSliderType = t.includes('dimmer') || t.includes('roller') || t.includes('slider');
+	const existingSliderWrap = isSliderType ? labelRow.querySelector('.inline-slider') : null;
+	const existingSliderInput = existingSliderWrap ? existingSliderWrap.querySelector('input[type="range"]') : null;
+	const previousSliderValue = existingSliderInput ? Number(existingSliderInput.value) : null;
+	const sliderIsDragging = existingSliderWrap && existingSliderWrap.dataset.dragging === 'true';
+	if (sliderIsDragging) {
+		card.classList.add('slider-card');
+		return true;
+	}
 	card.dataset.renderSig = signature;
 
 	resetCardInteractions(card);
@@ -5506,20 +5516,12 @@ function updateCard(card, w, info) {
 	labelRow.classList.remove('hidden');
 	if (iconWrap) iconWrap.classList.remove('hidden');
 	navHint.classList.add('hidden');
-	// Capture slider state before removal for smooth transition animation
-	const isSliderType = t.includes('dimmer') || t.includes('roller') || t.includes('slider');
-	const existingSliderWrap = isSliderType ? labelRow.querySelector('.inline-slider') : null;
-	const existingSliderInput = existingSliderWrap ? existingSliderWrap.querySelector('input[type="range"]') : null;
-	const previousSliderValue = existingSliderInput ? Number(existingSliderInput.value) : null;
-	// If user is actively dragging the slider, preserve it entirely (don't interrupt drag)
-	const sliderIsDragging = existingSliderWrap && existingSliderWrap.dataset.dragging === 'true';
 	// Capture switch controls for smooth state transitions
 	const isSwitchType = t.includes('switch') || t === 'switch';
 	const existingSwitchControls = isSwitchType ? labelRow.querySelector('.inline-controls') : null;
 	// Determine what to preserve
 	let preserveElement = null;
-	if (sliderIsDragging) preserveElement = existingSliderWrap;
-	else if (existingSwitchControls) preserveElement = existingSwitchControls;
+	if (existingSwitchControls) preserveElement = existingSwitchControls;
 	resetLabelRow(labelRow, labelStack, navHint, preserveElement);
 	removeOverlaySelects(card);
 
@@ -6366,12 +6368,6 @@ function updateCard(card, w, info) {
 			};
 		}
 	} else if (t.includes('dimmer') || t.includes('roller') || t.includes('slider')) {
-		// If user is actively dragging, skip recreation entirely to preserve drag
-		if (sliderIsDragging) {
-			card.classList.add('slider-card');
-			return true;
-		}
-
 		const sliderMin = Number.isFinite(Number(w?.minValue)) ? Number(w.minValue) : 0;
 		const sliderMax = Number.isFinite(Number(w?.maxValue)) ? Number(w.maxValue) : 100;
 		const sliderStep = Number.isFinite(Number(w?.step)) && Number(w.step) > 0 ? Number(w.step) : 1;
@@ -6542,23 +6538,56 @@ function updateCard(card, w, info) {
 			// Refresh after slider change to pick up visibility changes in sitemap
 			setTimeout(() => refresh(false), 150);
 		});
-		const startDrag = () => {
-			holdSliderRefresh();
-			inlineSlider.dataset.dragging = 'true';
+		let dragReleaseController = null;
+		let activePointerId = null;
+		const detachGlobalDragListeners = () => {
+			if (!dragReleaseController) return;
+			dragReleaseController.abort();
+			dragReleaseController = null;
 		};
-		const endDrag = () => {
+		const attachGlobalDragListeners = () => {
+			if (dragReleaseController) return;
+			dragReleaseController = new AbortController();
+			window.addEventListener('mouseup', endDrag, { signal: dragReleaseController.signal });
+			window.addEventListener('touchend', endDrag, { passive: true, signal: dragReleaseController.signal });
+			window.addEventListener('touchcancel', endDrag, { passive: true, signal: dragReleaseController.signal });
+			window.addEventListener('pointerup', endDrag, { signal: dragReleaseController.signal });
+			window.addEventListener('pointercancel', endDrag, { signal: dragReleaseController.signal });
+			window.addEventListener('blur', endDrag, { signal: dragReleaseController.signal });
+		};
+		const endDrag = (e) => {
 			releaseSliderRefresh();
 			delete inlineSlider.dataset.dragging;
+			const pointerId = (e && typeof e.pointerId === 'number') ? e.pointerId : activePointerId;
+			if (pointerId !== null && typeof input.releasePointerCapture === 'function') {
+				try { input.releasePointerCapture(pointerId); } catch {}
+			}
+			activePointerId = null;
+			detachGlobalDragListeners();
+		};
+		const startDrag = (e) => {
+			holdSliderRefresh();
+			inlineSlider.dataset.dragging = 'true';
+			const pointerId = e && typeof e.pointerId === 'number' ? e.pointerId : null;
+			activePointerId = pointerId;
+			if (pointerId !== null && typeof input.setPointerCapture === 'function') {
+				try { input.setPointerCapture(pointerId); } catch {}
+			}
+			attachGlobalDragListeners();
 		};
 		input.addEventListener('pointerdown', startDrag);
 		input.addEventListener('pointerup', endDrag);
 		input.addEventListener('pointercancel', endDrag);
+		input.addEventListener('lostpointercapture', endDrag);
 		input.addEventListener('touchstart', startDrag, { passive: true });
 		input.addEventListener('touchend', endDrag, { passive: true });
 		input.addEventListener('touchcancel', endDrag, { passive: true });
 		input.addEventListener('mousedown', startDrag);
 		input.addEventListener('mouseup', endDrag);
 		input.addEventListener('blur', endDrag);
+		registerCardCleanup(card, () => {
+			endDrag();
+		});
 
 		const valueBubble = document.createElement('span');
 		valueBubble.className = 'slider-bubble';
