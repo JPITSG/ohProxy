@@ -245,21 +245,24 @@ function createValidationTestApp() {
 	});
 
 	// Chart endpoint with strict validation
-	app.get('/chart', (req, res) => {
-		const rawItem = req.query?.item;
-		const rawPeriod = req.query?.period;
-		const rawMode = req.query?.mode;
-		const rawTitle = req.query?.title;
-		if (typeof rawItem !== 'string' || typeof rawPeriod !== 'string') {
-			return res.status(400).send('Invalid item parameter');
-		}
-		if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
-			return res.status(400).send('Invalid mode parameter');
-		}
-		const item = rawItem.trim();
-		const period = rawPeriod.trim();
-		const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
-		const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+		app.get('/chart', (req, res) => {
+			const rawItem = req.query?.item;
+			const rawPeriod = req.query?.period;
+			const rawMode = req.query?.mode;
+			const rawTitle = req.query?.title;
+			if (typeof rawItem !== 'string') {
+				return res.status(400).send('Invalid item parameter');
+			}
+			if (rawPeriod !== undefined && typeof rawPeriod !== 'string') {
+				return res.status(400).send('Invalid period parameter');
+			}
+			if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
+				return res.status(400).send('Invalid mode parameter');
+			}
+			const item = rawItem.trim();
+			const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
+			const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
+			const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
 		if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 			return res.status(400).send('Invalid parameters');
 		}
@@ -568,6 +571,13 @@ describe('Parameter Validation Security Tests', () => {
 
 		it('accepts valid parameters', async () => {
 			const res = await fetch(`${baseUrl}/chart?item=Temperature_Living&period=D&mode=light&title=Living`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('defaults period to h when omitted', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Temperature_Living&mode=dark`, {
 				headers: { 'Authorization': authHeader },
 			});
 			assert.strictEqual(res.status, 200);

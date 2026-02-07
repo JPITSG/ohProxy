@@ -400,21 +400,24 @@ function createExtraValidationTestApp() {
 		return res.json({ delta: true, since });
 	});
 
-	app.get('/chart', (req, res) => {
-		const rawItem = req.query?.item;
-		const rawPeriod = req.query?.period;
-		const rawMode = req.query?.mode;
-		const rawTitle = req.query?.title;
-		if (typeof rawItem !== 'string' || typeof rawPeriod !== 'string') {
-			return res.status(400).send('Invalid item parameter');
-		}
-		if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
-			return res.status(400).send('Invalid mode parameter');
-		}
-		const item = rawItem.trim();
-		const period = rawPeriod.trim();
-		const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
-		const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+		app.get('/chart', (req, res) => {
+			const rawItem = req.query?.item;
+			const rawPeriod = req.query?.period;
+			const rawMode = req.query?.mode;
+			const rawTitle = req.query?.title;
+			if (typeof rawItem !== 'string') {
+				return res.status(400).send('Invalid item parameter');
+			}
+			if (rawPeriod !== undefined && typeof rawPeriod !== 'string') {
+				return res.status(400).send('Invalid period parameter');
+			}
+			if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
+				return res.status(400).send('Invalid mode parameter');
+			}
+			const item = rawItem.trim();
+			const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
+			const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
+			const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
 		if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 			return res.status(400).send('Invalid parameters');
 		}
@@ -433,21 +436,24 @@ function createExtraValidationTestApp() {
 		return res.json({ ok: true });
 	});
 
-	app.get('/api/chart-hash', (req, res) => {
-		const rawItem = req.query?.item;
-		const rawPeriod = req.query?.period;
-		const rawMode = req.query?.mode;
-		const rawTitle = req.query?.title;
-		if (typeof rawItem !== 'string' || typeof rawPeriod !== 'string') {
-			return res.status(400).json({ error: 'Invalid item' });
-		}
-		if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
-			return res.status(400).json({ error: 'Invalid mode' });
-		}
-		const item = rawItem.trim();
-		const period = rawPeriod.trim();
-		const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
-		const title = (typeof rawTitle === 'string' ? rawTitle.trim() : '') || item;
+		app.get('/api/chart-hash', (req, res) => {
+			const rawItem = req.query?.item;
+			const rawPeriod = req.query?.period;
+			const rawMode = req.query?.mode;
+			const rawTitle = req.query?.title;
+			if (typeof rawItem !== 'string') {
+				return res.status(400).json({ error: 'Invalid item' });
+			}
+			if (rawPeriod !== undefined && typeof rawPeriod !== 'string') {
+				return res.status(400).json({ error: 'Invalid period' });
+			}
+			if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
+				return res.status(400).json({ error: 'Invalid mode' });
+			}
+			const item = rawItem.trim();
+			const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
+			const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
+			const title = (typeof rawTitle === 'string' ? rawTitle.trim() : '') || item;
 		if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 			return res.status(400).json({ error: 'Invalid parameters' });
 		}
@@ -872,6 +878,11 @@ describe('Extra Validation Coverage', () => {
 			assert.strictEqual(res.status, 200);
 		});
 
+		it('defaults chart period to h when omitted', async () => {
+			const res = await get('/chart?item=Temp_Sensor&mode=dark');
+			assert.strictEqual(res.status, 200);
+		});
+
 		it('rejects chart-hash empty item', async () => {
 			const res = await get('/api/chart-hash?item=&period=h');
 			assert.strictEqual(res.status, 400);
@@ -890,6 +901,11 @@ describe('Extra Validation Coverage', () => {
 
 		it('accepts chart-hash valid parameters', async () => {
 			const res = await get('/api/chart-hash?item=Temp_Sensor&period=D&mode=light');
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('defaults chart-hash period to h when omitted', async () => {
+			const res = await get('/api/chart-hash?item=Temp_Sensor&mode=light');
 			assert.strictEqual(res.status, 200);
 		});
 	});
