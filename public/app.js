@@ -1842,10 +1842,8 @@ function matchesGlowRule(rule, stateValue) {
 	switch (op) {
 		case '*': return true; // catch-all
 		case '=':
-			if (bothNumeric) return stateNum === ruleNum;
 			return stateStr === ruleStr;
 		case '!=':
-			if (bothNumeric) return stateNum !== ruleNum;
 			return stateStr !== ruleStr;
 		case '>':  return bothNumeric && stateNum > ruleNum;
 		case '<':  return bothNumeric && stateNum < ruleNum;
