@@ -1189,6 +1189,61 @@ body.theme-dark #themeToggleBtn svg {
 	white-space: nowrap;
 }
 
+/* Colortemperaturepicker styles */
+.colortemperaturepicker-card {
+	position: relative;
+}
+.colortemperaturepicker-card .inline-slider {
+	flex: 0 0 60%;
+	max-width: 60%;
+}
+.colortemperaturepicker-card .ctp-inline-slider {
+	accent-color: transparent;
+	appearance: none;
+	-webkit-appearance: none;
+	height: 16px;
+	border: none;
+	background: transparent;
+	padding: 0;
+}
+.colortemperaturepicker-card .ctp-inline-slider::-webkit-slider-runnable-track {
+	height: 8px;
+	border-radius: 999px;
+	border: 0;
+	background: linear-gradient(90deg, #b8d6ff 0%, #edf4ff 35%, #fff2d7 70%, #ffcf8a 100%);
+	box-shadow: inset 0 1px 2px rgba(0, 0, 0, .22);
+}
+.colortemperaturepicker-card .ctp-inline-slider::-webkit-slider-thumb {
+	appearance: none;
+	-webkit-appearance: none;
+	width: 16px;
+	height: 16px;
+	margin-top: -4px;
+	border-radius: 999px;
+	background: var(--ctp-thumb-color, #fff);
+	border: 1px solid rgba(0, 0, 0, .22);
+	box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+}
+.colortemperaturepicker-card .ctp-inline-slider::-moz-range-track {
+	height: 8px;
+	border-radius: 999px;
+	border: 0;
+	background: linear-gradient(90deg, #b8d6ff 0%, #edf4ff 35%, #fff2d7 70%, #ffcf8a 100%);
+	box-shadow: inset 0 1px 2px rgba(0, 0, 0, .22);
+}
+.colortemperaturepicker-card .ctp-inline-slider::-moz-range-progress {
+	background: transparent;
+}
+.colortemperaturepicker-card .ctp-inline-slider::-moz-range-thumb {
+	width: 16px;
+	height: 16px;
+	border-radius: 999px;
+	background: var(--ctp-thumb-color, #fff);
+	border: 1px solid rgba(0, 0, 0, .22);
+	box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+	transform: translateY(-1px);
+}
+
 /* Slider card styles */
 .slider-card .labelRow {
 	justify-content: flex-start;

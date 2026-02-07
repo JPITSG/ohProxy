@@ -5495,13 +5495,14 @@ function updateCard(card, w, info) {
 
 	card.dataset.widgetKey = widgetKey(w);
 	// Keep existing slider interactions intact while a drag is active.
-	const isSliderType = t.includes('dimmer') || t.includes('roller') || t.includes('slider');
+	const isSliderType = t === 'colortemperaturepicker' || t.includes('dimmer') || t.includes('roller') || t.includes('slider');
 	const existingSliderWrap = isSliderType ? labelRow.querySelector('.inline-slider') : null;
 	const existingSliderInput = existingSliderWrap ? existingSliderWrap.querySelector('input[type="range"]') : null;
 	const previousSliderValue = existingSliderInput ? Number(existingSliderInput.value) : null;
 	const sliderIsDragging = existingSliderWrap && existingSliderWrap.dataset.dragging === 'true';
 	if (sliderIsDragging) {
 		card.classList.add('slider-card');
+		if (t === 'colortemperaturepicker') card.classList.add('colortemperaturepicker-card');
 		return true;
 	}
 	card.dataset.renderSig = signature;
@@ -5514,6 +5515,7 @@ function updateCard(card, w, info) {
 	card.classList.remove(
 		'nav-card',
 		'selection-card',
+		'colortemperaturepicker-card',
 		'switch-card',
 		'slider-card',
 		'image-card',
@@ -5522,6 +5524,7 @@ function updateCard(card, w, info) {
 		'webview-card',
 		'video-card',
 		'menu-open',
+		'menu-above',
 		'cursor-pointer',
 		'has-meta',
 		'switch-many',
@@ -5559,6 +5562,7 @@ function updateCard(card, w, info) {
 	// Capture switch controls for smooth state transitions
 	const isSwitchType = t.includes('switch') || t === 'switch';
 	const isSetpoint = t === 'setpoint';
+	const isColorTemperaturePicker = t === 'colortemperaturepicker';
 	const existingSwitchControls = isSwitchType ? labelRow.querySelector('.inline-controls') : null;
 	// Determine what to preserve
 	let preserveElement = null;
@@ -5581,11 +5585,13 @@ function updateCard(card, w, info) {
 	titleEl.textContent = labelParts.title;
 	if (isText || isGroup) {
 		crossfadeText(metaEl, labelParts.state);
-	} else if (!isSelection && !isSwitchType && !isSetpoint) {
-		// Don't show meta text for Selection/Switch/Setpoint - their controls already show the value
+	} else if (!isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker) {
+		// Don't show meta text for Selection/Switch/Setpoint/Colortemperaturepicker.
 		metaEl.textContent = labelParts.state;
+	} else if (isColorTemperaturePicker) {
+		metaEl.textContent = '';
 	}
-	if (labelParts.state && !isSelection && !isSwitchType && !isSetpoint) card.classList.add('has-meta');
+	if (labelParts.state && !isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker) card.classList.add('has-meta');
 	// Apply openHAB labelcolor / valuecolor
 	const lc = data.labelcolor;
 	const vc = data.valuecolor;
@@ -6479,6 +6485,240 @@ function updateCard(card, w, info) {
 		inlineControls.appendChild(minus);
 		inlineControls.appendChild(display);
 		inlineControls.appendChild(plus);
+	} else if (t === 'colortemperaturepicker') {
+		let ctMin = Number.isFinite(Number(w?.minValue)) ? Number(w.minValue) : 0;
+		let ctMax = Number.isFinite(Number(w?.maxValue)) ? Number(w.maxValue) : 100;
+		const ctStep = Number.isFinite(Number(w?.step)) && Number(w.step) > 0 ? Number(w.step) : 1;
+		if (ctMax < ctMin) {
+			const swap = ctMin;
+			ctMin = ctMax;
+			ctMax = swap;
+		}
+		if (ctMax <= ctMin) ctMax = ctMin + ctStep;
+		const val = parseFloat(st);
+		const current = Number.isFinite(val) ? Math.max(ctMin, Math.min(ctMax, val)) : ctMin;
+
+		const inlineSlider = document.createElement('div');
+		inlineSlider.className = 'inline-slider flex items-center min-w-0';
+		card.classList.add('slider-card', 'colortemperaturepicker-card');
+		if (navHint && navHint.parentElement === labelRow) {
+			labelRow.insertBefore(inlineSlider, navHint);
+		} else {
+			labelRow.appendChild(inlineSlider);
+		}
+
+		const input = document.createElement('input');
+		input.type = 'range';
+		input.min = String(ctMin);
+		input.max = String(ctMax);
+		input.step = String(ctStep);
+		const startRaw = (previousSliderValue !== null && Number.isFinite(previousSliderValue))
+			? previousSliderValue : current;
+		const startValue = Math.max(ctMin, Math.min(ctMax, startRaw));
+		input.value = String(startValue);
+		input.className = 'w-full ctp-inline-slider';
+
+		let sliderHeld = false;
+		const releaseSliderRefresh = () => {
+			if (!sliderHeld) return;
+			sliderHeld = false;
+			state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
+			if (state.pendingRefresh) {
+				state.pendingRefresh = false;
+				refresh(false);
+			}
+		};
+
+		const holdSliderRefresh = () => {
+			if (sliderHeld) return;
+			sliderHeld = true;
+			state.suppressRefreshCount += 1;
+		};
+
+		let lastSentValue = current;
+		let lastSentAt = 0;
+		let pendingValue = null;
+		let sendTimer = null;
+
+		const sendValue = async (value, options = {}) => {
+			const force = options.force === true;
+			const next = Math.max(ctMin, Math.min(ctMax, value));
+			if (!force && next === lastSentValue) return;
+			lastSentValue = next;
+			lastSentAt = Date.now();
+			try { await sendCommand(itemName, String(next), { optimistic: true }); }
+			catch (e) {
+				lastSentValue = null;
+				logJsError(`sendColorTemperature failed for ${itemName}`, e);
+				console.error(e);
+			}
+		};
+
+		const queueSend = (value, immediate, options = {}) => {
+			pendingValue = Math.max(ctMin, Math.min(ctMax, value));
+			if (sendTimer) return;
+			const now = Date.now();
+			const delay = immediate ? 0 : Math.max(0, SLIDER_DEBOUNCE_MS - (now - lastSentAt));
+			sendTimer = setTimeout(() => {
+				sendTimer = null;
+				const next = pendingValue;
+				const opts = options || {};
+				pendingValue = null;
+				if (next === null) return;
+				void sendValue(next, opts);
+			}, delay);
+		};
+
+		const flushSend = () => {
+			if (sendTimer) {
+				clearTimeout(sendTimer);
+				sendTimer = null;
+			}
+			const next = pendingValue;
+			pendingValue = null;
+			if (next === null) return;
+			void sendValue(next, { force: true });
+		};
+
+		input.addEventListener('input', () => {
+			const value = Number(input.value);
+			if (!Number.isFinite(value)) return;
+			queueSend(value, false);
+		});
+		input.addEventListener('change', () => {
+			flushSend();
+			releaseSliderRefresh();
+			setTimeout(() => refresh(false), 150);
+		});
+		let dragReleaseController = null;
+		let activePointerId = null;
+		const detachGlobalDragListeners = () => {
+			if (!dragReleaseController) return;
+			dragReleaseController.abort();
+			dragReleaseController = null;
+		};
+		const attachGlobalDragListeners = () => {
+			if (dragReleaseController) return;
+			dragReleaseController = new AbortController();
+			window.addEventListener('mouseup', endDrag, { signal: dragReleaseController.signal });
+			window.addEventListener('touchend', endDrag, { passive: true, signal: dragReleaseController.signal });
+			window.addEventListener('touchcancel', endDrag, { passive: true, signal: dragReleaseController.signal });
+			window.addEventListener('pointerup', endDrag, { signal: dragReleaseController.signal });
+			window.addEventListener('pointercancel', endDrag, { signal: dragReleaseController.signal });
+			window.addEventListener('blur', endDrag, { signal: dragReleaseController.signal });
+		};
+		const endDrag = (e) => {
+			releaseSliderRefresh();
+			delete inlineSlider.dataset.dragging;
+			const pointerId = (e && typeof e.pointerId === 'number') ? e.pointerId : activePointerId;
+			if (pointerId !== null && typeof input.releasePointerCapture === 'function') {
+				try { input.releasePointerCapture(pointerId); } catch {}
+			}
+			activePointerId = null;
+			detachGlobalDragListeners();
+		};
+		const startDrag = (e) => {
+			holdSliderRefresh();
+			inlineSlider.dataset.dragging = 'true';
+			const pointerId = e && typeof e.pointerId === 'number' ? e.pointerId : null;
+			activePointerId = pointerId;
+			if (pointerId !== null && typeof input.setPointerCapture === 'function') {
+				try { input.setPointerCapture(pointerId); } catch {}
+			}
+			attachGlobalDragListeners();
+		};
+		input.addEventListener('pointerdown', startDrag);
+		input.addEventListener('pointerup', endDrag);
+		input.addEventListener('pointercancel', endDrag);
+		input.addEventListener('lostpointercapture', endDrag);
+		input.addEventListener('touchstart', startDrag, { passive: true });
+		input.addEventListener('touchend', endDrag, { passive: true });
+		input.addEventListener('touchcancel', endDrag, { passive: true });
+		input.addEventListener('mousedown', startDrag);
+		input.addEventListener('mouseup', endDrag);
+		input.addEventListener('blur', endDrag);
+		registerCardCleanup(card, () => {
+			endDrag();
+		});
+
+		const formatCtValue = (value) => {
+			const rounded = Math.round(Number(value) * 100) / 100;
+			if (!Number.isFinite(rounded)) return '\u2014';
+			return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+		};
+		const formatCtValueWithUnit = (value) => {
+			const base = formatCtValue(value);
+			if (base === '\u2014') return base;
+			return `${base} K`;
+		};
+		const colorStops = [
+			{ pos: 0, rgb: [184, 214, 255] },
+			{ pos: 0.35, rgb: [237, 244, 255] },
+			{ pos: 0.7, rgb: [255, 242, 215] },
+			{ pos: 1, rgb: [255, 207, 138] },
+		];
+		const setThumbColor = (value) => {
+			const min = Number(input.min) || 0;
+			const max = Number(input.max) || 100;
+			const range = max - min;
+			const norm = range > 0 ? (Number(value) - min) / range : 0;
+			const tNorm = Math.max(0, Math.min(1, norm));
+			let left = colorStops[0];
+			let right = colorStops[colorStops.length - 1];
+			for (let i = 0; i < colorStops.length - 1; i += 1) {
+				const a = colorStops[i];
+				const b = colorStops[i + 1];
+				if (tNorm >= a.pos && tNorm <= b.pos) {
+					left = a;
+					right = b;
+					break;
+				}
+			}
+			const localRange = Math.max(0.000001, right.pos - left.pos);
+			const localT = Math.max(0, Math.min(1, (tNorm - left.pos) / localRange));
+			const r = Math.round(left.rgb[0] + (right.rgb[0] - left.rgb[0]) * localT);
+			const g = Math.round(left.rgb[1] + (right.rgb[1] - left.rgb[1]) * localT);
+			const b = Math.round(left.rgb[2] + (right.rgb[2] - left.rgb[2]) * localT);
+			input.style.setProperty('--ctp-thumb-color', `rgb(${r}, ${g}, ${b})`);
+		};
+
+		const valueBubble = document.createElement('span');
+		valueBubble.className = 'slider-bubble';
+		valueBubble.textContent = formatCtValueWithUnit(current);
+		inlineSlider.appendChild(input);
+		inlineSlider.appendChild(valueBubble);
+
+		const positionBubble = () => {
+			const sliderValue = Number(input.value);
+			const min = Number(input.min) || 0;
+			const max = Number(input.max) || 100;
+			const pct = (sliderValue - min) / (max - min);
+			const thumbWidth = 16;
+			const trackWidth = input.offsetWidth - thumbWidth;
+			const offset = thumbWidth / 2 + pct * trackWidth;
+			valueBubble.style.left = offset + 'px';
+		};
+			const updateCtpVisuals = () => {
+				valueBubble.textContent = formatCtValueWithUnit(input.value);
+				positionBubble();
+				setThumbColor(input.value);
+			};
+			requestAnimationFrame(updateCtpVisuals);
+			input.addEventListener('input', updateCtpVisuals);
+			const ctpResizeController = new AbortController();
+			window.addEventListener('resize', updateCtpVisuals, { signal: ctpResizeController.signal });
+			let ctpResizeObserver = null;
+			if (typeof ResizeObserver === 'function') {
+				ctpResizeObserver = new ResizeObserver(() => updateCtpVisuals());
+				ctpResizeObserver.observe(input);
+			}
+			registerCardCleanup(card, () => {
+				ctpResizeController.abort();
+				if (ctpResizeObserver) ctpResizeObserver.disconnect();
+			});
+			if (startValue !== current) {
+				animateSliderValue(input, current, null, updateCtpVisuals);
+			}
 	} else if (t.includes('dimmer') || t.includes('roller') || t.includes('slider')) {
 		const sliderMin = Number.isFinite(Number(w?.minValue)) ? Number(w.minValue) : 0;
 		const sliderMax = Number.isFinite(Number(w?.maxValue)) ? Number(w.maxValue) : 100;
@@ -6715,29 +6955,41 @@ function updateCard(card, w, info) {
 		inlineSlider.appendChild(valueBubble);
 
 		// Position bubble above thumb (account for thumb width ~16px)
-		const positionBubble = () => {
-			const val = Number(input.value);
-			const min = Number(input.min) || 0;
-			const max = Number(input.max) || 100;
-			const pct = (val - min) / (max - min);
-			const thumbWidth = 16;
-			const trackWidth = input.offsetWidth - thumbWidth;
-			const offset = thumbWidth / 2 + pct * trackWidth;
-			valueBubble.style.left = offset + 'px';
-		};
-		// Defer initial positioning until element is rendered
-		requestAnimationFrame(positionBubble);
+			const positionBubble = () => {
+				const val = Number(input.value);
+				const min = Number(input.min) || 0;
+				const max = Number(input.max) || 100;
+				const pct = (val - min) / (max - min);
+				const thumbWidth = 16;
+				const trackWidth = input.offsetWidth - thumbWidth;
+				const offset = thumbWidth / 2 + pct * trackWidth;
+				valueBubble.style.left = offset + 'px';
+			};
+			const updateSliderVisuals = () => {
+				valueBubble.textContent = input.value;
+				positionBubble();
+			};
+			// Defer initial positioning until element is rendered
+			requestAnimationFrame(updateSliderVisuals);
 
-		// Update label and position when slider value changes
-		input.addEventListener('input', () => {
-			valueBubble.textContent = input.value;
-			positionBubble();
-		});
+			// Update label and position when slider value changes
+			input.addEventListener('input', updateSliderVisuals);
+			const sliderResizeController = new AbortController();
+			window.addEventListener('resize', updateSliderVisuals, { signal: sliderResizeController.signal });
+			let sliderResizeObserver = null;
+			if (typeof ResizeObserver === 'function') {
+				sliderResizeObserver = new ResizeObserver(() => updateSliderVisuals());
+				sliderResizeObserver.observe(input);
+			}
+			registerCardCleanup(card, () => {
+				sliderResizeController.abort();
+				if (sliderResizeObserver) sliderResizeObserver.disconnect();
+			});
 
-		// Animate slider from previous value to current value
-		if (startValue !== current) {
-			animateSliderValue(input, current, valueBubble, positionBubble);
-		}
+			// Animate slider from previous value to current value
+			if (startValue !== current) {
+				animateSliderValue(input, current, valueBubble, positionBubble);
+			}
 
 		if (switchSupport) {
 			const toggleSlider = async () => {
