@@ -349,6 +349,18 @@ html:not(.slim) .has-meta .labelStack {
 .iconWrap img.icon-ready {
 	opacity: .9;
 }
+.iconMask {
+	position: absolute;
+	width: 2.25rem;
+	height: 2.25rem;
+	opacity: .5;
+	mask-size: contain;
+	mask-repeat: no-repeat;
+	mask-position: center;
+	-webkit-mask-size: contain;
+	-webkit-mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+}
 
 /* Glow effect for special cards */
 .glow-card .labelStack {

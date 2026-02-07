@@ -4882,6 +4882,7 @@ function applyDeltaChanges(changes) {
 				}
 				if (change.labelcolor !== undefined) w.labelcolor = change.labelcolor;
 				if (change.valuecolor !== undefined) w.valuecolor = change.valuecolor;
+				if (change.iconcolor !== undefined) w.iconcolor = change.iconcolor;
 				updated = true;
 			}
 		}
@@ -4926,6 +4927,7 @@ function syncDeltaToCache(pageUrl, changes) {
 				}
 				if (change.labelcolor !== undefined) w.labelcolor = change.labelcolor;
 				if (change.valuecolor !== undefined) w.valuecolor = change.valuecolor;
+				if (change.iconcolor !== undefined) w.iconcolor = change.iconcolor;
 			}
 			// Recurse into nested widgets (Frames, etc.)
 			if (w.widget) updateWidgets(w.widget);
@@ -5100,6 +5102,24 @@ function iconCandidates(icon) {
 	return cands;
 }
 
+function applyIconColor(iconWrap) {
+	const img = iconWrap.querySelector('img');
+	const mask = iconWrap.querySelector('.iconMask');
+	if (!img || !mask) return;
+	const rgb = iconWrap.dataset.iconcolor;
+	if (rgb && img.classList.contains('icon-ready')) {
+		mask.style.webkitMaskImage = `url("${img.src}")`;
+		mask.style.maskImage = `url("${img.src}")`;
+		mask.style.backgroundColor = `rgb(${rgb})`;
+		mask.classList.remove('hidden');
+	} else {
+		mask.classList.add('hidden');
+		mask.style.backgroundColor = '';
+		mask.style.webkitMaskImage = '';
+		mask.style.maskImage = '';
+	}
+}
+
 function loadBestIcon(imgEl, candidates) {
 	const cacheKey = imgEl.dataset.iconKey;
 	if (cacheKey && MAX_ICON_CACHE > 0 && iconCache.has(cacheKey)) {
@@ -5108,6 +5128,8 @@ function loadBestIcon(imgEl, candidates) {
 			setBoundedCache(iconCache, cacheKey, cachedUrl, MAX_ICON_CACHE);
 			imgEl.src = cachedUrl;
 			imgEl.classList.add('icon-ready');
+			const wrap = imgEl.closest('.iconWrap');
+			if (wrap && wrap.dataset.iconcolor) applyIconColor(wrap);
 			return;
 		}
 		iconCache.delete(cacheKey);
@@ -5126,6 +5148,8 @@ function loadBestIcon(imgEl, candidates) {
 				setBoundedCache(iconCache, cacheKey, url, MAX_ICON_CACHE);
 			}
 			imgEl.classList.add('icon-ready');
+			const wrap = imgEl.closest('.iconWrap');
+			if (wrap && wrap.dataset.iconcolor) applyIconColor(wrap);
 		};
 		imgEl.onerror = () => {
 			if (imgEl.dataset.iconLoadToken !== token) return;
@@ -5166,8 +5190,9 @@ async function sendCommand(itemName, command, options = {}) {
 const CARD_TEMPLATE_HTML = `
 	<div class="glass rounded-2xl p-4 group">
 		<div class="cardRow flex items-start gap-3">
-			<div class="iconWrap h-12 w-12 rounded-xl flex items-center justify-center shrink-0 overflow-hidden">
+			<div class="iconWrap h-12 w-12 rounded-xl flex items-center justify-center shrink-0 overflow-hidden relative">
 				<img class="h-9 w-9 opacity-90 object-contain object-center block" />
+				<span class="iconMask hidden"></span>
 			</div>
 			<div class="flex-1 min-w-0">
 				<div class="labelRow flex items-center justify-between gap-2">
@@ -5361,6 +5386,7 @@ function getWidgetRenderInfo(w) {
 	const defaultMutedConfig = videoConfig ? String(videoConfig.defaultMuted) : '';
 	const labelcolor = safeText(w?.labelcolor || '');
 	const valuecolor = safeText(w?.valuecolor || '');
+	const iconcolor = safeText(w?.iconcolor || '');
 	const signature = [
 		type,
 		label,
@@ -5386,6 +5412,7 @@ function getWidgetRenderInfo(w) {
 		defaultMutedConfig,
 		labelcolor,
 		valuecolor,
+		iconcolor,
 	].join('||');
 	return {
 		type,
@@ -5414,6 +5441,7 @@ function getWidgetRenderInfo(w) {
 		rawVideoUrl,
 		labelcolor,
 		valuecolor,
+		iconcolor,
 		signature,
 	};
 }
@@ -5587,6 +5615,13 @@ function updateCard(card, w, info) {
 				iconImg.classList.remove('icon-ready');
 			}
 		}
+	}
+	// Apply openHAB iconcolor
+	if (iconWrap) {
+		const ic = data.iconcolor;
+		const icRgb = ic ? resolveColorToRgb(ic) : null;
+		iconWrap.dataset.iconcolor = icRgb ? `${icRgb.r},${icRgb.g},${icRgb.b}` : '';
+		applyIconColor(iconWrap);
 	}
 
 	if (pageLink && typeof pageLink === 'string' && pageLink.includes('/rest/sitemaps/')) {
