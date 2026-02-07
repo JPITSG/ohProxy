@@ -6649,7 +6649,7 @@ function updateCard(card, w, info) {
 		const formatCtValueWithUnit = (value) => {
 			const base = formatCtValue(value);
 			if (base === '\u2014') return base;
-			return `${base} K`;
+			return `${base}K`;
 		};
 		const colorStops = [
 			{ pos: 0, rgb: [184, 214, 255] },
