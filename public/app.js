@@ -2020,8 +2020,8 @@ function appendModeParam(url, mode) {
 function chartWidgetUrl(widget) {
 	// Chart items use /chart?item=NAME&period=PERIOD&mode=light|dark&title=TITLE
 	const itemName = safeText(widget?.item?.name || '').trim();
-	const period = safeText(widget?.period || '').trim();
-	if (!itemName || !period) return '';
+	const period = safeText(widget?.period || '').trim() || 'h';
+	if (!itemName) return '';
 	const mode = getThemeMode();
 	const labelParts = splitLabelState(widget?.label || '');
 	const title = labelParts.title || '';
@@ -5728,12 +5728,20 @@ function updateCard(card, w, info) {
 			frameContainer.appendChild(iframeEl);
 		}
 
+		const chartRefreshMs = parseInt(w?.refresh, 10);
+		const chartRefreshVal = Number.isFinite(chartRefreshMs) && chartRefreshMs > 0 ? String(chartRefreshMs) : '';
+		const refreshChanged = iframeEl.dataset.refresh !== chartRefreshVal;
+		iframeEl.dataset.refresh = chartRefreshVal;
+
 		const fullUrl = '/' + chartUrl;
 		const urlChanged = iframeEl.dataset.chartUrl !== fullUrl;
 		if (urlChanged) {
 			setChartIframeAnimState(iframeEl, fullUrl);
 			iframeEl.dataset.chartUrl = fullUrl;
 			iframeEl.src = fullUrl;
+		}
+		if (chartHashTimer && (urlChanged || refreshChanged)) {
+			startChartHashCheck();
 		}
 		return true;
 	}
@@ -7543,6 +7551,12 @@ async function checkChartHashes() {
 			const chartUrl = iframe.dataset.chartUrl || '';
 			if (!chartUrl) continue;
 
+			const refreshMs = parseInt(iframe.dataset.refresh, 10) || CHART_HASH_CHECK_MS;
+			const lastCheck = parseInt(iframe.dataset.lastHashCheck, 10) || 0;
+			const now = Date.now();
+			if (now - lastCheck < refreshMs * 0.9) continue;
+			iframe.dataset.lastHashCheck = String(now);
+
 			// Parse item, period, title from URL: /chart?item=X&period=Y&title=Z&...
 			const urlObj = new URL(chartUrl, window.location.origin);
 			const item = urlObj.searchParams.get('item') || '';
@@ -7604,7 +7618,13 @@ async function checkChartHashes() {
 
 function startChartHashCheck() {
 	if (chartHashTimer) clearInterval(chartHashTimer);
-	chartHashTimer = setInterval(checkChartHashes, CHART_HASH_CHECK_MS);
+	let interval = CHART_HASH_CHECK_MS;
+	const iframes = document.querySelectorAll('iframe.chart-frame');
+	for (const iframe of iframes) {
+		const r = parseInt(iframe.dataset.refresh, 10);
+		if (r > 0 && r < interval) interval = r;
+	}
+	chartHashTimer = setInterval(checkChartHashes, interval);
 }
 
 function stopChartHashCheck() {

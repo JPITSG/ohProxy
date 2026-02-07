@@ -7506,14 +7506,17 @@ app.get('/chart', (req, res) => {
 	const rawTitle = req.query?.title;
 	const rawLegend = req.query?.legend;
 	const legend = rawLegend === 'false' ? false : true;
-	if (typeof rawItem !== 'string' || typeof rawPeriod !== 'string') {
+	if (typeof rawItem !== 'string') {
 		return res.status(400).type('text/plain').send('Invalid item parameter');
+	}
+	if (rawPeriod !== undefined && typeof rawPeriod !== 'string') {
+		return res.status(400).type('text/plain').send('Invalid period parameter');
 	}
 	if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
 		return res.status(400).type('text/plain').send('Invalid mode parameter');
 	}
 	const item = rawItem.trim();
-	const period = rawPeriod.trim();
+	const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 	const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
 	const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
 	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
@@ -7585,14 +7588,17 @@ app.get('/api/chart-hash', (req, res) => {
 	const rawTitle = req.query?.title;
 	const rawLegend = req.query?.legend;
 	const legend = rawLegend === 'false' ? false : true;
-	if (typeof rawItem !== 'string' || typeof rawPeriod !== 'string') {
+	if (typeof rawItem !== 'string') {
 		return res.status(400).json({ error: 'Invalid item' });
+	}
+	if (rawPeriod !== undefined && typeof rawPeriod !== 'string') {
+		return res.status(400).json({ error: 'Invalid period' });
 	}
 	if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
 		return res.status(400).json({ error: 'Invalid mode' });
 	}
 	const item = rawItem.trim();
-	const period = rawPeriod.trim();
+	const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 	const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
 	const title = (typeof rawTitle === 'string' ? rawTitle.trim() : '') || item;
 	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
