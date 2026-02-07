@@ -5518,6 +5518,7 @@ function updateCard(card, w, info) {
 	navHint.classList.add('hidden');
 	// Capture switch controls for smooth state transitions
 	const isSwitchType = t.includes('switch') || t === 'switch';
+	const isSetpoint = t === 'setpoint';
 	const existingSwitchControls = isSwitchType ? labelRow.querySelector('.inline-controls') : null;
 	// Determine what to preserve
 	let preserveElement = null;
@@ -5540,11 +5541,11 @@ function updateCard(card, w, info) {
 	titleEl.textContent = labelParts.title;
 	if (isText || isGroup) {
 		crossfadeText(metaEl, labelParts.state);
-	} else if (!isSelection && !isSwitchType) {
-		// Don't show meta text for Selection/Switch - their controls already show the value
+	} else if (!isSelection && !isSwitchType && !isSetpoint) {
+		// Don't show meta text for Selection/Switch/Setpoint - their controls already show the value
 		metaEl.textContent = labelParts.state;
 	}
-	if (labelParts.state && !isSelection && !isSwitchType) card.classList.add('has-meta');
+	if (labelParts.state && !isSelection && !isSwitchType && !isSetpoint) card.classList.add('has-meta');
 	// Apply glow from ohProxy rules
 	const glowColor = getWidgetGlowOverride(widgetKey(w), labelParts.state || st);
 	if (glowColor) {
@@ -6367,6 +6368,55 @@ function updateCard(card, w, info) {
 				clickButton();
 			};
 		}
+	} else if (t === 'setpoint') {
+		card.classList.add('setpoint-card');
+		const spMin = Number.isFinite(Number(w?.minValue)) ? Number(w.minValue) : 0;
+		const spMax = Number.isFinite(Number(w?.maxValue)) ? Number(w.maxValue) : 100;
+		const spStep = Number.isFinite(Number(w?.step)) && Number(w.step) > 0 ? Number(w.step) : 1;
+		const val = parseFloat(st);
+		const current = Number.isFinite(val) ? val : spMin;
+
+		const inlineControls = document.createElement('div');
+		inlineControls.className = 'inline-controls flex items-center gap-2 flex-1 min-w-0';
+		if (navHint && navHint.parentElement === labelRow) {
+			labelRow.insertBefore(inlineControls, navHint);
+		} else {
+			labelRow.appendChild(inlineControls);
+		}
+
+		const minus = document.createElement('button');
+		minus.className = 'setpoint-btn';
+		minus.textContent = '\u2212';
+		minus.disabled = current <= spMin;
+		minus.onclick = async () => {
+			haptic();
+			const next = Math.max(spMin, current - spStep);
+			minus.disabled = true;
+			try { await sendCommand(itemName, String(next)); await refresh(false); }
+			catch (e) { logJsError(`sendSetpoint failed for ${itemName}`, e); alert(e.message); }
+			finally { minus.disabled = false; }
+		};
+
+		const display = document.createElement('span');
+		display.className = 'setpoint-value';
+		display.textContent = labelParts.state || (Number.isFinite(val) ? String(val) : '\u2014');
+
+		const plus = document.createElement('button');
+		plus.className = 'setpoint-btn';
+		plus.textContent = '+';
+		plus.disabled = current >= spMax;
+		plus.onclick = async () => {
+			haptic();
+			const next = Math.min(spMax, current + spStep);
+			plus.disabled = true;
+			try { await sendCommand(itemName, String(next)); await refresh(false); }
+			catch (e) { logJsError(`sendSetpoint failed for ${itemName}`, e); alert(e.message); }
+			finally { plus.disabled = false; }
+		};
+
+		inlineControls.appendChild(minus);
+		inlineControls.appendChild(display);
+		inlineControls.appendChild(plus);
 	} else if (t.includes('dimmer') || t.includes('roller') || t.includes('slider')) {
 		const sliderMin = Number.isFinite(Number(w?.minValue)) ? Number(w.minValue) : 0;
 		const sliderMax = Number.isFinite(Number(w?.maxValue)) ? Number(w.maxValue) : 100;
