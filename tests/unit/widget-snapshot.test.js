@@ -54,7 +54,54 @@ function serverWidgetKey(widget) {
 	return `widget:${item}|${label}|${type}|${link}`;
 }
 
+function normalizeButtongridButtons(widget) {
+	const buttons = [];
+	const inlineButtons = widget?.mappings || widget?.mapping;
+	if (Array.isArray(inlineButtons)) {
+		for (const b of inlineButtons) {
+			if (b?.row == null && b?.column == null) continue;
+			buttons.push({
+				row: parseInt(b?.row, 10) || 1,
+				column: parseInt(b?.column, 10) || 1,
+				command: safeText(b?.command || b?.cmd || ''),
+				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
+				label: safeText(b?.label || ''),
+				icon: safeText(b?.icon || b?.staticIcon || ''),
+				itemName: safeText(b?.item?.name || ''),
+				stateless: !!b?.stateless,
+			});
+		}
+	}
+	const children = widget?.widgets || widget?.widget;
+	if (Array.isArray(children)) {
+		for (const c of children) {
+			if (safeText(c?.type).toLowerCase() !== 'button') continue;
+			buttons.push({
+				row: parseInt(c?.row, 10) || 1,
+				column: parseInt(c?.column, 10) || 1,
+				command: safeText(c?.command || c?.cmd || c?.click || ''),
+				releaseCommand: safeText(c?.releaseCommand || c?.release || ''),
+				label: safeText(c?.label || ''),
+				icon: safeText(c?.icon || c?.staticIcon || ''),
+				itemName: safeText(c?.item?.name || ''),
+				stateless: !!c?.stateless,
+			});
+		}
+	}
+	return buttons;
+}
+
+function buttonsSignature(buttons) {
+	if (!buttons || !buttons.length) return '';
+	return buttons.map((b) =>
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.stateless}`
+	).join('|');
+}
+
 function widgetSnapshot(widget) {
+	const type = safeText(widget?.type || '').toLowerCase();
+	const buttons = type === 'buttongrid' ? normalizeButtongridButtons(widget) : [];
+	const btnSig = buttonsSignature(buttons);
 	return {
 		key: deltaKey(widget),
 		id: safeText(widget?.widgetId || widget?.id || ''),
@@ -62,6 +109,8 @@ function widgetSnapshot(widget) {
 		label: safeText(widget?.label || widget?.item?.label || widget?.item?.name || ''),
 		state: safeText(widget?.item?.state ?? widget?.state ?? ''),
 		icon: safeText(widget?.icon || widget?.item?.icon || widget?.item?.category || ''),
+		buttons: buttons,
+		buttonsSig: btnSig,
 	};
 }
 
@@ -128,6 +177,7 @@ function buildSnapshot(page) {
 			label: e.label,
 			state: e.state,
 			icon: e.icon,
+			buttonsSig: e.buttonsSig,
 		})),
 	}));
 
@@ -407,6 +457,74 @@ describe('Widget Snapshot Helpers', () => {
 			const snap1 = buildSnapshot(page1);
 			const snap2 = buildSnapshot(page2);
 			assert.notStrictEqual(snap1.hash, snap2.hash);
+		});
+
+		it('changes hash when buttongrid buttons change', () => {
+			const page1 = {
+				title: 'Home',
+				widget: [{
+					type: 'Buttongrid',
+					item: { name: 'Remote' },
+					mappings: [{ row: 1, column: 1, command: 'POWER', label: 'Power' }],
+				}],
+			};
+			const page2 = {
+				title: 'Home',
+				widget: [{
+					type: 'Buttongrid',
+					item: { name: 'Remote' },
+					mappings: [{ row: 1, column: 1, command: 'MUTE', label: 'Mute' }],
+				}],
+			};
+			const snap1 = buildSnapshot(page1);
+			const snap2 = buildSnapshot(page2);
+			assert.notStrictEqual(snap1.hash, snap2.hash);
+		});
+	});
+
+	describe('widgetSnapshot Buttongrid', () => {
+		it('includes buttons array for Buttongrid widget', () => {
+			const widget = {
+				type: 'Buttongrid',
+				widgetId: 'bg1',
+				item: { name: 'Remote', state: 'NULL' },
+				mappings: [
+					{ row: 1, column: 1, command: 'POWER', label: 'Power', icon: 'material:power' },
+					{ row: 2, column: 1, command: 'OK', label: 'OK' },
+				],
+			};
+			const snap = widgetSnapshot(widget);
+			assert.strictEqual(snap.buttons.length, 2);
+			assert.strictEqual(snap.buttons[0].command, 'POWER');
+			assert.strictEqual(snap.buttons[0].icon, 'material:power');
+			assert.strictEqual(snap.buttons[1].command, 'OK');
+			assert.ok(snap.buttonsSig.length > 0);
+		});
+
+		it('returns empty buttons for non-Buttongrid widget', () => {
+			const widget = {
+				type: 'Switch',
+				item: { name: 'Light', state: 'ON' },
+			};
+			const snap = widgetSnapshot(widget);
+			assert.deepStrictEqual(snap.buttons, []);
+			assert.strictEqual(snap.buttonsSig, '');
+		});
+
+		it('generates different buttonsSig for different buttons', () => {
+			const widget1 = {
+				type: 'Buttongrid',
+				item: { name: 'Remote' },
+				mappings: [{ row: 1, column: 1, command: 'A', label: 'A' }],
+			};
+			const widget2 = {
+				type: 'Buttongrid',
+				item: { name: 'Remote' },
+				mappings: [{ row: 1, column: 1, command: 'B', label: 'B' }],
+			};
+			const snap1 = widgetSnapshot(widget1);
+			const snap2 = widgetSnapshot(widget2);
+			assert.notStrictEqual(snap1.buttonsSig, snap2.buttonsSig);
 		});
 	});
 });

@@ -4573,10 +4573,59 @@ function mappingsSignature(mapping) {
 	return normalized.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}:${m.icon || ''}`).join('|');
 }
 
+function normalizeButtongridButtons(widget) {
+	const buttons = [];
+	// Inline buttons come through mappings with row/column fields
+	const inlineButtons = widget?.mappings || widget?.mapping;
+	if (Array.isArray(inlineButtons)) {
+		for (const b of inlineButtons) {
+			if (b?.row == null && b?.column == null) continue;
+			buttons.push({
+				row: parseInt(b?.row, 10) || 1,
+				column: parseInt(b?.column, 10) || 1,
+				command: safeText(b?.command || b?.cmd || ''),
+				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
+				label: safeText(b?.label || ''),
+				icon: safeText(b?.icon || b?.staticIcon || ''),
+				itemName: safeText(b?.item?.name || ''),
+				stateless: !!b?.stateless,
+			});
+		}
+	}
+	// Child Button widgets from widget.widgets
+	const children = widget?.widgets || widget?.widget;
+	if (Array.isArray(children)) {
+		for (const c of children) {
+			if (safeText(c?.type).toLowerCase() !== 'button') continue;
+			buttons.push({
+				row: parseInt(c?.row, 10) || 1,
+				column: parseInt(c?.column, 10) || 1,
+				command: safeText(c?.command || c?.cmd || c?.click || ''),
+				releaseCommand: safeText(c?.releaseCommand || c?.release || ''),
+				label: safeText(c?.label || ''),
+				icon: safeText(c?.icon || c?.staticIcon || ''),
+				itemName: safeText(c?.item?.name || ''),
+				stateless: !!c?.stateless,
+			});
+		}
+	}
+	return buttons;
+}
+
+function buttonsSignature(buttons) {
+	if (!buttons || !buttons.length) return '';
+	return buttons.map((b) =>
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.stateless}`
+	).join('|');
+}
+
 function widgetSnapshot(widget) {
 	// Support both OH 1.x 'mapping' and OH 3.x+ 'mappings'
 	const widgetMapping = widget?.mappings || widget?.mapping;
 	const mappingSig = mappingsSignature(widgetMapping);
+	const type = safeText(widget?.type || '').toLowerCase();
+	const buttons = type === 'buttongrid' ? normalizeButtongridButtons(widget) : [];
+	const btnSig = buttonsSignature(buttons);
 	return {
 		key: deltaKey(widget),
 		id: safeText(widget?.widgetId || widget?.id || ''),
@@ -4586,6 +4635,8 @@ function widgetSnapshot(widget) {
 		icon: widgetIconName(widget),
 		mappings: mappingSig,
 		mapping: mappingSig ? normalizeMappings(widgetMapping) : [],
+		buttons: buttons,
+		buttonsSig: btnSig,
 		labelcolor: safeText(widget?.labelcolor || ''),
 		valuecolor: safeText(widget?.valuecolor || ''),
 		iconcolor: safeText(widget?.iconcolor || ''),
@@ -4693,6 +4744,7 @@ function buildSnapshot(page) {
 			state: e.state,
 			icon: e.icon,
 			mappings: e.mappings,
+			buttonsSig: e.buttonsSig,
 			labelcolor: e.labelcolor,
 			valuecolor: e.valuecolor,
 			iconcolor: e.iconcolor,
@@ -4921,6 +4973,7 @@ async function computeDeltaResponse(url, since) {
 			prev.state !== current.state ||
 			prev.icon !== current.icon ||
 			prev.mappings !== current.mappings ||
+			prev.buttonsSig !== current.buttonsSig ||
 			prev.labelcolor !== current.labelcolor ||
 			prev.valuecolor !== current.valuecolor ||
 			prev.iconcolor !== current.iconcolor
@@ -7475,6 +7528,7 @@ app.use('/rest', async (req, res, next) => {
 			prev.state !== current.state ||
 			prev.icon !== current.icon ||
 			prev.mappings !== current.mappings ||
+			prev.buttonsSig !== current.buttonsSig ||
 			prev.labelcolor !== current.labelcolor ||
 			prev.valuecolor !== current.valuecolor ||
 			prev.iconcolor !== current.iconcolor
