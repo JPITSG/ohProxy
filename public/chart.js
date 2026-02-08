@@ -25,6 +25,37 @@
 	var CHART_PERIOD = window._chartPeriod || 'D';
 	var CHART_Y_PATTERN = window._chartYAxisPattern || null;
 
+	// Classify any period string into a display tier for x-axis formatting
+	function periodDurationTier(p) {
+		if (typeof p !== 'string' || !p) return 'hD';
+		// Past-future: extract past portion
+		if (/^\d+[hDWMY]-\d+[hDWMY]$/.test(p)) p = p.split('-')[0];
+		// Simple / multiplied
+		var sm = p.match(/^(\d*)([hDWMY])$/);
+		if (sm) {
+			var mul = sm[1] ? parseInt(sm[1], 10) : 1;
+			var uSec = { h: 3600, D: 86400, W: 604800, M: 2592000, Y: 31536000 };
+			var sec = mul * uSec[sm[2]];
+			if (sec <= 86400) return 'hD';
+			if (sec <= 604800) return 'W';
+			if (sec <= 7776000) return 'M';
+			return 'Y';
+		}
+		// ISO 8601
+		var im = p.match(/^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
+		if (im) {
+			var sec2 = (parseInt(im[1]||0)*31536000) + (parseInt(im[2]||0)*2592000)
+				+ (parseInt(im[3]||0)*604800) + (parseInt(im[4]||0)*86400)
+				+ (parseInt(im[5]||0)*3600) + (parseInt(im[6]||0)*60) + parseInt(im[7]||0);
+			if (sec2 <= 86400) return 'hD';
+			if (sec2 <= 604800) return 'W';
+			if (sec2 <= 7776000) return 'M';
+			return 'Y';
+		}
+		return 'hD';
+	}
+	var PERIOD_TIER = periodDurationTier(CHART_PERIOD);
+
 	// Java DecimalFormat-compatible formatter
 	function javaDecimalFormat(pattern, number) {
 		// Handle positive/negative subpatterns
@@ -192,8 +223,8 @@
 
 	function fmtXLabel(ts) {
 		var d = new Date(ts);
-		switch (CHART_PERIOD) {
-			case 'h': case 'D': return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+		switch (PERIOD_TIER) {
+			case 'hD': return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
 			case 'W': return DAYS_S[d.getDay()];
 			case 'M': return MONTHS_S[d.getMonth()] + ' ' + d.getDate();
 			case 'Y': return MONTHS_S[d.getMonth()];

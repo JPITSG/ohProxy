@@ -48,6 +48,35 @@ function parseOptionalInt(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}
 	return NaN;
 }
 
+// Period parser (mirrors server.js)
+const MAX_PERIOD_SEC = 10 * 365.25 * 86400;
+function parsePeriodToSeconds(period) {
+	if (typeof period !== 'string' || !period) return 0;
+	if (/^\d+[hDWMY]-\d+[hDWMY]$/.test(period)) {
+		return parsePeriodToSeconds(period.split('-')[0]);
+	}
+	const simpleMatch = period.match(/^(\d*)([hDWMY])$/);
+	if (simpleMatch) {
+		const multiplier = simpleMatch[1] ? parseInt(simpleMatch[1], 10) : 1;
+		const unitSec = { h: 3600, D: 86400, W: 604800, M: 2592000, Y: 31536000 };
+		const sec = multiplier * unitSec[simpleMatch[2]];
+		return Math.min(sec, MAX_PERIOD_SEC);
+	}
+	const isoMatch = period.match(/^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
+	if (isoMatch) {
+		const [, y, mo, w, d, h, mi, s] = isoMatch;
+		const sec = (parseInt(y || 0) * 31536000)
+			+ (parseInt(mo || 0) * 2592000)
+			+ (parseInt(w || 0) * 604800)
+			+ (parseInt(d || 0) * 86400)
+			+ (parseInt(h || 0) * 3600)
+			+ (parseInt(mi || 0) * 60)
+			+ (parseInt(s || 0));
+		return sec > 0 ? Math.min(sec, MAX_PERIOD_SEC) : 0;
+	}
+	return 0;
+}
+
 function isProxyTargetAllowed(url, allowlist) {
 	if (!allowlist.length) return false;
 	const host = safeText(url.hostname).toLowerCase();
@@ -274,7 +303,7 @@ function createValidationTestApp() {
 			return res.status(400).send('Invalid item parameter');
 		}
 
-		if (!['h', 'D', 'W', 'M', 'Y'].includes(period)) {
+		if (period.length > 20 || !/^[0-9A-Za-z-]+$/.test(period) || !parsePeriodToSeconds(period)) {
 			return res.status(400).send('Invalid period parameter');
 		}
 		if (!['light', 'dark'].includes(mode)) {
@@ -581,6 +610,62 @@ describe('Parameter Validation Security Tests', () => {
 				headers: { 'Authorization': authHeader },
 			});
 			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts multiplied period 4h', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=4h&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts multiplied period 2W', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=2W&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts ISO 8601 period PT1H30M', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=PT1H30M&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts ISO 8601 period P2W', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=P2W&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts ISO 8601 period P1DT12H', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=P1DT12H&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts past-future period 2h-1h', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=2h-1h&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('rejects unrecognised period string', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=invalid&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 400);
+		});
+
+		it('rejects overly long period', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=${'P'.repeat(25)}&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 400);
 		});
 	});
 
