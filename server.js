@@ -4466,21 +4466,24 @@ function normalizeMappings(mapping) {
 			.map((m) => {
 				if (!m || typeof m !== 'object') return null;
 				const command = safeText(m.command ?? '');
+				const releaseCommand = safeText(m.releaseCommand ?? '');
 				const label = safeText(m.label ?? m.command ?? '');
 				if (!command && !label) return null;
-				return { command, label: label || command };
+				return { command, releaseCommand, label: label || command };
 			})
 			.filter(Boolean);
 	}
 	if (typeof mapping === 'object') {
-		if ('command' in mapping || 'label' in mapping) {
+		if ('command' in mapping || 'label' in mapping || 'releaseCommand' in mapping) {
 			const command = safeText(mapping.command ?? '');
+			const releaseCommand = safeText(mapping.releaseCommand ?? '');
 			const label = safeText(mapping.label ?? mapping.command ?? '');
 			if (!command && !label) return [];
-			return [{ command, label: label || command }];
+			return [{ command, releaseCommand, label: label || command }];
 		}
 		return Object.entries(mapping).map(([command, label]) => ({
 			command: safeText(command),
+			releaseCommand: '',
 			label: safeText(label),
 		}));
 	}
@@ -4489,7 +4492,7 @@ function normalizeMappings(mapping) {
 
 function mappingsSignature(mapping) {
 	const normalized = normalizeMappings(mapping);
-	return normalized.map((m) => `${m.command}:${m.label}`).join('|');
+	return normalized.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}`).join('|');
 }
 
 function widgetSnapshot(widget) {

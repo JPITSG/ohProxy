@@ -5068,27 +5068,52 @@ function normalizeMapping(mapping) {
 			.map((m) => {
 				if (!m || typeof m !== 'object') return null;
 				const command = safeText(m.command ?? '');
+				const releaseCommand = safeText(m.releaseCommand ?? '');
 				const label = safeText(m.label ?? m.command ?? '');
 				if (!command) return null;
-				return { command, label: label || command };
+				return { command, releaseCommand, label: label || command };
 			})
 			.filter(Boolean);
 	}
 	if (typeof mapping === 'object') {
-		if ('command' in mapping || 'label' in mapping) {
+		if ('command' in mapping || 'label' in mapping || 'releaseCommand' in mapping) {
 			const command = safeText(mapping.command ?? '');
+			const releaseCommand = safeText(mapping.releaseCommand ?? '');
 			const label = safeText(mapping.label ?? mapping.command ?? '');
 			if (!command) return [];
-			return [{ command, label: label || command }];
+			return [{ command, releaseCommand, label: label || command }];
 		}
 		return Object.entries(mapping)
 			.filter(([command]) => safeText(command))
 			.map(([command, label]) => ({
 				command: safeText(command),
+				releaseCommand: '',
 				label: safeText(label) || safeText(command),
 			}));
 	}
 	return [];
+}
+
+function parseSwitchMappingCommand(rawMapping) {
+	let command = '';
+	let releaseCommand = '';
+	if (rawMapping && typeof rawMapping === 'object') {
+		command = safeText(rawMapping.command ?? '').trim();
+		releaseCommand = safeText(rawMapping.releaseCommand ?? '').trim();
+	} else {
+		command = safeText(rawMapping).trim();
+	}
+	if (command && releaseCommand) return { mode: 'dual', press: command, release: releaseCommand };
+	if (!command || !command.includes(':')) return { mode: 'single', press: command };
+	const firstColon = command.indexOf(':');
+	const lastColon = command.lastIndexOf(':');
+	if (firstColon <= 0 || firstColon !== lastColon || firstColon >= command.length - 1) {
+		return { mode: 'single', press: command };
+	}
+	const press = command.slice(0, firstColon).trim();
+	const release = command.slice(firstColon + 1).trim();
+	if (!press || !release) return { mode: 'single', press: command };
+	return { mode: 'dual', press, release };
 }
 
 function iconCandidates(icon) {
@@ -5186,6 +5211,173 @@ async function sendCommand(itemName, command, options = {}) {
 			if (state.filter.trim() && state.suppressRefreshCount === 0) render();
 		});
 	}
+}
+
+function bindSwitchSingleCommand(btn, itemName, command) {
+	btn.onpointerdown = null;
+	btn.onpointerup = null;
+	btn.onpointercancel = null;
+	btn.onlostpointercapture = null;
+	btn.onkeydown = null;
+	btn.onkeyup = null;
+	btn.onblur = null;
+	btn.onclick = async () => {
+		haptic();
+		btn.disabled = true;
+		try { await sendCommand(itemName, command); await refresh(false); }
+		catch (e) {
+			logJsError(`sendSwitchCommand failed for ${itemName}`, e);
+			alert(e.message);
+		}
+		finally { btn.disabled = false; }
+	};
+}
+
+function bindSwitchDualCommand(btn, itemName, pressCommand, releaseCommand, card) {
+	btn.onclick = null;
+	const controller = new AbortController();
+	let activePress = false;
+	let activePointerId = null;
+	let refreshHeld = false;
+	let releasePending = false;
+	let commandChain = Promise.resolve();
+
+	const holdRefresh = () => {
+		if (refreshHeld) return;
+		refreshHeld = true;
+		state.suppressRefreshCount += 1;
+	};
+
+	const releaseRefresh = () => {
+		if (!refreshHeld) return;
+		refreshHeld = false;
+		state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
+		if (state.pendingRefresh) {
+			state.pendingRefresh = false;
+			refresh(false);
+		}
+	};
+
+	const queueCommand = (command, refreshAfter) => {
+		commandChain = commandChain
+			.catch(() => {})
+			.then(async () => {
+				try {
+					await sendCommand(itemName, command);
+					if (refreshAfter) await refresh(false);
+				} catch (e) {
+					logJsError(`sendSwitchCommand failed for ${itemName}`, e);
+					alert(e.message);
+				}
+			});
+	};
+
+	const beginPress = () => {
+		if (activePress) return;
+		haptic();
+		activePress = true;
+		holdRefresh();
+		queueCommand(pressCommand, false);
+	};
+
+	const endPress = () => {
+		if (!activePress) {
+			if (!releasePending) releaseRefresh();
+			return;
+		}
+		activePress = false;
+		activePointerId = null;
+		releasePending = true;
+		queueCommand(releaseCommand, true);
+		commandChain.finally(() => {
+			releasePending = false;
+			releaseRefresh();
+		});
+	};
+
+	const onPointerDown = (e) => {
+		if (typeof e.button === 'number' && e.button !== 0) return;
+		e.preventDefault();
+		activePointerId = (typeof e.pointerId === 'number') ? e.pointerId : null;
+		if (activePointerId !== null && typeof btn.setPointerCapture === 'function') {
+			try { btn.setPointerCapture(activePointerId); } catch {}
+		}
+		beginPress();
+	};
+
+	const onPointerEnd = (e) => {
+		const pointerId = (e && typeof e.pointerId === 'number') ? e.pointerId : activePointerId;
+		if (activePointerId !== null && pointerId !== null && pointerId !== activePointerId) return;
+		if (pointerId !== null && typeof btn.releasePointerCapture === 'function') {
+			try { btn.releasePointerCapture(pointerId); } catch {}
+		}
+		endPress();
+	};
+
+	const isPressKey = (e) => e && (e.key === 'Enter' || e.key === ' ');
+	const onKeyDown = (e) => {
+		if (!isPressKey(e) || e.repeat) return;
+		e.preventDefault();
+		beginPress();
+	};
+
+	const onKeyUp = (e) => {
+		if (!isPressKey(e)) return;
+		e.preventDefault();
+		endPress();
+	};
+
+	btn.addEventListener('pointerdown', onPointerDown, { signal: controller.signal });
+	btn.addEventListener('pointerup', onPointerEnd, { signal: controller.signal });
+	btn.addEventListener('pointercancel', onPointerEnd, { signal: controller.signal });
+	btn.addEventListener('lostpointercapture', onPointerEnd, { signal: controller.signal });
+	btn.addEventListener('keydown', onKeyDown, { signal: controller.signal });
+	btn.addEventListener('keyup', onKeyUp, { signal: controller.signal });
+	btn.addEventListener('blur', onPointerEnd, { signal: controller.signal });
+
+	registerCardCleanup(card, () => {
+		endPress();
+		controller.abort();
+	});
+	return { press: beginPress, release: endPress };
+}
+
+function bindCardDualSwitchProxy(card, handlers) {
+	if (!card || !handlers || typeof handlers.press !== 'function' || typeof handlers.release !== 'function') return;
+	const controller = new AbortController();
+	let activePointerId = null;
+
+	const isInteractiveTarget = (target) => !!(target && target.closest && target.closest('button, a, input, select, textarea'));
+
+	const onPointerDown = (e) => {
+		if (isInteractiveTarget(e.target)) return;
+		if (typeof e.button === 'number' && e.button !== 0) return;
+		e.preventDefault();
+		activePointerId = (typeof e.pointerId === 'number') ? e.pointerId : null;
+		if (activePointerId !== null && typeof card.setPointerCapture === 'function') {
+			try { card.setPointerCapture(activePointerId); } catch {}
+		}
+		handlers.press();
+	};
+
+	const onPointerEnd = (e) => {
+		if (activePointerId === null) return;
+		const pointerId = (e && typeof e.pointerId === 'number') ? e.pointerId : activePointerId;
+		if (activePointerId !== null && pointerId !== null && pointerId !== activePointerId) return;
+		if (pointerId !== null && typeof card.releasePointerCapture === 'function') {
+			try { card.releasePointerCapture(pointerId); } catch {}
+		}
+		activePointerId = null;
+		handlers.release();
+	};
+
+	card.classList.add('cursor-pointer');
+	card.addEventListener('pointerdown', onPointerDown, { signal: controller.signal });
+	card.addEventListener('pointerup', onPointerEnd, { signal: controller.signal });
+	card.addEventListener('pointercancel', onPointerEnd, { signal: controller.signal });
+	card.addEventListener('lostpointercapture', onPointerEnd, { signal: controller.signal });
+
+	registerCardCleanup(card, () => controller.abort());
 }
 
 // --- Rendering ---
@@ -5379,7 +5571,7 @@ function getWidgetRenderInfo(w) {
 	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}&mode=${themeMode}` : '';
 	const videoHeight = isVideo ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const chartHeight = isChart ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
-	const mappingSig = mapping.map((m) => `${m.command}:${m.label}`).join('|');
+	const mappingSig = mapping.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}`).join('|');
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
 	// Get config values that affect rendering
@@ -6307,6 +6499,7 @@ function updateCard(card, w, info) {
 		card.classList.add('switch-card');
 		const currentState = safeText(st);
 		const switchButtonCount = mapping.length ? mapping.length : 1;
+		const singleDualMapping = mapping.length === 1 && parseSwitchMappingCommand(mapping[0]).mode === 'dual';
 		if (switchButtonCount >= 3) card.classList.add('switch-many');
 		if (switchButtonCount === 1) card.classList.add('switch-single');
 
@@ -6318,34 +6511,33 @@ function updateCard(card, w, info) {
 			// Reuse existing controls - update text, command, and is-active class
 			if (mapping.length) {
 				let i = 0;
+				let singleDualHandlers = null;
 				for (const btn of existingButtons) {
 					const m = mapping[i++];
-					if (m) {
-						btn.textContent = m.label || m.command;
-						btn.dataset.command = m.command;
-						const shouldBeActive = safeText(m.command) === currentState;
-						btn.classList.toggle('is-active', shouldBeActive);
-						// Update onclick with current command (closure would have stale value)
-						const cmd = m.command;
-						btn.onclick = async () => {
-							haptic();
-							btn.disabled = true;
-							try { await sendCommand(itemName, cmd); await refresh(false); }
-							catch (e) {
-								logJsError(`sendSwitchCommand failed for ${itemName}`, e);
-								alert(e.message);
-							}
-							finally { btn.disabled = false; }
-						};
+					if (!m) continue;
+					const parsed = parseSwitchMappingCommand(m);
+					btn.textContent = m.label || m.command;
+					btn.dataset.command = m.command;
+					const shouldBeActive = parsed.mode === 'single' && safeText(m.command) === currentState;
+					btn.classList.toggle('is-active', shouldBeActive);
+					if (parsed.mode === 'dual') {
+						const handlers = bindSwitchDualCommand(btn, itemName, parsed.press, parsed.release, card);
+						if (singleDualMapping) singleDualHandlers = handlers;
+					} else {
+						bindSwitchSingleCommand(btn, itemName, parsed.press);
 					}
 				}
 				if (existingButtons.length === 1) {
-					card.classList.add('cursor-pointer');
-					card.onclick = (e) => {
-						if (e.target.closest('button, a, input, select, textarea')) return;
-						const btn = existingButtons[0];
-						if (btn && !btn.disabled) btn.click();
-					};
+					if (singleDualMapping && singleDualHandlers) {
+						bindCardDualSwitchProxy(card, singleDualHandlers);
+					} else {
+						card.classList.add('cursor-pointer');
+						card.onclick = (e) => {
+							if (e.target.closest('button, a, input, select, textarea')) return;
+							const btn = existingButtons[0];
+							if (btn && !btn.disabled) btn.click();
+						};
+					}
 				}
 			} else {
 				// Single ON/OFF switch - update class, text, and click handler
@@ -6353,17 +6545,7 @@ function updateCard(card, w, info) {
 				const btn = existingButtons[0];
 				btn.classList.toggle('is-active', isOn);
 				btn.textContent = isOn ? 'Turn OFF' : 'Turn ON';
-				// Update onclick with current state (closure would have stale value)
-				btn.onclick = async () => {
-					haptic();
-					btn.disabled = true;
-					try { await sendCommand(itemName, isOn ? 'OFF' : 'ON'); await refresh(false); }
-					catch (e) {
-						logJsError(`sendSwitchCommand failed for ${itemName}`, e);
-						alert(e.message);
-					}
-					finally { btn.disabled = false; }
-				};
+				bindSwitchSingleCommand(btn, itemName, isOn ? 'OFF' : 'ON');
 				// Ensure card click handler is set for single switch
 				card.classList.add('cursor-pointer');
 				card.onclick = (e) => {
@@ -6387,24 +6569,25 @@ function updateCard(card, w, info) {
 
 		if (mapping.length) {
 			const btnClass = 'switch-btn';
+			let singleDualHandlers = null;
 
 			for (const m of mapping) {
+				const parsed = parseSwitchMappingCommand(m);
 				const b = document.createElement('button');
 				b.className = btnClass;
 				b.textContent = m.label || m.command;
 				b.dataset.command = m.command;
-				if (safeText(m.command) === currentState) b.classList.add('is-active');
-				b.onclick = async () => {
-					haptic();
-					b.disabled = true;
-					try { await sendCommand(itemName, m.command); await refresh(false); }
-					catch (e) {
-						logJsError(`sendSwitchCommand failed for ${itemName}`, e);
-						alert(e.message);
-					}
-					finally { b.disabled = false; }
-				};
+				if (parsed.mode === 'single' && safeText(m.command) === currentState) b.classList.add('is-active');
+				if (parsed.mode === 'dual') {
+					const handlers = bindSwitchDualCommand(b, itemName, parsed.press, parsed.release, card);
+					if (singleDualMapping) singleDualHandlers = handlers;
+				} else {
+					bindSwitchSingleCommand(b, itemName, parsed.press);
+				}
 				inlineControls.appendChild(b);
+			}
+			if (singleDualMapping && inlineControls.children.length === 1 && singleDualHandlers) {
+				bindCardDualSwitchProxy(card, singleDualHandlers);
 			}
 		} else {
 			const isOn = st.toUpperCase() === 'ON';
@@ -6412,20 +6595,11 @@ function updateCard(card, w, info) {
 			btn.className = 'switch-btn';
 			btn.textContent = isOn ? 'Turn OFF' : 'Turn ON';
 			if (isOn) btn.classList.add('is-active');
-			btn.onclick = async () => {
-				haptic();
-				btn.disabled = true;
-				try { await sendCommand(itemName, isOn ? 'OFF' : 'ON'); await refresh(false); }
-				catch (e) {
-					logJsError(`sendSwitchCommand failed for ${itemName}`, e);
-					alert(e.message);
-				}
-				finally { btn.disabled = false; }
-			};
+			bindSwitchSingleCommand(btn, itemName, isOn ? 'OFF' : 'ON');
 			inlineControls.appendChild(btn);
 		}
 
-		if (inlineControls.children.length === 1) {
+		if (inlineControls.children.length === 1 && !singleDualMapping) {
 			const clickButton = () => {
 				const btn = inlineControls.querySelector('button');
 				if (btn && !btn.disabled) btn.click();
@@ -6698,27 +6872,27 @@ function updateCard(card, w, info) {
 			const offset = thumbWidth / 2 + pct * trackWidth;
 			valueBubble.style.left = offset + 'px';
 		};
-			const updateCtpVisuals = () => {
-				valueBubble.textContent = formatCtValueWithUnit(input.value);
-				positionBubble();
-				setThumbColor(input.value);
-			};
-			requestAnimationFrame(updateCtpVisuals);
-			input.addEventListener('input', updateCtpVisuals);
-			const ctpResizeController = new AbortController();
-			window.addEventListener('resize', updateCtpVisuals, { signal: ctpResizeController.signal });
-			let ctpResizeObserver = null;
-			if (typeof ResizeObserver === 'function') {
-				ctpResizeObserver = new ResizeObserver(() => updateCtpVisuals());
-				ctpResizeObserver.observe(input);
-			}
-			registerCardCleanup(card, () => {
-				ctpResizeController.abort();
-				if (ctpResizeObserver) ctpResizeObserver.disconnect();
-			});
-			if (startValue !== current) {
-				animateSliderValue(input, current, null, updateCtpVisuals);
-			}
+		const updateCtpVisuals = () => {
+			valueBubble.textContent = formatCtValueWithUnit(input.value);
+			positionBubble();
+			setThumbColor(input.value);
+		};
+		requestAnimationFrame(updateCtpVisuals);
+		input.addEventListener('input', updateCtpVisuals);
+		const ctpResizeController = new AbortController();
+		window.addEventListener('resize', updateCtpVisuals, { signal: ctpResizeController.signal });
+		let ctpResizeObserver = null;
+		if (typeof ResizeObserver === 'function') {
+			ctpResizeObserver = new ResizeObserver(() => updateCtpVisuals());
+			ctpResizeObserver.observe(input);
+		}
+		registerCardCleanup(card, () => {
+			ctpResizeController.abort();
+			if (ctpResizeObserver) ctpResizeObserver.disconnect();
+		});
+		if (startValue !== current) {
+			animateSliderValue(input, current, null, updateCtpVisuals);
+		}
 	} else if (t.includes('dimmer') || t.includes('roller') || t.includes('slider')) {
 		const sliderMin = Number.isFinite(Number(w?.minValue)) ? Number(w.minValue) : 0;
 		const sliderMax = Number.isFinite(Number(w?.maxValue)) ? Number(w.maxValue) : 100;
@@ -6955,41 +7129,41 @@ function updateCard(card, w, info) {
 		inlineSlider.appendChild(valueBubble);
 
 		// Position bubble above thumb (account for thumb width ~16px)
-			const positionBubble = () => {
-				const val = Number(input.value);
-				const min = Number(input.min) || 0;
-				const max = Number(input.max) || 100;
-				const pct = (val - min) / (max - min);
-				const thumbWidth = 16;
-				const trackWidth = input.offsetWidth - thumbWidth;
-				const offset = thumbWidth / 2 + pct * trackWidth;
-				valueBubble.style.left = offset + 'px';
-			};
-			const updateSliderVisuals = () => {
-				valueBubble.textContent = input.value;
-				positionBubble();
-			};
-			// Defer initial positioning until element is rendered
-			requestAnimationFrame(updateSliderVisuals);
+		const positionBubble = () => {
+			const val = Number(input.value);
+			const min = Number(input.min) || 0;
+			const max = Number(input.max) || 100;
+			const pct = (val - min) / (max - min);
+			const thumbWidth = 16;
+			const trackWidth = input.offsetWidth - thumbWidth;
+			const offset = thumbWidth / 2 + pct * trackWidth;
+			valueBubble.style.left = offset + 'px';
+		};
+		const updateSliderVisuals = () => {
+			valueBubble.textContent = input.value;
+			positionBubble();
+		};
+		// Defer initial positioning until element is rendered
+		requestAnimationFrame(updateSliderVisuals);
 
-			// Update label and position when slider value changes
-			input.addEventListener('input', updateSliderVisuals);
-			const sliderResizeController = new AbortController();
-			window.addEventListener('resize', updateSliderVisuals, { signal: sliderResizeController.signal });
-			let sliderResizeObserver = null;
-			if (typeof ResizeObserver === 'function') {
-				sliderResizeObserver = new ResizeObserver(() => updateSliderVisuals());
-				sliderResizeObserver.observe(input);
-			}
-			registerCardCleanup(card, () => {
-				sliderResizeController.abort();
-				if (sliderResizeObserver) sliderResizeObserver.disconnect();
-			});
+		// Update label and position when slider value changes
+		input.addEventListener('input', updateSliderVisuals);
+		const sliderResizeController = new AbortController();
+		window.addEventListener('resize', updateSliderVisuals, { signal: sliderResizeController.signal });
+		let sliderResizeObserver = null;
+		if (typeof ResizeObserver === 'function') {
+			sliderResizeObserver = new ResizeObserver(() => updateSliderVisuals());
+			sliderResizeObserver.observe(input);
+		}
+		registerCardCleanup(card, () => {
+			sliderResizeController.abort();
+			if (sliderResizeObserver) sliderResizeObserver.disconnect();
+		});
 
-			// Animate slider from previous value to current value
-			if (startValue !== current) {
-				animateSliderValue(input, current, valueBubble, positionBubble);
-			}
+		// Animate slider from previous value to current value
+		if (startValue !== current) {
+			animateSliderValue(input, current, valueBubble, positionBubble);
+		}
 
 		if (switchSupport) {
 			const toggleSlider = async () => {
@@ -8152,6 +8326,10 @@ function applyWsUpdate(data) {
 	// Also sync to sitemap cache so navigation shows updated states
 	syncItemsToAllCachedPages(deltaChanges);
 	if (didUpdate) {
+		if (state.suppressRefreshCount > 0) {
+			state.pendingRefresh = true;
+			return;
+		}
 		render();
 		// Debounced refresh to catch visibility-triggered sitemap changes
 		if (wsRefreshTimer) clearTimeout(wsRefreshTimer);
