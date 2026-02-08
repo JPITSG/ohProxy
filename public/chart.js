@@ -24,6 +24,7 @@
 	var CHART_TIME_FMT = window._chartTimeFormat || 'H:mm:ss';
 	var CHART_PERIOD = window._chartPeriod || 'D';
 	var CHART_Y_PATTERN = window._chartYAxisPattern || null;
+	var CHART_INTERP = window._chartInterpolation || 'linear';
 
 	// Classify any period string into a display tier for x-axis formatting
 	function periodDurationTier(p) {
@@ -515,7 +516,12 @@
 			if (pts.length < 2) return '';
 			var path = ['M ' + pts[0].x + ' ' + pts[0].y];
 			for (var i = 1; i < pts.length; i++) {
-				path.push('L ' + pts[i].x + ' ' + pts[i].y);
+				if (CHART_INTERP === 'step') {
+					path.push('L ' + pts[i].x + ' ' + pts[i - 1].y);
+					path.push('L ' + pts[i].x + ' ' + pts[i].y);
+				} else {
+					path.push('L ' + pts[i].x + ' ' + pts[i].y);
+				}
 			}
 			return path.join(' ');
 		}

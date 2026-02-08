@@ -72,6 +72,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawRadius\s*=\s*req\.query\.radius\s*;/,
 			/const\s+rawLegend\s*=\s*req\.query\?\.legend\s*;/,
 			/const\s+rawYAxisDecimalPattern\s*=\s*req\.query\?\.yAxisDecimalPattern\s*;/,
+			/const\s+rawInterpolation\s*=\s*req\.query\?\.interpolation\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));
