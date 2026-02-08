@@ -5110,6 +5110,45 @@ function normalizeMapping(mapping) {
 	return [];
 }
 
+function normalizeButtongridButtons(widget) {
+	const buttons = [];
+	// Inline buttons come through mappings with row/column fields
+	const inlineButtons = widget?.mappings || widget?.mapping;
+	if (Array.isArray(inlineButtons)) {
+		for (const b of inlineButtons) {
+			if (b?.row == null && b?.column == null) continue;
+			buttons.push({
+				row: parseInt(b?.row, 10) || 1,
+				column: parseInt(b?.column, 10) || 1,
+				command: safeText(b?.command || b?.cmd || ''),
+				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
+				label: safeText(b?.label || ''),
+				icon: safeText(b?.icon || b?.staticIcon || ''),
+				itemName: safeText(b?.item?.name || ''),
+				stateless: !!b?.stateless,
+			});
+		}
+	}
+	// Child Button widgets from widget.widgets
+	const children = widget?.widgets || widget?.widget;
+	if (Array.isArray(children)) {
+		for (const c of children) {
+			if (safeText(c?.type).toLowerCase() !== 'button') continue;
+			buttons.push({
+				row: parseInt(c?.row, 10) || 1,
+				column: parseInt(c?.column, 10) || 1,
+				command: safeText(c?.command || c?.cmd || c?.click || ''),
+				releaseCommand: safeText(c?.releaseCommand || c?.release || ''),
+				label: safeText(c?.label || ''),
+				icon: safeText(c?.icon || c?.staticIcon || ''),
+				itemName: safeText(c?.item?.name || ''),
+				stateless: !!c?.stateless,
+			});
+		}
+	}
+	return buttons;
+}
+
 function parseSwitchMappingCommand(rawMapping) {
 	let command = '';
 	let releaseCommand = '';
@@ -5741,6 +5780,7 @@ function getWidgetRenderInfo(w) {
 	const isWebview = t.includes('webview');
 	const isVideo = t === 'video';
 	const isSelection = t.includes('selection');
+	const isButtongrid = t === 'buttongrid';
 	const label = isImage || isVideo || isChart ? safeText(w?.label || '') : widgetLabel(w);
 	const st = widgetState(w);
 	const icon = widgetIconName(w);
@@ -5772,6 +5812,10 @@ function getWidgetRenderInfo(w) {
 	const videoHeight = isVideo ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const chartHeight = isChart ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const mappingSig = mapping.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}:${m.icon || ''}`).join('|');
+	const buttons = isButtongrid ? normalizeButtongridButtons(w) : [];
+	const buttonsSig = buttons.map((b) =>
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.stateless}`
+	).join('|');
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
 	// Get config values that affect rendering
@@ -5789,6 +5833,7 @@ function getWidgetRenderInfo(w) {
 		itemName,
 		pageLink || '',
 		mappingSig,
+		buttonsSig,
 		mediaUrl,
 		chartUrl,
 		String(chartHeight),
@@ -5818,11 +5863,13 @@ function getWidgetRenderInfo(w) {
 		isWebview,
 		isVideo,
 		isSelection,
+		isButtongrid,
 		label,
 		st,
 		icon,
 		itemName,
 		mapping,
+		buttons,
 		pageLink,
 		labelParts,
 		mediaUrl,
@@ -5867,11 +5914,13 @@ function updateCard(card, w, info) {
 		isWebview,
 		isVideo,
 		isSelection,
+		isButtongrid,
 		label,
 		st,
 		icon,
 		itemName,
 		mapping,
+		buttons,
 		pageLink,
 		labelParts,
 		mediaUrl,
@@ -5910,6 +5959,8 @@ function updateCard(card, w, info) {
 		'colortemperaturepicker-card',
 		'input-card',
 		'switch-card',
+		'buttongrid-card',
+		'buttongrid-no-icon',
 		'slider-card',
 		'image-card',
 		'chart-card',
@@ -5979,13 +6030,13 @@ function updateCard(card, w, info) {
 	titleEl.textContent = labelParts.title;
 	if (isText || isGroup) {
 		crossfadeText(metaEl, labelParts.state);
-	} else if (!isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput) {
-		// Don't show meta text for Selection/Switch/Setpoint/Colortemperaturepicker/Input.
+	} else if (!isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput && !isButtongrid) {
+		// Don't show meta text for Selection/Switch/Setpoint/Colortemperaturepicker/Input/Buttongrid.
 		metaEl.textContent = labelParts.state;
-	} else if (isColorTemperaturePicker || isInput) {
+	} else if (isColorTemperaturePicker || isInput || isButtongrid) {
 		metaEl.textContent = '';
 	}
-	if (labelParts.state && !isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput) card.classList.add('has-meta');
+	if (labelParts.state && !isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput && !isButtongrid) card.classList.add('has-meta');
 	// Apply openHAB labelcolor / valuecolor
 	const lc = data.labelcolor;
 	const vc = data.valuecolor;
@@ -7532,6 +7583,57 @@ function updateCard(card, w, info) {
 			controls.classList.add('mt-3');
 			controls.appendChild(btns);
 		}
+	} else if (isButtongrid && buttons.length) {
+		card.classList.add('buttongrid-card');
+		const hasIcon = !!icon;
+		if (!hasIcon) card.classList.add('buttongrid-no-icon');
+
+		// Hide label row - buttongrid is all buttons
+		labelStack.style.display = 'none';
+		navHint.style.display = 'none';
+		metaEl.style.display = 'none';
+
+		// Build grid
+		const maxCol = Math.max(...buttons.map((b) => b.column), 1);
+
+		const grid = document.createElement('div');
+		grid.className = 'btn-grid';
+		grid.style.gridTemplateColumns = `repeat(${maxCol}, 1fr)`;
+
+		const parentItemName = itemName;
+		for (const b of buttons) {
+			const btn = document.createElement('button');
+			btn.className = 'grid-btn';
+			btn.style.gridRow = String(b.row);
+			btn.style.gridColumn = String(b.column);
+
+			const btnItemName = b.itemName || parentItemName;
+
+			setMappingControlContent(btn, {
+				command: b.command,
+				releaseCommand: b.releaseCommand,
+				label: b.label || b.command,
+				icon: b.icon,
+			});
+
+			if (b.releaseCommand) {
+				bindSwitchDualCommand(btn, btnItemName, b.command, b.releaseCommand, card);
+			} else {
+				bindSwitchSingleCommand(btn, btnItemName, b.command);
+			}
+
+			if (!b.stateless) {
+				const currentState = safeText(w?.item?.state || '');
+				if (safeText(b.command) === currentState) {
+					btn.classList.add('is-active');
+				}
+			}
+
+			grid.appendChild(btn);
+		}
+
+		controls.innerHTML = '';
+		controls.appendChild(grid);
 	} else {
 		if (!labelParts.state) {
 			controls.classList.add('mt-3');
