@@ -5072,26 +5072,36 @@ function normalizeMapping(mapping) {
 				const command = safeText(m.command ?? '');
 				const releaseCommand = safeText(m.releaseCommand ?? '');
 				const label = safeText(m.label ?? m.command ?? '');
+				const icon = safeText(m.icon ?? '');
 				if (!command) return null;
-				return { command, releaseCommand, label: label || command };
+				return { command, releaseCommand, label: label || command, icon };
 			})
 			.filter(Boolean);
 	}
 	if (typeof mapping === 'object') {
-		if ('command' in mapping || 'label' in mapping || 'releaseCommand' in mapping) {
+		if ('command' in mapping || 'label' in mapping || 'releaseCommand' in mapping || 'icon' in mapping) {
 			const command = safeText(mapping.command ?? '');
 			const releaseCommand = safeText(mapping.releaseCommand ?? '');
 			const label = safeText(mapping.label ?? mapping.command ?? '');
+			const icon = safeText(mapping.icon ?? '');
 			if (!command) return [];
-			return [{ command, releaseCommand, label: label || command }];
+			return [{ command, releaseCommand, label: label || command, icon }];
 		}
 		return Object.entries(mapping)
 			.filter(([command]) => safeText(command))
-			.map(([command, label]) => ({
-				command: safeText(command),
-				releaseCommand: '',
-				label: safeText(label) || safeText(command),
-			}));
+			.map(([command, mappingValue]) => {
+				const isEntryObject = mappingValue && typeof mappingValue === 'object';
+				const label = isEntryObject
+					? safeText(mappingValue.label ?? command)
+					: safeText(mappingValue);
+				const icon = isEntryObject ? safeText(mappingValue.icon ?? '') : '';
+				return {
+					command: safeText(command),
+					releaseCommand: '',
+					label: label || safeText(command),
+					icon,
+				};
+			});
 	}
 	return [];
 }
@@ -5116,6 +5126,190 @@ function parseSwitchMappingCommand(rawMapping) {
 	const release = command.slice(firstColon + 1).trim();
 	if (!press || !release) return { mode: 'single', press: command };
 	return { mode: 'dual', press, release };
+}
+
+const MAPPING_ICON_LOAD_TIMEOUT_MS = 2500;
+const MAX_MAPPING_ICON_CACHE = 128;
+const mappingIconUrlCache = new Map();
+const MATERIAL_ICON_STYLE_ALIASES = {
+	filled: 'filled',
+	fill: 'filled',
+	outlined: 'outlined',
+	outline: 'outlined',
+	round: 'round',
+	rounded: 'round',
+	sharp: 'sharp',
+	'two-tone': 'two-tone',
+	two_tone: 'two-tone',
+	twotone: 'two-tone',
+};
+
+function mappingLabel(mapping) {
+	if (!mapping || typeof mapping !== 'object') return safeText(mapping);
+	const label = safeText(mapping.label ?? '');
+	const command = safeText(mapping.command ?? '');
+	return label || command;
+}
+
+function findMappingByCommand(mapping, command) {
+	const target = safeText(command);
+	if (!Array.isArray(mapping) || !mapping.length) return null;
+	return mapping.find((m) => safeText(m?.command) === target) || null;
+}
+
+function resolveMaterialMappingIcon(icon) {
+	const raw = safeText(icon).trim();
+	if (!raw || !/^material:/i.test(raw)) return '';
+	const parts = raw.split(':').map((part) => safeText(part).trim()).filter(Boolean);
+	if (parts.length < 2) return '';
+	let style = 'filled';
+	let iconName = '';
+	if (parts.length >= 3) {
+		const mappedStyle = MATERIAL_ICON_STYLE_ALIASES[parts[1].toLowerCase()];
+		if (mappedStyle) {
+			style = mappedStyle;
+			iconName = parts.slice(2).join('_');
+		} else {
+			iconName = parts.slice(1).join('_');
+		}
+	} else {
+		iconName = parts[1];
+	}
+	const normalizedName = iconName.toLowerCase().replace(/\s+/g, '_');
+	if (!/^[a-z0-9][a-z0-9_-]{0,127}$/.test(normalizedName)) return '';
+	return style === 'filled'
+		? `/icons/material/${normalizedName}.svg`
+		: `/icons/material/${style}/${normalizedName}.svg`;
+}
+
+function mappingIconCandidates(icon) {
+	const raw = safeText(icon).trim();
+	if (!raw) return [];
+	const materialPath = resolveMaterialMappingIcon(raw);
+	if (materialPath) return [materialPath];
+	return iconCandidates(raw);
+}
+
+function applyMappingIconUrl(iconEl, url) {
+	if (!iconEl || !url) return;
+	iconEl.style.webkitMaskImage = `url("${url}")`;
+	iconEl.style.maskImage = `url("${url}")`;
+}
+
+function clearMappingIconUrl(iconEl) {
+	if (!iconEl) return;
+	iconEl.style.webkitMaskImage = '';
+	iconEl.style.maskImage = '';
+}
+
+function setMappingControlContent(el, mapping) {
+	if (!el) return;
+	const text = mappingLabel(mapping);
+	const iconToken = safeText(mapping?.icon ?? '').trim();
+	const renderToken = `${Date.now()}-${Math.random()}`;
+	el.dataset.mappingIconRenderToken = renderToken;
+	el.textContent = '';
+	el.classList.remove('mapping-icon-ready');
+	if (text) {
+		el.setAttribute('aria-label', text);
+		el.setAttribute('title', text);
+	} else {
+		el.removeAttribute('aria-label');
+		el.removeAttribute('title');
+	}
+
+	const content = document.createElement('span');
+	content.className = 'mapping-content';
+	const iconEl = document.createElement('span');
+	iconEl.className = 'mapping-icon hidden';
+	const textEl = document.createElement('span');
+	textEl.className = 'mapping-text';
+	textEl.textContent = text;
+	content.appendChild(iconEl);
+	content.appendChild(textEl);
+	el.appendChild(content);
+
+	const showText = () => {
+		if (el.dataset.mappingIconRenderToken !== renderToken) return;
+		el.classList.remove('mapping-icon-ready');
+		iconEl.classList.add('hidden');
+		clearMappingIconUrl(iconEl);
+		textEl.classList.remove('hidden');
+	};
+
+	const showIcon = (url, cacheKey) => {
+		if (el.dataset.mappingIconRenderToken !== renderToken) return;
+		if (cacheKey && MAX_MAPPING_ICON_CACHE > 0) {
+			setBoundedCache(mappingIconUrlCache, cacheKey, url, MAX_MAPPING_ICON_CACHE);
+		}
+		el.classList.add('mapping-icon-ready');
+		applyMappingIconUrl(iconEl, url);
+		iconEl.classList.remove('hidden');
+		textEl.classList.add('hidden');
+	};
+
+	if (!iconToken) {
+		showText();
+		return;
+	}
+
+	const candidates = mappingIconCandidates(iconToken);
+	if (!candidates.length) {
+		showText();
+		return;
+	}
+
+	if (MAX_MAPPING_ICON_CACHE > 0 && mappingIconUrlCache.has(iconToken)) {
+		const cached = mappingIconUrlCache.get(iconToken);
+		if (cached) {
+			showIcon(cached, iconToken);
+			return;
+		}
+		mappingIconUrlCache.delete(iconToken);
+	}
+
+	let idx = 0;
+	let done = false;
+	const probe = new Image();
+	const timeout = setTimeout(() => {
+		if (done) return;
+		done = true;
+		showText();
+	}, MAPPING_ICON_LOAD_TIMEOUT_MS);
+
+	const finish = () => {
+		clearTimeout(timeout);
+		probe.onload = null;
+		probe.onerror = null;
+	};
+
+	const tryNext = () => {
+		if (done) return;
+		if (el.dataset.mappingIconRenderToken !== renderToken) {
+			done = true;
+			finish();
+			return;
+		}
+		if (idx >= candidates.length) {
+			done = true;
+			finish();
+			showText();
+			return;
+		}
+		const url = candidates[idx++];
+		probe.onload = () => {
+			if (done) return;
+			done = true;
+			finish();
+			showIcon(url, iconToken);
+		};
+		probe.onerror = () => {
+			if (done) return;
+			tryNext();
+		};
+		probe.src = url;
+	};
+	tryNext();
 }
 
 function iconCandidates(icon) {
@@ -5573,7 +5767,7 @@ function getWidgetRenderInfo(w) {
 	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}&mode=${themeMode}` : '';
 	const videoHeight = isVideo ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const chartHeight = isChart ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
-	const mappingSig = mapping.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}`).join('|');
+	const mappingSig = mapping.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}:${m.icon || ''}`).join('|');
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
 	// Get config values that affect rendering
@@ -6296,9 +6490,12 @@ function updateCard(card, w, info) {
 				select.appendChild(opt);
 			}
 
-			const current = mapping.find(m => safeText(m.command) === safeText(st));
+			const current = findMappingByCommand(mapping, st);
 			select.value = current ? current.command : '';
-			const currentLabel = current ? (current.label || current.command) : safeText(st);
+			const fallbackSelectionMapping = () => {
+				const fallbackValue = safeText(select.value || st);
+				return { command: fallbackValue, releaseCommand: '', label: fallbackValue, icon: '' };
+			};
 
 			const releaseRefresh = () => {
 				state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
@@ -6330,8 +6527,8 @@ function updateCard(card, w, info) {
 				const fakeSelect = document.createElement('div');
 				fakeSelect.className = 'fake-select';
 				const syncFake = () => {
-					const opt = select.options[select.selectedIndex];
-					fakeSelect.textContent = opt ? opt.textContent : currentLabel;
+					const selectedMapping = findMappingByCommand(mapping, select.value);
+					setMappingControlContent(fakeSelect, selectedMapping || fallbackSelectionMapping());
 				};
 				syncFake();
 				let released = false;
@@ -6362,7 +6559,7 @@ function updateCard(card, w, info) {
 				const fakeSelect = document.createElement('button');
 				fakeSelect.type = 'button';
 				fakeSelect.className = 'fake-select';
-				fakeSelect.textContent = currentLabel || safeText(select.value);
+				setMappingControlContent(fakeSelect, current || fallbackSelectionMapping());
 
 				const menu = document.createElement('div');
 				menu.className = 'select-menu';
@@ -6387,7 +6584,7 @@ function updateCard(card, w, info) {
 					const optBtn = document.createElement('button');
 					optBtn.type = 'button';
 					optBtn.className = 'select-option';
-					optBtn.textContent = m.label || m.command;
+					setMappingControlContent(optBtn, m);
 					optBtn.dataset.command = m.command;
 					optBtn.onclick = async (e) => {
 						haptic();
@@ -6399,7 +6596,7 @@ function updateCard(card, w, info) {
 						}
 						const ok = await sendSelection(m.command);
 						if (ok) {
-							fakeSelect.textContent = m.label || m.command;
+							setMappingControlContent(fakeSelect, m);
 							setActive(m.command);
 						}
 						closeMenu();
@@ -6520,7 +6717,7 @@ function updateCard(card, w, info) {
 					const m = mapping[i++];
 					if (!m) continue;
 					const parsed = parseSwitchMappingCommand(m);
-					btn.textContent = m.label || m.command;
+					setMappingControlContent(btn, m);
 					btn.dataset.command = m.command;
 					const shouldBeActive = parsed.mode === 'single' && safeText(m.command) === currentState;
 					btn.classList.toggle('is-active', shouldBeActive);
@@ -6579,7 +6776,7 @@ function updateCard(card, w, info) {
 				const parsed = parseSwitchMappingCommand(m);
 				const b = document.createElement('button');
 				b.className = btnClass;
-				b.textContent = m.label || m.command;
+				setMappingControlContent(b, m);
 				b.dataset.command = m.command;
 				if (parsed.mode === 'single' && safeText(m.command) === currentState) b.classList.add('is-active');
 				if (parsed.mode === 'dual') {

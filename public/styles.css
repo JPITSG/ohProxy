@@ -361,6 +361,39 @@ html:not(.slim) .has-meta .labelStack {
 	-webkit-mask-repeat: no-repeat;
 	-webkit-mask-position: center;
 }
+.mapping-content {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: .35rem;
+	min-width: 0;
+	max-width: 100%;
+}
+.mapping-text {
+	display: block;
+	min-width: 0;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.mapping-icon {
+	width: .95rem;
+	height: .95rem;
+	display: inline-block;
+	flex: 0 0 .95rem;
+	background-color: currentColor;
+	mask-size: contain;
+	mask-repeat: no-repeat;
+	mask-position: center;
+	-webkit-mask-size: contain;
+	-webkit-mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+}
+.mapping-icon.hidden,
+.mapping-text.hidden {
+	display: none;
+}
 
 /* Glow effect for special cards */
 .glow-card .labelStack {
@@ -419,6 +452,10 @@ html:not(.slim) .has-meta .labelStack {
 .selection-card .select-wrap > .fake-select {
 	width: 100%;
 	cursor: pointer;
+}
+.selection-card .inline-controls .fake-select .mapping-content,
+.selection-card .select-option .mapping-content {
+	width: 100%;
 }
 .selection-card .inline-controls .fake-select {
 	background-color: var(--color-control-off-bg);
@@ -1097,6 +1134,9 @@ body.theme-dark #themeToggleBtn svg {
 	justify-content: center;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+.switch-card .inline-controls .switch-btn .mapping-content {
+	width: 100%;
 }
 .switch-card .inline-controls .switch-btn {
 	padding: 11px 12px;
