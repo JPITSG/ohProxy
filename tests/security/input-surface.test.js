@@ -71,6 +71,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawOffset\s*=\s*req\.query\.offset\s*;/,
 			/const\s+rawRadius\s*=\s*req\.query\.radius\s*;/,
 			/const\s+rawLegend\s*=\s*req\.query\?\.legend\s*;/,
+			/const\s+rawYAxisDecimalPattern\s*=\s*req\.query\?\.yAxisDecimalPattern\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));
@@ -127,7 +128,7 @@ describe('Input Validation Coverage', () => {
 		assert.ok(content.includes("if (!['http:', 'https:', 'rtsp:'].includes(target.protocol))"));
 		assert.ok(content.includes('isProxyTargetAllowed(target, liveConfig.proxyAllowlist)'));
 
-		assert.ok(content.includes("if (!['h', 'D', 'W', 'M', 'Y'].includes(period))"));
+		assert.ok(content.includes("parsePeriodToSeconds(period)"));
 		assert.ok(content.includes("if (!['light', 'dark'].includes(mode))"));
 
 		assert.ok(content.includes('parseOptionalInt(req.query?.w, { min: 0, max: 10000 })'));

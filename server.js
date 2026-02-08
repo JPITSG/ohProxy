@@ -360,13 +360,84 @@ const BIN_SHELL = safeText(BINARIES_CONFIG.shell) || '/bin/sh';
 const PATHS_CONFIG = SERVER_CONFIG.paths || {};
 const RRD_PATH = safeText(PATHS_CONFIG.rrd) || '';
 const CHART_CACHE_DIR = path.join(__dirname, 'cache', 'chart');
-const CHART_PERIOD_TTL = {
-	h: 60 * 1000,           // 1 minute
-	D: 10 * 60 * 1000,      // 10 minutes
-	W: 60 * 60 * 1000,      // 1 hour
-	M: 60 * 60 * 1000,      // 1 hour
-	Y: 24 * 60 * 60 * 1000, // 1 day
-};
+// Parse any openHAB chart period string to seconds.
+// Supports simple (h, D, W, M, Y), multiplied (4h, 2D, 3W),
+// ISO 8601 (P1Y6M, PT1H30M, P2W, P1DT12H), and past-future (2h-1h).
+// Returns 0 for invalid/unrecognised input. Capped at 10 years.
+const MAX_PERIOD_SEC = 10 * 365.25 * 86400; // ~10 years
+function parsePeriodToSeconds(period) {
+	if (typeof period !== 'string' || !period) return 0;
+
+	// Past-future format: extract past portion (before the dash)
+	if (/^\d+[hDWMY]-\d+[hDWMY]$/.test(period)) {
+		return parsePeriodToSeconds(period.split('-')[0]);
+	}
+
+	// Simple / multiplied: e.g. h, D, 4h, 2W, 12M
+	const simpleMatch = period.match(/^(\d*)([hDWMY])$/);
+	if (simpleMatch) {
+		const multiplier = simpleMatch[1] ? parseInt(simpleMatch[1], 10) : 1;
+		const unitSec = { h: 3600, D: 86400, W: 604800, M: 2592000, Y: 31536000 };
+		const sec = multiplier * unitSec[simpleMatch[2]];
+		return Math.min(sec, MAX_PERIOD_SEC);
+	}
+
+	// ISO 8601 duration: P[nY][nM][nW][nD][T[nH][nM][nS]]
+	const isoMatch = period.match(/^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
+	if (isoMatch) {
+		const [, y, mo, w, d, h, mi, s] = isoMatch;
+		const sec = (parseInt(y || 0) * 31536000)
+			+ (parseInt(mo || 0) * 2592000)
+			+ (parseInt(w || 0) * 604800)
+			+ (parseInt(d || 0) * 86400)
+			+ (parseInt(h || 0) * 3600)
+			+ (parseInt(mi || 0) * 60)
+			+ (parseInt(s || 0));
+		return sec > 0 ? Math.min(sec, MAX_PERIOD_SEC) : 0;
+	}
+
+	return 0;
+}
+
+// Tiered cache TTL (ms) matching original h/D/W/M/Y behaviour
+function chartCacheTtl(durationSec) {
+	if (durationSec <= 3600) return 60 * 1000;           // <=1h  → 1 min
+	if (durationSec <= 86400) return 10 * 60 * 1000;     // <=1d  → 10 min
+	if (durationSec <= 30 * 86400) return 60 * 60 * 1000; // <=30d → 1 hour
+	return 24 * 60 * 60 * 1000;                           // >30d  → 1 day
+}
+
+// Fallback data-point count when no data falls in period window
+function chartFallbackN(durationSec) {
+	return Math.min(Math.max(Math.round(durationSec / 60), 60), 8760);
+}
+
+// Snap to a "nice" x-label interval targeting ~7 labels
+function chartXLabelInterval(dataDurationSec) {
+	const niceIntervals = [
+		300, 600, 900, 1800, 3600, 7200, 14400, 21600,
+		43200, 86400, 172800, 432000, 604800, 1209600, 2592000,
+	];
+	const target = dataDurationSec / 7;
+	for (const iv of niceIntervals) {
+		if (iv >= target) return iv;
+	}
+	return niceIntervals[niceIntervals.length - 1];
+}
+
+// Tiered sampling/rounding config for stable data hashing
+function chartHashConfig(durationSec) {
+	if (durationSec <= 3600)       return { sample: 1,  decimals: 2, tsRound: 60 };
+	if (durationSec <= 86400)      return { sample: 4,  decimals: 1, tsRound: 3600 };
+	if (durationSec <= 604800)     return { sample: 8,  decimals: 1, tsRound: 86400 };
+	if (durationSec <= 2592000)    return { sample: 16, decimals: 0, tsRound: 86400 };
+	return { sample: 32, decimals: 0, tsRound: 604800 };
+}
+
+// Show "Cur" stat for short durations (<=4h)
+function chartShowCurStat(durationSec) {
+	return durationSec <= 14400;
+}
 const AI_CACHE_DIR = path.join(__dirname, 'cache', 'ai');
 const AI_STRUCTURE_MAP_WRITABLE = path.join(AI_CACHE_DIR, 'structuremap-writable.json');
 const ANTHROPIC_API_KEY = safeText(SERVER_CONFIG.apiKeys?.anthropic) || '';
@@ -2803,10 +2874,9 @@ function getChartCachePath(item, period, mode, title, legend, yAxisDecimalPatter
 	return path.join(CHART_CACHE_DIR, `${hash}.html`);
 }
 
-function isChartCacheValid(cachePath, period) {
+function isChartCacheValid(cachePath, durationSec) {
 	if (!fs.existsSync(cachePath)) return false;
-	const ttl = CHART_PERIOD_TTL[period];
-	if (!ttl) return false;
+	const ttl = chartCacheTtl(durationSec);
 	try {
 		const stat = fs.statSync(cachePath);
 		return (Date.now() - stat.mtimeMs) < ttl;
@@ -2845,7 +2915,7 @@ function deduceUnit(title) {
 	return '?';
 }
 
-function parseRrd4jFile(rrdPath, period = 'D') {
+function parseRrd4jFile(rrdPath, durationSec = 86400) {
 	try {
 		const data = fs.readFileSync(rrdPath);
 		if (data.length < 100) return null;
@@ -2901,9 +2971,8 @@ function parseRrd4jFile(rrdPath, period = 'D') {
 			archives.push({ steps: arcSteps, rows: arcRows, values: ordered });
 		}
 
-		// Select archive based on period
-		const periodDuration = { h: 3600, D: 86400, W: 604800, M: 2592000, Y: 31536000 };
-		const required = periodDuration[period] || 86400;
+		// Select archive based on duration
+		const required = durationSec || 86400;
 
 		let selected = null;
 		for (const arc of archives) {
@@ -2937,12 +3006,11 @@ function parseRrd4jFile(rrdPath, period = 'D') {
 	}
 }
 
-function processChartData(data, period, maxPoints = 500) {
+function processChartData(data, durationSec, maxPoints = 500) {
 	if (!data || data.length === 0) return { data: [], yMin: 0, yMax: 100 };
 
 	const now = Date.now() / 1000;
-	const periodSeconds = { h: 3600, D: 86400, W: 604800, M: 2592000, Y: 31536000 };
-	const duration = periodSeconds[period] || 86400;
+	const duration = durationSec || 86400;
 	const cutoff = now - duration;
 
 	// Filter and track min/max (and their indices for extreme-preserving downsample)
@@ -2960,8 +3028,7 @@ function processChartData(data, period, maxPoints = 500) {
 
 	// Fallback if no data in period
 	if (filtered.length === 0 && data.length > 0) {
-		const fallbackN = { h: 60, D: 1440, W: 2016, M: 4320, Y: 8760 };
-		const n = fallbackN[period] || 1440;
+		const n = chartFallbackN(duration);
 		filtered = data.slice(-n);
 		dataMin = Infinity; dataMax = -Infinity;
 		dataMinIdx = -1; dataMaxIdx = -1;
@@ -3017,22 +3084,14 @@ function processChartData(data, period, maxPoints = 500) {
 	return { data: filtered, yMin, yMax, dataMin, dataMax, dataAvg };
 }
 
-function generateXLabels(data, period) {
+function generateXLabels(data) {
 	if (!data || data.length === 0) return [];
 
 	const startTs = data[0][0];
 	const endTs = data[data.length - 1][0];
 	const duration = endTs - startTs;
 
-	const intervals = {
-		h: duration < 3600 ? 600 : 900,
-		D: 7200,
-		W: 86400,
-		M: 432000,
-		Y: 2592000,
-	};
-
-	const interval = intervals[period] || intervals.D;
+	const interval = chartXLabelInterval(duration);
 	const labels = [];
 
 	for (let ts = startTs; ts <= endTs; ts += interval) {
@@ -3063,26 +3122,18 @@ function generateChartPoints(data) {
 	}));
 }
 
-function computeChartDataHash(rawData, period) {
+function computeChartDataHash(rawData, durationSec) {
 	if (!rawData || rawData.length === 0) return null;
 
 	// Filter to requested period window (same cutoff as processChartData)
-	const periodSeconds = { h: 3600, D: 86400, W: 604800, M: 2592000, Y: 31536000 };
-	const duration = periodSeconds[period] || 86400;
+	const duration = durationSec || 86400;
 	const now = Date.now() / 1000;
 	const cutoff = now - duration;
 	const periodData = rawData.filter(([ts]) => ts >= cutoff);
 	if (periodData.length === 0) return null;
 
-	// Sample rate and rounding based on period for stable hashing
-	const hashConfig = {
-		h: { sample: 1, decimals: 2, tsRound: 60 },
-		D: { sample: 4, decimals: 1, tsRound: 3600 },
-		W: { sample: 8, decimals: 1, tsRound: 86400 },
-		M: { sample: 16, decimals: 0, tsRound: 86400 },
-		Y: { sample: 32, decimals: 0, tsRound: 604800 },
-	};
-	const cfg = hashConfig[period] || hashConfig.D;
+	// Sample rate and rounding based on duration for stable hashing
+	const cfg = chartHashConfig(duration);
 
 	const sampled = periodData.filter((_, i) => i % cfg.sample === 0);
 	const dataStr = sampled.map(([ts, val]) => {
@@ -3115,7 +3166,7 @@ function formatChartValue(n) {
 	return result;
 }
 
-function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern) {
+function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern, durationSec) {
 	const theme = mode === 'dark' ? 'dark' : 'light';
 	const safeTitle = escapeHtml(title);
 	const unitDisplay = unit !== '?' ? escapeHtml(unit) : '';
@@ -3131,7 +3182,7 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 		const fmtAvg = typeof dataAvg === 'number' ? formatChartValue(dataAvg) + statUnit : '';
 		const fmtMin = typeof dataMin === 'number' ? formatChartValue(dataMin) + statUnit : '';
 		const fmtMax = typeof dataMax === 'number' ? formatChartValue(dataMax) + statUnit : '';
-		const fmtCur = (period === 'h' && typeof dataCur === 'number') ? formatChartValue(dataCur) + statUnit : '';
+		const fmtCur = (chartShowCurStat(durationSec || 3600) && typeof dataCur === 'number') ? formatChartValue(dataCur) + statUnit : '';
 		const curHtml = fmtCur ? `<span class="stat-item" id="statCur"><span class="stat-label">Cur</span> <span class="stat-value">${fmtCur}</span></span>` : '';
 		statsHtml = fmtAvg ? `<div class="chart-stats" id="chartStats">${curHtml}<span class="stat-item"><span class="stat-label">Avg</span> <span class="stat-value">${fmtAvg}</span></span><span class="stat-item" id="statMin"><span class="stat-label">Min</span> <span class="stat-value">${fmtMin}</span></span><span class="stat-item" id="statMax"><span class="stat-label">Max</span> <span class="stat-value">${fmtMax}</span></span></div>` : '';
 	}
@@ -3175,19 +3226,22 @@ window._chartYAxisPattern=${JSON.stringify(yAxisDecimalPattern || null)};
 </html>`;
 }
 
-function generateChart(item, period, mode, title, legend, yAxisDecimalPattern) {
+function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, durationSec) {
 	const rrdDir = liveConfig.rrdPath || '';
 	if (!rrdDir) return null;
 
 	const rrdPath = path.join(rrdDir, `${item}.rrd`);
 	if (!fs.existsSync(rrdPath)) return null;
 
+	// Parse period once; callers may pre-compute durationSec
+	const durSec = durationSec || parsePeriodToSeconds(period) || 86400;
+
 	// Parse RRD file
-	const rawData = parseRrd4jFile(rrdPath, period);
+	const rawData = parseRrd4jFile(rrdPath, durSec);
 	if (!rawData) return null;
 
 	// Process data
-	const { data, yMin, yMax, dataMin, dataMax, dataAvg } = processChartData(rawData, period, 500);
+	const { data, yMin, yMax, dataMin, dataMax, dataAvg } = processChartData(rawData, durSec, 500);
 	if (!data || data.length === 0) return null;
 
 	// Deduce unit from title
@@ -3214,16 +3268,16 @@ function generateChart(item, period, mode, title, legend, yAxisDecimalPattern) {
 
 	// Generate chart components
 	const chartData = generateChartPoints(data);
-	const xLabels = generateXLabels(data, period);
+	const xLabels = generateXLabels(data);
 
 	// Get current (latest) value from chart data
 	const dataCur = chartData.length > 0 ? chartData[chartData.length - 1].y : null;
 
 	// Compute data hash for cache invalidation
-	const dataHash = computeChartDataHash(rawData, period);
+	const dataHash = computeChartDataHash(rawData, durSec);
 
 	// Generate HTML
-	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern);
+	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern, durSec);
 }
 
 async function fetchAllPages() {
@@ -7565,8 +7619,12 @@ app.get('/chart', (req, res) => {
 		return res.status(400).type('text/plain').send('Invalid item parameter');
 	}
 
-	// Validate period: h D W M Y
-	if (!['h', 'D', 'W', 'M', 'Y'].includes(period)) {
+	// Validate period: safe chars, max 20, and must parse to a positive duration
+	if (period.length > 20 || !/^[0-9A-Za-z-]+$/.test(period)) {
+		return res.status(400).type('text/plain').send('Invalid period parameter');
+	}
+	const durationSec = parsePeriodToSeconds(period);
+	if (!durationSec) {
 		return res.status(400).type('text/plain').send('Invalid period parameter');
 	}
 
@@ -7575,15 +7633,16 @@ app.get('/chart', (req, res) => {
 		return res.status(400).type('text/plain').send('Invalid mode parameter');
 	}
 
+	const cacheTtlMs = chartCacheTtl(durationSec);
 	const resolvedTitle = title || item;
 	const cachePath = getChartCachePath(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern);
 
 	// Check cache
-	if (isChartCacheValid(cachePath, period)) {
+	if (isChartCacheValid(cachePath, durationSec)) {
 		try {
 			const html = fs.readFileSync(cachePath, 'utf8');
 			res.setHeader('Content-Type', 'text/html; charset=utf-8');
-			res.setHeader('Cache-Control', `private, max-age=${Math.floor(CHART_PERIOD_TTL[period] / 1000)}`);
+			res.setHeader('Cache-Control', `private, max-age=${Math.floor(cacheTtlMs / 1000)}`);
 			res.setHeader('X-Chart-Cache', 'hit');
 			return res.send(html);
 		} catch {
@@ -7593,7 +7652,7 @@ app.get('/chart', (req, res) => {
 
 	// Generate HTML chart from RRD
 	try {
-		const html = generateChart(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern);
+		const html = generateChart(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern, durationSec);
 		if (!html) {
 			return res.status(404).type('text/plain').send('Chart data not available');
 		}
@@ -7605,7 +7664,7 @@ app.get('/chart', (req, res) => {
 		} catch {}
 
 		res.setHeader('Content-Type', 'text/html; charset=utf-8');
-		res.setHeader('Cache-Control', `private, max-age=${Math.floor(CHART_PERIOD_TTL[period] / 1000)}`);
+		res.setHeader('Cache-Control', `private, max-age=${Math.floor(cacheTtlMs / 1000)}`);
 		res.setHeader('X-Chart-Cache', 'miss');
 		res.send(html);
 	} catch (err) {
@@ -7654,7 +7713,11 @@ app.get('/api/chart-hash', (req, res) => {
 	if (!item || !/^[a-zA-Z0-9_-]{1,50}$/.test(item)) {
 		return res.status(400).json({ error: 'Invalid item' });
 	}
-	if (!['h', 'D', 'W', 'M', 'Y'].includes(period)) {
+	if (period.length > 20 || !/^[0-9A-Za-z-]+$/.test(period)) {
+		return res.status(400).json({ error: 'Invalid period' });
+	}
+	const durationSec = parsePeriodToSeconds(period);
+	if (!durationSec) {
 		return res.status(400).json({ error: 'Invalid period' });
 	}
 	if (!['light', 'dark'].includes(mode)) {
@@ -7677,13 +7740,13 @@ app.get('/api/chart-hash', (req, res) => {
 
 	try {
 		// Parse raw data and compute hash
-		const rawData = parseRrd4jFile(rrdPath, period);
+		const rawData = parseRrd4jFile(rrdPath, durationSec);
 		if (!rawData || rawData.length === 0) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'No data' });
 		}
 
-		const dataHash = computeChartDataHash(rawData, period);
+		const dataHash = computeChartDataHash(rawData, durationSec);
 		if (!dataHash) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Hash computation failed' });
@@ -7705,7 +7768,7 @@ app.get('/api/chart-hash', (req, res) => {
 		}
 
 		// Data changed - regenerate HTML (hash is embedded by generateChart)
-		const html = generateChart(item, period, mode, title, legend, yAxisDecimalPattern);
+		const html = generateChart(item, period, mode, title, legend, yAxisDecimalPattern, durationSec);
 		if (!html) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Generation failed' });
