@@ -2097,6 +2097,8 @@ const CHART_JS_PATH = path.join(PUBLIC_DIR, 'chart.js');
 const CHART_CSS_PATH = path.join(PUBLIC_DIR, 'chart.css');
 const LOGIN_JS_PATH = path.join(PUBLIC_DIR, 'login.js');
 const LANG_JS_PATH = path.join(PUBLIC_DIR, 'lang.js');
+const MATERIAL_ICONS_DIR = path.join(__dirname, 'node_modules', '@material-design-icons', 'svg');
+const MATERIAL_ICONS_FILLED_DIR = path.join(MATERIAL_ICONS_DIR, 'filled');
 const LOGIN_HTML_PATH = path.join(PUBLIC_DIR, 'login.html');
 const INDEX_HTML_PATH = path.join(PUBLIC_DIR, 'index.html');
 const SERVICE_WORKER_PATH = path.join(PUBLIC_DIR, 'sw.js');
@@ -4282,6 +4284,16 @@ function sendVersionedAsset(res, filePath, contentType) {
 	res.sendFile(filePath);
 }
 
+function sendImmutableSvg(res, filePath) {
+	if (!filePath || !fs.existsSync(filePath)) {
+		res.status(404).send('Not found');
+		return;
+	}
+	res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+	res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+	res.sendFile(filePath);
+}
+
 function normalizeWidgets(page) {
 	// Support both OH 1.x 'widget' and OH 3.x+ 'widgets'
 	let w = page?.widgets || page?.widget;
@@ -4469,31 +4481,41 @@ function normalizeMappings(mapping) {
 				const command = safeText(m.command ?? '');
 				const releaseCommand = safeText(m.releaseCommand ?? '');
 				const label = safeText(m.label ?? m.command ?? '');
-				if (!command && !label) return null;
-				return { command, releaseCommand, label: label || command };
+				const icon = safeText(m.icon ?? '');
+				if (!command && !label && !icon) return null;
+				return { command, releaseCommand, label: label || command, icon };
 			})
 			.filter(Boolean);
 	}
 	if (typeof mapping === 'object') {
-		if ('command' in mapping || 'label' in mapping || 'releaseCommand' in mapping) {
+		if ('command' in mapping || 'label' in mapping || 'releaseCommand' in mapping || 'icon' in mapping) {
 			const command = safeText(mapping.command ?? '');
 			const releaseCommand = safeText(mapping.releaseCommand ?? '');
 			const label = safeText(mapping.label ?? mapping.command ?? '');
-			if (!command && !label) return [];
-			return [{ command, releaseCommand, label: label || command }];
+			const icon = safeText(mapping.icon ?? '');
+			if (!command && !label && !icon) return [];
+			return [{ command, releaseCommand, label: label || command, icon }];
 		}
-		return Object.entries(mapping).map(([command, label]) => ({
-			command: safeText(command),
-			releaseCommand: '',
-			label: safeText(label),
-		}));
+		return Object.entries(mapping).map(([command, mappingValue]) => {
+			const isEntryObject = mappingValue && typeof mappingValue === 'object';
+			const label = isEntryObject
+				? safeText(mappingValue.label ?? command)
+				: safeText(mappingValue);
+			const icon = isEntryObject ? safeText(mappingValue.icon ?? '') : '';
+			return {
+				command: safeText(command),
+				releaseCommand: '',
+				label: label || safeText(command),
+				icon,
+			};
+		});
 	}
 	return [];
 }
 
 function mappingsSignature(mapping) {
 	const normalized = normalizeMappings(mapping);
-	return normalized.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}`).join('|');
+	return normalized.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}:${m.icon || ''}`).join('|');
 }
 
 function widgetSnapshot(widget) {
@@ -8721,6 +8743,32 @@ app.get('/vendor/OpenLayers.js', (req, res) => {
 	}
 	res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
 	res.sendFile(path.join(PUBLIC_DIR, 'vendor', 'OpenLayers.js'));
+});
+
+// Material icons (locally hosted from npm package)
+// Default style: filled (e.g. /icons/material/mic_off.svg)
+app.get(/^\/icons\/material\/([a-z0-9][a-z0-9_-]{0,127})\.svg$/i, (req, res) => {
+	const match = req.path.match(/^\/icons\/material\/([a-z0-9][a-z0-9_-]{0,127})\.svg$/i);
+	const iconName = match && match[1] ? match[1].toLowerCase() : '';
+	if (!iconName) {
+		res.status(404).send('Not found');
+		return;
+	}
+	const filePath = path.join(MATERIAL_ICONS_FILLED_DIR, `${iconName}.svg`);
+	sendImmutableSvg(res, filePath);
+});
+
+// Style-specific material icon path (e.g. /icons/material/outlined/mic_off.svg)
+app.get(/^\/icons\/material\/(filled|outlined|round|sharp|two-tone)\/([a-z0-9][a-z0-9_-]{0,127})\.svg$/i, (req, res) => {
+	const match = req.path.match(/^\/icons\/material\/(filled|outlined|round|sharp|two-tone)\/([a-z0-9][a-z0-9_-]{0,127})\.svg$/i);
+	const style = match && match[1] ? match[1].toLowerCase() : '';
+	const iconName = match && match[2] ? match[2].toLowerCase() : '';
+	if (!style || !iconName) {
+		res.status(404).send('Not found');
+		return;
+	}
+	const filePath = path.join(MATERIAL_ICONS_DIR, style, `${iconName}.svg`);
+	sendImmutableSvg(res, filePath);
 });
 
 // --- Static modern UI ---
