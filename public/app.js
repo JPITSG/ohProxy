@@ -5710,6 +5710,7 @@ function updateCard(card, w, info) {
 		'nav-card',
 		'selection-card',
 		'colortemperaturepicker-card',
+		'input-card',
 		'switch-card',
 		'slider-card',
 		'image-card',
@@ -5757,6 +5758,7 @@ function updateCard(card, w, info) {
 	const isSwitchType = t.includes('switch') || t === 'switch';
 	const isSetpoint = t === 'setpoint';
 	const isColorTemperaturePicker = t === 'colortemperaturepicker';
+	const isInput = t === 'input';
 	const existingSwitchControls = isSwitchType ? labelRow.querySelector('.inline-controls') : null;
 	// Determine what to preserve
 	let preserveElement = null;
@@ -5779,13 +5781,13 @@ function updateCard(card, w, info) {
 	titleEl.textContent = labelParts.title;
 	if (isText || isGroup) {
 		crossfadeText(metaEl, labelParts.state);
-	} else if (!isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker) {
-		// Don't show meta text for Selection/Switch/Setpoint/Colortemperaturepicker.
+	} else if (!isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput) {
+		// Don't show meta text for Selection/Switch/Setpoint/Colortemperaturepicker/Input.
 		metaEl.textContent = labelParts.state;
-	} else if (isColorTemperaturePicker) {
+	} else if (isColorTemperaturePicker || isInput) {
 		metaEl.textContent = '';
 	}
-	if (labelParts.state && !isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker) card.classList.add('has-meta');
+	if (labelParts.state && !isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput) card.classList.add('has-meta');
 	// Apply openHAB labelcolor / valuecolor
 	const lc = data.labelcolor;
 	const vc = data.valuecolor;
@@ -6661,6 +6663,127 @@ function updateCard(card, w, info) {
 		inlineControls.appendChild(minus);
 		inlineControls.appendChild(display);
 		inlineControls.appendChild(plus);
+	} else if (t === 'input') {
+		card.classList.add('input-card');
+
+		const rawHint = safeText(w?.inputHint || '').toLowerCase().trim();
+		const inputHint = ['text', 'number', 'date', 'time', 'datetime'].includes(rawHint) ? rawHint : 'text';
+
+		const inlineControls = document.createElement('div');
+		inlineControls.className = 'inline-controls flex items-center gap-2 flex-1 min-w-0';
+		if (navHint && navHint.parentElement === labelRow) {
+			labelRow.insertBefore(inlineControls, navHint);
+		} else {
+			labelRow.appendChild(inlineControls);
+		}
+
+		// Build the input element
+		const inputEl = document.createElement('input');
+		inputEl.className = 'input-field';
+
+		const htmlTypeMap = { text: 'text', number: 'number', date: 'date', time: 'time', datetime: 'datetime-local' };
+		inputEl.type = htmlTypeMap[inputHint];
+
+		// Pre-fill from current state
+		const isNullState = !st || st === 'NULL' || st === 'UNDEF';
+		if (!isNullState) {
+			if (inputHint === 'number') {
+				const num = parseFloat(st);
+				if (Number.isFinite(num)) inputEl.value = String(num);
+			} else if (inputHint === 'date') {
+				const m = st.match(/^(\d{4}-\d{2}-\d{2})/);
+				if (m) inputEl.value = m[1];
+			} else if (inputHint === 'time') {
+				const m = st.match(/(\d{2}:\d{2})/);
+				if (m) inputEl.value = m[1];
+			} else if (inputHint === 'datetime') {
+				const m = st.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+				if (m) inputEl.value = m[1] + 'T' + m[2];
+			} else {
+				inputEl.value = st;
+			}
+		}
+
+		// Number constraints
+		if (inputHint === 'number') {
+			if (w?.step != null && Number.isFinite(Number(w.step))) inputEl.step = String(Number(w.step));
+			if (w?.minValue != null && Number.isFinite(Number(w.minValue))) inputEl.min = String(Number(w.minValue));
+			if (w?.maxValue != null && Number.isFinite(Number(w.maxValue))) inputEl.max = String(Number(w.maxValue));
+		}
+
+		// Send button
+		const sendBtn = document.createElement('button');
+		sendBtn.className = 'input-send-btn';
+		sendBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path fill-rule="evenodd" clip-rule="evenodd" d="M21.2287 6.60355C21.6193 6.99407 21.6193 7.62723 21.2287 8.01776L10.2559 18.9906C9.86788 19.3786 9.23962 19.3814 8.84811 18.9969L2.66257 12.9218C2.26855 12.5349 2.26284 11.9017 2.64983 11.5077L3.35054 10.7942C3.73753 10.4002 4.37067 10.3945 4.7647 10.7815L9.53613 15.4677L19.1074 5.89644C19.4979 5.50592 20.1311 5.50591 20.5216 5.89644L21.2287 6.60355Z"/></svg>';
+
+		// doSend handler
+		const doSend = async () => {
+			let command = inputEl.value;
+			if (inputHint === 'date') {
+				if (!command) return;
+				command = command + 'T00:00:00';
+			} else if (inputHint === 'time') {
+				if (!command) return;
+				command = command.length === 5 ? command + ':00' : command;
+			} else if (inputHint === 'datetime') {
+				if (!command) return;
+				command = command.length === 16 ? command + ':00' : command;
+			} else if (inputHint === 'number') {
+				if (!command) return;
+			}
+			if (!command && inputHint !== 'text') return;
+
+			haptic();
+			inputEl.disabled = true;
+			sendBtn.disabled = true;
+			try {
+				await sendCommand(itemName, command);
+				await refresh(false);
+			} catch (e) {
+				logJsError(`sendInput failed for ${itemName}`, e);
+				alert(e.message);
+			} finally {
+				inputEl.disabled = false;
+				sendBtn.disabled = false;
+			}
+		};
+
+		sendBtn.onclick = doSend;
+		inputEl.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') { e.preventDefault(); doSend(); }
+		});
+
+		// Refresh suppression during focus
+		let inputFocused = false;
+		const onInputFocus = () => {
+			if (inputFocused) return;
+			inputFocused = true;
+			state.suppressRefreshCount += 1;
+		};
+		const onInputBlur = () => {
+			if (!inputFocused) return;
+			inputFocused = false;
+			state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
+			if (state.pendingRefresh) {
+				state.pendingRefresh = false;
+				refresh(false);
+			}
+		};
+		inputEl.addEventListener('focus', onInputFocus);
+		inputEl.addEventListener('blur', onInputBlur);
+
+		// Cleanup
+		registerCardCleanup(card, () => {
+			if (inputFocused) {
+				inputFocused = false;
+				state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
+			}
+			inputEl.removeEventListener('focus', onInputFocus);
+			inputEl.removeEventListener('blur', onInputBlur);
+		});
+
+		inlineControls.appendChild(inputEl);
+		inlineControls.appendChild(sendBtn);
 	} else if (t === 'colortemperaturepicker') {
 		let ctMin = Number.isFinite(Number(w?.minValue)) ? Number(w.minValue) : 0;
 		let ctMax = Number.isFinite(Number(w?.maxValue)) ? Number(w.maxValue) : 100;
