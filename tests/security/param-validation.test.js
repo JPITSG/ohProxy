@@ -279,6 +279,7 @@ function createValidationTestApp() {
 			const rawPeriod = req.query?.period;
 			const rawMode = req.query?.mode;
 			const rawTitle = req.query?.title;
+			const rawInterpolation = req.query?.interpolation;
 			if (typeof rawItem !== 'string') {
 				return res.status(400).send('Invalid item parameter');
 			}
@@ -288,15 +289,22 @@ function createValidationTestApp() {
 			if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
 				return res.status(400).send('Invalid mode parameter');
 			}
+			if (rawInterpolation !== undefined && typeof rawInterpolation !== 'string') {
+				return res.status(400).send('Invalid interpolation parameter');
+			}
 			const item = rawItem.trim();
 			const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 			const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
 			const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+			const interpolation = typeof rawInterpolation === 'string' ? rawInterpolation.trim().toLowerCase() : 'linear';
 		if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 			return res.status(400).send('Invalid parameters');
 		}
 		if (title && title.length > 200) {
 			return res.status(400).send('Invalid title parameter');
+		}
+		if (!['linear', 'step'].includes(interpolation)) {
+			return res.status(400).send('Invalid interpolation parameter');
 		}
 
 		if (!item || !/^[a-zA-Z0-9_-]{1,50}$/.test(item)) {
@@ -310,7 +318,7 @@ function createValidationTestApp() {
 			return res.status(400).send('Invalid mode parameter');
 		}
 
-		res.json({ item, period, mode, title });
+		res.json({ item, period, mode, title, interpolation });
 	});
 
 	// Video preview with allowlist validation
@@ -666,6 +674,36 @@ describe('Parameter Validation Security Tests', () => {
 				headers: { 'Authorization': authHeader },
 			});
 			assert.strictEqual(res.status, 400);
+		});
+
+		it('accepts interpolation=linear', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=h&mode=dark&interpolation=linear`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts interpolation=step', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=h&mode=dark&interpolation=step`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('rejects invalid interpolation value', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=h&mode=dark&interpolation=cubic`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 400);
+		});
+
+		it('defaults interpolation to linear when omitted', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=h&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+			const body = await res.json();
+			assert.strictEqual(body.interpolation, 'linear');
 		});
 	});
 

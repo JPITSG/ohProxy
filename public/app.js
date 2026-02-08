@@ -2031,6 +2031,10 @@ function chartWidgetUrl(widget) {
 	if (legend === false || legend === 'false') url += '&legend=false';
 	const yAxisDecimalPattern = safeText(widget?.yAxisDecimalPattern || '').trim();
 	if (yAxisDecimalPattern) url += `&yAxisDecimalPattern=${encodeURIComponent(yAxisDecimalPattern)}`;
+	const itemType = safeText(widget?.item?.type || '').toLowerCase();
+	const interpolation = safeText(widget?.interpolation || '').trim().toLowerCase()
+		|| ((itemType === 'switch' || itemType === 'contact') ? 'step' : 'linear');
+	if (interpolation === 'step') url += '&interpolation=step';
 	return url;
 }
 
