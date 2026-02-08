@@ -2786,18 +2786,18 @@ function rtspUrlHash(url) {
 }
 
 // Chart cache helpers
-function chartCacheKey(item, period, mode, title, legend) {
+function chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern) {
 	const assetVersion = liveConfig.assetVersion || 'v1';
 	const dateFmt = liveConfig.clientConfig?.dateFormat || '';
 	const timeFmt = liveConfig.clientConfig?.timeFormat || '';
 	return crypto.createHash('md5')
-		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}|${legend}`)
+		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}|${legend}|${yAxisDecimalPattern || ''}`)
 		.digest('hex')
 		.substring(0, 16);
 }
 
-function getChartCachePath(item, period, mode, title, legend) {
-	const hash = chartCacheKey(item, period, mode, title, legend);
+function getChartCachePath(item, period, mode, title, legend, yAxisDecimalPattern) {
+	const hash = chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern);
 	return path.join(CHART_CACHE_DIR, `${hash}.html`);
 }
 
@@ -3113,7 +3113,7 @@ function formatChartValue(n) {
 	return result;
 }
 
-function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg, dataCur, period, legend) {
+function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern) {
 	const theme = mode === 'dark' ? 'dark' : 'light';
 	const safeTitle = escapeHtml(title);
 	const unitDisplay = unit !== '?' ? escapeHtml(unit) : '';
@@ -3166,13 +3166,14 @@ window._chartUnit=${JSON.stringify(unit)};
 window._chartPeriod=${JSON.stringify(period)};
 window._chartDateFormat=${JSON.stringify(liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY')};
 window._chartTimeFormat=${JSON.stringify(liveConfig.clientConfig?.timeFormat || 'H:mm:ss')};
+window._chartYAxisPattern=${JSON.stringify(yAxisDecimalPattern || null)};
 </script>
 <script src="/chart.${assetVersion}.js"></script>
 </body>
 </html>`;
 }
 
-function generateChart(item, period, mode, title, legend) {
+function generateChart(item, period, mode, title, legend, yAxisDecimalPattern) {
 	const rrdDir = liveConfig.rrdPath || '';
 	if (!rrdDir) return null;
 
@@ -3220,7 +3221,7 @@ function generateChart(item, period, mode, title, legend) {
 	const dataHash = computeChartDataHash(rawData, period);
 
 	// Generate HTML
-	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg, dataCur, period, legend);
+	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern);
 }
 
 async function fetchAllPages() {
@@ -7508,6 +7509,7 @@ app.get('/chart', (req, res) => {
 	const rawMode = req.query?.mode;
 	const rawTitle = req.query?.title;
 	const rawLegend = req.query?.legend;
+	const rawYAxisDecimalPattern = req.query?.yAxisDecimalPattern;
 	const legend = rawLegend === 'false' ? false : true;
 	if (typeof rawItem !== 'string') {
 		return res.status(400).type('text/plain').send('Invalid item parameter');
@@ -7518,12 +7520,19 @@ app.get('/chart', (req, res) => {
 	if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
 		return res.status(400).type('text/plain').send('Invalid mode parameter');
 	}
+	if (rawYAxisDecimalPattern !== undefined && typeof rawYAxisDecimalPattern !== 'string') {
+		return res.status(400).type('text/plain').send('Invalid yAxisDecimalPattern parameter');
+	}
 	const item = rawItem.trim();
 	const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 	const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
 	const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+	const yAxisDecimalPattern = typeof rawYAxisDecimalPattern === 'string' ? rawYAxisDecimalPattern.trim() : '';
 	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 		return res.status(400).type('text/plain').send('Invalid parameters');
+	}
+	if (yAxisDecimalPattern && (hasAnyControlChars(yAxisDecimalPattern) || yAxisDecimalPattern.length > 50)) {
+		return res.status(400).type('text/plain').send('Invalid yAxisDecimalPattern parameter');
 	}
 	if (title && title.length > 200) {
 		return res.status(400).type('text/plain').send('Invalid title parameter');
@@ -7545,7 +7554,7 @@ app.get('/chart', (req, res) => {
 	}
 
 	const resolvedTitle = title || item;
-	const cachePath = getChartCachePath(item, period, mode, resolvedTitle, legend);
+	const cachePath = getChartCachePath(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern);
 
 	// Check cache
 	if (isChartCacheValid(cachePath, period)) {
@@ -7562,7 +7571,7 @@ app.get('/chart', (req, res) => {
 
 	// Generate HTML chart from RRD
 	try {
-		const html = generateChart(item, period, mode, resolvedTitle, legend);
+		const html = generateChart(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern);
 		if (!html) {
 			return res.status(404).type('text/plain').send('Chart data not available');
 		}
@@ -7590,6 +7599,7 @@ app.get('/api/chart-hash', (req, res) => {
 	const rawMode = req.query?.mode;
 	const rawTitle = req.query?.title;
 	const rawLegend = req.query?.legend;
+	const rawYAxisDecimalPattern = req.query?.yAxisDecimalPattern;
 	const legend = rawLegend === 'false' ? false : true;
 	if (typeof rawItem !== 'string') {
 		return res.status(400).json({ error: 'Invalid item' });
@@ -7600,12 +7610,19 @@ app.get('/api/chart-hash', (req, res) => {
 	if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
 		return res.status(400).json({ error: 'Invalid mode' });
 	}
+	if (rawYAxisDecimalPattern !== undefined && typeof rawYAxisDecimalPattern !== 'string') {
+		return res.status(400).json({ error: 'Invalid yAxisDecimalPattern' });
+	}
 	const item = rawItem.trim();
 	const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 	const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
 	const title = (typeof rawTitle === 'string' ? rawTitle.trim() : '') || item;
+	const yAxisDecimalPattern = typeof rawYAxisDecimalPattern === 'string' ? rawYAxisDecimalPattern.trim() : '';
 	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 		return res.status(400).json({ error: 'Invalid parameters' });
+	}
+	if (yAxisDecimalPattern && (hasAnyControlChars(yAxisDecimalPattern) || yAxisDecimalPattern.length > 50)) {
+		return res.status(400).json({ error: 'Invalid yAxisDecimalPattern' });
 	}
 	if (title && title.length > 200) {
 		return res.status(400).json({ error: 'Invalid title' });
@@ -7622,7 +7639,7 @@ app.get('/api/chart-hash', (req, res) => {
 		return res.status(400).json({ error: 'Invalid mode' });
 	}
 
-	const cachePath = getChartCachePath(item, period, mode, title, legend);
+	const cachePath = getChartCachePath(item, period, mode, title, legend, yAxisDecimalPattern);
 
 	// Get RRD data for stable hash (not affected by label positioning)
 	const rrdDir = liveConfig.rrdPath || '';
@@ -7666,7 +7683,7 @@ app.get('/api/chart-hash', (req, res) => {
 		}
 
 		// Data changed - regenerate HTML (hash is embedded by generateChart)
-		const html = generateChart(item, period, mode, title, legend);
+		const html = generateChart(item, period, mode, title, legend, yAxisDecimalPattern);
 		if (!html) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Generation failed' });

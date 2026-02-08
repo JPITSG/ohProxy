@@ -2029,6 +2029,8 @@ function chartWidgetUrl(widget) {
 	if (title) url += `&title=${encodeURIComponent(title)}`;
 	const legend = widget?.legend;
 	if (legend === false || legend === 'false') url += '&legend=false';
+	const yAxisDecimalPattern = safeText(widget?.yAxisDecimalPattern || '').trim();
+	if (yAxisDecimalPattern) url += `&yAxisDecimalPattern=${encodeURIComponent(yAxisDecimalPattern)}`;
 	return url;
 }
 
@@ -7996,9 +7998,11 @@ async function checkChartHashes() {
 
 			try {
 				const legend = urlObj.searchParams.get('legend');
+				const yAxisDecimalPattern = urlObj.searchParams.get('yAxisDecimalPattern');
 				const hashUrl = `/api/chart-hash?item=${encodeURIComponent(item)}&period=${period}&mode=${mode}` +
 					(title ? `&title=${encodeURIComponent(title)}` : '') +
-					(legend === 'false' ? '&legend=false' : '');
+					(legend === 'false' ? '&legend=false' : '') +
+					(yAxisDecimalPattern ? `&yAxisDecimalPattern=${encodeURIComponent(yAxisDecimalPattern)}` : '');
 				const res = await fetch(hashUrl, { cache: 'no-store' });
 				if (!res.ok) continue;
 				const data = await res.json();
