@@ -26,18 +26,18 @@ describe('Homepage Inline Icons', () => {
 		assert.match(server, /if \(icons\.length >= HOMEPAGE_INLINE_ICON_LIMIT\) break;/);
 	});
 
-	it('client prefers inline icon candidate before remote icon URLs', () => {
+	it('client prefers inline icon candidate before unified URL', () => {
 		const app = read(APP_FILE);
-		const start = app.indexOf('function iconCandidates(icon) {');
+		const start = app.indexOf('function iconCandidates(icon, itemState) {');
 		assert.ok(start >= 0, 'iconCandidates function should exist');
 		const end = app.indexOf('function loadBestIcon', start);
 		assert.ok(end > start, 'loadBestIcon should exist after iconCandidates');
 		const block = app.slice(start, end);
 		const inlinePos = block.indexOf('const inline = getHomeInlineIcon(icon);');
-		const remotePos = block.indexOf('cands.push(`images/${ICON_VERSION}/${icon}.png`);');
+		const unifiedPos = block.indexOf('cands.push(`icon/${ICON_VERSION}/');
 		assert.ok(inlinePos >= 0, 'inline icon lookup should exist in iconCandidates');
-		assert.ok(remotePos >= 0, 'remote icon candidate should exist in iconCandidates');
-		assert.ok(inlinePos < remotePos, 'inline icon should be preferred before remote candidates');
+		assert.ok(unifiedPos >= 0, 'unified icon URL candidate should exist in iconCandidates');
+		assert.ok(inlinePos < unifiedPos, 'inline icon should be preferred before unified URL');
 	});
 
 	it('client persists and restores inline icon map in home snapshot', () => {

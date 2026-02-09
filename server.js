@@ -298,6 +298,7 @@ const APPLE_TOUCH_VERSION_RAW = safeText(SERVER_CONFIG.assets?.appleTouchIconVer
 const APPLE_TOUCH_VERSION = APPLE_TOUCH_VERSION_RAW || '';
 const ICON_SIZE = configNumber(SERVER_CONFIG.iconSize);
 const ICON_CACHE_CONCURRENCY = Math.max(1, Math.floor(configNumber(SERVER_CONFIG.iconCacheConcurrency, 5)));
+const ICON_CACHE_TTL_MS = Math.max(0, Math.floor(configNumber(SERVER_CONFIG.iconCacheTtlMs, 86400000)));
 const DELTA_CACHE_LIMIT = configNumber(SERVER_CONFIG.deltaCacheLimit);
 const GROUP_ITEMS = Array.isArray(SERVER_CONFIG.groupItems) ? SERVER_CONFIG.groupItems.map(safeText).filter(Boolean) : [];
 const PROXY_LOG_LEVEL = safeText(SERVER_CONFIG.proxyMiddlewareLogLevel);
@@ -1140,6 +1141,7 @@ function validateAdminConfig(config) {
 	if (s.userAgent !== undefined) ensureString(s.userAgent, 'server.userAgent', { allowEmpty: false, maxLen: 256 }, errors);
 	if (s.iconSize !== undefined) ensureNumber(s.iconSize, 'server.iconSize', { min: 1 }, errors);
 	if (s.iconCacheConcurrency !== undefined) ensureNumber(s.iconCacheConcurrency, 'server.iconCacheConcurrency', { min: 1 }, errors);
+	if (s.iconCacheTtlMs !== undefined) ensureNumber(s.iconCacheTtlMs, 'server.iconCacheTtlMs', { min: 0 }, errors);
 	if (s.deltaCacheLimit !== undefined) ensureNumber(s.deltaCacheLimit, 'server.deltaCacheLimit', { min: 1 }, errors);
 	if (s.logFile !== undefined) ensureLogPath(s.logFile, 'server.logFile', errors);
 	if (s.accessLog !== undefined) ensureLogPath(s.accessLog, 'server.accessLog', errors);
@@ -1828,6 +1830,7 @@ const liveConfig = {
 	appleTouchVersion: APPLE_TOUCH_VERSION,
 	iconSize: ICON_SIZE,
 	iconCacheConcurrency: ICON_CACHE_CONCURRENCY,
+	iconCacheTtlMs: ICON_CACHE_TTL_MS,
 	deltaCacheLimit: DELTA_CACHE_LIMIT,
 	groupItems: GROUP_ITEMS,
 	slowQueryMs: SLOW_QUERY_MS,
@@ -2015,6 +2018,7 @@ function reloadLiveConfig() {
 	liveConfig.appleTouchVersion = safeText(newAssets.appleTouchIconVersion);
 	liveConfig.iconSize = configNumber(newServer.iconSize);
 	liveConfig.iconCacheConcurrency = Math.max(1, Math.floor(configNumber(newServer.iconCacheConcurrency, 5)));
+	liveConfig.iconCacheTtlMs = Math.max(0, Math.floor(configNumber(newServer.iconCacheTtlMs, 86400000)));
 	liveConfig.deltaCacheLimit = configNumber(newServer.deltaCacheLimit);
 	liveConfig.groupItems = Array.isArray(newServer.groupItems) ? newServer.groupItems.map(safeText).filter(Boolean) : [];
 	liveConfig.slowQueryMs = configNumber(newServer.slowQueryMs, 0);
@@ -4695,6 +4699,7 @@ function widgetSnapshot(widget) {
 		label: safeText(widget?.label || widget?.item?.label || widget?.item?.name || ''),
 		state: safeText(widget?.item?.state ?? widget?.state ?? ''),
 		icon: widgetIconName(widget),
+		staticIcon: !!widget?.staticIcon,
 		mappings: mappingSig,
 		mapping: normalizedMapping,
 		buttons: buttons,
@@ -4715,45 +4720,20 @@ function normalizeIconName(icon) {
 	return segments.join('/');
 }
 
-function resolveInlineIconCachePath(iconName) {
-	const normalizedIcon = normalizeIconName(iconName);
-	if (!normalizedIcon) return null;
-	const parsed = path.posix.parse(`${normalizedIcon}.png`);
-	const cacheRel = path.posix.join(parsed.dir, `${parsed.name}.png`);
-	const cacheRoot = path.resolve(getIconCacheDir());
-	const cachePath = path.resolve(cacheRoot, cacheRel);
-	if (cachePath !== cacheRoot && !cachePath.startsWith(cacheRoot + path.sep)) {
-		return null;
-	}
-	return { cachePath, normalizedIcon };
-}
-
-async function buildInlineIconDataUri(iconName, iconVersion) {
-	const resolved = resolveInlineIconCachePath(iconName);
-	if (!resolved) return '';
-	const version = safeText(iconVersion).trim() || 'v1';
-	const candidates = [
-		{ sourcePath: `/images/${version}/${resolved.normalizedIcon}.png`, sourceExt: '.png' },
-		{ sourcePath: `/openhab.app/images/${version}/${resolved.normalizedIcon}.png`, sourceExt: '.png' },
-		{ sourcePath: `/openhab.app/images/${version}/${resolved.normalizedIcon}.svg`, sourceExt: '.svg' },
-	];
-
-	for (const candidate of candidates) {
-		try {
-			const buffer = await getCachedIcon(resolved.cachePath, candidate.sourcePath, candidate.sourceExt);
-			if (Buffer.isBuffer(buffer) && buffer.length) {
-				return `data:image/png;base64,${buffer.toString('base64')}`;
-			}
-		} catch {
-			// Try next candidate.
+async function buildInlineIconDataUri(iconName) {
+	const normalized = normalizeIconName(iconName);
+	if (!normalized) return '';
+	try {
+		const buffer = await resolveIcon(normalized, undefined, 'png');
+		if (Buffer.isBuffer(buffer) && buffer.length) {
+			return `data:image/png;base64,${buffer.toString('base64')}`;
 		}
-	}
+	} catch {}
 	return '';
 }
 
 async function buildHomepageInlineIcons(widgets) {
 	const list = Array.isArray(widgets) ? widgets : [];
-	const iconVersion = safeText(liveConfig.iconVersion || ICON_VERSION || 'v1').trim() || 'v1';
 	const icons = [];
 	const seen = new Set();
 	for (const widget of list) {
@@ -4769,7 +4749,7 @@ async function buildHomepageInlineIcons(widgets) {
 	const inlineIcons = {};
 	for (const iconName of icons) {
 		try {
-			const dataUri = await buildInlineIconDataUri(iconName, iconVersion);
+			const dataUri = await buildInlineIconDataUri(iconName);
 			if (dataUri) inlineIcons[iconName] = dataUri;
 		} catch (err) {
 			logMessage(`[Icons] Homepage inline icon failed for ${iconName}: ${err.message || err}`);
@@ -4805,6 +4785,7 @@ function buildSnapshot(page) {
 			label: e.label,
 			state: e.state,
 			icon: e.icon,
+			staticIcon: e.staticIcon,
 			mappings: e.mappings,
 			buttonsSig: e.buttonsSig,
 			labelcolor: e.labelcolor,
@@ -5034,6 +5015,7 @@ async function computeDeltaResponse(url, since) {
 			prev.label !== current.label ||
 			prev.state !== current.state ||
 			prev.icon !== current.icon ||
+			prev.staticIcon !== current.staticIcon ||
 			prev.mappings !== current.mappings ||
 			prev.buttonsSig !== current.buttonsSig ||
 			prev.labelcolor !== current.labelcolor ||
@@ -5531,26 +5513,26 @@ function fetchOpenhabBinary(pathname, options = {}) {
 	return fetchBinaryFromUrl(buildTargetUrl(baseUrl, pathname), headers, 3, getOhAgent());
 }
 
-async function buildIconCache(cachePath, sourcePath, sourceExt) {
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oh-icon-'));
-	const srcPath = path.join(tmpDir, `src${sourceExt || '.img'}`);
+function iconStateHash(state) {
+	return crypto.createHash('sha256').update(state).digest('hex').slice(0, 12);
+}
+
+async function resizeToPng(buffer) {
 	const iconSize = configNumber(liveConfig.iconSize, ICON_SIZE);
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oh-icon-'));
+	const srcPath = path.join(tmpDir, 'src.img');
+	const dstPath = path.join(tmpDir, 'dst.png');
 	try {
-		const res = await fetchOpenhabBinary(sourcePath);
-		if (!res.ok || !isImageContentType(res.contentType)) {
-			const reason = !res.ok ? `status ${res.status}` : `content-type ${res.contentType || 'unknown'}`;
-			throw new Error(`openHAB icon fetch failed (${reason})`);
-		}
-		fs.writeFileSync(srcPath, res.body);
-		ensureDir(path.dirname(cachePath));
+		fs.writeFileSync(srcPath, buffer);
 		await enqueueIconConvert(() => execFileAsync(liveConfig.binConvert, [
 			srcPath,
 			'-resize', `${iconSize}x${iconSize}`,
 			'-background', 'none',
 			'-gravity', 'center',
 			'-extent', `${iconSize}x${iconSize}`,
-			`PNG32:${cachePath}`,
+			`PNG32:${dstPath}`,
 		]));
+		return fs.readFileSync(dstPath);
 	} finally {
 		try {
 			if (fs.rmSync) fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -5559,12 +5541,22 @@ async function buildIconCache(cachePath, sourcePath, sourceExt) {
 	}
 }
 
-async function getCachedIcon(cachePath, sourcePath, sourceExt) {
+function getIconCachePath(name, format, state) {
+	const cacheDir = getIconCacheDir();
+	if (state !== undefined && state !== '') {
+		return path.join(cacheDir, 'dyn', `${name}_${iconStateHash(state)}.${format}`);
+	}
+	return path.join(cacheDir, `${name}.${format}`);
+}
+
+async function getOrBuildCachedIcon(cachePath, buildFn) {
 	if (fs.existsSync(cachePath)) return fs.readFileSync(cachePath);
 	if (iconInflight.has(cachePath)) return iconInflight.get(cachePath);
 	const promise = (async () => {
-		await buildIconCache(cachePath, sourcePath, sourceExt);
-		return fs.readFileSync(cachePath);
+		const buffer = await buildFn();
+		ensureDir(path.dirname(cachePath));
+		fs.writeFileSync(cachePath, buffer);
+		return buffer;
 	})();
 	iconInflight.set(cachePath, promise);
 	try {
@@ -5572,6 +5564,25 @@ async function getCachedIcon(cachePath, sourcePath, sourceExt) {
 	} finally {
 		iconInflight.delete(cachePath);
 	}
+}
+
+async function resolveIcon(name, state, format) {
+	const fmt = (format === 'svg') ? 'svg' : 'png';
+	const cachePath = getIconCachePath(name, fmt, state);
+	return getOrBuildCachedIcon(cachePath, async () => {
+		const hasDynState = state !== undefined && state !== '';
+		const fetchPath = hasDynState
+			? `/icon/${name}?state=${encodeURIComponent(state)}&format=${fmt}`
+			: `/images/${name}.${fmt}`;
+		const res = await fetchOpenhabBinary(fetchPath);
+		if (!res.ok || !isImageContentType(res.contentType)) {
+			const reason = !res.ok ? `status ${res.status}` : `content-type ${res.contentType || 'unknown'}`;
+			logMessage(`[Icon] Not found: ${fetchPath} -> ${reason}`);
+			throw new Error(`Icon not found: ${name}`);
+		}
+		if (fmt === 'png') return resizeToPng(res.body);
+		return res.body;
+	});
 }
 
 const app = express();
@@ -7495,36 +7506,39 @@ const proxyCommon = {
 purgeOldIconCache();
 ensureDir(getIconCacheDir());
 
-app.get(/^\/(?:openhab\.app\/)?images\/(v\d+)\/(.+)$/i, async (req, res, next) => {
-	const match = req.path.match(/^\/(?:openhab\.app\/)?images\/(v\d+)\/(.+)$/i);
+app.get(/^\/icon\/(v\d+)\/(.+)$/i, async (req, res, next) => {
+	const match = req.path.match(/^\/icon\/(v\d+)\/(.+)$/i);
 	if (!match) return next();
 	const version = match[1];
 	if (version !== liveConfig.iconVersion) return next();
-	const rawRel = safeText(match[2]).replace(/\\/g, '/');
-	const rel = rawRel.replace(/^\/+/, '');
-	if (!rel) return res.status(400).type('text/plain').send('Invalid icon path');
-	const segments = rel.split('/');
+	let rawName;
+	try { rawName = decodeURIComponent(safeText(match[2])).replace(/\\/g, '/').trim(); } catch { return res.status(400).type('text/plain').send('Invalid icon name'); }
+	if (!rawName) return res.status(400).type('text/plain').send('Invalid icon name');
+	const segments = rawName.split('/');
 	if (segments.some((seg) => seg === '.' || seg === '..' || seg === '')) {
-		return res.status(400).type('text/plain').send('Invalid icon path');
+		return res.status(400).type('text/plain').send('Invalid icon name');
 	}
-	const parsed = path.posix.parse(rel);
-	const cacheRel = path.posix.join(parsed.dir, `${parsed.name}.png`);
-	const cacheRoot = path.resolve(getIconCacheDir());
-	const cachePath = path.resolve(cacheRoot, cacheRel);
-	if (cachePath !== cacheRoot && !cachePath.startsWith(cacheRoot + path.sep)) {
-		return res.status(400).type('text/plain').send('Invalid icon path');
+	const name = segments.join('/');
+	const rawFormat = safeText(req.query?.format || '').trim().toLowerCase();
+	const format = rawFormat === 'svg' ? 'svg' : 'png';
+	const rawState = req.query?.state;
+	let state;
+	if (rawState !== undefined && rawState !== '') {
+		const stateStr = safeText(rawState);
+		if (ANY_CONTROL_CHARS_RE.test(stateStr)) {
+			return res.status(400).type('text/plain').send('Invalid state');
+		}
+		state = stateStr;
 	}
-	const sourcePath = `/images/${rel}`;
-	const sourceExt = parsed.ext || '.png';
 
 	try {
-		const buffer = await getCachedIcon(cachePath, sourcePath, sourceExt);
-		res.setHeader('Content-Type', 'image/png');
+		const buffer = await resolveIcon(name, state, format);
+		res.setHeader('Content-Type', format === 'svg' ? 'image/svg+xml' : 'image/png');
 		res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
 		res.send(buffer);
 	} catch (err) {
-		logMessage(`[Icons] Cache failed for ${rawRel}: ${err.message || err}`);
-		next();
+		logMessage(`[Icon] ${name}: ${err.message || err}`);
+		res.status(404).type('text/plain').send('Icon not found');
 	}
 });
 
@@ -7589,6 +7603,7 @@ app.use('/rest', async (req, res, next) => {
 			prev.label !== current.label ||
 			prev.state !== current.state ||
 			prev.icon !== current.icon ||
+			prev.staticIcon !== current.staticIcon ||
 			prev.mappings !== current.mappings ||
 			prev.buttonsSig !== current.buttonsSig ||
 			prev.labelcolor !== current.labelcolor ||
@@ -7616,18 +7631,12 @@ app.use('/openhab.app', createProxyMiddleware({
 	pathRewrite: (path) => stripIconVersion(path),
 }));
 
-// Some installs reference these directly
-app.use('/icon', createProxyMiddleware({
-	...proxyCommon,
-	pathRewrite: (path) => `/openhab.app${stripIconVersion(path)}`,
-}));
 // /chart is handled by dedicated endpoint with caching (see app.get('/chart', ...))
 
-// Serve local images from public/images/ before proxying to openHAB
+// Serve local images from public/images/ (app icons, etc.)
 app.use('/images', (req, res, next) => {
 	const imagesDir = path.join(PUBLIC_DIR, 'images');
 	const localPath = path.normalize(path.join(imagesDir, req.path));
-	// Prevent path traversal - ensure resolved path is within images directory
 	if (!localPath.startsWith(imagesDir + path.sep) && localPath !== imagesDir) {
 		return next();
 	}
@@ -7635,10 +7644,7 @@ app.use('/images', (req, res, next) => {
 		return res.sendFile(localPath);
 	}
 	next();
-}, createProxyMiddleware({
-	...proxyCommon,
-	pathRewrite: (path) => `/openhab.app${stripIconVersion(path)}`,
-}));
+});
 
 // Video preview endpoint
 app.get('/video-preview', (req, res) => {
@@ -8999,6 +9005,32 @@ app.use((req, res) => {
 registerBackgroundTask('sitemap-cache', SITEMAP_REFRESH_MS, refreshSitemapCache);
 registerBackgroundTask('group-member-map', 60000, refreshGroupMemberMap);
 registerBackgroundTask('structure-map', STRUCTURE_MAP_REFRESH_MS, refreshStructureMapCache);
+registerBackgroundTask('icon-cache-cleanup', 3600000, () => {
+	const ttl = liveConfig.iconCacheTtlMs;
+	if (ttl <= 0) return;
+	purgeOldIconCache();
+	const dynDir = path.join(getIconCacheDir(), 'dyn');
+	if (!fs.existsSync(dynDir)) return;
+	const now = Date.now();
+	let pruned = 0;
+	try {
+		const entries = fs.readdirSync(dynDir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (!entry.isFile()) continue;
+			const filePath = path.join(dynDir, entry.name);
+			try {
+				const stat = fs.statSync(filePath);
+				if (now - stat.mtimeMs > ttl) {
+					fs.unlinkSync(filePath);
+					pruned += 1;
+				}
+			} catch {}
+		}
+	} catch (err) {
+		logMessage(`[Icon] Cache cleanup failed: ${err.message || err}`);
+	}
+	if (pruned > 0) logMessage(`[Icon] Pruned ${pruned} stale dynamic icon(s)`);
+});
 
 // Video preview capture function
 async function captureRtspPreview(rtspUrl) {

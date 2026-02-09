@@ -137,6 +137,8 @@ module.exports = {
 		iconSize: 64,
 		// Max concurrent icon conversions (integer >=1).
 		iconCacheConcurrency: 5,
+		// Dynamic icon cache TTL in milliseconds (0 = never expire; default 24h).
+		iconCacheTtlMs: 86400000,
 
 		// === Caching ===
 		// Max delta cache size (integer >=1).
