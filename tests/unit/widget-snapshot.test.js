@@ -132,6 +132,7 @@ function widgetSnapshot(widget) {
 		label: safeText(widget?.label || widget?.item?.label || widget?.item?.name || ''),
 		state: safeText(widget?.item?.state ?? widget?.state ?? ''),
 		icon: safeText(widget?.icon || widget?.item?.icon || widget?.item?.category || ''),
+		staticIcon: !!widget?.staticIcon,
 		buttons: buttons,
 		buttonsSig: btnSig,
 	};
@@ -370,6 +371,21 @@ describe('Widget Snapshot Helpers', () => {
 			assert.strictEqual(snap.label, '');
 			assert.strictEqual(snap.state, '');
 			assert.strictEqual(snap.icon, '');
+		});
+
+		it('returns false when staticIcon is absent', () => {
+			const snap = widgetSnapshot({ icon: 'temperature', item: { name: 'T', state: '22' } });
+			assert.strictEqual(snap.staticIcon, false);
+		});
+
+		it('returns true when staticIcon is true', () => {
+			const snap = widgetSnapshot({ icon: 'temperature', staticIcon: true, item: { name: 'T', state: '22' } });
+			assert.strictEqual(snap.staticIcon, true);
+		});
+
+		it('returns false for null/undefined staticIcon', () => {
+			assert.strictEqual(widgetSnapshot({ staticIcon: null }).staticIcon, false);
+			assert.strictEqual(widgetSnapshot({ staticIcon: undefined }).staticIcon, false);
 		});
 	});
 

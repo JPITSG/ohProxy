@@ -3419,6 +3419,7 @@ const ADMIN_CONFIG_SCHEMA = [
 		fields: [
 			{ key: 'server.iconSize', type: 'number', min: 1 },
 			{ key: 'server.iconCacheConcurrency', type: 'number', min: 1 },
+			{ key: 'server.iconCacheTtlMs', type: 'number', min: 0 },
 			{ key: 'server.deltaCacheLimit', type: 'number', min: 1 },
 		],
 	},
@@ -5434,15 +5435,16 @@ function setMappingControlContent(el, mapping) {
 	tryNext();
 }
 
-function iconCandidates(icon) {
-	// openHAB 1.x icons are mostly static; avoid state-suffixed probes to reduce 404 noise.
+function iconCandidates(icon, itemState) {
 	const cands = [];
 	if (icon) {
 		const inline = getHomeInlineIcon(icon);
 		if (inline) cands.push(inline);
-		cands.push(`images/${ICON_VERSION}/${icon}.png`);
-		cands.push(`openhab.app/images/${ICON_VERSION}/${icon}.png`);
-		cands.push(`openhab.app/images/${ICON_VERSION}/${icon}.svg`);
+		const params = ['format=png'];
+		if (itemState !== undefined && itemState !== '') {
+			params.push(`state=${encodeURIComponent(itemState)}`);
+		}
+		cands.push(`icon/${ICON_VERSION}/${encodeURIComponent(icon)}?${params.join('&')}`);
 	}
 	return cands;
 }
@@ -5866,6 +5868,7 @@ function getWidgetRenderInfo(w) {
 	const label = isImage || isVideo || isChart ? safeText(w?.label || '') : widgetLabel(w);
 	const st = widgetState(w);
 	const icon = widgetIconName(w);
+	const isStaticIcon = !!w?.staticIcon;
 	const itemName = safeText(w?.item?.name || w?.itemName || '');
 	// Support both OH 1.x 'mapping' and OH 3.x+ 'mappings'
 	const mapping = normalizeMapping(w?.mappings || w?.mapping);
@@ -5912,6 +5915,7 @@ function getWidgetRenderInfo(w) {
 		label,
 		st,
 		icon,
+		isStaticIcon ? 'S' : 'D',
 		itemName,
 		pageLink || '',
 		mappingSig,
@@ -5949,6 +5953,7 @@ function getWidgetRenderInfo(w) {
 		label,
 		st,
 		icon,
+		isStaticIcon,
 		itemName,
 		mapping,
 		buttons,
@@ -6000,6 +6005,7 @@ function updateCard(card, w, info) {
 		label,
 		st,
 		icon,
+		isStaticIcon,
 		itemName,
 		mapping,
 		buttons,
@@ -6143,9 +6149,11 @@ function updateCard(card, w, info) {
 		if (iconWrap) iconWrap.classList.remove('hidden');
 		if (iconImg) {
 			if (icon) {
-				if (iconImg.dataset.iconKey !== icon) {
-					iconImg.dataset.iconKey = icon;
-					loadBestIcon(iconImg, iconCandidates(icon));
+				const isDynamicIcon = !isStaticIcon && !/^material:/i.test(icon);
+				const iconKey = isDynamicIcon ? `${icon}@${st}` : icon;
+				if (iconImg.dataset.iconKey !== iconKey) {
+					iconImg.dataset.iconKey = iconKey;
+					loadBestIcon(iconImg, iconCandidates(icon, isDynamicIcon ? st : undefined));
 				}
 			} else {
 				// No icon defined - clear and hide

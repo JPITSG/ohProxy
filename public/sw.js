@@ -50,9 +50,7 @@ function shouldHandleRequest(request, url) {
 }
 
 function isIconRequest(url) {
-	const path = url.pathname;
-	return (path.startsWith('/images/') || path.startsWith('/openhab.app/images/')) &&
-		(path.endsWith('.png') || path.endsWith('.svg'));
+	return url.pathname.startsWith('/icon/v');
 }
 
 self.addEventListener('fetch', (event) => {

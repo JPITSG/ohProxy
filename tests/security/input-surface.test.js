@@ -73,6 +73,8 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawLegend\s*=\s*req\.query\?\.legend\s*;/,
 			/const\s+rawYAxisDecimalPattern\s*=\s*req\.query\?\.yAxisDecimalPattern\s*;/,
 			/const\s+rawInterpolation\s*=\s*req\.query\?\.interpolation\s*;/,
+			/const\s+rawFormat\s*=\s*safeText\(req\.query\?\.format\s*\|\|\s*''\)\.trim\(\)\.toLowerCase\(\)\s*;/,
+			/const\s+rawState\s*=\s*req\.query\?\.state\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));
@@ -164,14 +166,9 @@ describe('Request-Derived File Paths', () => {
 		assert.ok(content.includes('path.normalize(path.join(imagesDir, req.path))'));
 		assert.ok(content.includes('localPath.startsWith(imagesDir + path.sep)'));
 
-		assert.ok(content.includes("const rawRel = safeText(match[2]).replace(/\\\\/g, '/');"));
-		assert.ok(content.includes("const rel = rawRel.replace(/^\\/+/, '');"));
+		// Unified icon endpoint validates name segments
+		assert.ok(content.includes("rawName = decodeURIComponent(safeText(match[2])).replace(/\\\\/g, '/').trim();"));
 		assert.ok(content.includes("segments.some((seg) => seg === '.' || seg === '..' || seg === '')"));
-		assert.ok(content.includes('const parsed = path.posix.parse(rel);'));
-		assert.ok(/const\s+cacheRel\s*=\s*path\.posix\.join\(parsed\.dir,\s*`\$\{parsed\.name\}\.png`\s*\);/.test(content));
-		assert.ok(content.includes('const cacheRoot = path.resolve(getIconCacheDir());'));
-		assert.ok(content.includes('const cachePath = path.resolve(cacheRoot, cacheRel);'));
-		assert.ok(content.includes('!cachePath.startsWith(cacheRoot + path.sep)'));
 
 		assert.ok(content.includes('const hash = rtspUrlHash(url);'));
 		assert.ok(/const\s+filePath\s*=\s*path\.join\(VIDEO_PREVIEW_DIR,\s*`\$\{hash\}\.jpg`\s*\);/.test(content));
