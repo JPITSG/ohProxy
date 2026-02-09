@@ -8088,11 +8088,6 @@ app.get('/api/presence/nearby-days', async (req, res) => {
 });
 
 app.get('/presence', async (req, res) => {
-	const conn = getMysqlConnection();
-	if (!conn) {
-		return res.status(503).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
-	}
-
 	const username = req.ohProxyUser;
 	if (!username) {
 		return res.status(401).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
@@ -8100,6 +8095,46 @@ app.get('/presence', async (req, res) => {
 	const user = sessions.getUser(username);
 	if (!user || !user.trackgps) {
 		return res.status(403).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
+	}
+
+	const rawLat = req.query?.lat;
+	const rawLon = req.query?.lon;
+	const hasLat = rawLat !== undefined;
+	const hasLon = rawLon !== undefined;
+	if (hasLat !== hasLon) {
+		return res.status(400).type('text/plain').send('Both lat and lon are required');
+	}
+
+	let singlePointMode = false;
+	let singlePointLat = null;
+	let singlePointLon = null;
+	if (hasLat && hasLon) {
+		if (typeof rawLat !== 'string' || typeof rawLon !== 'string') {
+			return res.status(400).type('text/plain').send('Invalid lat/lon');
+		}
+		const parsedLat = Number(rawLat.trim());
+		const parsedLon = Number(rawLon.trim());
+		if (
+			!Number.isFinite(parsedLat)
+			|| parsedLat < -90
+			|| parsedLat > 90
+			|| !Number.isFinite(parsedLon)
+			|| parsedLon < -180
+			|| parsedLon > 180
+		) {
+			return res.status(400).type('text/plain').send('Invalid lat/lon');
+		}
+		singlePointMode = true;
+		singlePointLat = parsedLat;
+		singlePointLon = parsedLon;
+	}
+
+	let conn = null;
+	if (!singlePointMode) {
+		conn = getMysqlConnection();
+		if (!conn) {
+			return res.status(503).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
+		}
 	}
 
 	const QUERY_TIMEOUT_MS = 10000;
@@ -8113,57 +8148,67 @@ app.get('/presence', async (req, res) => {
 		});
 	}
 
-	let rows;
+	let rows = [];
 	let displayDate = new Date();
-	try {
-		// Try today first
-		rows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = CURDATE() ORDER BY id DESC', [username]);
+	if (!singlePointMode) {
+		try {
+			// Try today first
+			rows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = CURDATE() ORDER BY id DESC', [username]);
 
-		// If no results for today, fall back to the most recent date with data
-		if (!rows.length) {
-			const fallbackRows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? ORDER BY timestamp DESC LIMIT 1', [username]);
-			if (fallbackRows.length && fallbackRows[0].timestamp) {
-				displayDate = new Date(fallbackRows[0].timestamp);
-				const dateStr = displayDate.toISOString().slice(0, 10);
-				rows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = ? ORDER BY id DESC', [username, dateStr]);
+			// If no results for today, fall back to the most recent date with data
+			if (!rows.length) {
+				const fallbackRows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? ORDER BY timestamp DESC LIMIT 1', [username]);
+				if (fallbackRows.length && fallbackRows[0].timestamp) {
+					displayDate = new Date(fallbackRows[0].timestamp);
+					const dateStr = displayDate.toISOString().slice(0, 10);
+					rows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = ? ORDER BY id DESC', [username, dateStr]);
+				}
 			}
+		} catch (err) {
+			logMessage(`[Presence] Query failed: ${err.message || err}`);
+			return res.status(504).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
 		}
-	} catch (err) {
-		logMessage(`[Presence] Query failed: ${err.message || err}`);
-		return res.status(504).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
 	}
 
 	const markers = [];
-	const seen = new Set();
-	let first = true;
+	if (singlePointMode) {
+		const lat = Math.round(singlePointLat * 10000000) / 10000000;
+		const lon = Math.round(singlePointLon * 10000000) / 10000000;
+		markers.push([lat, lon, 'red', '']);
+	} else {
+		const seen = new Set();
+		let first = true;
 
-	for (const row of rows) {
-		const current = [
-			Math.round(row.lat * 10000000) / 10000000,
-			Math.round(row.lon * 10000000) / 10000000,
-		];
-		const key = current[0] + ',' + current[1];
-		if (seen.has(key)) {
-			continue;
+		for (const row of rows) {
+			const current = [
+				Math.round(row.lat * 10000000) / 10000000,
+				Math.round(row.lon * 10000000) / 10000000,
+			];
+			const key = current[0] + ',' + current[1];
+			if (seen.has(key)) {
+				continue;
+			}
+			seen.add(key);
+			const ts = row.timestamp ? (() => {
+				const d = new Date(row.timestamp);
+				const date = formatDT(d, liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY');
+				const time = formatDT(d, liveConfig.clientConfig?.timeFormat || 'H:mm:ss');
+				return '<div class="tt-date">' + date + '</div><div class="tt-time">' + time + '</div>';
+			})() : '';
+			markers.push([current[0], current[1], first ? 'red' : 'blue', ts]);
+			first = false;
 		}
-		seen.add(key);
-		const ts = row.timestamp ? (() => {
-			const d = new Date(row.timestamp);
-			const date = formatDT(d, liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY');
-			const time = formatDT(d, liveConfig.clientConfig?.timeFormat || 'H:mm:ss');
-			return '<div class="tt-date">' + date + '</div><div class="tt-time">' + time + '</div>';
-		})() : '';
-		markers.push([current[0], current[1], first ? 'red' : 'blue', ts]);
-		first = false;
+		markers.reverse();
 	}
 
-	markers.reverse();
 	const markersJson = JSON.stringify(markers).replace(/</g, '\\u003c');
 
 	const hLat = liveConfig.gpsHomeLat;
 	const hLon = liveConfig.gpsHomeLon;
-	const homeLatJson = Number.isFinite(hLat) ? String(hLat) : "''";
-	const homeLonJson = Number.isFinite(hLon) ? String(hLon) : "''";
+	const homeLatValue = singlePointMode ? singlePointLat : hLat;
+	const homeLonValue = singlePointMode ? singlePointLon : hLon;
+	const homeLatJson = Number.isFinite(homeLatValue) ? String(homeLatValue) : "''";
+	const homeLonJson = Number.isFinite(homeLonValue) ? String(homeLonValue) : "''";
 
 	const html = `<!DOCTYPE html>
 <html>
@@ -8225,39 +8270,40 @@ body{margin:0;padding:0;overflow:hidden}
 .ctx-nav .ctx-older,.ctx-nav .ctx-newer{margin-top:0}
 .ctx-empty,.ctx-loading{font-size:0.625rem;font-weight:300;letter-spacing:0.08em;color:rgba(19,21,54,0.5);font-family:'Rubik',sans-serif}
 </style>
-<script src="/vendor/OpenLayers.js"></script>
-</head>
-<body>
-<div id="map"></div>
-<div id="red-tooltip" class="tooltip"></div>
-<div id="hover-tooltip" class="tooltip"></div>
-<div id="preview-tooltip" class="tooltip"></div>
-<div id="ctx-menu"></div>
-<div id="map-controls">
-<button class="map-ctrl-btn" id="zoom-in" type="button">+</button>
-<button class="map-ctrl-btn" id="zoom-home" type="button"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></button>
-<button class="map-ctrl-btn" id="zoom-out" type="button">&minus;</button>
-</div>
-<div id="search-modal">
-<div class="search-header"><span>SEARCH HISTORY</span><span class="search-today">TODAY</span></div>
-<div class="search-empty">No results found</div>
-<div class="search-controls">
-<div class="month-select"><button class="month-select-btn" type="button">Month</button><div class="month-select-menu" id="month-menu"></div></div>
-<input type="text" class="search-dd" placeholder="DD" maxlength="2">
-<input type="text" class="search-yyyy" placeholder="YYYY" maxlength="4">
-<button class="search-go" type="button">Search</button>
-</div>
-</div>
-<script>
-(function(){
-var markers=${markersJson};
+	<script src="/vendor/OpenLayers.js"></script>
+	</head>
+	<body>
+	<div id="map"></div>
+	${singlePointMode ? '' : `<div id="red-tooltip" class="tooltip"></div>
+	<div id="hover-tooltip" class="tooltip"></div>
+	<div id="preview-tooltip" class="tooltip"></div>
+	<div id="ctx-menu"></div>`}
+	<div id="map-controls">
+	<button class="map-ctrl-btn" id="zoom-in" type="button">+</button>
+	<button class="map-ctrl-btn" id="zoom-home" type="button"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></button>
+	<button class="map-ctrl-btn" id="zoom-out" type="button">&minus;</button>
+	</div>
+	${singlePointMode ? '' : `<div id="search-modal">
+	<div class="search-header"><span>SEARCH HISTORY</span><span class="search-today">TODAY</span></div>
+	<div class="search-empty">No results found</div>
+	<div class="search-controls">
+	<div class="month-select"><button class="month-select-btn" type="button">Month</button><div class="month-select-menu" id="month-menu"></div></div>
+	<input type="text" class="search-dd" placeholder="DD" maxlength="2">
+	<input type="text" class="search-yyyy" placeholder="YYYY" maxlength="4">
+	<button class="search-go" type="button">Search</button>
+	</div>
+	</div>`}
+	<script>
+	(function(){
+	var markers=${markersJson};
+	var singlePointMode=${singlePointMode ? 'true' : 'false'};
 
-var map=new OpenLayers.Map("map");
-map.addLayer(new OpenLayers.Layer.OSM("OSM",["//a.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//b.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//c.tile.openstreetmap.org/\${z}/\${x}/\${y}.png"]));
+	var map=new OpenLayers.Map("map");
+	map.addLayer(new OpenLayers.Layer.OSM("OSM",["//a.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//b.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//c.tile.openstreetmap.org/\${z}/\${x}/\${y}.png"]));
 
-var wgs84=new OpenLayers.Projection("EPSG:4326");
-var proj=map.getProjectionObject();
-var vector=new OpenLayers.Layer.Vector("Markers");
+	var wgs84=new OpenLayers.Projection("EPSG:4326");
+	var proj=map.getProjectionObject();
+	var vector=new OpenLayers.Layer.Vector("Markers");
 
 markers.forEach(function(m,i){
 var feature=new OpenLayers.Feature.Vector(
@@ -8265,47 +8311,51 @@ new OpenLayers.Geometry.Point(m[1],m[0]).transform(wgs84,proj),
 {timestamp:m[3],index:i,color:m[2]},{externalGraphic:'/images/marker-'+m[2]+'.png',graphicHeight:41,graphicWidth:25,graphicXOffset:-12,graphicYOffset:-41}
 );
 vector.addFeatures(feature);
-});
+	});
 
-map.addLayer(vector);
+	map.addLayer(vector);
 
-var previewLayer=new OpenLayers.Layer.Vector("Preview",{
-styleMap:new OpenLayers.StyleMap({
-"default":new OpenLayers.Style({
-externalGraphic:'/images/marker-blue.png',
-graphicHeight:41,
-graphicWidth:25,
-graphicXOffset:-12,
-graphicYOffset:-41,
-graphicOpacity:0.5,
-cursor:'pointer'
-})
-})
-});
-map.addLayer(previewLayer);
+	var previewLayer=null;
+	if(!singlePointMode){
+	previewLayer=new OpenLayers.Layer.Vector("Preview",{
+	styleMap:new OpenLayers.StyleMap({
+	"default":new OpenLayers.Style({
+	externalGraphic:'/images/marker-blue.png',
+	graphicHeight:41,
+	graphicWidth:25,
+	graphicXOffset:-12,
+	graphicYOffset:-41,
+	graphicOpacity:0.5,
+	cursor:'pointer'
+	})
+	})
+	});
+	map.addLayer(previewLayer);
+	}
 
-var previewTooltip=document.getElementById('preview-tooltip');
-var hoverTooltip=document.getElementById('hover-tooltip');
-var red=markers.length?markers[markers.length-1]:null;
-var redTooltip=document.getElementById('red-tooltip');
-if(red)redTooltip.innerHTML=red[3];
+	var previewTooltip=singlePointMode?null:document.getElementById('preview-tooltip');
+	var hoverTooltip=singlePointMode?null:document.getElementById('hover-tooltip');
+	var red=markers.length?markers[markers.length-1]:null;
+	var redTooltip=singlePointMode?null:document.getElementById('red-tooltip');
+	if(!singlePointMode&&red&&redTooltip)redTooltip.innerHTML=red[3];
 
-function updateRedTooltip(){
-if(!red)return;
-var lonlat=new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj);
-var px=map.getPixelFromLonLat(lonlat);
-if(px){
-redTooltip.style.left=(px.x+15)+'px';
-redTooltip.style.top=(px.y-60)+'px';
-}
-}
+	function updateRedTooltip(){
+	if(singlePointMode||!red||!redTooltip)return;
+	var lonlat=new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj);
+	var px=map.getPixelFromLonLat(lonlat);
+	if(px){
+	redTooltip.style.left=(px.x+15)+'px';
+	redTooltip.style.top=(px.y-60)+'px';
+	}
+	}
 
-var hoverControl=new OpenLayers.Control.SelectFeature([previewLayer,vector],{
-hover:true,
-highlightOnly:true,
-overFeature:function(f){
-var mapEl=document.getElementById('map');
-if(f.layer===previewLayer&&f.attributes.tooltip){
+	if(!singlePointMode){
+	var hoverControl=new OpenLayers.Control.SelectFeature([previewLayer,vector],{
+	hover:true,
+	highlightOnly:true,
+	overFeature:function(f){
+	var mapEl=document.getElementById('map');
+	if(f.layer===previewLayer&&f.attributes.tooltip){
 previewTooltip.innerHTML=f.attributes.tooltip;
 previewTooltip.style.display='block';
 mapEl.style.cursor='pointer';
@@ -8340,25 +8390,30 @@ lastClickFeature=f;lastClickTime=now;
 }
 }
 }
-});
-var lastClickFeature=null;var lastClickTime=0;
-map.addControl(hoverControl);
-hoverControl.activate();
+	});
+	var lastClickFeature=null;var lastClickTime=0;
+	map.addControl(hoverControl);
+	hoverControl.activate();
+	}
 
-map.events.register('mousemove',map,function(e){
-if(previewTooltip.style.display==='block'){
-previewTooltip.style.left=(e.xy.x+15)+'px';
-previewTooltip.style.top=(e.xy.y+15)+'px';
+	if(!singlePointMode){
+	map.events.register('mousemove',map,function(e){
+	if(previewTooltip.style.display==='block'){
+	previewTooltip.style.left=(e.xy.x+15)+'px';
+	previewTooltip.style.top=(e.xy.y+15)+'px';
 }
 if(hoverTooltip.style.display==='block'){
-hoverTooltip.style.left=(e.xy.x+15)+'px';
-hoverTooltip.style.top=(e.xy.y+15)+'px';
-}
-});
+	hoverTooltip.style.left=(e.xy.x+15)+'px';
+	hoverTooltip.style.top=(e.xy.y+15)+'px';
+	}
+	});
+	}
 
-map.events.register('move',map,updateRedTooltip);
-map.events.register('moveend',map,updateRedTooltip);
-map.events.register('zoomend',map,updateRedTooltip);
+	if(!singlePointMode){
+	map.events.register('move',map,updateRedTooltip);
+	map.events.register('moveend',map,updateRedTooltip);
+	map.events.register('zoomend',map,updateRedTooltip);
+	}
 
 function zoomToMarkers(){
 var extent=vector.getDataExtent();
@@ -8370,22 +8425,23 @@ extent.top+=50*res;extent.bottom-=15*res;
 map.zoomToExtent(extent);
 }
 
-if(markers.length){
-zoomToMarkers();
-setTimeout(updateRedTooltip,100);
-}
+	if(markers.length){
+	zoomToMarkers();
+	if(!singlePointMode)setTimeout(updateRedTooltip,100);
+	}
 
 var homeLat=${homeLatJson};
 var homeLon=${homeLonJson};
 document.getElementById('zoom-in').addEventListener('click',function(){map.zoomIn()});
 document.getElementById('zoom-out').addEventListener('click',function(){map.zoomOut()});
-document.getElementById('zoom-home').addEventListener('click',function(){
-if(typeof homeLat==='number'&&typeof homeLon==='number'){
-map.setCenter(new OpenLayers.LonLat(homeLon,homeLat).transform(wgs84,proj),15);
-}
-});
+	document.getElementById('zoom-home').addEventListener('click',function(){
+	if(typeof homeLat==='number'&&typeof homeLon==='number'){
+	map.setCenter(new OpenLayers.LonLat(homeLon,homeLat).transform(wgs84,proj),15);
+	}
+	});
 
-document.getElementById('search-modal').addEventListener('keydown',function(e){e.stopPropagation()});
+	if(!singlePointMode){
+	document.getElementById('search-modal').addEventListener('keydown',function(e){e.stopPropagation()});
 
 var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 var displayMonth=${displayDate.getMonth()};
@@ -8668,12 +8724,13 @@ if(ctxDragging){e.preventDefault();endCtxDrag(e)}
 else if(ctxDragEnded){e.preventDefault();ctxDragEnded=false}
 },true);
 
-mapEl.addEventListener('click',closeCtxMenu);
-ctxMenu.addEventListener('click',function(e){e.stopPropagation()});
-ctxMenu.addEventListener('contextmenu',function(e){e.stopPropagation();e.preventDefault()});
-ctxMenu.addEventListener('mousedown',function(e){e.stopPropagation()});
-})();
-</script>
+	mapEl.addEventListener('click',closeCtxMenu);
+	ctxMenu.addEventListener('click',function(e){e.stopPropagation()});
+	ctxMenu.addEventListener('contextmenu',function(e){e.stopPropagation();e.preventDefault()});
+	ctxMenu.addEventListener('mousedown',function(e){e.stopPropagation()});
+	}
+	})();
+	</script>
 </body>
 </html>`;
 

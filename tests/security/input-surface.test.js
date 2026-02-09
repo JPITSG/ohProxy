@@ -48,6 +48,8 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawPeriod\s*=\s*req\.query\?\.period\s*;/,
 			/const\s+rawMode\s*=\s*req\.query\?\.mode\s*;/,
 			/const\s+rawTitle\s*=\s*req\.query\?\.title\s*;/,
+			/const\s+rawLat\s*=\s*req\.query\?\.lat\s*;/,
+			/const\s+rawLon\s*=\s*req\.query\?\.lon\s*;/,
 			/const\s+raw\s*=\s*req\.query\?\.url\s*;/,
 			/if\s*\(req\.query\?\.w\s*!==\s*undefined\s*&&\s*typeof\s+req\.query\.w\s*!==\s*'string'\s*\)/,
 			/const\s+rawWidth\s*=\s*parseOptionalInt\(req\.query\?\.w,\s*\{\s*min:\s*0,\s*max:\s*10000\s*\}\)\s*;/,
