@@ -873,6 +873,74 @@ function resetVideoZoom(videoEl) {
 	}
 }
 
+function attachPinchZoomHandlers(element, config) {
+	const {
+		maxScale = 4,
+		panSpeed = 1.5,
+		resetThreshold = 1.05,
+		getState,
+		applyZoom,
+		resetZoom,
+		isReady = () => true
+	} = config;
+
+	element.addEventListener('touchstart', (e) => {
+		if (!isReady()) return;
+		const s = getState();
+		if (e.touches.length === 2) {
+			e.preventDefault();
+			s.isPanning = false;
+			const dx = e.touches[0].clientX - e.touches[1].clientX;
+			const dy = e.touches[0].clientY - e.touches[1].clientY;
+			s.pinchStartDist = Math.hypot(dx, dy);
+			s.pinchStartScale = s.scale;
+		} else if (e.touches.length === 1 && s.scale > 1) {
+			s.isPanning = true;
+			s.panStartX = e.touches[0].clientX;
+			s.panStartY = e.touches[0].clientY;
+			s.panStartTranslateX = s.translateX;
+			s.panStartTranslateY = s.translateY;
+		}
+	}, { passive: false });
+
+	element.addEventListener('touchmove', (e) => {
+		if (!isReady()) return;
+		const s = getState();
+		if (e.touches.length === 2 && s.pinchStartDist > 0) {
+			e.preventDefault();
+			const dx = e.touches[0].clientX - e.touches[1].clientX;
+			const dy = e.touches[0].clientY - e.touches[1].clientY;
+			const dist = Math.hypot(dx, dy);
+			s.scale = Math.min(maxScale, Math.max(1, s.pinchStartScale * (dist / s.pinchStartDist)));
+			applyZoom();
+		} else if (e.touches.length === 1 && s.isPanning && s.scale > 1) {
+			e.preventDefault();
+			const dx = (e.touches[0].clientX - s.panStartX) * panSpeed;
+			const dy = (e.touches[0].clientY - s.panStartY) * panSpeed;
+			s.translateX = s.panStartTranslateX + dx;
+			s.translateY = s.panStartTranslateY + dy;
+			applyZoom();
+		}
+	}, { passive: false });
+
+	element.addEventListener('touchend', (e) => {
+		const s = getState();
+		if (e.touches.length < 2) {
+			s.pinchStartDist = 0;
+		}
+		if (e.touches.length === 0) {
+			s.isPanning = false;
+			if (s.scale < resetThreshold) {
+				resetZoom();
+			}
+		}
+	});
+
+	element.addEventListener('touchcancel', () => {
+		resetZoom();
+	});
+}
+
 function initVideoZoom(videoEl, zoomStage) {
 	if (!videoEl || !zoomStage) return;
 	if (videoEl.dataset.zoomInit === '1') return;
@@ -903,57 +971,14 @@ function initVideoZoom(videoEl, zoomStage) {
 		return;
 	}
 
-	zoomStage.addEventListener('touchstart', (e) => {
-		if (!isVideoZoomReady(videoEl)) return;
-		if (e.touches.length === 2) {
-			e.preventDefault();
-			zoomState.isPanning = false;
-			const dx = e.touches[0].clientX - e.touches[1].clientX;
-			const dy = e.touches[0].clientY - e.touches[1].clientY;
-			zoomState.pinchStartDist = Math.hypot(dx, dy);
-			zoomState.pinchStartScale = zoomState.scale;
-		} else if (e.touches.length === 1 && zoomState.scale > 1) {
-			zoomState.isPanning = true;
-			zoomState.panStartX = e.touches[0].clientX;
-			zoomState.panStartY = e.touches[0].clientY;
-			zoomState.panStartTranslateX = zoomState.translateX;
-			zoomState.panStartTranslateY = zoomState.translateY;
-		}
-	}, { passive: false });
-
-	zoomStage.addEventListener('touchmove', (e) => {
-		if (!isVideoZoomReady(videoEl)) return;
-		if (e.touches.length === 2 && zoomState.pinchStartDist > 0) {
-			e.preventDefault();
-			const dx = e.touches[0].clientX - e.touches[1].clientX;
-			const dy = e.touches[0].clientY - e.touches[1].clientY;
-			const dist = Math.hypot(dx, dy);
-			zoomState.scale = Math.min(VIDEO_ZOOM_MAX_SCALE, Math.max(1, zoomState.pinchStartScale * (dist / zoomState.pinchStartDist)));
-			applyVideoZoom(videoEl);
-		} else if (e.touches.length === 1 && zoomState.isPanning && zoomState.scale > 1) {
-			e.preventDefault();
-			const dx = (e.touches[0].clientX - zoomState.panStartX) * VIDEO_ZOOM_PAN_SPEED;
-			const dy = (e.touches[0].clientY - zoomState.panStartY) * VIDEO_ZOOM_PAN_SPEED;
-			zoomState.translateX = zoomState.panStartTranslateX + dx;
-			zoomState.translateY = zoomState.panStartTranslateY + dy;
-			applyVideoZoom(videoEl);
-		}
-	}, { passive: false });
-
-	zoomStage.addEventListener('touchend', (e) => {
-		if (e.touches.length < 2) {
-			zoomState.pinchStartDist = 0;
-		}
-		if (e.touches.length === 0) {
-			zoomState.isPanning = false;
-			if (zoomState.scale < VIDEO_ZOOM_RESET_THRESHOLD) {
-				resetVideoZoom(videoEl);
-			}
-		}
-	});
-
-	zoomStage.addEventListener('touchcancel', () => {
-		resetVideoZoom(videoEl);
+	attachPinchZoomHandlers(zoomStage, {
+		resetThreshold: VIDEO_ZOOM_RESET_THRESHOLD,
+		maxScale: VIDEO_ZOOM_MAX_SCALE,
+		panSpeed: VIDEO_ZOOM_PAN_SPEED,
+		getState: () => zoomState,
+		applyZoom: () => applyVideoZoom(videoEl),
+		resetZoom: () => resetVideoZoom(videoEl),
+		isReady: () => isVideoZoomReady(videoEl)
 	});
 }
 
@@ -3005,7 +3030,12 @@ function formatHistoryTime(isoString) {
 	return formatDT(d, DATE_FORMAT + ' ' + TIME_FORMAT);
 }
 
-async function loadHistoryEntries(itemName, offset) {
+function formatRawState(rawState) {
+	return /^[A-Z][A-Z_]+$/.test(rawState) ? rawState.split('_').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ') : rawState;
+}
+
+async function loadHistoryEntriesShared(itemName, token, config) {
+	const { buildUrl, formatState, stack, nextTokenKey, defaultToken, self } = config;
 	const section = cardConfigModal.querySelector('.history-section');
 	const container = section.querySelector('.history-entries');
 	const nav = section.querySelector('.history-nav');
@@ -3014,16 +3044,11 @@ async function loadHistoryEntries(itemName, offset) {
 		container.innerHTML = '<div class="history-loading">' + ohLang.cardConfig.loading + '</div>';
 		nav.style.display = 'none';
 	}
-	// Abort any previous pagination fetch
 	if (historyAbort) historyAbort.abort();
 	historyAbort = new AbortController();
 	const signal = historyAbort.signal;
 	try {
-		let historyUrl = '/api/card-config/' + encodeURIComponent(itemName) + '/history?offset=' + offset;
-		if (historyMappings.length) {
-			historyUrl += '&commands=' + encodeURIComponent(historyMappings.map(m => m.command).join(','));
-		}
-		const resp = await fetch(historyUrl, { signal });
+		const resp = await fetch(buildUrl(itemName, token), { signal });
 		const data = await resp.json();
 		if (!data.ok || !data.entries.length) {
 			section.style.display = 'none';
@@ -3037,9 +3062,8 @@ async function loadHistoryEntries(itemName, offset) {
 			timeSpan.textContent = formatHistoryTime(entry.time);
 			const stateSpan = document.createElement('span');
 			stateSpan.className = 'history-state';
-			const mapped = historyMappings.length ? historyMappings.find(m => m.command === entry.state) : null;
 			const rawState = entry.state;
-			stateSpan.textContent = mapped ? (mapped.label || mapped.command) : (/^[A-Z][A-Z_]+$/.test(rawState) ? rawState.split('_').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ') : rawState);
+			stateSpan.textContent = formatState(entry, rawState);
 			row.appendChild(timeSpan);
 			if (historyGlowColor) {
 				const color = historyGlowColor(rawState);
@@ -3069,8 +3093,8 @@ async function loadHistoryEntries(itemName, offset) {
 				btn.textContent = ohLang.cardConfig.newerBtn;
 				btn.addEventListener('click', () => {
 					haptic();
-					const prevOffset = historyOffsetStack.pop() || 0;
-					loadHistoryEntries(itemName, prevOffset);
+					const prev = stack.pop();
+					self(itemName, prev != null ? prev : defaultToken);
 				});
 				navFrag.appendChild(btn);
 			}
@@ -3081,8 +3105,8 @@ async function loadHistoryEntries(itemName, offset) {
 				btn.textContent = ohLang.cardConfig.olderBtn;
 				btn.addEventListener('click', () => {
 					haptic();
-					historyOffsetStack.push(offset);
-					loadHistoryEntries(itemName, data.nextOffset);
+					stack.push(token);
+					self(itemName, data[nextTokenKey]);
 				});
 				navFrag.appendChild(btn);
 			}
@@ -3098,97 +3122,37 @@ async function loadHistoryEntries(itemName, offset) {
 	}
 }
 
-async function loadGroupHistoryEntries(itemName, cursor) {
-	const section = cardConfigModal.querySelector('.history-section');
-	const container = section.querySelector('.history-entries');
-	const nav = section.querySelector('.history-nav');
-	const isFirstLoad = !container.children.length;
-	if (isFirstLoad) {
-		container.innerHTML = '<div class="history-loading">' + ohLang.cardConfig.loading + '</div>';
-		nav.style.display = 'none';
-	}
-	// Abort any previous pagination fetch
-	if (historyAbort) historyAbort.abort();
-	historyAbort = new AbortController();
-	const signal = historyAbort.signal;
-	try {
-		let historyUrl = '/api/card-config/' + encodeURIComponent(itemName) + '/history';
-		if (cursor) {
-			historyUrl += '?before=' + encodeURIComponent(cursor);
-		}
-		const resp = await fetch(historyUrl, { signal });
-		const data = await resp.json();
-		if (!data.ok || !data.entries.length) {
-			section.style.display = 'none';
-			return;
-		}
-		const frag = document.createDocumentFragment();
-		for (const entry of data.entries) {
-			const row = document.createElement('div');
-			row.className = 'history-entry';
-			const timeSpan = document.createElement('span');
-			timeSpan.textContent = formatHistoryTime(entry.time);
-			const stateSpan = document.createElement('span');
-			stateSpan.className = 'history-state';
-			const rawState = entry.state;
-			const displayState = /^[A-Z][A-Z_]+$/.test(rawState) ? rawState.split('_').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ') : rawState;
-			stateSpan.textContent = (entry.member || '') + ' \u00B7 ' + displayState;
-			row.appendChild(timeSpan);
-			if (historyGlowColor) {
-				const color = historyGlowColor(rawState);
-				if (color) {
-					const solid = colorToRgba(color, 1);
-					const glow = colorToRgba(color, 0.6);
-					if (solid && glow) {
-						const dot = document.createElement('span');
-						dot.className = 'history-glow-dot';
-						dot.style.setProperty('--glow-solid', solid);
-						dot.style.setProperty('--glow-color', glow);
-						row.appendChild(dot);
-					}
-				}
-			}
-			row.appendChild(stateSpan);
-			frag.appendChild(row);
-		}
-		container.innerHTML = '';
-		container.appendChild(frag);
-		const navFrag = document.createDocumentFragment();
-		if (data.hasNewer || data.hasOlder) {
-			if (data.hasNewer) {
-				const btn = document.createElement('button');
-				btn.type = 'button';
-				btn.className = 'history-newer';
-				btn.textContent = ohLang.cardConfig.newerBtn;
-				btn.addEventListener('click', () => {
-					haptic();
-					const prevCursor = historyCursorStack.pop() || null;
-					loadGroupHistoryEntries(itemName, prevCursor);
-				});
-				navFrag.appendChild(btn);
-			}
-			if (data.hasOlder) {
-				const btn = document.createElement('button');
-				btn.type = 'button';
-				btn.className = 'history-older';
-				btn.textContent = ohLang.cardConfig.olderBtn;
-				btn.addEventListener('click', () => {
-					haptic();
-					historyCursorStack.push(cursor);
-					loadGroupHistoryEntries(itemName, data.nextCursor);
-				});
-				navFrag.appendChild(btn);
-			}
-			nav.innerHTML = '';
-			nav.appendChild(navFrag);
-			nav.style.display = 'flex';
-		} else {
-			nav.style.display = 'none';
-		}
-	} catch (e) {
-		if (e.name === 'AbortError') return;
-		section.style.display = 'none';
-	}
+function loadHistoryEntries(itemName, offset) {
+	return loadHistoryEntriesShared(itemName, offset, {
+		buildUrl: (name, off) => {
+			let url = '/api/card-config/' + encodeURIComponent(name) + '/history?offset=' + off;
+			if (historyMappings.length) url += '&commands=' + encodeURIComponent(historyMappings.map(m => m.command).join(','));
+			return url;
+		},
+		formatState: (entry, raw) => {
+			const mapped = historyMappings.length ? historyMappings.find(m => m.command === raw) : null;
+			return mapped ? (mapped.label || mapped.command) : formatRawState(raw);
+		},
+		stack: historyOffsetStack,
+		nextTokenKey: 'nextOffset',
+		defaultToken: 0,
+		self: loadHistoryEntries
+	});
+}
+
+function loadGroupHistoryEntries(itemName, cursor) {
+	return loadHistoryEntriesShared(itemName, cursor, {
+		buildUrl: (name, cur) => {
+			let url = '/api/card-config/' + encodeURIComponent(name) + '/history';
+			if (cur) url += '?before=' + encodeURIComponent(cur);
+			return url;
+		},
+		formatState: (entry, raw) => (entry.member || '') + ' \u00B7 ' + formatRawState(raw),
+		stack: historyCursorStack,
+		nextTokenKey: 'nextCursor',
+		defaultToken: null,
+		self: loadGroupHistoryEntries
+	});
 }
 
 function closeCardConfigModal() {
@@ -4131,93 +4095,45 @@ function ensureImageViewer() {
 			});
 		} else {
 			// Pinch-to-zoom and pan for touch devices
-			let pinchStartDist = 0;
-			let pinchStartScale = 1;
-			let currentScale = 1;
-			let translateX = 0;
-			let translateY = 0;
-			let panStartX = 0;
-			let panStartY = 0;
-			let panStartTranslateX = 0;
-			let panStartTranslateY = 0;
-			let isPanning = false;
-
-			const clampTranslate = () => {
-				// Limit panning so image stays within view
-				const rect = imageViewerImg.getBoundingClientRect();
-				const imgWidth = rect.width / currentScale;
-				const imgHeight = rect.height / currentScale;
-				const maxX = (imgWidth * (currentScale - 1)) / 2;
-				const maxY = (imgHeight * (currentScale - 1)) / 2;
-				translateX = Math.min(maxX, Math.max(-maxX, translateX));
-				translateY = Math.min(maxY, Math.max(-maxY, translateY));
+			const imgZoomState = {
+				scale: 1, translateX: 0, translateY: 0,
+				pinchStartDist: 0, pinchStartScale: 1,
+				panStartX: 0, panStartY: 0,
+				panStartTranslateX: 0, panStartTranslateY: 0,
+				isPanning: false
 			};
 
-			const updateTransform = () => {
-				if (currentScale > 1) {
-					clampTranslate();
-					imageViewerImg.style.transform = `translate(${translateX}px, ${translateY}px) scale(${currentScale})`;
+			const clampImgTranslate = () => {
+				const rect = imageViewerImg.getBoundingClientRect();
+				const imgWidth = rect.width / imgZoomState.scale;
+				const imgHeight = rect.height / imgZoomState.scale;
+				const maxX = (imgWidth * (imgZoomState.scale - 1)) / 2;
+				const maxY = (imgHeight * (imgZoomState.scale - 1)) / 2;
+				imgZoomState.translateX = Math.min(maxX, Math.max(-maxX, imgZoomState.translateX));
+				imgZoomState.translateY = Math.min(maxY, Math.max(-maxY, imgZoomState.translateY));
+			};
+
+			const applyImgZoom = () => {
+				if (imgZoomState.scale > 1) {
+					clampImgTranslate();
+					imageViewerImg.style.transform = `translate(${imgZoomState.translateX}px, ${imgZoomState.translateY}px) scale(${imgZoomState.scale})`;
 				} else {
 					imageViewerImg.style.transform = '';
 				}
+				imageViewerZoomed = imgZoomState.scale > 1;
+				imageViewerImg.classList.toggle('zoomed', imageViewerZoomed);
 			};
 
-			imageViewerImg.addEventListener('touchstart', (e) => {
-				if (e.touches.length === 2) {
-					// Pinch start
-					e.preventDefault();
-					isPanning = false;
-					const dx = e.touches[0].clientX - e.touches[1].clientX;
-					const dy = e.touches[0].clientY - e.touches[1].clientY;
-					pinchStartDist = Math.hypot(dx, dy);
-					pinchStartScale = currentScale;
-				} else if (e.touches.length === 1 && currentScale > 1) {
-					// Pan start (only when zoomed)
-					isPanning = true;
-					panStartX = e.touches[0].clientX;
-					panStartY = e.touches[0].clientY;
-					panStartTranslateX = translateX;
-					panStartTranslateY = translateY;
-				}
-			}, { passive: false });
-
-			imageViewerImg.addEventListener('touchmove', (e) => {
-				if (e.touches.length === 2 && pinchStartDist > 0) {
-					// Pinch zoom
-					e.preventDefault();
-					const dx = e.touches[0].clientX - e.touches[1].clientX;
-					const dy = e.touches[0].clientY - e.touches[1].clientY;
-					const dist = Math.hypot(dx, dy);
-					const scale = Math.min(4, Math.max(1, pinchStartScale * (dist / pinchStartDist)));
-					currentScale = scale;
-					imageViewerZoomed = scale > 1;
-					imageViewerImg.classList.toggle('zoomed', imageViewerZoomed);
-					updateTransform();
-				} else if (e.touches.length === 1 && isPanning && currentScale > 1) {
-					// Pan (1.5x speed multiplier)
-					e.preventDefault();
-					const dx = (e.touches[0].clientX - panStartX) * 1.5;
-					const dy = (e.touches[0].clientY - panStartY) * 1.5;
-					translateX = panStartTranslateX + dx;
-					translateY = panStartTranslateY + dy;
-					updateTransform();
-				}
-			}, { passive: false });
-
-			imageViewerImg.addEventListener('touchend', (e) => {
-				if (e.touches.length < 2) {
-					pinchStartDist = 0;
-				}
-				if (e.touches.length === 0) {
-					isPanning = false;
-					// Reset if scale is close to 1
-					if (currentScale < 1.1) {
-						currentScale = 1;
-						translateX = 0;
-						translateY = 0;
-						updateTransform();
-						setImageViewerZoom(false);
-					}
+			attachPinchZoomHandlers(imageViewerImg, {
+				resetThreshold: 1.1,
+				getState: () => imgZoomState,
+				applyZoom: applyImgZoom,
+				resetZoom: () => {
+					imgZoomState.scale = 1;
+					imgZoomState.translateX = 0;
+					imgZoomState.translateY = 0;
+					applyImgZoom();
+					setImageViewerZoom(false);
 				}
 			});
 		}
@@ -5690,6 +5606,171 @@ function animateSliderValue(input, targetValue, valueBubble = null, positionCall
 		}
 	};
 	requestAnimationFrame(animate);
+}
+
+function createSliderDragKit(input, inlineSlider, card, config) {
+	const { state, refresh, clampValue, sendCommand: cmdFn, itemName, errorLabel, formatBubble, onVisualUpdate } = config;
+
+	let sliderHeld = false;
+	const releaseSliderRefresh = () => {
+		if (!sliderHeld) return;
+		sliderHeld = false;
+		state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
+		if (state.pendingRefresh) {
+			state.pendingRefresh = false;
+			refresh(false);
+		}
+	};
+
+	const holdSliderRefresh = () => {
+		if (sliderHeld) return;
+		sliderHeld = true;
+		state.suppressRefreshCount += 1;
+	};
+
+	let lastSentValue = null;
+	let lastSentAt = 0;
+	let pendingValue = null;
+	let pendingOptions = null;
+	let sendTimer = null;
+
+	const sendValue = async (value, options = {}) => {
+		const optimistic = options.optimistic !== false;
+		const force = options.force === true;
+		const next = clampValue ? clampValue(value) : value;
+		if (!force && next === lastSentValue) return;
+		lastSentValue = next;
+		lastSentAt = Date.now();
+		try { await cmdFn(itemName, String(next), { optimistic }); }
+		catch (e) {
+			lastSentValue = null;
+			logJsError(`${errorLabel} failed for ${itemName}`, e);
+			console.error(e);
+		}
+	};
+
+	const queueSend = (value, immediate, options = {}) => {
+		pendingValue = clampValue ? clampValue(value) : value;
+		pendingOptions = options;
+		if (sendTimer) return;
+		const now = Date.now();
+		const delay = immediate ? 0 : Math.max(0, SLIDER_DEBOUNCE_MS - (now - lastSentAt));
+		sendTimer = setTimeout(() => {
+			sendTimer = null;
+			const next = pendingValue;
+			const opts = pendingOptions || {};
+			pendingValue = null;
+			pendingOptions = null;
+			if (next === null) return;
+			void sendValue(next, opts);
+		}, delay);
+	};
+
+	const flushSend = (overrideOpts) => {
+		if (sendTimer) {
+			clearTimeout(sendTimer);
+			sendTimer = null;
+		}
+		const next = pendingValue;
+		const opts = overrideOpts || pendingOptions || {};
+		pendingValue = null;
+		pendingOptions = null;
+		if (next === null) return;
+		void sendValue(next, opts);
+	};
+
+	let dragReleaseController = null;
+	let activePointerId = null;
+	const detachGlobalDragListeners = () => {
+		if (!dragReleaseController) return;
+		dragReleaseController.abort();
+		dragReleaseController = null;
+	};
+	const attachGlobalDragListeners = () => {
+		if (dragReleaseController) return;
+		dragReleaseController = new AbortController();
+		window.addEventListener('mouseup', endDrag, { signal: dragReleaseController.signal });
+		window.addEventListener('touchend', endDrag, { passive: true, signal: dragReleaseController.signal });
+		window.addEventListener('touchcancel', endDrag, { passive: true, signal: dragReleaseController.signal });
+		window.addEventListener('pointerup', endDrag, { signal: dragReleaseController.signal });
+		window.addEventListener('pointercancel', endDrag, { signal: dragReleaseController.signal });
+		window.addEventListener('blur', endDrag, { signal: dragReleaseController.signal });
+	};
+	const endDrag = (e) => {
+		releaseSliderRefresh();
+		delete inlineSlider.dataset.dragging;
+		const pointerId = (e && typeof e.pointerId === 'number') ? e.pointerId : activePointerId;
+		if (pointerId !== null && typeof input.releasePointerCapture === 'function') {
+			try { input.releasePointerCapture(pointerId); } catch {}
+		}
+		activePointerId = null;
+		detachGlobalDragListeners();
+	};
+	const startDrag = (e) => {
+		holdSliderRefresh();
+		inlineSlider.dataset.dragging = 'true';
+		const pointerId = e && typeof e.pointerId === 'number' ? e.pointerId : null;
+		activePointerId = pointerId;
+		if (pointerId !== null && typeof input.setPointerCapture === 'function') {
+			try { input.setPointerCapture(pointerId); } catch {}
+		}
+		attachGlobalDragListeners();
+	};
+	input.addEventListener('pointerdown', startDrag);
+	input.addEventListener('pointerup', endDrag);
+	input.addEventListener('pointercancel', endDrag);
+	input.addEventListener('lostpointercapture', endDrag);
+	input.addEventListener('touchstart', startDrag, { passive: true });
+	input.addEventListener('touchend', endDrag, { passive: true });
+	input.addEventListener('touchcancel', endDrag, { passive: true });
+	input.addEventListener('mousedown', startDrag);
+	input.addEventListener('mouseup', endDrag);
+	input.addEventListener('blur', endDrag);
+	registerCardCleanup(card, () => { endDrag(); });
+
+	const valueBubble = document.createElement('span');
+	valueBubble.className = 'slider-bubble';
+	valueBubble.textContent = formatBubble(input.value);
+	inlineSlider.appendChild(input);
+	inlineSlider.appendChild(valueBubble);
+
+	const positionBubble = () => {
+		const val = Number(input.value);
+		const min = Number(input.min) || 0;
+		const max = Number(input.max) || 100;
+		const pct = (val - min) / (max - min);
+		const thumbWidth = 16;
+		const trackWidth = input.offsetWidth - thumbWidth;
+		const offset = thumbWidth / 2 + pct * trackWidth;
+		valueBubble.style.left = offset + 'px';
+	};
+	const updateVisuals = () => {
+		valueBubble.textContent = formatBubble(input.value);
+		positionBubble();
+		if (onVisualUpdate) onVisualUpdate(input.value);
+	};
+	requestAnimationFrame(updateVisuals);
+	input.addEventListener('input', updateVisuals);
+	const resizeController = new AbortController();
+	window.addEventListener('resize', updateVisuals, { signal: resizeController.signal });
+	let resizeObserver = null;
+	if (typeof ResizeObserver === 'function') {
+		resizeObserver = new ResizeObserver(() => updateVisuals());
+		resizeObserver.observe(input);
+	}
+	registerCardCleanup(card, () => {
+		resizeController.abort();
+		if (resizeObserver) resizeObserver.disconnect();
+	});
+
+	return {
+		sendValue, queueSend, flushSend,
+		releaseSliderRefresh, holdSliderRefresh,
+		startDrag, endDrag,
+		valueBubble, positionBubble, updateVisuals,
+		get lastSentValue() { return lastSentValue; },
+		set lastSentValue(v) { lastSentValue = v; }
+	};
 }
 
 function crossfadeText(element, newText, fadeOutMs = 200, fadeInMs = 200) {
@@ -7186,129 +7267,6 @@ function updateCard(card, w, info) {
 		input.value = String(startValue);
 		input.className = 'w-full ctp-inline-slider';
 
-		let sliderHeld = false;
-		const releaseSliderRefresh = () => {
-			if (!sliderHeld) return;
-			sliderHeld = false;
-			state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
-			if (state.pendingRefresh) {
-				state.pendingRefresh = false;
-				refresh(false);
-			}
-		};
-
-		const holdSliderRefresh = () => {
-			if (sliderHeld) return;
-			sliderHeld = true;
-			state.suppressRefreshCount += 1;
-		};
-
-		let lastSentValue = current;
-		let lastSentAt = 0;
-		let pendingValue = null;
-		let sendTimer = null;
-
-		const sendValue = async (value, options = {}) => {
-			const force = options.force === true;
-			const next = Math.max(ctMin, Math.min(ctMax, value));
-			if (!force && next === lastSentValue) return;
-			lastSentValue = next;
-			lastSentAt = Date.now();
-			try { await sendCommand(itemName, String(next), { optimistic: true }); }
-			catch (e) {
-				lastSentValue = null;
-				logJsError(`sendColorTemperature failed for ${itemName}`, e);
-				console.error(e);
-			}
-		};
-
-		const queueSend = (value, immediate, options = {}) => {
-			pendingValue = Math.max(ctMin, Math.min(ctMax, value));
-			if (sendTimer) return;
-			const now = Date.now();
-			const delay = immediate ? 0 : Math.max(0, SLIDER_DEBOUNCE_MS - (now - lastSentAt));
-			sendTimer = setTimeout(() => {
-				sendTimer = null;
-				const next = pendingValue;
-				const opts = options || {};
-				pendingValue = null;
-				if (next === null) return;
-				void sendValue(next, opts);
-			}, delay);
-		};
-
-		const flushSend = () => {
-			if (sendTimer) {
-				clearTimeout(sendTimer);
-				sendTimer = null;
-			}
-			const next = pendingValue;
-			pendingValue = null;
-			if (next === null) return;
-			void sendValue(next, { force: true });
-		};
-
-		input.addEventListener('input', () => {
-			const value = Number(input.value);
-			if (!Number.isFinite(value)) return;
-			queueSend(value, false);
-		});
-		input.addEventListener('change', () => {
-			flushSend();
-			releaseSliderRefresh();
-			setTimeout(() => refresh(false), 150);
-		});
-		let dragReleaseController = null;
-		let activePointerId = null;
-		const detachGlobalDragListeners = () => {
-			if (!dragReleaseController) return;
-			dragReleaseController.abort();
-			dragReleaseController = null;
-		};
-		const attachGlobalDragListeners = () => {
-			if (dragReleaseController) return;
-			dragReleaseController = new AbortController();
-			window.addEventListener('mouseup', endDrag, { signal: dragReleaseController.signal });
-			window.addEventListener('touchend', endDrag, { passive: true, signal: dragReleaseController.signal });
-			window.addEventListener('touchcancel', endDrag, { passive: true, signal: dragReleaseController.signal });
-			window.addEventListener('pointerup', endDrag, { signal: dragReleaseController.signal });
-			window.addEventListener('pointercancel', endDrag, { signal: dragReleaseController.signal });
-			window.addEventListener('blur', endDrag, { signal: dragReleaseController.signal });
-		};
-		const endDrag = (e) => {
-			releaseSliderRefresh();
-			delete inlineSlider.dataset.dragging;
-			const pointerId = (e && typeof e.pointerId === 'number') ? e.pointerId : activePointerId;
-			if (pointerId !== null && typeof input.releasePointerCapture === 'function') {
-				try { input.releasePointerCapture(pointerId); } catch {}
-			}
-			activePointerId = null;
-			detachGlobalDragListeners();
-		};
-		const startDrag = (e) => {
-			holdSliderRefresh();
-			inlineSlider.dataset.dragging = 'true';
-			const pointerId = e && typeof e.pointerId === 'number' ? e.pointerId : null;
-			activePointerId = pointerId;
-			if (pointerId !== null && typeof input.setPointerCapture === 'function') {
-				try { input.setPointerCapture(pointerId); } catch {}
-			}
-			attachGlobalDragListeners();
-		};
-		input.addEventListener('pointerdown', startDrag);
-		input.addEventListener('pointerup', endDrag);
-		input.addEventListener('pointercancel', endDrag);
-		input.addEventListener('lostpointercapture', endDrag);
-		input.addEventListener('touchstart', startDrag, { passive: true });
-		input.addEventListener('touchend', endDrag, { passive: true });
-		input.addEventListener('touchcancel', endDrag, { passive: true });
-		input.addEventListener('mousedown', startDrag);
-		input.addEventListener('mouseup', endDrag);
-		input.addEventListener('blur', endDrag);
-		registerCardCleanup(card, () => {
-			endDrag();
-		});
-
 		const formatCtValue = (value) => {
 			const rounded = Math.round(Number(value) * 100) / 100;
 			if (!Number.isFinite(rounded)) return '\u2014';
@@ -7350,42 +7308,28 @@ function updateCard(card, w, info) {
 			input.style.setProperty('--ctp-thumb-color', `rgb(${r}, ${g}, ${b})`);
 		};
 
-		const valueBubble = document.createElement('span');
-		valueBubble.className = 'slider-bubble';
-		valueBubble.textContent = formatCtValueWithUnit(current);
-		inlineSlider.appendChild(input);
-		inlineSlider.appendChild(valueBubble);
+		const kit = createSliderDragKit(input, inlineSlider, card, {
+			state, refresh,
+			clampValue: v => Math.max(ctMin, Math.min(ctMax, v)),
+			sendCommand, itemName,
+			errorLabel: 'sendColorTemperature',
+			formatBubble: formatCtValueWithUnit,
+			onVisualUpdate: v => setThumbColor(v)
+		});
+		kit.lastSentValue = current;
 
-		const positionBubble = () => {
-			const sliderValue = Number(input.value);
-			const min = Number(input.min) || 0;
-			const max = Number(input.max) || 100;
-			const pct = (sliderValue - min) / (max - min);
-			const thumbWidth = 16;
-			const trackWidth = input.offsetWidth - thumbWidth;
-			const offset = thumbWidth / 2 + pct * trackWidth;
-			valueBubble.style.left = offset + 'px';
-		};
-		const updateCtpVisuals = () => {
-			valueBubble.textContent = formatCtValueWithUnit(input.value);
-			positionBubble();
-			setThumbColor(input.value);
-		};
-		requestAnimationFrame(updateCtpVisuals);
-		input.addEventListener('input', updateCtpVisuals);
-		const ctpResizeController = new AbortController();
-		window.addEventListener('resize', updateCtpVisuals, { signal: ctpResizeController.signal });
-		let ctpResizeObserver = null;
-		if (typeof ResizeObserver === 'function') {
-			ctpResizeObserver = new ResizeObserver(() => updateCtpVisuals());
-			ctpResizeObserver.observe(input);
-		}
-		registerCardCleanup(card, () => {
-			ctpResizeController.abort();
-			if (ctpResizeObserver) ctpResizeObserver.disconnect();
+		input.addEventListener('input', () => {
+			const value = Number(input.value);
+			if (!Number.isFinite(value)) return;
+			kit.queueSend(value, false);
+		});
+		input.addEventListener('change', () => {
+			kit.flushSend({ force: true });
+			kit.releaseSliderRefresh();
+			setTimeout(() => refresh(false), 150);
 		});
 		if (startValue !== current) {
-			animateSliderValue(input, current, null, updateCtpVisuals);
+			animateSliderValue(input, current, null, kit.updateVisuals);
 		}
 	} else if (t.includes('dimmer') || t.includes('roller') || t.includes('slider')) {
 		const sliderMin = Number.isFinite(Number(w?.minValue)) ? Number(w.minValue) : 0;
@@ -7416,22 +7360,14 @@ function updateCard(card, w, info) {
 		input.value = String(startValue);
 		input.className = 'w-full';
 
-		let sliderHeld = false;
-		const releaseSliderRefresh = () => {
-			if (!sliderHeld) return;
-			sliderHeld = false;
-			state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
-			if (state.pendingRefresh) {
-				state.pendingRefresh = false;
-				refresh(false);
-			}
-		};
-
-		const holdSliderRefresh = () => {
-			if (sliderHeld) return;
-			sliderHeld = true;
-			state.suppressRefreshCount += 1;
-		};
+		const kit = createSliderDragKit(input, inlineSlider, card, {
+			state, refresh,
+			clampValue: null,
+			sendCommand, itemName,
+			errorLabel: 'sendSliderValue',
+			formatBubble: v => v
+		});
+		kit.lastSentValue = current;
 
 		const ACTIVATION_TIMEOUT_MS = 800;
 		const ACTIVATION_CHECK_MS = 80;
@@ -7442,55 +7378,6 @@ function updateCard(card, w, info) {
 		let activationPendingValue = null;
 		let activationStartedAt = 0;
 		let activationTimer = null;
-		let lastSentValue = current;
-		let lastSentAt = 0;
-		let pendingValue = null;
-		let pendingOptions = null;
-		let sendTimer = null;
-
-		const sendValue = async (value, options = {}) => {
-			const optimistic = options.optimistic !== false;
-			const force = options.force === true;
-			if (!force && value === lastSentValue) return;
-			lastSentValue = value;
-			lastSentAt = Date.now();
-			try { await sendCommand(itemName, String(value), { optimistic }); }
-			catch (e) {
-				lastSentValue = null;
-				logJsError(`sendSliderValue failed for ${itemName}`, e);
-				console.error(e);
-			}
-		};
-
-		const queueSend = (value, immediate, options = {}) => {
-			pendingValue = value;
-			pendingOptions = options;
-			if (sendTimer) return;
-			const now = Date.now();
-			const delay = immediate ? 0 : Math.max(0, SLIDER_DEBOUNCE_MS - (now - lastSentAt));
-			sendTimer = setTimeout(() => {
-				sendTimer = null;
-				const next = pendingValue;
-				const opts = pendingOptions || {};
-				pendingValue = null;
-				pendingOptions = null;
-				if (next === null) return;
-				void sendValue(next, opts);
-			}, delay);
-		};
-
-		const flushSend = () => {
-			if (sendTimer) {
-				clearTimeout(sendTimer);
-				sendTimer = null;
-			}
-			const next = pendingValue;
-			const opts = pendingOptions || {};
-			pendingValue = null;
-			pendingOptions = null;
-			if (next === null) return;
-			void sendValue(next, opts);
-		};
 
 		const clearActivationTimer = () => {
 			if (activationTimer) {
@@ -7504,7 +7391,7 @@ function updateCard(card, w, info) {
 			activationPending = false;
 			clearActivationTimer();
 			if (activationPendingValue != null && activationPendingValue !== activationValue) {
-				queueSend(activationPendingValue, true, { force: true });
+				kit.queueSend(activationPendingValue, true, { force: true });
 			}
 			activationPendingValue = null;
 			activationValue = null;
@@ -7531,7 +7418,7 @@ function updateCard(card, w, info) {
 			activationValue = value;
 			activationPendingValue = value;
 			activationStartedAt = Date.now();
-			void sendValue(value, { optimistic: false, force: true });
+			void kit.sendValue(value, { optimistic: false, force: true });
 			if (!activationTimer) activationTimer = setTimeout(checkActivation, ACTIVATION_CHECK_MS);
 		};
 
@@ -7550,113 +7437,22 @@ function updateCard(card, w, info) {
 					return;
 				}
 			}
-			// Haptic when turning off (going to min from above min)
-			if (value === sliderMin && lastSentValue > sliderMin) haptic();
-			if (!releaseOnly) queueSend(value, false);
+			if (value === sliderMin && kit.lastSentValue > sliderMin) haptic();
+			if (!releaseOnly) kit.queueSend(value, false);
 		});
 		input.addEventListener('change', () => {
 			if (releaseOnly) {
 				const value = Number(input.value);
-				if (Number.isFinite(value)) void sendValue(value, { force: true });
+				if (Number.isFinite(value)) void kit.sendValue(value, { force: true });
 			} else {
-				flushSend();
+				kit.flushSend();
 			}
-			releaseSliderRefresh();
-			// Refresh after slider change to pick up visibility changes in sitemap
+			kit.releaseSliderRefresh();
 			setTimeout(() => refresh(false), 150);
 		});
-		let dragReleaseController = null;
-		let activePointerId = null;
-		const detachGlobalDragListeners = () => {
-			if (!dragReleaseController) return;
-			dragReleaseController.abort();
-			dragReleaseController = null;
-		};
-		const attachGlobalDragListeners = () => {
-			if (dragReleaseController) return;
-			dragReleaseController = new AbortController();
-			window.addEventListener('mouseup', endDrag, { signal: dragReleaseController.signal });
-			window.addEventListener('touchend', endDrag, { passive: true, signal: dragReleaseController.signal });
-			window.addEventListener('touchcancel', endDrag, { passive: true, signal: dragReleaseController.signal });
-			window.addEventListener('pointerup', endDrag, { signal: dragReleaseController.signal });
-			window.addEventListener('pointercancel', endDrag, { signal: dragReleaseController.signal });
-			window.addEventListener('blur', endDrag, { signal: dragReleaseController.signal });
-		};
-		const endDrag = (e) => {
-			releaseSliderRefresh();
-			delete inlineSlider.dataset.dragging;
-			const pointerId = (e && typeof e.pointerId === 'number') ? e.pointerId : activePointerId;
-			if (pointerId !== null && typeof input.releasePointerCapture === 'function') {
-				try { input.releasePointerCapture(pointerId); } catch {}
-			}
-			activePointerId = null;
-			detachGlobalDragListeners();
-		};
-		const startDrag = (e) => {
-			holdSliderRefresh();
-			inlineSlider.dataset.dragging = 'true';
-			const pointerId = e && typeof e.pointerId === 'number' ? e.pointerId : null;
-			activePointerId = pointerId;
-			if (pointerId !== null && typeof input.setPointerCapture === 'function') {
-				try { input.setPointerCapture(pointerId); } catch {}
-			}
-			attachGlobalDragListeners();
-		};
-		input.addEventListener('pointerdown', startDrag);
-		input.addEventListener('pointerup', endDrag);
-		input.addEventListener('pointercancel', endDrag);
-		input.addEventListener('lostpointercapture', endDrag);
-		input.addEventListener('touchstart', startDrag, { passive: true });
-		input.addEventListener('touchend', endDrag, { passive: true });
-		input.addEventListener('touchcancel', endDrag, { passive: true });
-		input.addEventListener('mousedown', startDrag);
-		input.addEventListener('mouseup', endDrag);
-		input.addEventListener('blur', endDrag);
-		registerCardCleanup(card, () => {
-			endDrag();
-		});
 
-		const valueBubble = document.createElement('span');
-		valueBubble.className = 'slider-bubble';
-		valueBubble.textContent = current;
-		inlineSlider.appendChild(input);
-		inlineSlider.appendChild(valueBubble);
-
-		// Position bubble above thumb (account for thumb width ~16px)
-		const positionBubble = () => {
-			const val = Number(input.value);
-			const min = Number(input.min) || 0;
-			const max = Number(input.max) || 100;
-			const pct = (val - min) / (max - min);
-			const thumbWidth = 16;
-			const trackWidth = input.offsetWidth - thumbWidth;
-			const offset = thumbWidth / 2 + pct * trackWidth;
-			valueBubble.style.left = offset + 'px';
-		};
-		const updateSliderVisuals = () => {
-			valueBubble.textContent = input.value;
-			positionBubble();
-		};
-		// Defer initial positioning until element is rendered
-		requestAnimationFrame(updateSliderVisuals);
-
-		// Update label and position when slider value changes
-		input.addEventListener('input', updateSliderVisuals);
-		const sliderResizeController = new AbortController();
-		window.addEventListener('resize', updateSliderVisuals, { signal: sliderResizeController.signal });
-		let sliderResizeObserver = null;
-		if (typeof ResizeObserver === 'function') {
-			sliderResizeObserver = new ResizeObserver(() => updateSliderVisuals());
-			sliderResizeObserver.observe(input);
-		}
-		registerCardCleanup(card, () => {
-			sliderResizeController.abort();
-			if (sliderResizeObserver) sliderResizeObserver.disconnect();
-		});
-
-		// Animate slider from previous value to current value
 		if (startValue !== current) {
-			animateSliderValue(input, current, valueBubble, positionBubble);
+			animateSliderValue(input, current, kit.valueBubble, kit.positionBubble);
 		}
 
 		if (switchSupport) {
