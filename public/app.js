@@ -1840,6 +1840,43 @@ function resolveNamedColor(color) {
 	return parseRgbString(computed);
 }
 
+function hsbToRgb(h, s, b) {
+	const hh = ((h % 360) + 360) % 360;
+	const ss = Math.max(0, Math.min(100, s)) / 100;
+	const bb = Math.max(0, Math.min(100, b)) / 100;
+	const c = bb * ss;
+	const x = c * (1 - Math.abs(((hh / 60) % 2) - 1));
+	const m = bb - c;
+	let r1 = 0, g1 = 0, b1 = 0;
+	if (hh < 60) { r1 = c; g1 = x; }
+	else if (hh < 120) { r1 = x; g1 = c; }
+	else if (hh < 180) { g1 = c; b1 = x; }
+	else if (hh < 240) { g1 = x; b1 = c; }
+	else if (hh < 300) { r1 = x; b1 = c; }
+	else { r1 = c; b1 = x; }
+	return {
+		r: Math.round((r1 + m) * 255),
+		g: Math.round((g1 + m) * 255),
+		b: Math.round((b1 + m) * 255),
+	};
+}
+
+function parseHsbState(stateStr) {
+	const fallback = { h: 0, s: 0, b: 0 };
+	if (!stateStr || stateStr === 'NULL' || stateStr === 'UNDEF') return fallback;
+	const parts = String(stateStr).split(',');
+	if (parts.length < 3) return fallback;
+	const h = Number(parts[0]);
+	const s = Number(parts[1]);
+	const b = Number(parts[2]);
+	if (!Number.isFinite(h) || !Number.isFinite(s) || !Number.isFinite(b)) return fallback;
+	return {
+		h: Math.max(0, Math.min(360, h)),
+		s: Math.max(0, Math.min(100, s)),
+		b: Math.max(0, Math.min(100, b)),
+	};
+}
+
 function resolveColorToRgb(color) {
 	const c = safeText(color).trim();
 	if (!c) return null;
@@ -5946,6 +5983,7 @@ function getWidgetRenderInfo(w) {
 	const isVideo = t === 'video';
 	const isSelection = t.includes('selection');
 	const isButtongrid = t === 'buttongrid';
+	const isColorpicker = t === 'colorpicker';
 	const label = isImage || isVideo || isChart ? safeText(w?.label || '') : widgetLabel(w);
 	const st = widgetState(w);
 	const icon = widgetIconName(w);
@@ -6037,6 +6075,7 @@ function getWidgetRenderInfo(w) {
 		isVideo,
 		isSelection,
 		isButtongrid,
+		isColorpicker,
 		label,
 		st,
 		icon,
@@ -6092,6 +6131,7 @@ function updateCard(card, w, info) {
 		isVideo,
 		isSelection,
 		isButtongrid,
+		isColorpicker,
 		label,
 		st,
 		icon,
@@ -6137,6 +6177,9 @@ function updateCard(card, w, info) {
 		'nav-card',
 		'selection-card',
 		'colortemperaturepicker-card',
+		'colorpicker-card',
+		'colorpicker-open',
+		'colorpicker-above',
 		'input-card',
 		'switch-card',
 		'buttongrid-card',
@@ -6219,13 +6262,13 @@ function updateCard(card, w, info) {
 	titleEl.textContent = labelParts.title;
 	if (isText || isGroup) {
 		crossfadeText(metaEl, labelParts.state);
-	} else if (!isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput && !isButtongrid) {
-		// Don't show meta text for Selection/Switch/Setpoint/Colortemperaturepicker/Input/Buttongrid.
+	} else if (!isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput && !isButtongrid && !isColorpicker) {
+		// Don't show meta text for Selection/Switch/Setpoint/Colortemperaturepicker/Input/Buttongrid/Colorpicker.
 		metaEl.textContent = labelParts.state;
-	} else if (isColorTemperaturePicker || isInput || isButtongrid) {
+	} else if (isColorTemperaturePicker || isInput || isButtongrid || isColorpicker) {
 		metaEl.textContent = '';
 	}
-	if (labelParts.state && !isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput && !isButtongrid) card.classList.add('has-meta');
+	if (labelParts.state && !isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput && !isButtongrid && !isColorpicker) card.classList.add('has-meta');
 	// Apply openHAB labelcolor / valuecolor
 	const lc = data.labelcolor;
 	const vc = data.valuecolor;
@@ -7196,6 +7239,299 @@ function updateCard(card, w, info) {
 		if (startValue !== current) {
 			animateSliderValue(input, current, null, kit.updateVisuals);
 		}
+	} else if (isColorpicker) {
+		card.classList.add('colorpicker-card');
+		const hsb = parseHsbState(st);
+		const rgb = hsbToRgb(hsb.h, hsb.s, hsb.b);
+		const inlineControls = createInlineControls(labelRow, navHint);
+
+		// Minus button (OFF - brightness to 0)
+		const minusBtn = createSetpointButton('\u2212', false, () => 'OFF', itemName);
+
+		// Color swatch
+		const swatch = document.createElement('button');
+		swatch.className = 'colorpicker-swatch';
+		const updateSwatchColor = (r, g, b, brightness) => {
+			if (brightness === 0) {
+				swatch.style.background = '';
+				swatch.classList.add('colorpicker-swatch-off');
+			} else {
+				swatch.style.background = `rgb(${r}, ${g}, ${b})`;
+				swatch.classList.remove('colorpicker-swatch-off');
+			}
+		};
+		updateSwatchColor(rgb.r, rgb.g, rgb.b, hsb.b);
+
+		// Plus button (ON - brightness to 100)
+		const plusBtn = createSetpointButton('+', false, () => 'ON', itemName);
+
+		// Overlay
+		const overlay = document.createElement('div');
+		overlay.className = 'colorpicker-overlay';
+
+		// Color wheel canvas
+		const wheelWrap = document.createElement('div');
+		wheelWrap.className = 'colorpicker-wheel-wrap';
+		const canvas = document.createElement('canvas');
+		canvas.className = 'colorpicker-wheel';
+		canvas.width = 200;
+		canvas.height = 200;
+		const cursor = document.createElement('div');
+		cursor.className = 'colorpicker-wheel-cursor';
+		wheelWrap.appendChild(canvas);
+		wheelWrap.appendChild(cursor);
+
+		// Brightness slider
+		const brightnessSlider = document.createElement('input');
+		brightnessSlider.type = 'range';
+		brightnessSlider.className = 'colorpicker-brightness';
+		brightnessSlider.min = '0';
+		brightnessSlider.max = '100';
+		brightnessSlider.step = '1';
+		brightnessSlider.value = String(hsb.b);
+
+		// Preview swatch
+		const preview = document.createElement('div');
+		preview.className = 'colorpicker-preview';
+		preview.style.background = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+
+		const overlayBody = document.createElement('div');
+		overlayBody.className = 'colorpicker-overlay-body';
+		overlayBody.appendChild(wheelWrap);
+		const rightCol = document.createElement('div');
+		rightCol.className = 'colorpicker-right-col';
+		rightCol.appendChild(brightnessSlider);
+		rightCol.appendChild(preview);
+		overlayBody.appendChild(rightCol);
+		overlay.appendChild(overlayBody);
+
+		// Current HSB tracked locally while overlay is open
+		let liveH = hsb.h;
+		let liveS = hsb.s;
+		let liveB = hsb.b;
+
+		// Debounce setup (same pattern as slider drag kit)
+		let lastSentAt = 0;
+		let pendingSend = null;
+		let sendTimer = null;
+		const sendHsb = (h, s, b) => {
+			const cmd = `${Math.round(h)},${Math.round(s)},${Math.round(b)}`;
+			lastSentAt = Date.now();
+			sendCommand(itemName, cmd, { optimistic: true }).catch((e) => {
+				logJsError(`sendColorpicker failed for ${itemName}`, e);
+			});
+		};
+		const queueHsbSend = (h, s, b) => {
+			pendingSend = { h, s, b };
+			if (sendTimer) return;
+			const now = Date.now();
+			const delay = Math.max(0, SLIDER_DEBOUNCE_MS - (now - lastSentAt));
+			sendTimer = setTimeout(() => {
+				sendTimer = null;
+				const p = pendingSend;
+				pendingSend = null;
+				if (p) sendHsb(p.h, p.s, p.b);
+			}, delay);
+		};
+		const flushHsbSend = () => {
+			if (sendTimer) { clearTimeout(sendTimer); sendTimer = null; }
+			const p = pendingSend;
+			pendingSend = null;
+			if (p) sendHsb(p.h, p.s, p.b);
+		};
+
+		// Draw wheel
+		const dpr = window.devicePixelRatio || 1;
+		const wheelSize = 200;
+		const pxSize = wheelSize * dpr;
+		canvas.width = pxSize;
+		canvas.height = pxSize;
+
+		const drawWheel = (brightness) => {
+			const ctx = canvas.getContext('2d');
+			const cx = pxSize / 2, cy = pxSize / 2, radius = pxSize / 2;
+			const imgData = ctx.createImageData(pxSize, pxSize);
+			const data = imgData.data;
+			for (let y = 0; y < pxSize; y++) {
+				for (let x = 0; x < pxSize; x++) {
+					const dx = x - cx;
+					const dy = y - cy;
+					const dist = Math.sqrt(dx * dx + dy * dy);
+					const idx = (y * pxSize + x) * 4;
+					if (dist <= radius + 1) {
+						const angle = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+						const sat = Math.min((dist / radius) * 100, 100);
+						const c = hsbToRgb(angle, sat, brightness);
+						data[idx] = c.r;
+						data[idx + 1] = c.g;
+						data[idx + 2] = c.b;
+						// Anti-alias the edge: fade alpha over the last 1.5px
+						const edge = radius - dist;
+						data[idx + 3] = edge < 0 ? 0 : edge < 1.5 ? Math.round((edge / 1.5) * 255) : 255;
+					} else {
+						data[idx + 3] = 0;
+					}
+				}
+			}
+			ctx.putImageData(imgData, 0, 0);
+		};
+
+		// Position cursor on wheel
+		const positionCursor = (h, s) => {
+			const angle = h * Math.PI / 180;
+			const dist = (s / 100) * 100;
+			const cx = 100 + dist * Math.cos(angle);
+			const cy = 100 + dist * Math.sin(angle);
+			cursor.style.left = `${cx}px`;
+			cursor.style.top = `${cy}px`;
+		};
+
+		const updatePreview = () => {
+			const c = hsbToRgb(liveH, liveS, liveB);
+			preview.style.background = `rgb(${c.r}, ${c.g}, ${c.b})`;
+			updateSwatchColor(c.r, c.g, c.b, liveB);
+		};
+
+		drawWheel(liveB);
+		positionCursor(liveH, liveS);
+
+		// Wheel interaction
+		const wheelInteract = (clientX, clientY) => {
+			const rect = canvas.getBoundingClientRect();
+			const x = clientX - rect.left;
+			const y = clientY - rect.top;
+			const cx = rect.width / 2;
+			const cy = rect.height / 2;
+			const dx = x - cx;
+			const dy = y - cy;
+			const dist = Math.min(Math.sqrt(dx * dx + dy * dy), cx);
+			const angle = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+			liveH = angle;
+			liveS = (dist / cx) * 100;
+			positionCursor(liveH, liveS);
+			updatePreview();
+			queueHsbSend(liveH, liveS, liveB);
+		};
+
+		let wheelDragging = false;
+		canvas.addEventListener('pointerdown', (e) => {
+			e.preventDefault();
+			wheelDragging = true;
+			canvas.setPointerCapture(e.pointerId);
+			wheelInteract(e.clientX, e.clientY);
+		});
+		canvas.addEventListener('pointermove', (e) => {
+			if (!wheelDragging) return;
+			wheelInteract(e.clientX, e.clientY);
+		});
+		canvas.addEventListener('pointerup', (e) => {
+			if (!wheelDragging) return;
+			wheelDragging = false;
+			canvas.releasePointerCapture(e.pointerId);
+			flushHsbSend();
+		});
+		canvas.addEventListener('pointercancel', (e) => {
+			if (!wheelDragging) return;
+			wheelDragging = false;
+			canvas.releasePointerCapture(e.pointerId);
+			flushHsbSend();
+		});
+
+		// Brightness slider interaction
+		brightnessSlider.addEventListener('input', () => {
+			liveB = Number(brightnessSlider.value);
+			drawWheel(liveB);
+			updatePreview();
+			queueHsbSend(liveH, liveS, liveB);
+		});
+		brightnessSlider.addEventListener('change', () => {
+			flushHsbSend();
+		});
+
+		// Overlay open/close
+		let overlayOpen = false;
+		let docClickController = null;
+		let escController = null;
+
+		const addDocClickListener = () => {
+			if (docClickController) return;
+			docClickController = new AbortController();
+			document.addEventListener('click', (e) => {
+				if (card.contains(e.target)) return;
+				closeOverlay();
+			}, { capture: true, signal: docClickController.signal });
+		};
+		const removeDocClickListener = () => {
+			if (!docClickController) return;
+			docClickController.abort();
+			docClickController = null;
+		};
+		const addEscListener = () => {
+			if (escController) return;
+			escController = new AbortController();
+			document.addEventListener('keydown', (e) => {
+				if (e.key === 'Escape') closeOverlay();
+			}, { signal: escController.signal });
+		};
+		const removeEscListener = () => {
+			if (!escController) return;
+			escController.abort();
+			escController = null;
+		};
+
+		const openOverlay = () => {
+			if (overlayOpen) return;
+			overlayOpen = true;
+			haptic();
+			card.classList.add('colorpicker-open');
+			state.suppressRefreshCount += 1;
+			addDocClickListener();
+			addEscListener();
+			// Re-draw with current state
+			drawWheel(liveB);
+			positionCursor(liveH, liveS);
+			updatePreview();
+			// Position above/below
+			requestAnimationFrame(() => {
+				const swatchRect = swatch.getBoundingClientRect();
+				const overlayHeight = overlay.offsetHeight;
+				const spaceBelow = window.innerHeight - swatchRect.bottom - 10;
+				const spaceAbove = swatchRect.top - 10;
+				if (spaceBelow < overlayHeight && spaceAbove > spaceBelow) {
+					card.classList.add('colorpicker-above');
+				} else {
+					card.classList.remove('colorpicker-above');
+				}
+			});
+		};
+
+		const closeOverlay = () => {
+			if (!overlayOpen) return;
+			overlayOpen = false;
+			card.classList.remove('colorpicker-open', 'colorpicker-above');
+			removeDocClickListener();
+			removeEscListener();
+			flushHsbSend();
+			state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
+			if (state.pendingRefresh) {
+				state.pendingRefresh = false;
+				refresh(false);
+			}
+		};
+
+		swatch.onclick = (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			if (overlayOpen) closeOverlay();
+			else openOverlay();
+		};
+
+		registerCardCleanup(card, closeOverlay);
+
+		inlineControls.appendChild(minusBtn);
+		inlineControls.appendChild(swatch);
+		inlineControls.appendChild(plusBtn);
+		inlineControls.appendChild(overlay);
 	} else if (t.includes('dimmer') || t.includes('roller') || t.includes('slider')) {
 		const sliderMin = Number.isFinite(Number(w?.minValue)) ? Number(w.minValue) : 0;
 		const sliderMax = Number.isFinite(Number(w?.maxValue)) ? Number(w.maxValue) : 100;
