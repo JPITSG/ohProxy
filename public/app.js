@@ -2845,7 +2845,7 @@ function openCardConfigModal(widget, card) {
 	}
 
 	// Show/hide default sound section for video widgets
-	const wType = (widget?.type || '').toLowerCase();
+	const wType = widgetType(widget).toLowerCase();
 	const isVideoWidget = wType === 'video';
 	const defaultSoundSection = cardConfigModal.querySelector('.default-sound-section');
 	if (defaultSoundSection) {
@@ -2862,8 +2862,8 @@ function openCardConfigModal(widget, card) {
 		}
 	}
 
-	// Show/hide iframe height section for iframe cards (webview, video, chart)
-	const isIframeWidget = wType === 'video' || wType.includes('webview') || wType === 'chart';
+	// Show/hide iframe height section for iframe cards (webview, mapview, video, chart)
+	const isIframeWidget = wType === 'video' || wType.includes('webview') || wType === 'chart' || wType === 'mapview';
 	const iframeHeightSection = cardConfigModal.querySelector('.iframe-height-section');
 	if (iframeHeightSection) {
 		iframeHeightSection.style.display = isIframeWidget ? '' : 'none';
@@ -2891,7 +2891,7 @@ function openCardConfigModal(widget, card) {
 
 	// Card width section - show for non-media widgets (media widgets are already full width)
 	const cardWidthSection = cardConfigModal.querySelector('.card-width-section');
-	const isMediaWidget = wType.includes('image') || wType === 'chart' || wType.includes('webview') || wType === 'video';
+	const isMediaWidget = wType.includes('image') || wType === 'chart' || wType.includes('webview') || wType === 'video' || wType === 'mapview';
 	if (cardWidthSection) {
 		cardWidthSection.style.display = isMediaWidget ? 'none' : '';
 		if (!isMediaWidget) {
@@ -5854,11 +5854,50 @@ function removeOverlaySelects(card) {
 	}
 }
 
+function parseMapviewCoordinates(stateValue) {
+	const raw = safeText(stateValue).trim();
+	if (!raw) return null;
+	if (/^(null|undef|uninitialized)$/i.test(raw)) return null;
+
+	// openHAB may expose Location as WKT POINT(lon lat)
+	const pointMatch = raw.match(/^POINT\s*\(\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*\)$/i);
+	if (pointMatch) {
+		const lon = Number(pointMatch[1]);
+		const lat = Number(pointMatch[2]);
+		if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+			return { lat, lon };
+		}
+	}
+
+	// Fallback: first two numeric tokens are lat,lon (optional altitude ignored)
+	const parts = raw.match(/-?\d+(?:\.\d+)?/g);
+	if (!parts || parts.length < 2) return null;
+	const lat = Number(parts[0]);
+	const lon = Number(parts[1]);
+	if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+	if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+	return { lat, lon };
+}
+
+function buildMapviewUrl(coords) {
+	if (!coords) return '';
+	const lat = Number(coords.lat);
+	const lon = Number(coords.lon);
+	if (!Number.isFinite(lat) || !Number.isFinite(lon)) return '';
+
+	const clampedLat = Math.max(-90, Math.min(90, lat));
+	const clampedLon = Math.max(-180, Math.min(180, lon));
+	const normalizedLat = Math.round(clampedLat * 10000000) / 10000000;
+	const normalizedLon = Math.round(clampedLon * 10000000) / 10000000;
+	return `/presence?lat=${encodeURIComponent(normalizedLat)}&lon=${encodeURIComponent(normalizedLon)}`;
+}
+
 function getWidgetRenderInfo(w) {
 	const type = widgetType(w);
 	const t = type.toLowerCase();
 	const isImage = t.includes('image');
 	const isChart = t === 'chart';
+	const isMapview = t === 'mapview';
 	const isText = t.includes('text');
 	const isGroup = t.includes('group');
 	const isWebview = t.includes('webview');
@@ -5892,6 +5931,9 @@ function getWidgetRenderInfo(w) {
 	const iframeConfig = widgetIframeConfigMap.get(wKey);
 	const iframeHeightOverride = iframeConfig?.height || 0;
 	const webviewHeight = isWebview ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
+	const mapviewCoordinates = isMapview ? parseMapviewCoordinates(st) : null;
+	const mapviewUrl = isMapview ? buildMapviewUrl(mapviewCoordinates) : '';
+	const mapviewHeight = isMapview ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const rawVideoUrl = isVideo ? safeText(w?.label || '') : '';
 	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}&mode=${themeMode}` : '';
 	const videoHeight = isVideo ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
@@ -5923,6 +5965,8 @@ function getWidgetRenderInfo(w) {
 		mediaUrl,
 		chartUrl,
 		String(chartHeight),
+		mapviewUrl,
+		String(mapviewHeight),
 		webviewUrl,
 		String(webviewHeight),
 		videoUrl,
@@ -5944,6 +5988,7 @@ function getWidgetRenderInfo(w) {
 		t,
 		isImage,
 		isChart,
+		isMapview,
 		isText,
 		isGroup,
 		isWebview,
@@ -5962,6 +6007,8 @@ function getWidgetRenderInfo(w) {
 		mediaUrl,
 		chartUrl,
 		chartHeight,
+		mapviewUrl,
+		mapviewHeight,
 		webviewUrl,
 		webviewHeight,
 		videoUrl,
@@ -5996,6 +6043,7 @@ function updateCard(card, w, info) {
 		t,
 		isImage,
 		isChart,
+		isMapview,
 		isText,
 		isGroup,
 		isWebview,
@@ -6014,6 +6062,8 @@ function updateCard(card, w, info) {
 		mediaUrl,
 		chartUrl,
 		chartHeight,
+		mapviewUrl,
+		mapviewHeight,
 		webviewUrl,
 		webviewHeight,
 		videoUrl,
@@ -6053,6 +6103,7 @@ function updateCard(card, w, info) {
 		'image-card',
 		'chart-card',
 		'image-loading',
+		'mapview-card',
 		'webview-card',
 		'video-card',
 		'menu-open',
@@ -6065,10 +6116,10 @@ function updateCard(card, w, info) {
 	const cardWidth = widgetCardWidthMap.get(card.dataset.widgetKey);
 	const cardWidthFull = cardWidth === 'full';
 	const cardWidthStretch = cardWidth === 'stretch';
-	card.classList.toggle('sm:col-span-2', isImage || isChart || isWebview || isVideo || cardWidthFull);
-	card.classList.toggle('lg:col-span-3', isImage || isChart || isWebview || isVideo || cardWidthFull);
+	card.classList.toggle('sm:col-span-2', isImage || isChart || isMapview || isWebview || isVideo || cardWidthFull);
+	card.classList.toggle('lg:col-span-3', isImage || isChart || isMapview || isWebview || isVideo || cardWidthFull);
 	card.classList.toggle('card-stretch', cardWidthStretch);
-	// Reset webview/video inline styles
+	// Reset map/webview/video inline styles
 	card.style.padding = '';
 	card.style.overflow = '';
 	// Stop any active video stream to terminate FFmpeg process
@@ -6083,6 +6134,10 @@ function updateCard(card, w, info) {
 	if (!isVideo) {
 		const existingContainer = card.querySelector('.video-container');
 		if (existingContainer) existingContainer.remove();
+	}
+	if (!isMapview) {
+		const existingMapviewContainer = card.querySelector('.mapview-frame-container');
+		if (existingMapviewContainer) existingMapviewContainer.remove();
 	}
 
 	row.classList.remove('items-center', 'hidden');
@@ -6142,7 +6197,7 @@ function updateCard(card, w, info) {
 		applyGlowStyle(card, glowColor);
 	}
 
-	if (isImage || isChart || isWebview || isVideo) {
+	if (isImage || isChart || isMapview || isWebview || isVideo) {
 		labelRow.classList.add('hidden');
 		if (iconWrap) iconWrap.classList.add('hidden');
 	} else {
@@ -6287,6 +6342,56 @@ function updateCard(card, w, info) {
 		}
 		if (chartHashTimer && (urlChanged || refreshChanged)) {
 			startChartHashCheck();
+		}
+		return true;
+	}
+
+	if (isMapview) {
+		card.classList.add('mapview-card');
+		// Hide title and icon for mapview cards
+		labelRow.classList.add('hidden');
+		if (iconWrap) iconWrap.classList.add('hidden');
+		row.classList.add('hidden');
+		if (!mapviewUrl) {
+			row.classList.remove('hidden');
+			controls.classList.add('mt-3');
+			controls.innerHTML = `<div class="text-sm text-slate-400">Map location not available</div>`;
+			return true;
+		}
+		let frameContainer = card.querySelector('.mapview-frame-container');
+		if (!frameContainer) {
+			frameContainer = document.createElement('div');
+			frameContainer.className = 'mapview-frame-container';
+			card.appendChild(frameContainer);
+		}
+		let iframeEl = frameContainer.querySelector('iframe.mapview-frame');
+		if (!iframeEl) {
+			iframeEl = document.createElement('iframe');
+			iframeEl.className = 'mapview-frame';
+			iframeEl.setAttribute('frameborder', '0');
+			iframeEl.setAttribute('loading', 'lazy');
+			frameContainer.appendChild(iframeEl);
+		}
+		card.style.padding = '0';
+		card.style.overflow = 'hidden';
+		// Height: if 0, use 16:9 aspect ratio; otherwise use specified height
+		if (mapviewHeight > 0) {
+			frameContainer.style.height = `${mapviewHeight}px`;
+			frameContainer.style.aspectRatio = 'auto';
+			frameContainer.style.paddingBottom = '0';
+		} else {
+			frameContainer.style.height = '';
+			if (supportsAspectRatio) {
+				frameContainer.style.aspectRatio = '16 / 9';
+				frameContainer.style.paddingBottom = '';
+			} else {
+				frameContainer.style.aspectRatio = '';
+				frameContainer.style.paddingBottom = '56.25%';
+			}
+		}
+		const resolvedMapviewUrl = new URL(mapviewUrl, location.href).href;
+		if (iframeEl.src !== resolvedMapviewUrl) {
+			iframeEl.src = mapviewUrl;
 		}
 		return true;
 	}

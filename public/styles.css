@@ -703,9 +703,40 @@ body.theme-light .selection-card .select-menu-scroll::-webkit-scrollbar-thumb:ho
 	border: none;
 	border-radius: inherit;
 }
+/* Mapview iframe container - 16:9 aspect ratio */
+.mapview-card {
+	padding: 0 !important;
+	overflow: hidden;
+}
+.mapview-frame-container {
+	position: relative;
+	width: 100%;
+	overflow: hidden;
+	border-radius: inherit;
+}
+@supports (aspect-ratio: 16 / 9) {
+	.mapview-frame-container {
+		aspect-ratio: 16 / 9;
+	}
+}
+@supports not (aspect-ratio: 16 / 9) {
+	.mapview-frame-container {
+		padding-bottom: 56.25%;
+	}
+}
+.mapview-frame {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	border: none;
+	border-radius: inherit;
+}
 /* Transparent background for all card iframes */
 .chart-frame,
 .webview-frame,
+.mapview-frame,
 .video-card iframe {
 	background: transparent;
 }
