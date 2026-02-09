@@ -17,6 +17,11 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /return res\.status\(400\)\.type\('text\/plain'\)\.send\('Invalid lat\/lon'\);/);
 	});
 
+	it('allows single-point mode without trackgps while keeping history mode gated', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /if \(!singlePointMode && !user\.trackgps\) \{\s*return res\.status\(403\)\.type\('text\/html'\)\.send\('<!DOCTYPE html><html><head><\/head><body><\/body><\/html>'\);/);
+	});
+
 	it('builds a single red marker with no tooltip content in single-point mode', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /if \(singlePointMode\) \{\s*const lat = Math\.round\(singlePointLat \* 10000000\) \/ 10000000;\s*const lon = Math\.round\(singlePointLon \* 10000000\) \/ 10000000;\s*markers\.push\(\[lat, lon, 'red', ''\]\);/);
@@ -36,4 +41,3 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /const homeLonValue = singlePointMode \? singlePointLon : hLon;/);
 	});
 });
-
