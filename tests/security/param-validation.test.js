@@ -50,11 +50,8 @@ function parseOptionalInt(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}
 
 // Period parser (mirrors server.js)
 const MAX_PERIOD_SEC = 10 * 365.25 * 86400;
-function parsePeriodToSeconds(period) {
-	if (typeof period !== 'string' || !period) return 0;
-	if (/^\d+[hDWMY]-\d+[hDWMY]$/.test(period)) {
-		return parsePeriodToSeconds(period.split('-')[0]);
-	}
+const CHART_PERIOD_MAX_LEN = 64;
+function parseBasePeriodToSeconds(period) {
 	const simpleMatch = period.match(/^(\d*)([hDWMY])$/);
 	if (simpleMatch) {
 		const multiplier = simpleMatch[1] ? parseInt(simpleMatch[1], 10) : 1;
@@ -72,9 +69,26 @@ function parsePeriodToSeconds(period) {
 			+ (parseInt(h || 0) * 3600)
 			+ (parseInt(mi || 0) * 60)
 			+ (parseInt(s || 0));
-		return sec > 0 ? Math.min(sec, MAX_PERIOD_SEC) : 0;
+			return sec > 0 ? Math.min(sec, MAX_PERIOD_SEC) : 0;
 	}
 	return 0;
+}
+
+function parsePeriodToSeconds(period) {
+	if (typeof period !== 'string') return 0;
+	const raw = period.trim();
+	if (!raw) return 0;
+	const dashCount = (raw.match(/-/g) || []).length;
+	if (dashCount > 1) return 0;
+	if (dashCount === 1) {
+		const [past, future] = raw.split('-');
+		if (!past) return 0;
+		const pastSec = parseBasePeriodToSeconds(past);
+		if (!pastSec) return 0;
+		if (future && !parseBasePeriodToSeconds(future)) return 0;
+		return pastSec;
+	}
+	return parseBasePeriodToSeconds(raw);
 }
 
 function isProxyTargetAllowed(url, allowlist) {
@@ -311,7 +325,7 @@ function createValidationTestApp() {
 			return res.status(400).send('Invalid item parameter');
 		}
 
-		if (period.length > 20 || !/^[0-9A-Za-z-]+$/.test(period) || !parsePeriodToSeconds(period)) {
+		if (period.length > CHART_PERIOD_MAX_LEN || !/^[0-9A-Za-z-]+$/.test(period) || !parsePeriodToSeconds(period)) {
 			return res.status(400).send('Invalid period parameter');
 		}
 		if (!['light', 'dark'].includes(mode)) {
@@ -662,6 +676,43 @@ describe('Parameter Validation Security Tests', () => {
 			assert.strictEqual(res.status, 200);
 		});
 
+		it('accepts past-future period D-1D', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=D-1D&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts past-future period h-1h', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=h-1h&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts past-future period D- (empty future)', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=D-&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts ISO past-future period PT1H30M-PT30M', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=PT1H30M-PT30M&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts long but valid ISO past-future period within limit', async () => {
+			const period = 'P10Y6M2DT3H4M5S-PT30M';
+			assert.ok(period.length <= CHART_PERIOD_MAX_LEN);
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=${period}&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
 		it('rejects unrecognised period string', async () => {
 			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=invalid&mode=dark`, {
 				headers: { 'Authorization': authHeader },
@@ -670,7 +721,7 @@ describe('Parameter Validation Security Tests', () => {
 		});
 
 		it('rejects overly long period', async () => {
-			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=${'P'.repeat(25)}&mode=dark`, {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=${'P'.repeat(CHART_PERIOD_MAX_LEN + 1)}&mode=dark`, {
 				headers: { 'Authorization': authHeader },
 			});
 			assert.strictEqual(res.status, 400);

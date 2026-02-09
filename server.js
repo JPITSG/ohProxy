@@ -362,17 +362,11 @@ const RRD_PATH = safeText(PATHS_CONFIG.rrd) || '';
 const CHART_CACHE_DIR = path.join(__dirname, 'cache', 'chart');
 // Parse any openHAB chart period string to seconds.
 // Supports simple (h, D, W, M, Y), multiplied (4h, 2D, 3W),
-// ISO 8601 (P1Y6M, PT1H30M, P2W, P1DT12H), and past-future (2h-1h).
+// ISO 8601 (P1Y6M, PT1H30M, P2W, P1DT12H), and past-future (2h-1h, D-1D, D-, PT1H-PT30M).
 // Returns 0 for invalid/unrecognised input. Capped at 10 years.
 const MAX_PERIOD_SEC = 10 * 365.25 * 86400; // ~10 years
-function parsePeriodToSeconds(period) {
-	if (typeof period !== 'string' || !period) return 0;
-
-	// Past-future format: extract past portion (before the dash)
-	if (/^\d+[hDWMY]-\d+[hDWMY]$/.test(period)) {
-		return parsePeriodToSeconds(period.split('-')[0]);
-	}
-
+const CHART_PERIOD_MAX_LEN = 64;
+function parseBasePeriodToSeconds(period) {
 	// Simple / multiplied: e.g. h, D, 4h, 2W, 12M
 	const simpleMatch = period.match(/^(\d*)([hDWMY])$/);
 	if (simpleMatch) {
@@ -397,6 +391,29 @@ function parsePeriodToSeconds(period) {
 	}
 
 	return 0;
+}
+
+function parsePeriodToSeconds(period) {
+	if (typeof period !== 'string') return 0;
+	const raw = period.trim();
+	if (!raw) return 0;
+
+	// Past-future format: <past>-<future>, where future may be empty (e.g. D-).
+	const dashCount = (raw.match(/-/g) || []).length;
+	if (dashCount > 1) return 0;
+	if (dashCount === 1) {
+		const [past, future] = raw.split('-');
+		if (!past) return 0;
+		const pastSec = parseBasePeriodToSeconds(past);
+		if (!pastSec) return 0;
+		if (future) {
+			const futureSec = parseBasePeriodToSeconds(future);
+			if (!futureSec) return 0;
+		}
+		return pastSec;
+	}
+
+	return parseBasePeriodToSeconds(raw);
 }
 
 // Tiered cache TTL (ms) matching original h/D/W/M/Y behaviour
@@ -2859,6 +2876,11 @@ function rtspUrlHash(url) {
 }
 
 // Chart cache helpers
+const CHART_CACHE_MAX_FILES = 2000;
+const CHART_CACHE_MAX_BYTES = 256 * 1024 * 1024; // 256MB
+const CHART_CACHE_PRUNE_MIN_INTERVAL_MS = 5 * 60 * 1000;
+let lastChartCachePruneAt = 0;
+
 function chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation) {
 	const assetVersion = liveConfig.assetVersion || 'v1';
 	const dateFmt = liveConfig.clientConfig?.dateFormat || '';
@@ -2883,6 +2905,15 @@ function isChartCacheValid(cachePath, durationSec) {
 	} catch {
 		return false;
 	}
+}
+
+function maybePruneChartCache() {
+	const now = Date.now();
+	if (now - lastChartCachePruneAt < CHART_CACHE_PRUNE_MIN_INTERVAL_MS) return;
+	lastChartCachePruneAt = now;
+	setTimeout(() => {
+		pruneChartCache({ force: true });
+	}, 0);
 }
 
 // Proxy cache helpers
@@ -3209,18 +3240,18 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 </div>
 </div>
 <script>
-window._chartData=${JSON.stringify(chartData)};
-window._chartXLabels=${JSON.stringify(xLabels)};
-window._chartYMin=${yMin};
-window._chartYMax=${yMax};
-window._chartDataMin=${dataMin};
-window._chartDataMax=${dataMax};
-window._chartUnit=${JSON.stringify(unit)};
-window._chartPeriod=${JSON.stringify(period)};
-window._chartDateFormat=${JSON.stringify(liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY')};
-window._chartTimeFormat=${JSON.stringify(liveConfig.clientConfig?.timeFormat || 'H:mm:ss')};
-window._chartYAxisPattern=${JSON.stringify(yAxisDecimalPattern || null)};
-window._chartInterpolation=${JSON.stringify(interpolation || 'linear')};
+window._chartData=${inlineJson(chartData)};
+window._chartXLabels=${inlineJson(xLabels)};
+window._chartYMin=${inlineJson(yMin)};
+window._chartYMax=${inlineJson(yMax)};
+window._chartDataMin=${inlineJson(dataMin)};
+window._chartDataMax=${inlineJson(dataMax)};
+window._chartUnit=${inlineJson(unit)};
+window._chartPeriod=${inlineJson(period)};
+window._chartDateFormat=${inlineJson(liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY')};
+window._chartTimeFormat=${inlineJson(liveConfig.clientConfig?.timeFormat || 'H:mm:ss')};
+window._chartYAxisPattern=${inlineJson(yAxisDecimalPattern || null)};
+window._chartInterpolation=${inlineJson(interpolation || 'linear')};
 </script>
 <script src="/chart.${assetVersion}.js"></script>
 </body>
@@ -4568,18 +4599,22 @@ function normalizeMappings(mapping) {
 	return [];
 }
 
-function mappingsSignature(mapping) {
-	const normalized = normalizeMappings(mapping);
+function mappingsSignatureFromNormalized(normalized) {
+	if (!Array.isArray(normalized) || !normalized.length) return '';
 	return normalized.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}:${m.icon || ''}`).join('|');
+}
+
+function mappingsSignature(mapping) {
+	return mappingsSignatureFromNormalized(normalizeMappings(mapping));
 }
 
 function normalizeButtongridButtons(widget) {
 	const buttons = [];
-	// Inline buttons come through mappings with row/column fields
-	const inlineButtons = widget?.mappings || widget?.mapping;
-	if (Array.isArray(inlineButtons)) {
-		for (const b of inlineButtons) {
-			if (b?.row == null && b?.column == null) continue;
+	if (Array.isArray(widget?.buttons)) {
+		for (const b of widget.buttons) {
+			if (!b || typeof b !== 'object') continue;
+			const itemName = safeText(b?.itemName || b?.item?.name || '');
+			const state = safeText(b?.state ?? b?.item?.state ?? (itemName ? itemStates.get(itemName) : ''));
 			buttons.push({
 				row: parseInt(b?.row, 10) || 1,
 				column: parseInt(b?.column, 10) || 1,
@@ -4587,7 +4622,29 @@ function normalizeButtongridButtons(widget) {
 				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
 				label: safeText(b?.label || ''),
 				icon: safeText(b?.icon || b?.staticIcon || ''),
-				itemName: safeText(b?.item?.name || ''),
+				itemName,
+				state,
+				stateless: !!b?.stateless,
+			});
+		}
+		return buttons;
+	}
+	// Inline buttons come through mappings with row/column fields
+	const inlineButtons = widget?.mappings || widget?.mapping;
+	if (Array.isArray(inlineButtons)) {
+		for (const b of inlineButtons) {
+			if (b?.row == null && b?.column == null) continue;
+			const itemName = safeText(b?.itemName || b?.item?.name || '');
+			const state = safeText(b?.state ?? b?.item?.state ?? (itemName ? itemStates.get(itemName) : ''));
+			buttons.push({
+				row: parseInt(b?.row, 10) || 1,
+				column: parseInt(b?.column, 10) || 1,
+				command: safeText(b?.command || b?.cmd || ''),
+				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
+				label: safeText(b?.label || ''),
+				icon: safeText(b?.icon || b?.staticIcon || ''),
+				itemName,
+				state,
 				stateless: !!b?.stateless,
 			});
 		}
@@ -4597,6 +4654,8 @@ function normalizeButtongridButtons(widget) {
 	if (Array.isArray(children)) {
 		for (const c of children) {
 			if (safeText(c?.type).toLowerCase() !== 'button') continue;
+			const itemName = safeText(c?.itemName || c?.item?.name || '');
+			const state = safeText(c?.state ?? c?.item?.state ?? (itemName ? itemStates.get(itemName) : ''));
 			buttons.push({
 				row: parseInt(c?.row, 10) || 1,
 				column: parseInt(c?.column, 10) || 1,
@@ -4604,7 +4663,8 @@ function normalizeButtongridButtons(widget) {
 				releaseCommand: safeText(c?.releaseCommand || c?.release || ''),
 				label: safeText(c?.label || ''),
 				icon: safeText(c?.icon || c?.staticIcon || ''),
-				itemName: safeText(c?.item?.name || ''),
+				itemName,
+				state,
 				stateless: !!c?.stateless,
 			});
 		}
@@ -4615,15 +4675,17 @@ function normalizeButtongridButtons(widget) {
 function buttonsSignature(buttons) {
 	if (!buttons || !buttons.length) return '';
 	return buttons.map((b) =>
-		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.stateless}`
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}`
 	).join('|');
 }
 
 function widgetSnapshot(widget) {
 	// Support both OH 1.x 'mapping' and OH 3.x+ 'mappings'
-	const widgetMapping = widget?.mappings || widget?.mapping;
-	const mappingSig = mappingsSignature(widgetMapping);
 	const type = safeText(widget?.type || '').toLowerCase();
+	const isButtongrid = type === 'buttongrid';
+	const widgetMapping = isButtongrid ? null : (widget?.mappings || widget?.mapping);
+	const normalizedMapping = isButtongrid ? [] : normalizeMappings(widgetMapping);
+	const mappingSig = mappingsSignatureFromNormalized(normalizedMapping);
 	const buttons = type === 'buttongrid' ? normalizeButtongridButtons(widget) : [];
 	const btnSig = buttonsSignature(buttons);
 	return {
@@ -4634,7 +4696,7 @@ function widgetSnapshot(widget) {
 		state: safeText(widget?.item?.state ?? widget?.state ?? ''),
 		icon: widgetIconName(widget),
 		mappings: mappingSig,
-		mapping: mappingSig ? normalizeMappings(widgetMapping) : [],
+		mapping: normalizedMapping,
 		buttons: buttons,
 		buttonsSig: btnSig,
 		labelcolor: safeText(widget?.labelcolor || ''),
@@ -7682,10 +7744,10 @@ app.get('/chart', (req, res) => {
 		return res.status(400).type('text/plain').send('Invalid item parameter');
 	}
 
-	// Validate period: safe chars, max 20, and must parse to a positive duration
-	if (period.length > 20 || !/^[0-9A-Za-z-]+$/.test(period)) {
-		return res.status(400).type('text/plain').send('Invalid period parameter');
-	}
+		// Validate period: safe chars, bounded length, and must parse to a positive duration
+		if (period.length > CHART_PERIOD_MAX_LEN || !/^[0-9A-Za-z-]+$/.test(period)) {
+			return res.status(400).type('text/plain').send('Invalid period parameter');
+		}
 	const durationSec = parsePeriodToSeconds(period);
 	if (!durationSec) {
 		return res.status(400).type('text/plain').send('Invalid period parameter');
@@ -7720,11 +7782,12 @@ app.get('/chart', (req, res) => {
 			return res.status(404).type('text/plain').send('Chart data not available');
 		}
 
-		// Cache the generated HTML
-		try {
-			ensureDir(CHART_CACHE_DIR);
-			fs.writeFileSync(cachePath, html);
-		} catch {}
+			// Cache the generated HTML
+			try {
+				ensureDir(CHART_CACHE_DIR);
+				fs.writeFileSync(cachePath, html);
+				maybePruneChartCache();
+			} catch {}
 
 		res.setHeader('Content-Type', 'text/html; charset=utf-8');
 		res.setHeader('Cache-Control', `private, max-age=${Math.floor(cacheTtlMs / 1000)}`);
@@ -7784,9 +7847,9 @@ app.get('/api/chart-hash', (req, res) => {
 	if (!item || !/^[a-zA-Z0-9_-]{1,50}$/.test(item)) {
 		return res.status(400).json({ error: 'Invalid item' });
 	}
-	if (period.length > 20 || !/^[0-9A-Za-z-]+$/.test(period)) {
-		return res.status(400).json({ error: 'Invalid period' });
-	}
+		if (period.length > CHART_PERIOD_MAX_LEN || !/^[0-9A-Za-z-]+$/.test(period)) {
+			return res.status(400).json({ error: 'Invalid period' });
+		}
 	const durationSec = parsePeriodToSeconds(period);
 	if (!durationSec) {
 		return res.status(400).json({ error: 'Invalid period' });
@@ -7845,9 +7908,10 @@ app.get('/api/chart-hash', (req, res) => {
 			return res.json({ hash: null, error: 'Generation failed' });
 		}
 
-		// Write to cache
-		ensureDir(CHART_CACHE_DIR);
-		fs.writeFileSync(cachePath, html);
+			// Write to cache
+			ensureDir(CHART_CACHE_DIR);
+			fs.writeFileSync(cachePath, html);
+			maybePruneChartCache();
 
 		res.setHeader('Cache-Control', 'no-cache');
 		res.json({ hash: dataHash });
@@ -8972,13 +9036,19 @@ async function captureRtspPreview(rtspUrl) {
 	});
 }
 
-// Prune old chart cache entries (older than 1 week)
-function pruneChartCache() {
+// Prune chart cache entries by age and hard caps.
+function pruneChartCache(options = {}) {
 	if (!fs.existsSync(CHART_CACHE_DIR)) return;
+	const force = options && options.force === true;
 
 	const maxAgeMs = 7 * 24 * 60 * 60 * 1000; // 1 week
 	const now = Date.now();
-	let pruned = 0;
+	if (!force && now - lastChartCachePruneAt < CHART_CACHE_PRUNE_MIN_INTERVAL_MS) return;
+	lastChartCachePruneAt = now;
+	let prunedByAge = 0;
+	let prunedByCap = 0;
+	let totalBytes = 0;
+	const entries = [];
 
 	try {
 		const files = fs.readdirSync(CHART_CACHE_DIR);
@@ -8989,14 +9059,31 @@ function pruneChartCache() {
 				const stat = fs.statSync(filePath);
 				if (now - stat.mtimeMs > maxAgeMs) {
 					fs.unlinkSync(filePath);
-					pruned++;
+					prunedByAge++;
+					continue;
 				}
+				entries.push({ filePath, mtimeMs: stat.mtimeMs, size: stat.size || 0 });
+				totalBytes += stat.size || 0;
 			} catch (err) {
 				// Ignore individual file errors
 			}
 		}
-		if (pruned > 0) {
-			logMessage(`Chart cache pruned ${pruned} old entries`);
+
+		entries.sort((a, b) => a.mtimeMs - b.mtimeMs);
+		while ((entries.length > CHART_CACHE_MAX_FILES || totalBytes > CHART_CACHE_MAX_BYTES) && entries.length > 0) {
+			const oldest = entries.shift();
+			try {
+				fs.unlinkSync(oldest.filePath);
+				totalBytes = Math.max(0, totalBytes - (oldest.size || 0));
+				prunedByCap++;
+			} catch {
+				// Ignore individual file errors
+			}
+		}
+
+		const totalPruned = prunedByAge + prunedByCap;
+		if (totalPruned > 0) {
+			logMessage(`Chart cache pruned ${totalPruned} entries (${prunedByAge} by age, ${prunedByCap} by cap)`);
 		}
 	} catch (err) {
 		logMessage(`Chart cache prune failed: ${err.message || err}`);

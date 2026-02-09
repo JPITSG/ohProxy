@@ -26,39 +26,60 @@
 	var CHART_Y_PATTERN = window._chartYAxisPattern || null;
 	var CHART_INTERP = window._chartInterpolation || 'linear';
 
-	// Classify any period string into a display tier for x-axis formatting
-	function periodDurationTier(p) {
-		if (typeof p !== 'string' || !p) return 'hD';
-		// Past-future: extract past portion
-		if (/^\d+[hDWMY]-\d+[hDWMY]$/.test(p)) p = p.split('-')[0];
-		// Simple / multiplied
-		var sm = p.match(/^(\d*)([hDWMY])$/);
-		if (sm) {
-			var mul = sm[1] ? parseInt(sm[1], 10) : 1;
-			var uSec = { h: 3600, D: 86400, W: 604800, M: 2592000, Y: 31536000 };
-			var sec = mul * uSec[sm[2]];
+		function parseBasePeriodSeconds(p) {
+			// Simple / multiplied
+			var sm = p.match(/^(\d*)([hDWMY])$/);
+			if (sm) {
+				var mul = sm[1] ? parseInt(sm[1], 10) : 1;
+				var uSec = { h: 3600, D: 86400, W: 604800, M: 2592000, Y: 31536000 };
+				return mul * uSec[sm[2]];
+			}
+			// ISO 8601
+			var im = p.match(/^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
+			if (im) {
+				var sec = (parseInt(im[1] || 0) * 31536000) + (parseInt(im[2] || 0) * 2592000)
+					+ (parseInt(im[3] || 0) * 604800) + (parseInt(im[4] || 0) * 86400)
+					+ (parseInt(im[5] || 0) * 3600) + (parseInt(im[6] || 0) * 60) + parseInt(im[7] || 0);
+				return sec > 0 ? sec : 0;
+			}
+			return 0;
+		}
+
+		function parsePeriodSeconds(p) {
+			if (typeof p !== 'string') return 0;
+			var raw = p.trim();
+			if (!raw) return 0;
+			var dashCount = (raw.match(/-/g) || []).length;
+			if (dashCount > 1) return 0;
+			if (dashCount === 1) {
+				var parts = raw.split('-');
+				var past = parts[0];
+				var future = parts[1];
+				if (!past) return 0;
+				var pastSec = parseBasePeriodSeconds(past);
+				if (!pastSec) return 0;
+				if (future && !parseBasePeriodSeconds(future)) return 0;
+				return pastSec;
+			}
+			return parseBasePeriodSeconds(raw);
+		}
+
+		// Classify any period string into a display tier for x-axis formatting
+		function periodDurationTier(p) {
+			var sec = parsePeriodSeconds(p);
+			if (!sec) return 'hD';
 			if (sec <= 86400) return 'hD';
 			if (sec <= 604800) return 'W';
 			if (sec <= 7776000) return 'M';
 			return 'Y';
 		}
-		// ISO 8601
-		var im = p.match(/^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
-		if (im) {
-			var sec2 = (parseInt(im[1]||0)*31536000) + (parseInt(im[2]||0)*2592000)
-				+ (parseInt(im[3]||0)*604800) + (parseInt(im[4]||0)*86400)
-				+ (parseInt(im[5]||0)*3600) + (parseInt(im[6]||0)*60) + parseInt(im[7]||0);
-			if (sec2 <= 86400) return 'hD';
-			if (sec2 <= 604800) return 'W';
-			if (sec2 <= 7776000) return 'M';
-			return 'Y';
-		}
-		return 'hD';
-	}
 	var PERIOD_TIER = periodDurationTier(CHART_PERIOD);
 
 	// Java DecimalFormat-compatible formatter
 	function javaDecimalFormat(pattern, number) {
+		if (typeof number !== 'number' || !Number.isFinite(number)) {
+			return String(number);
+		}
 		// Handle positive/negative subpatterns
 		var subpatterns = [];
 		var inQuote = false;
@@ -105,11 +126,16 @@
 		var prefix = unquote(prefixRaw);
 		var suffix = unquote(suffixRaw);
 
-		// Check for percent suffix in raw suffix
-		inQuote = false;
-		for (var i = 0; i < suffixRaw.length; i++) {
-			if (suffixRaw[i] === "'") { inQuote = !inQuote; continue; }
-			if (!inQuote && suffixRaw[i] === '%') { absNum *= 100; break; }
+		function hasUnquotedPercent(rawText) {
+			var quoted = false;
+			for (var idx = 0; idx < rawText.length; idx++) {
+				if (rawText[idx] === "'") { quoted = !quoted; continue; }
+				if (!quoted && rawText[idx] === '%') return true;
+			}
+			return false;
+		}
+		if (hasUnquotedPercent(prefixRaw) || hasUnquotedPercent(suffixRaw)) {
+			absNum *= 100;
 		}
 
 		// Scientific notation
@@ -125,9 +151,28 @@
 			if (absNum === 0) {
 				var result = (0).toFixed(mantDec) + 'E0';
 			} else {
-				var exp = Math.floor(Math.log10(absNum));
-				var mantissa = absNum / Math.pow(10, exp);
-				var result = mantissa.toFixed(mantDec) + 'E' + exp;
+				var expParts = absNum.toExponential().split('e');
+				var mantissa = parseFloat(expParts[0]);
+				var exp = parseInt(expParts[1], 10);
+				if (!Number.isFinite(mantissa) || !Number.isFinite(exp)) {
+					var fallbackExp = Math.floor(Math.log10(absNum));
+					var fallbackScale = Math.pow(10, fallbackExp);
+					if (!Number.isFinite(fallbackScale) || fallbackScale === 0) {
+						var fallbackParts = absNum.toExponential(15).split('e');
+						mantissa = parseFloat(fallbackParts[0]);
+						exp = parseInt(fallbackParts[1], 10);
+					} else {
+						mantissa = absNum / fallbackScale;
+						exp = fallbackExp;
+					}
+				}
+				var mantissaText = Number.isFinite(mantissa) ? mantissa.toFixed(mantDec) : (0).toFixed(mantDec);
+				var mantissaNum = parseFloat(mantissaText);
+				if (Number.isFinite(mantissaNum) && mantissaNum >= 10) {
+					exp += 1;
+					mantissaText = (mantissaNum / 10).toFixed(mantDec);
+				}
+				var result = mantissaText + 'E' + exp;
 				// Normalize negative zero
 				if (parseFloat(result.split('E')[0]) === 0 && result.charAt(0) === '-') {
 					result = result.substring(1);
@@ -478,14 +523,26 @@
 						// Process grid positions within this segment
 						while (gridIdx < gridXPositions.length && gridXPositions[gridIdx].x <= curr.x) {
 							var gd = gridXPositions[gridIdx];
-							if (gd.x >= prev.x) {
-								var t = (gd.x - prev.x) / (curr.x - prev.x);
-								var interpY = prev.y + t * (curr.y - prev.y);
-								var interpValue = prev.value + t * (curr.value - prev.value);
-								var interpTime = prev.t + t * (curr.t - prev.t);
-								var circle = $('circle', { class: 'data-point', cx: gd.x, cy: interpY, r: 5 });
-								circle.style.animationDelay = gd.delay + 's';
-								circle.dataset.idx = this.circleData.length;
+								if (gd.x >= prev.x) {
+									var segXSpan = curr.x - prev.x;
+									var t = Math.abs(segXSpan) > 1e-9 ? (gd.x - prev.x) / segXSpan : 1;
+									if (!Number.isFinite(t)) t = 1;
+									if (t < 0) t = 0;
+									if (t > 1) t = 1;
+									var interpY;
+									var interpValue;
+									if (CHART_INTERP === 'step') {
+										var atBoundary = Math.abs(gd.x - curr.x) < 1e-4;
+										interpY = atBoundary ? curr.y : prev.y;
+										interpValue = atBoundary ? curr.value : prev.value;
+									} else {
+										interpY = prev.y + t * (curr.y - prev.y);
+										interpValue = prev.value + t * (curr.value - prev.value);
+									}
+									var interpTime = prev.t + t * (curr.t - prev.t);
+									var circle = $('circle', { class: 'data-point', cx: gd.x, cy: interpY, r: 5 });
+									circle.style.animationDelay = gd.delay + 's';
+									circle.dataset.idx = this.circleData.length;
 								this.circleData.push({ x: gd.x, y: interpY, value: interpValue, t: interpTime });
 								pointsGroup.appendChild(circle);
 							}
@@ -513,7 +570,8 @@
 		}
 
 		createPath(pts) {
-			if (pts.length < 2) return '';
+			if (!pts || pts.length === 0) return '';
+			if (pts.length === 1) return 'M ' + pts[0].x + ' ' + pts[0].y;
 			var path = ['M ' + pts[0].x + ' ' + pts[0].y];
 			for (var i = 1; i < pts.length; i++) {
 				if (CHART_INTERP === 'step') {
@@ -537,6 +595,7 @@
 		}
 
 		fmt(n, decimals) {
+			if (!Number.isFinite(n)) return String(n);
 			if (CHART_Y_PATTERN) return javaDecimalFormat(CHART_Y_PATTERN, n);
 			var result;
 			if (typeof decimals === 'number') {
@@ -561,6 +620,7 @@
 		}
 
 		getDecimals(n) {
+			if (!Number.isFinite(n)) return 0;
 			if (n === 0) return 1;
 			if (Number.isInteger(n) || Math.abs(n - Math.round(n)) < 0.0001) {
 				return Math.abs(Math.round(n)) >= 100 ? 0 : 1;
@@ -688,6 +748,38 @@
 			return closest;
 		}
 
+		getLineYAtX(plotX, cursorY) {
+			if (this.points.length === 0) return null;
+			if (this.points.length === 1) return this.points[0].y;
+			if (plotX <= this.points[0].x) return this.points[0].y;
+
+			for (var i = 1; i < this.points.length; i++) {
+				var prev = this.points[i - 1];
+				var curr = this.points[i];
+				if (plotX > curr.x && i < this.points.length - 1) continue;
+
+				var xSpan = curr.x - prev.x;
+				if (CHART_INTERP === 'step') {
+					if (Math.abs(xSpan) <= 1e-9 || Math.abs(plotX - curr.x) < 1e-4) {
+						if (typeof cursorY === 'number' && Number.isFinite(cursorY)) {
+							var lo = Math.min(prev.y, curr.y);
+							var hi = Math.max(prev.y, curr.y);
+							return Math.max(lo, Math.min(hi, cursorY));
+						}
+						return curr.y;
+					}
+					return prev.y;
+				}
+
+				var t = Math.abs(xSpan) > 1e-9 ? (plotX - prev.x) / xSpan : 1;
+				if (!Number.isFinite(t)) t = 1;
+				if (t < 0) t = 0;
+				if (t > 1) t = 1;
+				return prev.y + t * (curr.y - prev.y);
+			}
+			return this.points[this.points.length - 1].y;
+		}
+
 		onClick(e) {
 			if (!this.layout.sm) return;
 			// Ignore clicks if we just finished a touch drag
@@ -767,10 +859,12 @@
 			var closest = this.findClosestPoint(e.clientX);
 
 			if (closest) {
-				// Check if cursor is within 20px of the line
+				// Check if cursor is within 20px of the visible line shape.
 				var rect = this.layout.containerRect;
+				var cursorX = e.clientX - rect.left - this.layout.pad.left;
 				var cursorY = e.clientY - rect.top - this.layout.pad.top;
-				var lineY = closest.y;
+				var lineY = this.getLineYAtX(cursorX, cursorY);
+				if (!Number.isFinite(lineY)) lineY = closest.y;
 				var dist = Math.abs(cursorY - lineY);
 
 				if (dist <= 20) {

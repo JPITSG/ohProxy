@@ -5,6 +5,9 @@ const assert = require('node:assert');
 
 // Replicated from public/chart.js.
 function javaDecimalFormat(pattern, number) {
+	if (typeof number !== 'number' || !Number.isFinite(number)) {
+		return String(number);
+	}
 	// Handle positive/negative subpatterns
 	var subpatterns = [];
 	var inQuote = false;
@@ -51,11 +54,16 @@ function javaDecimalFormat(pattern, number) {
 	var prefix = unquote(prefixRaw);
 	var suffix = unquote(suffixRaw);
 
-	// Check for percent suffix in raw suffix
-	inQuote = false;
-	for (var i = 0; i < suffixRaw.length; i++) {
-		if (suffixRaw[i] === "'") { inQuote = !inQuote; continue; }
-		if (!inQuote && suffixRaw[i] === '%') { absNum *= 100; break; }
+	function hasUnquotedPercent(rawText) {
+		var quoted = false;
+		for (var idx = 0; idx < rawText.length; idx++) {
+			if (rawText[idx] === "'") { quoted = !quoted; continue; }
+			if (!quoted && rawText[idx] === '%') return true;
+		}
+		return false;
+	}
+	if (hasUnquotedPercent(prefixRaw) || hasUnquotedPercent(suffixRaw)) {
+		absNum *= 100;
 	}
 
 	// Scientific notation
@@ -71,9 +79,28 @@ function javaDecimalFormat(pattern, number) {
 		if (absNum === 0) {
 			var result = (0).toFixed(mantDec) + 'E0';
 		} else {
-			var exp = Math.floor(Math.log10(absNum));
-			var mantissa = absNum / Math.pow(10, exp);
-			var result = mantissa.toFixed(mantDec) + 'E' + exp;
+			var expParts = absNum.toExponential().split('e');
+			var mantissa = parseFloat(expParts[0]);
+			var exp = parseInt(expParts[1], 10);
+			if (!Number.isFinite(mantissa) || !Number.isFinite(exp)) {
+				var fallbackExp = Math.floor(Math.log10(absNum));
+				var fallbackScale = Math.pow(10, fallbackExp);
+				if (!Number.isFinite(fallbackScale) || fallbackScale === 0) {
+					var fallbackParts = absNum.toExponential(15).split('e');
+					mantissa = parseFloat(fallbackParts[0]);
+					exp = parseInt(fallbackParts[1], 10);
+				} else {
+					mantissa = absNum / fallbackScale;
+					exp = fallbackExp;
+				}
+			}
+			var mantissaText = Number.isFinite(mantissa) ? mantissa.toFixed(mantDec) : (0).toFixed(mantDec);
+			var mantissaNum = parseFloat(mantissaText);
+			if (Number.isFinite(mantissaNum) && mantissaNum >= 10) {
+				exp += 1;
+				mantissaText = (mantissaNum / 10).toFixed(mantDec);
+			}
+			var result = mantissaText + 'E' + exp;
 			// Normalize negative zero
 			if (parseFloat(result.split('E')[0]) === 0 && result.charAt(0) === '-') {
 				result = result.substring(1);
@@ -172,10 +199,13 @@ describe('javaDecimalFormat', () => {
 		['#', 1.7, '2'],
 		['#', 0, '0'],
 		["0.00'%'", 5.1, '5.10%'],
+		['%#0.0', 0.5, '%50.0'],
 		['#.##;(#.##)', -3.5, '(3.5)'],
 		['0.##E0', 1234, '1.23E3'],
+		['0.0E0', 5e-324, '5.0E-324'],
 		['#.##', -0.0001, '0'],
 		['0.0', -0, '0.0'],
+		['0.0', Infinity, 'Infinity'],
 	];
 
 	for (const [pattern, input, expected] of cases) {

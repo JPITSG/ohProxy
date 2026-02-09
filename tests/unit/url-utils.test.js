@@ -56,8 +56,9 @@ function normalizeOpenhabPath(link) {
 
 function splitLabelState(label) {
 	const raw = safeText(label);
-	const match = raw.match(/^(.*)\s*\[(.+)\]\s*$/);
-	if (!match) return { title: raw, state: '' };
+	const cleaned = raw.replace(/\s*\[\s*-?\s*\]\s*$/, '');
+	const match = cleaned.match(/^(.*)\s*\[(.+)\]\s*$/);
+	if (!match) return { title: cleaned, state: '' };
 	return { title: match[1].trim(), state: match[2].trim() };
 }
 
@@ -274,6 +275,14 @@ describe('URL and Label Helpers', () => {
 
 		it('trims whitespace around title and state', () => {
 			assert.deepStrictEqual(splitLabelState('  Title  [  state  ]  '), { title: 'Title', state: 'state' });
+		});
+
+		it('strips trailing empty state brackets', () => {
+			assert.deepStrictEqual(splitLabelState('Temp []'), { title: 'Temp', state: '' });
+		});
+
+		it('strips trailing placeholder state brackets', () => {
+			assert.deepStrictEqual(splitLabelState('Temp [-]'), { title: 'Temp', state: '' });
 		});
 	});
 
