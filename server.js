@@ -9506,6 +9506,8 @@ function startHttpServer() {
 	});
 }
 
+let httpsServer = null;
+
 function startHttpsServer() {
 	let tlsOptions;
 	try {
@@ -9519,9 +9521,10 @@ function startHttpsServer() {
 		logMessage(`Failed to read HTTPS credentials: ${err.message || err}`);
 		process.exit(1);
 	}
-	const server = HTTPS_HTTP2
+	httpsServer = HTTPS_HTTP2
 		? http2.createSecureServer({ ...tlsOptions, allowHTTP1: true }, app)
 		: https.createServer(tlsOptions, app);
+	const server = httpsServer;
 	server.on('error', (err) => {
 		logMessage(`HTTPS server error: ${err.message || err}`);
 		process.exit(1);
@@ -9534,8 +9537,60 @@ function startHttpsServer() {
 	});
 }
 
+function watchCertificates() {
+	if (!HTTPS_ENABLED || !HTTPS_CERT_FILE || !HTTPS_KEY_FILE) return;
+
+	const certDir = path.dirname(HTTPS_CERT_FILE);
+	const keyDir = path.dirname(HTTPS_KEY_FILE);
+	const certBase = path.basename(HTTPS_CERT_FILE);
+	const keyBase = path.basename(HTTPS_KEY_FILE);
+	const RELOAD_DELAY_MS = 500;
+	let reloadTimer = null;
+
+	const scheduleReload = (trigger) => {
+		if (reloadTimer) clearTimeout(reloadTimer);
+		reloadTimer = setTimeout(() => {
+			reloadTimer = null;
+			reloadCertificates(trigger);
+		}, RELOAD_DELAY_MS);
+	};
+
+	const reloadCertificates = (trigger) => {
+		if (!httpsServer) return;
+		let key, cert;
+		try {
+			key = fs.readFileSync(HTTPS_KEY_FILE);
+			cert = fs.readFileSync(HTTPS_CERT_FILE);
+		} catch (err) {
+			logMessage(`[SSL] Failed to read certificates: ${err.message}`);
+			return;
+		}
+		try {
+			httpsServer.setSecureContext({ key, cert });
+			logMessage(`[SSL] Certificates reloaded successfully (triggered by ${trigger})`);
+		} catch (err) {
+			logMessage(`[SSL] Failed to apply new certificates: ${err.message}`);
+		}
+	};
+
+	const watchedDirs = new Set([certDir, keyDir]);
+	for (const dir of watchedDirs) {
+		try {
+			fs.watch(dir, (eventType, filename) => {
+				if (filename === certBase || filename === keyBase) {
+					scheduleReload(filename);
+				}
+			});
+			logMessage(`[SSL] Watching ${dir} for certificate changes`);
+		} catch (err) {
+			logMessage(`[SSL] Failed to watch ${dir}: ${err.message}`);
+		}
+	}
+}
+
 if (HTTP_ENABLED) startHttpServer();
 if (HTTPS_ENABLED) startHttpsServer();
+watchCertificates();
 
 logMessage(`[Startup] Proxying openHAB from: ${OH_TARGET}`);
 
