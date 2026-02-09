@@ -8432,7 +8432,7 @@ body{margin:0;padding:0;overflow:hidden}
 	var markers=${markersJson};
 	var singlePointMode=${singlePointMode ? 'true' : 'false'};
 
-	var map=new OpenLayers.Map("map");
+	var map=new OpenLayers.Map("map",{theme:null});
 	map.addLayer(new OpenLayers.Layer.OSM("OSM",["//a.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//b.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//c.tile.openstreetmap.org/\${z}/\${x}/\${y}.png"]));
 
 	var wgs84=new OpenLayers.Projection("EPSG:4326");
