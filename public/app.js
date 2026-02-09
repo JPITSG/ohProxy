@@ -6015,7 +6015,9 @@ function getWidgetRenderInfo(w) {
 	const mapviewUrl = isMapview ? buildMapviewUrl(mapviewCoordinates) : '';
 	const mapviewHeight = isMapview ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const rawVideoUrl = isVideo ? safeText(w?.label || '') : '';
-	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}&mode=${themeMode}` : '';
+	const videoEncoding = isVideo ? safeText(w?.encoding || '').toLowerCase() : '';
+	const encodingParam = videoEncoding ? `&encoding=${encodeURIComponent(videoEncoding)}` : '';
+	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}&mode=${themeMode}${encodingParam}` : '';
 	const videoHeight = isVideo ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const chartHeight = isChart ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const mappingSig = mapping.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}:${m.icon || ''}`).join('|');
@@ -6455,8 +6457,8 @@ function updateCard(card, w, info) {
 			previewDiv.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background-size:cover;background-position:center;opacity:0.75;z-index:10;';
 			videoContainer.appendChild(previewDiv);
 		}
-		// Set preview background if RTSP URL available
-		if (rawVideoUrl && rawVideoUrl.startsWith('rtsp://')) {
+		// Set preview background if video URL available
+		if (rawVideoUrl) {
 			const previewUrl = `/video-preview?url=${encodeURIComponent(rawVideoUrl)}`;
 			previewDiv.style.backgroundImage = `url('${previewUrl}')`;
 			previewDiv.classList.remove('hidden');
