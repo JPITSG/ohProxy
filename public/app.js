@@ -3067,7 +3067,13 @@ function openCardConfigModal(widget, card) {
 	cardConfigInitialStateJson = initialCardConfig ? JSON.stringify(initialCardConfig) : null;
 
 	const titleEl = cardConfigModal.querySelector('.card-config-header h2');
-	if (titleEl) titleEl.textContent = isSection ? ohLang.cardConfig.frameTitle : ohLang.cardConfig.title;
+	if (titleEl) {
+		if (isSection) {
+			titleEl.textContent = ohLang.cardConfig.frameTitle;
+		} else {
+			titleEl.textContent = itemName ? `Item ${itemName} Settings` : ohLang.cardConfig.title;
+		}
+	}
 
 	openModalBase(cardConfigModal, 'card-config-open');
 }
