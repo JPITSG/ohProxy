@@ -2585,20 +2585,27 @@ function ensureCardConfigModal() {
 	makeFrameDraggable(wrap.querySelector('.card-config-frame'), wrap.querySelector('.card-config-header h2'));
 }
 
-function createCustomSelect(options, initialValue, className) {
-	const wrap = document.createElement('div');
-	wrap.className = `glow-select-wrap ${className}`;
+function createSelect(options, initialValue, config) {
+	const {
+		wrapClass,
+		btnClass,
+		colorMode = false,
+		getValue = o => o.value,
+		getLabel = o => o.label,
+		onMenuCreated = null
+	} = config;
 
-	const current = options.find(o => o.value === initialValue) || options[0];
-	wrap.dataset.value = current.value;
+	const wrap = document.createElement('div');
+	wrap.className = wrapClass;
+
+	const current = options.find(o => getValue(o) === initialValue) || options[0];
+	wrap.dataset.value = getValue(current);
 
 	const fakeSelect = document.createElement('button');
 	fakeSelect.type = 'button';
-	fakeSelect.className = 'glow-fake-select';
-	fakeSelect.textContent = current.label;
-	if (className === 'glow-color-select') {
-		fakeSelect.dataset.color = current.value;
-	}
+	fakeSelect.className = btnClass;
+	fakeSelect.textContent = getLabel(current);
+	if (colorMode) fakeSelect.dataset.color = getValue(current);
 
 	const menu = document.createElement('div');
 	menu.className = 'glow-select-menu';
@@ -2621,25 +2628,25 @@ function createCustomSelect(options, initialValue, className) {
 		if (scrollParent) { scrollParent.removeEventListener('scroll', onScrollParent); scrollParent = null; }
 	};
 
+	const wrapSelector = '.' + wrapClass.split(' ')[0] + '.menu-open';
+
 	for (const opt of options) {
+		const val = getValue(opt);
+		const label = getLabel(opt);
 		const optBtn = document.createElement('button');
 		optBtn.type = 'button';
 		optBtn.className = 'glow-select-option';
-		if (opt.value === current.value) optBtn.classList.add('active');
-		optBtn.textContent = opt.label;
-		optBtn.dataset.value = opt.value;
-		if (className === 'glow-color-select') {
-			optBtn.dataset.color = opt.value;
-		}
+		if (val === getValue(current)) optBtn.classList.add('active');
+		optBtn.textContent = label;
+		optBtn.dataset.value = val;
+		if (colorMode) optBtn.dataset.color = val;
 		optBtn.onclick = (e) => {
 			haptic();
 			e.preventDefault();
 			e.stopPropagation();
-			wrap.dataset.value = opt.value;
-			fakeSelect.textContent = opt.label;
-			if (className === 'glow-color-select') {
-				fakeSelect.dataset.color = opt.value;
-			}
+			wrap.dataset.value = val;
+			fakeSelect.textContent = label;
+			if (colorMode) fakeSelect.dataset.color = val;
 			menu.querySelectorAll('.glow-select-option').forEach(b => b.classList.remove('active'));
 			optBtn.classList.add('active');
 			closeMenu();
@@ -2698,7 +2705,7 @@ function createCustomSelect(options, initialValue, className) {
 		e.preventDefault();
 		e.stopPropagation();
 		// Close other open menus (properly removes scroll listeners)
-		document.querySelectorAll('.glow-select-wrap.menu-open').forEach(w => {
+		document.querySelectorAll(wrapSelector).forEach(w => {
 			if (w !== wrap && typeof w._closeMenu === 'function') w._closeMenu();
 		});
 		if (wrap.classList.contains('menu-open')) {
@@ -2724,7 +2731,18 @@ function createCustomSelect(options, initialValue, className) {
 	wrap._glowMenu = menu;
 	wrap._closeMenu = closeMenu;
 	document.body.appendChild(menu);
+	if (onMenuCreated) onMenuCreated(menu);
 	return wrap;
+}
+
+function createCustomSelect(options, initialValue, className) {
+	return createSelect(options, initialValue, {
+		wrapClass: `glow-select-wrap ${className}`,
+		btnClass: 'glow-fake-select',
+		colorMode: className === 'glow-color-select',
+		getValue: o => o.value,
+		getLabel: o => o.label
+	});
 }
 
 function createGlowRuleRow(rule = {}) {
@@ -3565,136 +3583,13 @@ function adminSetNested(obj, path, value) {
 }
 
 function createAdminSelect(options, initialValue) {
-	const wrap = document.createElement('div');
-	wrap.className = 'admin-select-wrap';
-	const current = options.find(o => o === initialValue) || options[0];
-	wrap.dataset.value = current;
-
-	const displayLabel = (v) => v || '(none)';
-	const fakeSelect = document.createElement('button');
-	fakeSelect.type = 'button';
-	fakeSelect.className = 'admin-fake-select';
-	fakeSelect.textContent = displayLabel(current);
-
-	const menu = document.createElement('div');
-	menu.className = 'glow-select-menu';
-
-	const needsScroll = options.length > 5;
-	let scrollInner = null;
-	if (needsScroll) {
-		menu.classList.add('scrollable');
-		scrollInner = document.createElement('div');
-		scrollInner.className = 'glow-select-menu-scroll';
-		menu.appendChild(scrollInner);
-	}
-
-	let scrollParent = null;
-	const onScrollParent = () => closeMenu();
-
-	const closeMenu = () => {
-		menu.style.display = 'none';
-		wrap.classList.remove('menu-open');
-		if (scrollParent) { scrollParent.removeEventListener('scroll', onScrollParent); scrollParent = null; }
-	};
-
-	for (const opt of options) {
-		const optBtn = document.createElement('button');
-		optBtn.type = 'button';
-		optBtn.className = 'glow-select-option';
-		if (opt === current) optBtn.classList.add('active');
-		optBtn.textContent = displayLabel(opt);
-		optBtn.dataset.value = opt;
-		optBtn.onclick = (e) => {
-			e.preventDefault();
-			e.stopPropagation();
-			haptic();
-			wrap.dataset.value = opt;
-			fakeSelect.textContent = displayLabel(opt);
-			menu.querySelectorAll('.glow-select-option').forEach(b => b.classList.remove('active'));
-			optBtn.classList.add('active');
-			closeMenu();
-		};
-		(scrollInner || menu).appendChild(optBtn);
-	}
-
-	const openMenu = () => {
-		const rect = fakeSelect.getBoundingClientRect();
-		menu.style.position = 'fixed';
-		menu.style.display = 'block';
-		wrap.classList.add('menu-open');
-
-		if (needsScroll && scrollInner && !scrollInner.style.maxHeight) {
-			const btns = scrollInner.querySelectorAll('.glow-select-option');
-			if (btns.length > 1) {
-				const btnH = btns[0].offsetHeight;
-				const btnM = parseFloat(getComputedStyle(btns[1]).marginTop || 0);
-				scrollInner.style.maxHeight = `${(btnH * 5) + (btnM * 5)}px`;
-			}
-			const scrollStyle = getComputedStyle(scrollInner);
-			const scrollPad = parseFloat(scrollStyle.paddingRight || 0);
-			const scrollbarW = scrollInner.offsetWidth - scrollInner.clientWidth;
-			const menuStyle = getComputedStyle(menu);
-			const menuPad = parseFloat(menuStyle.paddingLeft || 0) + parseFloat(menuStyle.paddingRight || 0);
-			menu.style.minWidth = `${rect.width + scrollPad + scrollbarW + menuPad}px`;
-		}
-
-		const menuPadLeft = parseFloat(getComputedStyle(menu).paddingLeft || 0);
-		menu.style.left = (rect.left - menuPadLeft) + 'px';
-		if (!needsScroll) {
-			menu.style.minWidth = (rect.width + menuPadLeft * 2) + 'px';
-		}
-
-		// Measure menu height to decide direction
-		menu.style.top = '-9999px';
-		const menuH = menu.offsetHeight;
-		const spaceBelow = window.innerHeight - rect.bottom - 4;
-		const spaceAbove = rect.top - 4;
-
-		if (spaceBelow >= menuH || spaceBelow >= spaceAbove) {
-			menu.style.top = (rect.bottom + 4) + 'px';
-			menu.style.bottom = '';
-		} else {
-			menu.style.top = '';
-			menu.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
-		}
-
-		// Close on scroll of nearest scrollable ancestor
-		scrollParent = fakeSelect.closest('.card-config-frame, .admin-config-sections');
-		if (scrollParent) scrollParent.addEventListener('scroll', onScrollParent, { passive: true });
-	};
-
-	fakeSelect.onclick = (e) => {
-		e.preventDefault();
-		e.stopPropagation();
-		haptic();
-		// Close other open menus (properly removes scroll listeners)
-		document.querySelectorAll('.admin-select-wrap.menu-open').forEach(w => {
-			if (w !== wrap && typeof w._closeMenu === 'function') w._closeMenu();
-		});
-		if (wrap.classList.contains('menu-open')) {
-			closeMenu();
-		} else {
-			openMenu();
-		}
-	};
-
-	// Close on click outside (auto-removes when wrap is detached from DOM)
-	const onDocClick = (e) => {
-		if (!wrap.isConnected) {
-			document.removeEventListener('click', onDocClick);
-			return;
-		}
-		if (!wrap.contains(e.target) && !menu.contains(e.target)) {
-			closeMenu();
-		}
-	};
-	document.addEventListener('click', onDocClick);
-
-	wrap.appendChild(fakeSelect);
-	wrap._closeMenu = closeMenu;
-	document.body.appendChild(menu);
-	adminSelectMenus.push(menu);
-	return wrap;
+	return createSelect(options, initialValue, {
+		wrapClass: 'admin-select-wrap',
+		btnClass: 'admin-fake-select',
+		getValue: o => o,
+		getLabel: o => o || '(none)',
+		onMenuCreated: menu => adminSelectMenus.push(menu)
+	});
 }
 
 function autoResizeTextarea(ta) {
