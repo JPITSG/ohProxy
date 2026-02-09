@@ -8093,7 +8093,7 @@ app.get('/presence', async (req, res) => {
 		return res.status(401).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
 	}
 	const user = sessions.getUser(username);
-	if (!user || !user.trackgps) {
+	if (!user) {
 		return res.status(403).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
 	}
 
@@ -8127,6 +8127,11 @@ app.get('/presence', async (req, res) => {
 		singlePointMode = true;
 		singlePointLat = parsedLat;
 		singlePointLon = parsedLon;
+	}
+
+	// History mode requires GPS tracking; single-point viewer mode does not.
+	if (!singlePointMode && !user.trackgps) {
+		return res.status(403).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
 	}
 
 	let conn = null;
