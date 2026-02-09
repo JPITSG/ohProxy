@@ -7904,6 +7904,12 @@ function render() {
 						openCardConfigModal(w, header);
 					}
 				});
+				header.addEventListener('contextmenu', (e) => {
+					if (state.isSlim) return;
+					if (getUserRole() !== 'admin') return;
+					e.preventDefault();
+					openCardConfigModal(w, header);
+				});
 				fragment.appendChild(header);
 				continue;
 			}
