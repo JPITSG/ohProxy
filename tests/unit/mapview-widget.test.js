@@ -25,7 +25,8 @@ describe('Mapview Widget Rendering', () => {
 	it('renders mapview as media card with iframe and no data fallback', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /if \(isMapview\) \{\s*card\.classList\.add\('mapview-card'\);/);
-		assert.match(app, /if \(!mapviewUrl\) \{\s*row\.classList\.remove\('hidden'\);\s*controls\.classList\.add\('mt-3'\);\s*controls\.innerHTML = `<div class="text-sm text-slate-400">Map location not available<\/div>`;/);
+		assert.match(app, /renderIframeWidget\(card, mapviewUrl, mapviewHeight,\s*'mapview-frame-container', 'mapview-frame'/);
+		assert.match(app, /if \(!url\) \{\s*row\.classList\.remove\('hidden'\);\s*showUnavailableMessage\(controls, errorMessage\);/);
 		assert.match(app, /card\.classList\.toggle\('sm:col-span-2', isImage \|\| isChart \|\| isMapview \|\| isWebview \|\| isVideo \|\| cardWidthFull\);/);
 	});
 

@@ -54,6 +54,73 @@ const supportsAspectRatio = (function() {
 	return el.style.aspectRatio === '1 / 1';
 })();
 
+function applyIframeHeight(container, height) {
+	if (height > 0) {
+		container.style.height = height + 'px';
+		container.style.aspectRatio = 'auto';
+		container.style.paddingBottom = '0';
+	} else {
+		container.style.height = '';
+		if (supportsAspectRatio) {
+			container.style.aspectRatio = '16 / 9';
+			container.style.paddingBottom = '';
+		} else {
+			container.style.aspectRatio = '';
+			container.style.paddingBottom = '56.25%';
+		}
+	}
+}
+
+function getOrCreateIframe(parent, containerClass, iframeClass, attrs) {
+	let container = parent.querySelector('.' + containerClass);
+	if (!container) {
+		container = document.createElement('div');
+		container.className = containerClass;
+		parent.appendChild(container);
+	}
+	let iframe = container.querySelector('iframe.' + iframeClass);
+	if (!iframe) {
+		iframe = document.createElement('iframe');
+		iframe.className = iframeClass;
+		iframe.setAttribute('frameborder', '0');
+		if (attrs) for (const [k, v] of Object.entries(attrs)) iframe.setAttribute(k, v);
+		container.appendChild(iframe);
+	}
+	return { container, iframe };
+}
+
+function renderIframeWidget(card, url, height, containerClass, iframeClass, iframeAttrs, errorMessage, controls, row) {
+	if (!url) {
+		row.classList.remove('hidden');
+		showUnavailableMessage(controls, errorMessage);
+		return true;
+	}
+	const { container: frameContainer, iframe: iframeEl } = getOrCreateIframe(card, containerClass, iframeClass, iframeAttrs);
+	card.style.padding = '0';
+	card.style.overflow = 'hidden';
+	applyIframeHeight(frameContainer, height);
+	const resolvedUrl = new URL(url, location.href).href;
+	if (iframeEl.src !== resolvedUrl) {
+		iframeEl.src = url;
+	}
+	return true;
+}
+
+function hideMediaCardChrome(labelRow, iconWrap, row) {
+	labelRow.classList.add('hidden');
+	if (iconWrap) iconWrap.classList.add('hidden');
+	row.classList.add('hidden');
+}
+
+function showUnavailableMessage(el, message) {
+	el.classList.add('mt-3');
+	const msg = document.createElement('div');
+	msg.className = 'text-sm text-slate-400';
+	msg.textContent = message;
+	el.innerHTML = '';
+	el.appendChild(msg);
+}
+
 function triggerReload() {
 	showResumeSpinner(true);
 	window.location.reload();
@@ -353,38 +420,26 @@ let sitemapCacheInFlight = false;
 let sitemapCacheRetryTimer = null;
 let sitemapCacheRetryMs = SITEMAP_CACHE_RETRY_BASE_MS;
 
-// Widget glow rules: Map from widgetId to rules array
-const widgetGlowRulesMap = new Map();
-(function initWidgetGlowRules() {
-	const rules = Array.isArray(OH_CONFIG.widgetGlowRules) ? OH_CONFIG.widgetGlowRules : [];
-	for (const entry of rules) {
-		if (entry.widgetId && Array.isArray(entry.rules)) {
-			widgetGlowRulesMap.set(entry.widgetId, entry.rules);
-		}
+// Build a Map from widgetId to value for config arrays
+function buildWidgetMap(arr, config) {
+	const map = new Map();
+	if (!Array.isArray(arr)) return map;
+	for (const entry of arr) {
+		if (!entry?.widgetId) continue;
+		const value = config?.extract ? config.extract(entry) : entry;
+		if (config?.validate && !config.validate(value)) continue;
+		map.set(entry.widgetId, value);
 	}
-})();
+	return map;
+}
 
-// Widget visibility rules: Map from widgetId to visibility ('all', 'normal', 'admin')
-const widgetVisibilityMap = new Map();
-(function initWidgetVisibility() {
-	const rules = Array.isArray(OH_CONFIG.widgetVisibilityRules) ? OH_CONFIG.widgetVisibilityRules : [];
-	for (const entry of rules) {
-		if (entry.widgetId && entry.visibility) {
-			widgetVisibilityMap.set(entry.widgetId, entry.visibility);
-		}
-	}
-})();
-
-// Widget video configs: Map from widgetId to {defaultMuted: boolean}
-const widgetVideoConfigMap = new Map();
-(function initWidgetVideoConfigs() {
-	const configs = Array.isArray(OH_CONFIG.widgetVideoConfigs) ? OH_CONFIG.widgetVideoConfigs : [];
-	for (const entry of configs) {
-		if (entry.widgetId) {
-			widgetVideoConfigMap.set(entry.widgetId, entry);
-		}
-	}
-})();
+const widgetGlowRulesMap = buildWidgetMap(OH_CONFIG.widgetGlowRules, {
+	extract: e => e.rules, validate: v => Array.isArray(v)
+});
+const widgetVisibilityMap = buildWidgetMap(OH_CONFIG.widgetVisibilityRules, {
+	extract: e => e.visibility, validate: v => !!v
+});
+const widgetVideoConfigMap = buildWidgetMap(OH_CONFIG.widgetVideoConfigs);
 
 // Video fullscreen state
 let videoFullscreenActive = false;
@@ -396,39 +451,11 @@ let videoFsPlaceholder = null;
 let videosPausedForVisibility = false;
 const videoZoomStateMap = new WeakMap();
 
-// Widget iframe configs: Map from widgetId to {height: number}
-const widgetIframeConfigMap = new Map();
-(function initWidgetIframeConfigs() {
-	const configs = Array.isArray(OH_CONFIG.widgetIframeConfigs) ? OH_CONFIG.widgetIframeConfigs : [];
-	for (const entry of configs) {
-		if (entry.widgetId) {
-			widgetIframeConfigMap.set(entry.widgetId, entry);
-		}
-	}
-})();
-
-/// Widget proxy cache configs: Map from widgetId to {cacheSeconds: number}
-const widgetProxyCacheConfigMap = new Map();
-(function initWidgetProxyCacheConfigs() {
-	const configs = Array.isArray(OH_CONFIG.widgetProxyCacheConfigs) ? OH_CONFIG.widgetProxyCacheConfigs : [];
-	for (const entry of configs) {
-		if (entry.widgetId) {
-			widgetProxyCacheConfigMap.set(entry.widgetId, entry);
-		}
-	}
-})();
-
-// Widget card width configs: Map from widgetId to width ('standard' or 'full')
-const widgetCardWidthMap = new Map();
-(function initWidgetCardWidths() {
-	if (Array.isArray(OH_CONFIG.widgetCardWidths)) {
-		for (const entry of OH_CONFIG.widgetCardWidths) {
-			if (entry?.widgetId && entry?.width) {
-				widgetCardWidthMap.set(entry.widgetId, entry.width);
-			}
-		}
-	}
-})();
+const widgetIframeConfigMap = buildWidgetMap(OH_CONFIG.widgetIframeConfigs);
+const widgetProxyCacheConfigMap = buildWidgetMap(OH_CONFIG.widgetProxyCacheConfigs);
+const widgetCardWidthMap = buildWidgetMap(OH_CONFIG.widgetCardWidths, {
+	extract: e => e.width, validate: v => !!v
+});
 
 // Get current user role from config
 function getUserRole() {
@@ -539,8 +566,8 @@ function isInlineIconDataUri(value) {
 	return text.startsWith('data:image/') && text.includes(';base64,');
 }
 
-function replaceHomeInlineIcons(value) {
-	homeInlineIcons.clear();
+function updateHomeInlineIcons(value, clear) {
+	if (clear) homeInlineIcons.clear();
 	if (!value || typeof value !== 'object') return;
 	for (const [rawKey, rawDataUri] of Object.entries(value)) {
 		const iconKey = safeText(rawKey).trim();
@@ -549,16 +576,8 @@ function replaceHomeInlineIcons(value) {
 		homeInlineIcons.set(iconKey, dataUri);
 	}
 }
-
-function mergeHomeInlineIcons(value) {
-	if (!value || typeof value !== 'object') return;
-	for (const [rawKey, rawDataUri] of Object.entries(value)) {
-		const iconKey = safeText(rawKey).trim();
-		const dataUri = typeof rawDataUri === 'string' ? rawDataUri.trim() : '';
-		if (!iconKey || !isInlineIconDataUri(dataUri)) continue;
-		homeInlineIcons.set(iconKey, dataUri);
-	}
-}
+function replaceHomeInlineIcons(value) { updateHomeInlineIcons(value, true); }
+function mergeHomeInlineIcons(value) { updateHomeInlineIcons(value, false); }
 
 function getHomeInlineIcon(icon) {
 	const key = safeText(icon).trim();
@@ -871,6 +890,15 @@ function resetVideoZoom(videoEl) {
 		zoomStage.style.transform = '';
 		zoomStage.style.transformOrigin = '50% 50%';
 	}
+}
+
+function restartVideoStream(videoEl) {
+	setVideoZoomReady(videoEl, false);
+	resetVideoZoom(videoEl);
+	const src = videoEl.src;
+	videoEl.src = '';
+	videoEl.src = src;
+	videoEl.play().catch(() => {});
 }
 
 function attachPinchZoomHandlers(element, config) {
@@ -1297,17 +1325,22 @@ function queueScrollTop() {
 	state.pendingScrollTop = true;
 }
 
+function setStatusBarState(bar, ...activeClasses) {
+	const all = ['status-ok', 'status-error', 'status-pending', 'status-fast'];
+	const inactive = all.filter(c => !activeClasses.includes(c));
+	bar.classList.add(...activeClasses);
+	bar.classList.remove(...inactive);
+}
+
 function updateStatusBar() {
 	if (!els.statusBar || !els.statusText) return;
 	if (!state.connectionReady) {
 		const label = state.initialStatusText || connectionStatusInfo().label || 'Connected';
 		els.statusText.textContent = label;
 		if (state.connectionPending) {
-			els.statusBar.classList.add('status-pending');
-			els.statusBar.classList.remove('status-ok', 'status-error', 'status-fast');
+			setStatusBarState(els.statusBar, 'status-pending');
 		} else {
-			els.statusBar.classList.add('status-ok');
-			els.statusBar.classList.remove('status-error', 'status-pending', 'status-fast');
+			setStatusBarState(els.statusBar, 'status-ok');
 		}
 		updateErrorUiState();
 		closeStatusNotification();
@@ -1318,19 +1351,15 @@ function updateStatusBar() {
 		els.statusText.textContent = info.label;
 		const fast = isFastConnection();
 		if (info.isError) {
-			els.statusBar.classList.add('status-error');
-			els.statusBar.classList.remove('status-ok', 'status-pending', 'status-fast');
+			setStatusBarState(els.statusBar, 'status-error');
 		} else if (fast) {
-			els.statusBar.classList.add('status-ok', 'status-fast');
-			els.statusBar.classList.remove('status-error', 'status-pending');
+			setStatusBarState(els.statusBar, 'status-ok', 'status-fast');
 		} else {
-			els.statusBar.classList.add('status-ok');
-			els.statusBar.classList.remove('status-error', 'status-pending', 'status-fast');
+			setStatusBarState(els.statusBar, 'status-ok');
 		}
 	} else {
 		els.statusText.textContent = 'Disconnected';
-		els.statusBar.classList.add('status-error');
-		els.statusBar.classList.remove('status-ok', 'status-pending', 'status-fast');
+		setStatusBarState(els.statusBar, 'status-error');
 	}
 	updateErrorUiState();
 	if (state.connectionOk) {
@@ -1568,64 +1597,45 @@ function setTheme(mode, syncToServer = true) {
 	reloadWebviewIframes(mode);
 }
 
-function reloadChartIframes(mode) {
-	const iframes = document.querySelectorAll('iframe.chart-frame');
+function reloadIframes(selector, mode, config) {
+	const iframes = document.querySelectorAll(selector);
 	iframes.forEach(iframe => {
-		// Get actual current URL from contentWindow (src attribute doesn't update with location.replace)
 		let currentUrl;
 		try {
 			currentUrl = iframe.contentWindow.location.href;
 		} catch {
-			currentUrl = iframe.src || iframe.dataset.chartUrl || '';
+			currentUrl = iframe.src || (config?.fallbackUrl ? config.fallbackUrl(iframe) : '') || '';
 		}
 		if (!currentUrl || currentUrl === 'about:blank') {
-			currentUrl = iframe.src || iframe.dataset.chartUrl || '';
+			currentUrl = iframe.src || (config?.fallbackUrl ? config.fallbackUrl(iframe) : '') || '';
 		}
 		if (!currentUrl) return;
-		// Replace mode param and strip hash (hash is content-based including colors, so invalid across modes)
-		const newUrl = currentUrl
-			.replace(/([?&])mode=(light|dark)/, `$1mode=${mode}`)
-			.replace(/&_t=[^&]*/, '');
+		let newUrl = currentUrl.replace(/([?&])mode=(light|dark)/, `$1mode=${mode}`);
+		if (config?.stripTimestamp) newUrl = newUrl.replace(/&_t=[^&]*/, '');
 		if (newUrl !== currentUrl) {
-			// Use location.replace() to avoid adding browser history entry (same-origin iframes)
-			setChartIframeAnimState(iframe, newUrl);
-			iframe.dataset.chartUrl = newUrl;
+			if (config?.beforeReload) config.beforeReload(iframe, newUrl);
 			try {
 				iframe.contentWindow.location.replace(newUrl);
 			} catch {
-				// Fallback if contentWindow access fails
 				iframe.src = newUrl;
 			}
 		}
 	});
 }
 
-function reloadWebviewIframes(mode) {
-	const iframes = document.querySelectorAll('iframe.webview-frame');
-	iframes.forEach(iframe => {
-		// Get actual current URL from contentWindow (src attribute doesn't update with location.replace)
-		let currentUrl;
-		try {
-			currentUrl = iframe.contentWindow.location.href;
-		} catch {
-			currentUrl = iframe.src || '';
-		}
-		if (!currentUrl || currentUrl === 'about:blank') {
-			currentUrl = iframe.src || '';
-		}
-		if (!currentUrl) return;
-		// Replace mode param in URL
-		const newUrl = currentUrl.replace(/([?&])mode=(light|dark)/, `$1mode=${mode}`);
-		if (newUrl !== currentUrl) {
-			// Use location.replace() to avoid adding browser history entry (same-origin iframes via proxy)
-			try {
-				iframe.contentWindow.location.replace(newUrl);
-			} catch {
-				// Fallback if contentWindow access fails (cross-origin)
-				iframe.src = newUrl;
-			}
+function reloadChartIframes(mode) {
+	reloadIframes('iframe.chart-frame', mode, {
+		fallbackUrl: iframe => iframe.dataset.chartUrl || '',
+		stripTimestamp: true,
+		beforeReload: (iframe, newUrl) => {
+			setChartIframeAnimState(iframe, newUrl);
+			iframe.dataset.chartUrl = newUrl;
 		}
 	});
+}
+
+function reloadWebviewIframes(mode) {
+	reloadIframes('iframe.webview-frame', mode);
 }
 
 function toggleTheme() {
@@ -1732,6 +1742,8 @@ function scheduleSearchPlaceholderUpdate() {
 	});
 }
 
+let searchFocusHistoryPushed = false;
+
 function isSmallSearchViewport() {
 	return window.matchMedia('(max-width: 639px)').matches;
 }
@@ -1748,6 +1760,13 @@ function setSearchFocusedLayout(enabled) {
 	const className = 'search-focus-expanded';
 	if (root.classList.contains(className) === enabled) return;
 	root.classList.toggle(className, enabled);
+	if (enabled) {
+		history.pushState(null, '', window.location.pathname + window.location.search + window.location.hash);
+		searchFocusHistoryPushed = true;
+	} else if (searchFocusHistoryPushed) {
+		searchFocusHistoryPushed = false;
+		history.back();
+	}
 	scheduleSearchPlaceholderUpdate();
 }
 
@@ -2490,6 +2509,12 @@ function makeFrameDraggable(frame, handle) {
 	};
 }
 
+function syncRadioClasses(container, groupName) {
+	container.querySelectorAll(`input[name="${groupName}"]`).forEach(r =>
+		r.closest('.item-config-radio')?.classList.toggle('checked', r.checked)
+	);
+}
+
 function ensureCardConfigModal() {
 	if (cardConfigModal) return;
 	const wrap = document.createElement('div');
@@ -2596,17 +2621,9 @@ function ensureCardConfigModal() {
 		if (e.target.type !== 'radio') return;
 		haptic();
 		const group = e.target.name;
-		wrap.querySelectorAll(`input[name="${group}"]`).forEach(r => r.closest('.item-config-radio')?.classList.toggle('checked', r.checked));
+		syncRadioClasses(wrap, group);
 	});
-	wrap.addEventListener('click', (e) => {
-		if (e.target === wrap) { haptic(); closeCardConfigModal(); }
-	});
-	document.addEventListener('keydown', (e) => {
-		if (e.key === 'Escape' && cardConfigModal && !cardConfigModal.classList.contains('hidden')) {
-			haptic();
-			closeCardConfigModal();
-		}
-	});
+	attachModalDismissListeners(wrap, cardConfigModal, closeCardConfigModal);
 	makeFrameDraggable(wrap.querySelector('.card-config-frame'), wrap.querySelector('.card-config-header h2'));
 }
 
@@ -2884,7 +2901,7 @@ function openCardConfigModal(widget, card) {
 	const visRadio = cardConfigModal.querySelector(`input[name="visibility"][value="${visibility}"]`);
 	if (visRadio) {
 		visRadio.checked = true;
-		cardConfigModal.querySelectorAll('input[name="visibility"]').forEach(r => r.closest('.item-config-radio')?.classList.toggle('checked', r.checked));
+		syncRadioClasses(cardConfigModal, 'visibility');
 	}
 
 	// Show/hide default sound section for video widgets
@@ -2900,7 +2917,7 @@ function openCardConfigModal(widget, card) {
 			const soundRadio = cardConfigModal.querySelector(`input[name="defaultSound"][value="${defaultMutedValue}"]`);
 			if (soundRadio) {
 				soundRadio.checked = true;
-				cardConfigModal.querySelectorAll('input[name="defaultSound"]').forEach(r => r.closest('.item-config-radio')?.classList.toggle('checked', r.checked));
+				syncRadioClasses(cardConfigModal, 'defaultSound');
 			}
 		}
 	}
@@ -2942,9 +2959,7 @@ function openCardConfigModal(widget, card) {
 			const widthRadio = cardConfigModal.querySelector(`input[name="cardWidth"][value="${cardWidth}"]`);
 			if (widthRadio) {
 				widthRadio.checked = true;
-				cardConfigModal.querySelectorAll('input[name="cardWidth"]').forEach(r =>
-					r.closest('.item-config-radio')?.classList.toggle('checked', r.checked)
-				);
+				syncRadioClasses(cardConfigModal, 'cardWidth');
 			}
 		}
 	}
@@ -3014,10 +3029,7 @@ function openCardConfigModal(widget, card) {
 	const initialCardConfig = collectCardConfigValues();
 	cardConfigInitialStateJson = initialCardConfig ? JSON.stringify(initialCardConfig) : null;
 
-	cardConfigModal.classList.remove('hidden');
-	cardConfigModal._savedScrollY = window.scrollY;
-	document.body.style.top = `-${window.scrollY}px`;
-	document.body.classList.add('card-config-open');
+	openModalBase(cardConfigModal, 'card-config-open');
 }
 
 function formatHistoryTime(isoString) {
@@ -3155,6 +3167,34 @@ function loadGroupHistoryEntries(itemName, cursor) {
 	});
 }
 
+function openModalBase(modal, bodyClass) {
+	modal.classList.remove('hidden');
+	modal._savedScrollY = window.scrollY;
+	document.body.style.top = `-${window.scrollY}px`;
+	document.body.classList.add(bodyClass);
+}
+
+function closeModalBase(modal, frameSelector, bodyClass) {
+	modal.classList.add('hidden');
+	const frame = modal.querySelector(frameSelector);
+	if (frame?._resetDragPosition) frame._resetDragPosition();
+	document.body.classList.remove(bodyClass);
+	document.body.style.top = '';
+	window.scrollTo(0, modal._savedScrollY || 0);
+}
+
+function attachModalDismissListeners(wrap, modal, closeFn) {
+	wrap.addEventListener('click', (e) => {
+		if (e.target === wrap) { haptic(); closeFn(); }
+	});
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
+			haptic();
+			closeFn();
+		}
+	});
+}
+
 function closeCardConfigModal() {
 	if (!cardConfigModal) return;
 	// Abort any in-flight history fetches
@@ -3164,12 +3204,7 @@ function closeCardConfigModal() {
 		if (typeof w._closeMenu === 'function') w._closeMenu();
 		if (w._glowMenu) { w._glowMenu.remove(); w._glowMenu = null; }
 	});
-	cardConfigModal.classList.add('hidden');
-	var cardFrame = cardConfigModal.querySelector('.card-config-frame');
-	if (cardFrame._resetDragPosition) cardFrame._resetDragPosition();
-	document.body.classList.remove('card-config-open');
-	document.body.style.top = '';
-	window.scrollTo(0, cardConfigModal._savedScrollY || 0);
+	closeModalBase(cardConfigModal, '.card-config-frame', 'card-config-open');
 	cardConfigWidgetKey = '';
 	cardConfigWidgetLabel = '';
 	historyGlowColor = null;
@@ -3812,15 +3847,7 @@ function ensureAdminConfigModal() {
 	wrap.querySelector('.admin-config-close').addEventListener('click', () => { haptic(); closeAdminConfigModal(); });
 	wrap.querySelector('.admin-config-cancel').addEventListener('click', () => { haptic(); closeAdminConfigModal(); });
 	wrap.querySelector('.admin-config-save').addEventListener('click', () => { haptic(); saveAdminConfig(); });
-	wrap.addEventListener('click', (e) => {
-		if (e.target === wrap) { haptic(); closeAdminConfigModal(); }
-	});
-	document.addEventListener('keydown', (e) => {
-		if (e.key === 'Escape' && adminConfigModal && !adminConfigModal.classList.contains('hidden')) {
-			haptic();
-			closeAdminConfigModal();
-		}
-	});
+	attachModalDismissListeners(wrap, adminConfigModal, closeAdminConfigModal);
 	makeFrameDraggable(wrap.querySelector('.admin-config-frame'), wrap.querySelector('.admin-config-header h2'));
 }
 
@@ -3843,10 +3870,7 @@ async function openAdminConfigModal() {
 
 	// Show modal immediately with loading state
 	sectionsEl.innerHTML = '';
-	adminConfigModal.classList.remove('hidden');
-	adminConfigModal._savedScrollY = window.scrollY;
-	document.body.style.top = `-${window.scrollY}px`;
-	document.body.classList.add('admin-config-open');
+	openModalBase(adminConfigModal, 'admin-config-open');
 
 	// Abort any in-flight config fetch
 	if (adminConfigAbort) adminConfigAbort.abort();
@@ -3898,12 +3922,7 @@ function closeAdminConfigModal() {
 	// Remove admin select menus from body
 	adminSelectMenus.forEach(m => m.remove());
 	adminSelectMenus.length = 0;
-	adminConfigModal.classList.add('hidden');
-	var adminFrame = adminConfigModal.querySelector('.admin-config-frame');
-	if (adminFrame._resetDragPosition) adminFrame._resetDragPosition();
-	document.body.classList.remove('admin-config-open');
-	document.body.style.top = '';
-	window.scrollTo(0, adminConfigModal._savedScrollY || 0);
+	closeModalBase(adminConfigModal, '.admin-config-frame', 'admin-config-open');
 	adminConfigInitialStateJson = null;
 }
 
@@ -4693,6 +4712,25 @@ async function fetchItemState(itemName) {
 	}
 }
 
+function applyWidgetPropertyChanges(w, change, wType, updateState) {
+	if (change.label !== undefined) w.label = change.label;
+	if (change.state !== undefined) updateState(w, change.state);
+	if (change.icon !== undefined) {
+		w.icon = change.icon;
+		if (w.item) w.item.icon = change.icon;
+	}
+	if (change.mapping !== undefined && wType !== 'buttongrid') {
+		if (w.mappings) w.mappings = change.mapping;
+		else w.mapping = change.mapping;
+	}
+	if (change.buttons !== undefined && wType === 'buttongrid') {
+		w.buttons = Array.isArray(change.buttons) ? change.buttons : [];
+	}
+	if (change.labelcolor !== undefined) w.labelcolor = change.labelcolor;
+	if (change.valuecolor !== undefined) w.valuecolor = change.valuecolor;
+	if (change.iconcolor !== undefined) w.iconcolor = change.iconcolor;
+}
+
 function applyDeltaChanges(changes) {
 	if (!Array.isArray(changes) || !changes.length) return false;
 	let updated = false;
@@ -4723,22 +4761,7 @@ function applyDeltaChanges(changes) {
 				if (!targets) continue;
 				for (const w of targets) {
 					const wType = widgetType(w).toLowerCase();
-					if (change.label !== undefined) w.label = change.label;
-					if (change.state !== undefined) updateWidgetState(w, change.state);
-					if (change.icon !== undefined) {
-						w.icon = change.icon;
-						if (w.item) w.item.icon = change.icon;
-					}
-					if (change.mapping !== undefined && wType !== 'buttongrid') {
-						if (w.mappings) w.mappings = change.mapping;
-						else w.mapping = change.mapping;
-					}
-					if (change.buttons !== undefined && wType === 'buttongrid') {
-						w.buttons = Array.isArray(change.buttons) ? change.buttons : [];
-					}
-					if (change.labelcolor !== undefined) w.labelcolor = change.labelcolor;
-					if (change.valuecolor !== undefined) w.valuecolor = change.valuecolor;
-					if (change.iconcolor !== undefined) w.iconcolor = change.iconcolor;
+					applyWidgetPropertyChanges(w, change, wType, updateWidgetState);
 					updated = true;
 				}
 		}
@@ -4753,41 +4776,22 @@ function syncDeltaToCache(pageUrl, changes) {
 	if (!cachedPage) return;
 
 	// Build a map of changes by key for quick lookup
-	const changeMap = new Map();
-	for (const change of changes) {
-		const key = safeText(change?.key || '');
-		if (key) changeMap.set(key, change);
-	}
+	const changeMap = buildChangeMap(changes, c => c?.key);
 
 	// Recursively update widgets in the cached page structure
 	const updateWidgets = (widgets) => {
 		if (!widgets) return;
-		const list = Array.isArray(widgets) ? widgets : (widgets.item ? (Array.isArray(widgets.item) ? widgets.item : [widgets.item]) : [widgets]);
+		const list = normalizeWidgetList(widgets);
 			for (const w of list) {
 				if (!w) continue;
 				const key = deltaKey(w);
 				if (key && changeMap.has(key)) {
 					const change = changeMap.get(key);
 					const wType = widgetType(w).toLowerCase();
-					if (change.label !== undefined) w.label = change.label;
-					if (change.state !== undefined) {
-						if (w.item) w.item.state = change.state;
-						w.state = change.state;
-					}
-				if (change.icon !== undefined) {
-					w.icon = change.icon;
-					if (w.item) w.item.icon = change.icon;
-				}
-					if (change.mapping !== undefined && wType !== 'buttongrid') {
-						if (w.mappings) w.mappings = change.mapping;
-						else w.mapping = change.mapping;
-					}
-					if (change.buttons !== undefined && wType === 'buttongrid') {
-						w.buttons = Array.isArray(change.buttons) ? change.buttons : [];
-					}
-					if (change.labelcolor !== undefined) w.labelcolor = change.labelcolor;
-					if (change.valuecolor !== undefined) w.valuecolor = change.valuecolor;
-					if (change.iconcolor !== undefined) w.iconcolor = change.iconcolor;
+					applyWidgetPropertyChanges(w, change, wType, (widget, state) => {
+						if (widget.item) widget.item.state = state;
+						widget.state = state;
+					});
 				}
 			// Recurse into nested widgets (Frames, etc.)
 			if (w.widget) updateWidgets(w.widget);
@@ -4805,17 +4809,13 @@ function syncItemsToAllCachedPages(changes) {
 	if (!state.sitemapCacheReady || !state.sitemapCache || !Array.isArray(changes) || !changes.length) return;
 
 	// Build a map of changes by itemName
-	const changeMap = new Map();
-	for (const change of changes) {
-		const itemName = safeText(change?.itemName || '');
-		if (itemName) changeMap.set(itemName, change);
-	}
+	const changeMap = buildChangeMap(changes, c => c?.itemName);
 	if (changeMap.size === 0) return;
 
 	// Recursively update widgets matching item names
 	const updateWidgets = (widgets) => {
 		if (!widgets) return;
-		const list = Array.isArray(widgets) ? widgets : (widgets.item ? (Array.isArray(widgets.item) ? widgets.item : [widgets.item]) : [widgets]);
+		const list = normalizeWidgetList(widgets);
 			for (const w of list) {
 				if (!w) continue;
 				const itemName = safeText(w?.item?.name || w?.name || '');
@@ -4846,6 +4846,20 @@ function syncItemsToAllCachedPages(changes) {
 		const widgetSource = page?.widgets || page?.widget;
 		if (widgetSource) updateWidgets(widgetSource);
 	}
+}
+
+function normalizeWidgetList(widgets) {
+	return Array.isArray(widgets) ? widgets
+		: (widgets.item ? (Array.isArray(widgets.item) ? widgets.item : [widgets.item]) : [widgets]);
+}
+
+function buildChangeMap(changes, keyFn) {
+	const changeMap = new Map();
+	for (const change of changes) {
+		const key = safeText(keyFn(change) || '');
+		if (key) changeMap.set(key, change);
+	}
+	return changeMap;
 }
 
 function widgetType(widget) {
@@ -5608,6 +5622,31 @@ function animateSliderValue(input, targetValue, valueBubble = null, positionCall
 	requestAnimationFrame(animate);
 }
 
+function createInlineSliderContainer(card, labelRow, navHint, ...extraClasses) {
+	const inlineSlider = document.createElement('div');
+	inlineSlider.className = 'inline-slider flex items-center min-w-0';
+	card.classList.add('slider-card', ...extraClasses);
+	if (navHint && navHint.parentElement === labelRow) {
+		labelRow.insertBefore(inlineSlider, navHint);
+	} else {
+		labelRow.appendChild(inlineSlider);
+	}
+	return inlineSlider;
+}
+
+function createRangeInput(min, max, step, current, previousSliderValue, className) {
+	const input = document.createElement('input');
+	input.type = 'range';
+	input.min = String(min);
+	input.max = String(max);
+	input.step = String(step);
+	const startValue = (previousSliderValue !== null && Number.isFinite(previousSliderValue))
+		? previousSliderValue : current;
+	input.value = String(startValue);
+	input.className = className;
+	return { input, startValue };
+}
+
 function createSliderDragKit(input, inlineSlider, card, config) {
 	const { state, refresh, clampValue, sendCommand: cmdFn, itemName, errorLabel, formatBubble, onVisualUpdate } = config;
 
@@ -5866,6 +5905,33 @@ function buildMapviewUrl(coords) {
 	const normalizedLat = Math.round(clampedLat * 10000000) / 10000000;
 	const normalizedLon = Math.round(clampedLon * 10000000) / 10000000;
 	return `/presence?lat=${encodeURIComponent(normalizedLat)}&lon=${encodeURIComponent(normalizedLon)}`;
+}
+
+function createSetpointButton(text, isDisabled, computeNext, itemName) {
+	const btn = document.createElement('button');
+	btn.className = 'setpoint-btn';
+	btn.textContent = text;
+	btn.disabled = isDisabled;
+	btn.onclick = async () => {
+		haptic();
+		const next = computeNext();
+		btn.disabled = true;
+		try { await sendCommand(itemName, String(next)); await refresh(false); }
+		catch (e) { logJsError(`sendSetpoint failed for ${itemName}`, e); alert(e.message); }
+		finally { btn.disabled = false; }
+	};
+	return btn;
+}
+
+function createInlineControls(labelRow, navHint) {
+	const el = document.createElement('div');
+	el.className = 'inline-controls flex items-center gap-2 flex-1 min-w-0';
+	if (navHint && navHint.parentElement === labelRow) {
+		labelRow.insertBefore(el, navHint);
+	} else {
+		labelRow.appendChild(el);
+	}
+	return el;
 }
 
 function getWidgetRenderInfo(w) {
@@ -6228,8 +6294,7 @@ function updateCard(card, w, info) {
 	if (isImage) {
 		card.classList.add('image-card');
 		if (!mediaUrl) {
-			controls.classList.add('mt-3');
-			controls.innerHTML = `<div class="text-sm text-slate-400">Image not available</div>`;
+			showUnavailableMessage(controls, 'Image not available');
 			card.classList.remove('image-loading');
 			return true;
 		}
@@ -6268,41 +6333,12 @@ function updateCard(card, w, info) {
 	if (isChart) {
 		card.classList.add('chart-card');
 		if (!chartUrl) {
-			controls.classList.add('mt-3');
-			controls.innerHTML = `<div class="text-sm text-slate-400">Chart not available</div>`;
+			showUnavailableMessage(controls, 'Chart not available');
 			return true;
 		}
 		// Use iframe for HTML charts with 16:9 aspect ratio (or custom height if configured)
-		let frameContainer = controls.querySelector('.chart-frame-container');
-		if (!frameContainer) {
-			frameContainer = document.createElement('div');
-			frameContainer.className = 'chart-frame-container';
-			controls.appendChild(frameContainer);
-		}
-		// Apply height override if configured
-		if (chartHeight > 0) {
-			frameContainer.style.height = `${chartHeight}px`;
-			frameContainer.style.aspectRatio = 'auto';
-			frameContainer.style.paddingBottom = '0';
-		} else {
-			frameContainer.style.height = '';
-			if (supportsAspectRatio) {
-				frameContainer.style.aspectRatio = '16 / 9';
-				frameContainer.style.paddingBottom = '';
-			} else {
-				// Fallback for older browsers (Chrome <88)
-				frameContainer.style.aspectRatio = '';
-				frameContainer.style.paddingBottom = '56.25%';
-			}
-		}
-		let iframeEl = frameContainer.querySelector('iframe.chart-frame');
-		if (!iframeEl) {
-			iframeEl = document.createElement('iframe');
-			iframeEl.className = 'chart-frame';
-			iframeEl.setAttribute('frameborder', '0');
-			iframeEl.setAttribute('scrolling', 'no');
-			frameContainer.appendChild(iframeEl);
-		}
+		const { container: frameContainer, iframe: iframeEl } = getOrCreateIframe(controls, 'chart-frame-container', 'chart-frame', { scrolling: 'no' });
+		applyIframeHeight(frameContainer, chartHeight);
 
 		const chartRefreshMs = parseInt(w?.refresh, 10);
 		const chartRefreshVal = Number.isFinite(chartRefreshMs) && chartRefreshMs > 0 ? String(chartRefreshMs) : '';
@@ -6324,110 +6360,23 @@ function updateCard(card, w, info) {
 
 	if (isMapview) {
 		card.classList.add('mapview-card');
-		// Hide title and icon for mapview cards
-		labelRow.classList.add('hidden');
-		if (iconWrap) iconWrap.classList.add('hidden');
-		row.classList.add('hidden');
-		if (!mapviewUrl) {
-			row.classList.remove('hidden');
-			controls.classList.add('mt-3');
-			controls.innerHTML = `<div class="text-sm text-slate-400">Map location not available</div>`;
-			return true;
-		}
-		let frameContainer = card.querySelector('.mapview-frame-container');
-		if (!frameContainer) {
-			frameContainer = document.createElement('div');
-			frameContainer.className = 'mapview-frame-container';
-			card.appendChild(frameContainer);
-		}
-		let iframeEl = frameContainer.querySelector('iframe.mapview-frame');
-		if (!iframeEl) {
-			iframeEl = document.createElement('iframe');
-			iframeEl.className = 'mapview-frame';
-			iframeEl.setAttribute('frameborder', '0');
-			iframeEl.setAttribute('loading', 'lazy');
-			frameContainer.appendChild(iframeEl);
-		}
-		card.style.padding = '0';
-		card.style.overflow = 'hidden';
-		// Height: if 0, use 16:9 aspect ratio; otherwise use specified height
-		if (mapviewHeight > 0) {
-			frameContainer.style.height = `${mapviewHeight}px`;
-			frameContainer.style.aspectRatio = 'auto';
-			frameContainer.style.paddingBottom = '0';
-		} else {
-			frameContainer.style.height = '';
-			if (supportsAspectRatio) {
-				frameContainer.style.aspectRatio = '16 / 9';
-				frameContainer.style.paddingBottom = '';
-			} else {
-				frameContainer.style.aspectRatio = '';
-				frameContainer.style.paddingBottom = '56.25%';
-			}
-		}
-		const resolvedMapviewUrl = new URL(mapviewUrl, location.href).href;
-		if (iframeEl.src !== resolvedMapviewUrl) {
-			iframeEl.src = mapviewUrl;
-		}
-		return true;
+		hideMediaCardChrome(labelRow, iconWrap, row);
+		return renderIframeWidget(card, mapviewUrl, mapviewHeight,
+			'mapview-frame-container', 'mapview-frame', { loading: 'lazy' },
+			'Map location not available', controls, row);
 	}
 
 	if (isWebview) {
 		card.classList.add('webview-card');
-		// Hide title and icon for webview cards
-		labelRow.classList.add('hidden');
-		if (iconWrap) iconWrap.classList.add('hidden');
-		row.classList.add('hidden');
-		if (!webviewUrl) {
-			row.classList.remove('hidden');
-			controls.classList.add('mt-3');
-			controls.innerHTML = `<div class="text-sm text-slate-400">Webview URL not available</div>`;
-			return true;
-		}
-		let frameContainer = card.querySelector('.webview-frame-container');
-		if (!frameContainer) {
-			frameContainer = document.createElement('div');
-			frameContainer.className = 'webview-frame-container';
-			card.appendChild(frameContainer);
-		}
-		let iframeEl = frameContainer.querySelector('iframe.webview-frame');
-		if (!iframeEl) {
-			iframeEl = document.createElement('iframe');
-			iframeEl.className = 'webview-frame';
-			iframeEl.setAttribute('frameborder', '0');
-			iframeEl.setAttribute('allowfullscreen', 'true');
-			frameContainer.appendChild(iframeEl);
-		}
-		card.style.padding = '0';
-		card.style.overflow = 'hidden';
-		// Height: if 0, use 16:9 aspect ratio; otherwise use specified height
-		if (webviewHeight > 0) {
-			frameContainer.style.height = `${webviewHeight}px`;
-			frameContainer.style.aspectRatio = 'auto';
-			frameContainer.style.paddingBottom = '0';
-		} else {
-			frameContainer.style.height = '';
-			if (supportsAspectRatio) {
-				frameContainer.style.aspectRatio = '16 / 9';
-				frameContainer.style.paddingBottom = '';
-			} else {
-				frameContainer.style.aspectRatio = '';
-				frameContainer.style.paddingBottom = '56.25%';
-			}
-		}
-		const resolvedWebviewUrl = new URL(webviewUrl, location.href).href;
-		if (iframeEl.src !== resolvedWebviewUrl) {
-			iframeEl.src = webviewUrl;
-		}
-		return true;
+		hideMediaCardChrome(labelRow, iconWrap, row);
+		return renderIframeWidget(card, webviewUrl, webviewHeight,
+			'webview-frame-container', 'webview-frame', { allowfullscreen: 'true' },
+			'Webview URL not available', controls, row);
 	}
 
 	if (isVideo) {
 		card.classList.add('video-card');
-		// Hide title and icon for video cards
-		labelRow.classList.add('hidden');
-		if (iconWrap) iconWrap.classList.add('hidden');
-		row.classList.add('hidden');
+		hideMediaCardChrome(labelRow, iconWrap, row);
 		if (!videoUrl) {
 			const staleContainer = card.querySelector('.video-container');
 			if (staleContainer) {
@@ -6441,8 +6390,7 @@ function updateCard(card, w, info) {
 				staleContainer.remove();
 			}
 			row.classList.remove('hidden');
-			controls.classList.add('mt-3');
-			controls.innerHTML = `<div class="text-sm text-slate-400">Video URL not available</div>`;
+			showUnavailableMessage(controls, 'Video URL not available');
 			return true;
 		}
 		card.style.padding = '0';
@@ -6520,26 +6468,16 @@ function updateCard(card, w, info) {
 
 		if (isNewVideo) {
 			const disableVideoZoom = () => setVideoZoomReady(videoEl, false);
-			videoEl.addEventListener('loadstart', disableVideoZoom);
-			videoEl.addEventListener('waiting', disableVideoZoom);
-			videoEl.addEventListener('stalled', disableVideoZoom);
-			videoEl.addEventListener('pause', disableVideoZoom);
-			videoEl.addEventListener('ended', disableVideoZoom);
-			videoEl.addEventListener('emptied', disableVideoZoom);
-			videoEl.addEventListener('abort', disableVideoZoom);
-			videoEl.addEventListener('error', disableVideoZoom);
+			for (const evt of ['loadstart','waiting','stalled','pause','ended','emptied','abort','error']) {
+				videoEl.addEventListener(evt, disableVideoZoom);
+			}
 
 			// Auto-reconnect on error - aggressive retry
 			videoEl.addEventListener('error', () => {
 				const retry = () => {
 					if (videosPausedForVisibility) return;
 					if (videoEl.src && document.contains(videoEl)) {
-						setVideoZoomReady(videoEl, false);
-						resetVideoZoom(videoEl);
-						const src = videoEl.src;
-						videoEl.src = '';
-						videoEl.src = src;
-						videoEl.play().catch(() => {});
+						restartVideoStream(videoEl);
 					}
 				};
 				setTimeout(retry, 1000);
@@ -6557,12 +6495,7 @@ function updateCard(card, w, info) {
 				setTimeout(() => {
 					if (videosPausedForVisibility) return;
 					if (videoEl.src && document.contains(videoEl)) {
-						setVideoZoomReady(videoEl, false);
-						resetVideoZoom(videoEl);
-						const src = videoEl.src;
-						videoEl.src = '';
-						videoEl.src = src;
-						videoEl.play().catch(() => {});
+						restartVideoStream(videoEl);
 					}
 				}, 500);
 			});
@@ -6575,12 +6508,7 @@ function updateCard(card, w, info) {
 				if (videosPausedForVisibility) return;
 				if (videoEl.src && videoEl.paused && !videoEl.ended) {
 					videoEl.play().catch(() => {
-						setVideoZoomReady(videoEl, false);
-						resetVideoZoom(videoEl);
-						const src = videoEl.src;
-						videoEl.src = '';
-						videoEl.src = src;
-						videoEl.play().catch(() => {});
+						restartVideoStream(videoEl);
 					});
 				}
 			}, 3000);
@@ -6681,8 +6609,7 @@ function updateCard(card, w, info) {
 	if (!itemName && !hasButtongridButtonItem) {
 		if (!isText) {
 			navHint.classList.add('hidden');
-			controls.classList.add('mt-3');
-			controls.innerHTML = `<div class="text-sm text-slate-400">No item bound</div>`;
+			showUnavailableMessage(controls, 'No item bound');
 		}
 		return true;
 	}
@@ -6691,21 +6618,14 @@ function updateCard(card, w, info) {
 	// Heuristic controls by widget/item type
 	if (t.includes('selection')) {
 		if (!mapping.length) {
-			controls.classList.add('mt-3');
-			controls.innerHTML = `<div class="text-sm text-slate-400">No selection options available</div>`;
+			showUnavailableMessage(controls, 'No selection options available');
 		} else {
 			// Slim/small-header/small-touch use native overlay; all others use custom dropdown
 			const isSmallTouch = window.matchMedia('(max-width: 768px)').matches &&
 				('ontouchstart' in window || navigator.maxTouchPoints > 0);
 			const useOverlay = state.isSlim || state.headerMode === 'small' || isSmallTouch;
-			const inlineControls = document.createElement('div');
-			inlineControls.className = 'inline-controls flex items-center gap-2 flex-1 min-w-0';
 			card.classList.add('selection-card');
-			if (navHint && navHint.parentElement === labelRow) {
-				labelRow.insertBefore(inlineControls, navHint);
-			} else {
-				labelRow.appendChild(inlineControls);
-			}
+			const inlineControls = createInlineControls(labelRow, navHint);
 
 			const selectWrap = document.createElement('div');
 			selectWrap.className = 'select-wrap';
@@ -7006,13 +6926,7 @@ function updateCard(card, w, info) {
 		// No existing controls or count mismatch - create new
 		if (existingSwitchControls) existingSwitchControls.remove();
 
-		const inlineControls = document.createElement('div');
-		inlineControls.className = 'inline-controls flex items-center gap-2 flex-1 min-w-0';
-		if (navHint && navHint.parentElement === labelRow) {
-			labelRow.insertBefore(inlineControls, navHint);
-		} else {
-			labelRow.appendChild(inlineControls);
-		}
+		const inlineControls = createInlineControls(labelRow, navHint);
 
 		if (mapping.length) {
 			const btnClass = 'switch-btn';
@@ -7072,43 +6986,15 @@ function updateCard(card, w, info) {
 		const val = parseFloat(st);
 		const current = Number.isFinite(val) ? val : spMin;
 
-		const inlineControls = document.createElement('div');
-		inlineControls.className = 'inline-controls flex items-center gap-2 flex-1 min-w-0';
-		if (navHint && navHint.parentElement === labelRow) {
-			labelRow.insertBefore(inlineControls, navHint);
-		} else {
-			labelRow.appendChild(inlineControls);
-		}
+		const inlineControls = createInlineControls(labelRow, navHint);
 
-		const minus = document.createElement('button');
-		minus.className = 'setpoint-btn';
-		minus.textContent = '\u2212';
-		minus.disabled = current <= spMin;
-		minus.onclick = async () => {
-			haptic();
-			const next = Math.max(spMin, current - spStep);
-			minus.disabled = true;
-			try { await sendCommand(itemName, String(next)); await refresh(false); }
-			catch (e) { logJsError(`sendSetpoint failed for ${itemName}`, e); alert(e.message); }
-			finally { minus.disabled = false; }
-		};
+		const minus = createSetpointButton('\u2212', current <= spMin, () => Math.max(spMin, current - spStep), itemName);
 
 		const display = document.createElement('span');
 		display.className = 'setpoint-value';
 		display.textContent = labelParts.state || (Number.isFinite(val) ? String(val) : '\u2014');
 
-		const plus = document.createElement('button');
-		plus.className = 'setpoint-btn';
-		plus.textContent = '+';
-		plus.disabled = current >= spMax;
-		plus.onclick = async () => {
-			haptic();
-			const next = Math.min(spMax, current + spStep);
-			plus.disabled = true;
-			try { await sendCommand(itemName, String(next)); await refresh(false); }
-			catch (e) { logJsError(`sendSetpoint failed for ${itemName}`, e); alert(e.message); }
-			finally { plus.disabled = false; }
-		};
+		const plus = createSetpointButton('+', current >= spMax, () => Math.min(spMax, current + spStep), itemName);
 
 		inlineControls.appendChild(minus);
 		inlineControls.appendChild(display);
@@ -7119,13 +7005,7 @@ function updateCard(card, w, info) {
 		const rawHint = safeText(w?.inputHint || '').toLowerCase().trim();
 		const inputHint = ['text', 'number', 'date', 'time', 'datetime'].includes(rawHint) ? rawHint : 'text';
 
-		const inlineControls = document.createElement('div');
-		inlineControls.className = 'inline-controls flex items-center gap-2 flex-1 min-w-0';
-		if (navHint && navHint.parentElement === labelRow) {
-			labelRow.insertBefore(inlineControls, navHint);
-		} else {
-			labelRow.appendChild(inlineControls);
-		}
+		const inlineControls = createInlineControls(labelRow, navHint);
 
 		// Build the input element
 		const inputEl = document.createElement('input');
@@ -7247,25 +7127,10 @@ function updateCard(card, w, info) {
 		const val = parseFloat(st);
 		const current = Number.isFinite(val) ? Math.max(ctMin, Math.min(ctMax, val)) : ctMin;
 
-		const inlineSlider = document.createElement('div');
-		inlineSlider.className = 'inline-slider flex items-center min-w-0';
-		card.classList.add('slider-card', 'colortemperaturepicker-card');
-		if (navHint && navHint.parentElement === labelRow) {
-			labelRow.insertBefore(inlineSlider, navHint);
-		} else {
-			labelRow.appendChild(inlineSlider);
-		}
+		const inlineSlider = createInlineSliderContainer(card, labelRow, navHint, 'colortemperaturepicker-card');
 
-		const input = document.createElement('input');
-		input.type = 'range';
-		input.min = String(ctMin);
-		input.max = String(ctMax);
-		input.step = String(ctStep);
-		const startRaw = (previousSliderValue !== null && Number.isFinite(previousSliderValue))
-			? previousSliderValue : current;
+		const { input, startValue: startRaw } = createRangeInput(ctMin, ctMax, ctStep, current, previousSliderValue, 'w-full ctp-inline-slider');
 		const startValue = Math.max(ctMin, Math.min(ctMax, startRaw));
-		input.value = String(startValue);
-		input.className = 'w-full ctp-inline-slider';
 
 		const formatCtValue = (value) => {
 			const rounded = Math.round(Number(value) * 100) / 100;
@@ -7340,25 +7205,9 @@ function updateCard(card, w, info) {
 		const val = parseFloat(st);
 		const current = Number.isFinite(val) ? Math.max(sliderMin, Math.min(sliderMax, val)) : sliderMin;
 
-		const inlineSlider = document.createElement('div');
-		inlineSlider.className = 'inline-slider flex items-center min-w-0';
-		card.classList.add('slider-card');
-		if (navHint && navHint.parentElement === labelRow) {
-			labelRow.insertBefore(inlineSlider, navHint);
-		} else {
-			labelRow.appendChild(inlineSlider);
-		}
+		const inlineSlider = createInlineSliderContainer(card, labelRow, navHint);
 
-		const input = document.createElement('input');
-		input.type = 'range';
-		input.min = String(sliderMin);
-		input.max = String(sliderMax);
-		input.step = String(sliderStep);
-		// Start at previous value if available (for smooth animation), otherwise use current
-		const startValue = (previousSliderValue !== null && Number.isFinite(previousSliderValue))
-			? previousSliderValue : current;
-		input.value = String(startValue);
-		input.className = 'w-full';
+		const { input, startValue } = createRangeInput(sliderMin, sliderMax, sliderStep, current, previousSliderValue, 'w-full');
 
 		const kit = createSliderDragKit(input, inlineSlider, card, {
 			state, refresh,
@@ -8014,6 +7863,18 @@ async function buildSearchIndex() {
 	if (state.filter.trim()) render();
 }
 
+async function applyPageData(page, fade, shouldScroll) {
+	state.pageTitle = page?.title || state.pageTitle;
+	state.rawWidgets = normalizeWidgets(page);
+	state.lastPageUrl = state.pageUrl;
+	if (fade) await fade.promise;
+	if (shouldScroll) scrollToTop();
+	render();
+	saveHomeSnapshot();
+	if (fade) runPageFadeIn(fade.token);
+	state.isRefreshing = false;
+}
+
 async function refresh(showLoading) {
 	clearLoadingStatusTimer();
 	if (showLoading) scheduleLoadingStatus();
@@ -8036,16 +7897,8 @@ async function refresh(showLoading) {
 	if (isPageChange && state.sitemapCacheReady && !isFastConnection()) {
 		const cachedPage = getPageFromCache(state.pageUrl);
 		if (cachedPage) {
-			state.pageTitle = cachedPage?.title || state.pageTitle;
-			state.rawWidgets = normalizeWidgets(cachedPage);
-			state.lastPageUrl = state.pageUrl;
-			if (fade) await fade.promise;
-			if (shouldScroll) scrollToTop();
-			render();
-			saveHomeSnapshot();
 			clearLoadingStatusTimer();
-			if (fade) runPageFadeIn(fade.token);
-			state.isRefreshing = false;
+			await applyPageData(cachedPage, fade, shouldScroll);
 			// Background refresh to get fresh transformed labels
 			setTimeout(() => refresh(false), 100);
 			return;
@@ -8080,18 +7933,9 @@ async function refresh(showLoading) {
 			return;
 		}
 		const page = result.page;
-		state.pageTitle = page?.title || state.pageTitle;
-		state.rawWidgets = normalizeWidgets(page);
-		state.lastPageUrl = state.pageUrl;
-		// Update cache with fresh page data
 		updatePageInCache(state.pageUrl, page);
-		if (fade) await fade.promise;
-		if (shouldScroll) scrollToTop();
-		render();
-		saveHomeSnapshot();
 		clearLoadingStatusTimer();
-		if (fade) runPageFadeIn(fade.token);
-		state.isRefreshing = false;
+		await applyPageData(page, fade, shouldScroll);
 		setConnectionStatus(true);
 	} catch (e) {
 		console.error(e);
@@ -8102,15 +7946,7 @@ async function refresh(showLoading) {
 		if (state.sitemapCacheReady) {
 			const cachedPage = getPageFromCache(state.pageUrl);
 			if (cachedPage) {
-				state.pageTitle = cachedPage?.title || state.pageTitle;
-				state.rawWidgets = normalizeWidgets(cachedPage);
-				state.lastPageUrl = state.pageUrl;
-				if (fade) await fade.promise;
-				if (shouldScroll) scrollToTop();
-				render();
-				saveHomeSnapshot();
-				if (fade) runPageFadeIn(fade.token);
-				state.isRefreshing = false;
+				await applyPageData(cachedPage, fade, shouldScroll);
 				setConnectionStatus(false, e.message);
 				return;
 			}
@@ -9126,14 +8962,14 @@ function restoreNormalPolling() {
 	}, { passive: true });
 	window.addEventListener('blur', () => setIframePointerEvents(true), { passive: true });
 	window.addEventListener('keydown', noteActivity, { passive: true });
-	window.addEventListener('resize', scheduleImageResizeRefresh, { passive: true });
-	window.addEventListener('orientationchange', scheduleImageResizeRefresh, { passive: true });
-	window.addEventListener('resize', scheduleStretchRecalc, { passive: true });
-	window.addEventListener('orientationchange', scheduleStretchRecalc, { passive: true });
-	window.addEventListener('resize', scheduleSearchPlaceholderUpdate, { passive: true });
-	window.addEventListener('orientationchange', scheduleSearchPlaceholderUpdate, { passive: true });
-	window.addEventListener('resize', syncSearchFocusedLayout, { passive: true });
-	window.addEventListener('orientationchange', syncSearchFocusedLayout, { passive: true });
+	function addResizeListeners(fn) {
+		window.addEventListener('resize', fn, { passive: true });
+		window.addEventListener('orientationchange', fn, { passive: true });
+	}
+	addResizeListeners(scheduleImageResizeRefresh);
+	addResizeListeners(scheduleStretchRecalc);
+	addResizeListeners(scheduleSearchPlaceholderUpdate);
+	addResizeListeners(syncSearchFocusedLayout);
 	// Instant offline/online detection
 	window.addEventListener('offline', () => {
 		clearInflightFetches(); // Clear stuck requests to prevent deadlocks
@@ -9221,6 +9057,13 @@ function restoreNormalPolling() {
 	});
 
 	window.addEventListener('popstate', (event) => {
+		if (searchFocusHistoryPushed) {
+			searchFocusHistoryPushed = false;
+			if (els.search && document.activeElement === els.search) {
+				els.search.blur();
+			}
+			return;
+		}
 		const next = event.state;
 		if (!next) {
 			if (videoFullscreenActive) {
@@ -9372,6 +9215,35 @@ function restoreNormalPolling() {
 				speechSynthesis.speak(utterance);
 			}
 
+			function startVoiceProcessingTimeout(requestId) {
+				voiceTimeoutId = setTimeout(function() {
+					if (voiceRequestId === requestId) {
+						els.voice.classList.remove('processing');
+						isProcessing = false;
+						voiceRequestId++;
+					}
+				}, VOICE_RESPONSE_TIMEOUT_MS);
+			}
+			function handleVoiceSuccess(requestId) {
+				clearTimeout(voiceTimeoutId);
+				voiceTimeoutId = null;
+				if (voiceRequestId !== requestId) return false;
+				els.voice.classList.remove('processing');
+				isProcessing = false;
+				return true;
+			}
+			function handleVoiceError(requestId, err, label) {
+				logJsError(label, err);
+				if (voiceTimeoutId) {
+					clearTimeout(voiceTimeoutId);
+					voiceTimeoutId = null;
+				}
+				if (voiceRequestId === requestId) {
+					els.voice.classList.remove('processing');
+					isProcessing = false;
+				}
+			}
+
 			// Send transcript to voice command API and handle response
 			async function sendVoiceCommand(transcript) {
 				isListening = false;
@@ -9380,14 +9252,7 @@ function restoreNormalPolling() {
 				isProcessing = true;
 
 				var currentRequestId = ++voiceRequestId;
-
-				voiceTimeoutId = setTimeout(function() {
-					if (voiceRequestId === currentRequestId) {
-						els.voice.classList.remove('processing');
-						isProcessing = false;
-						voiceRequestId++;
-					}
-				}, VOICE_RESPONSE_TIMEOUT_MS);
+				startVoiceProcessingTimeout(currentRequestId);
 
 				try {
 					var response = await fetch('/api/voice', {
@@ -9397,27 +9262,13 @@ function restoreNormalPolling() {
 					});
 					var data = await response.json();
 
-					clearTimeout(voiceTimeoutId);
-					voiceTimeoutId = null;
-
-					if (voiceRequestId !== currentRequestId) return;
-
-					els.voice.classList.remove('processing');
-					isProcessing = false;
+					if (!handleVoiceSuccess(currentRequestId)) return;
 
 					if (data.response) {
 						speakText(data.response);
 					}
 				} catch (err) {
-					logJsError('voice request failed', err);
-					if (voiceTimeoutId) {
-						clearTimeout(voiceTimeoutId);
-						voiceTimeoutId = null;
-					}
-					if (voiceRequestId === currentRequestId) {
-						els.voice.classList.remove('processing');
-						isProcessing = false;
-					}
+					handleVoiceError(currentRequestId, err, 'voice request failed');
 				}
 			}
 
@@ -9490,38 +9341,20 @@ function restoreNormalPolling() {
 						isProcessing = true;
 						var currentRequestId = ++voiceRequestId;
 
-						voiceTimeoutId = setTimeout(function() {
-							if (voiceRequestId === currentRequestId) {
-								els.voice.classList.remove('processing');
-								isProcessing = false;
-								voiceRequestId++;
-							}
-						}, VOICE_RESPONSE_TIMEOUT_MS);
+						startVoiceProcessingTimeout(currentRequestId);
 
 						fetch('/api/voice/transcribe', {
 							method: 'POST',
 							headers: { 'Content-Type': 'application/octet-stream' },
 							body: pcm.buffer,
 						}).then(function(r) { return r.json(); }).then(function(data) {
-							clearTimeout(voiceTimeoutId);
-							voiceTimeoutId = null;
-							if (voiceRequestId !== currentRequestId) return;
-							els.voice.classList.remove('processing');
-							isProcessing = false;
+							if (!handleVoiceSuccess(currentRequestId)) return;
 
 							if (data.text && data.text.trim()) {
 								sendVoiceCommand(data.text.trim());
 							}
 						}).catch(function(err) {
-							logJsError('vosk transcribe failed', err);
-							if (voiceTimeoutId) {
-								clearTimeout(voiceTimeoutId);
-								voiceTimeoutId = null;
-							}
-							if (voiceRequestId === currentRequestId) {
-								els.voice.classList.remove('processing');
-								isProcessing = false;
-							}
+							handleVoiceError(currentRequestId, err, 'vosk transcribe failed');
 						});
 						return;
 					}
