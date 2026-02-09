@@ -3066,6 +3066,9 @@ function openCardConfigModal(widget, card) {
 	const initialCardConfig = collectCardConfigValues();
 	cardConfigInitialStateJson = initialCardConfig ? JSON.stringify(initialCardConfig) : null;
 
+	const titleEl = cardConfigModal.querySelector('.card-config-header h2');
+	if (titleEl) titleEl.textContent = isSection ? ohLang.cardConfig.frameTitle : ohLang.cardConfig.title;
+
 	openModalBase(cardConfigModal, 'card-config-open');
 }
 

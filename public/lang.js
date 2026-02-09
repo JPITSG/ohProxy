@@ -301,6 +301,7 @@ window.ohLang = {
 
 	cardConfig: {
 		title: 'Item Settings',
+		frameTitle: 'Frame Settings',
 		historyHeader: 'HISTORICAL VALUES',
 		soundHeader: 'DEFAULT SOUND',
 		heightHeader: 'HEIGHT',
