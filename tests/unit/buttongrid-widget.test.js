@@ -11,10 +11,10 @@ function safeText(value) {
 
 function normalizeButtongridButtons(widget) {
 	const buttons = [];
-	const inlineButtons = widget?.mappings || widget?.mapping;
-	if (Array.isArray(inlineButtons)) {
-		for (const b of inlineButtons) {
-			if (b?.row == null && b?.column == null) continue;
+	if (Array.isArray(widget?.buttons)) {
+		for (const b of widget.buttons) {
+			if (!b || typeof b !== 'object') continue;
+			const itemName = safeText(b?.itemName || b?.item?.name || '');
 			buttons.push({
 				row: parseInt(b?.row, 10) || 1,
 				column: parseInt(b?.column, 10) || 1,
@@ -22,7 +22,27 @@ function normalizeButtongridButtons(widget) {
 				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
 				label: safeText(b?.label || ''),
 				icon: safeText(b?.icon || b?.staticIcon || ''),
-				itemName: safeText(b?.item?.name || ''),
+				itemName,
+				state: safeText(b?.state ?? b?.item?.state ?? ''),
+				stateless: !!b?.stateless,
+			});
+		}
+		return buttons;
+	}
+	const inlineButtons = widget?.mappings || widget?.mapping;
+	if (Array.isArray(inlineButtons)) {
+		for (const b of inlineButtons) {
+			if (b?.row == null && b?.column == null) continue;
+			const itemName = safeText(b?.itemName || b?.item?.name || '');
+			buttons.push({
+				row: parseInt(b?.row, 10) || 1,
+				column: parseInt(b?.column, 10) || 1,
+				command: safeText(b?.command || b?.cmd || ''),
+				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
+				label: safeText(b?.label || ''),
+				icon: safeText(b?.icon || b?.staticIcon || ''),
+				itemName,
+				state: safeText(b?.state ?? b?.item?.state ?? ''),
 				stateless: !!b?.stateless,
 			});
 		}
@@ -31,6 +51,7 @@ function normalizeButtongridButtons(widget) {
 	if (Array.isArray(children)) {
 		for (const c of children) {
 			if (safeText(c?.type).toLowerCase() !== 'button') continue;
+			const itemName = safeText(c?.itemName || c?.item?.name || '');
 			buttons.push({
 				row: parseInt(c?.row, 10) || 1,
 				column: parseInt(c?.column, 10) || 1,
@@ -38,7 +59,8 @@ function normalizeButtongridButtons(widget) {
 				releaseCommand: safeText(c?.releaseCommand || c?.release || ''),
 				label: safeText(c?.label || ''),
 				icon: safeText(c?.icon || c?.staticIcon || ''),
-				itemName: safeText(c?.item?.name || ''),
+				itemName,
+				state: safeText(c?.state ?? c?.item?.state ?? ''),
 				stateless: !!c?.stateless,
 			});
 		}
@@ -49,7 +71,7 @@ function normalizeButtongridButtons(widget) {
 function buttonsSignature(buttons) {
 	if (!buttons || !buttons.length) return '';
 	return buttons.map((b) =>
-		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.stateless}`
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}`
 	).join('|');
 }
 
@@ -90,6 +112,23 @@ describe('Buttongrid Widget', () => {
 			assert.strictEqual(buttons[0].stateless, true);
 			assert.strictEqual(buttons[1].command, 'PAUSE');
 			assert.strictEqual(buttons[1].icon, 'material:pause');
+		});
+
+		it('prefers normalized buttons payload when provided', () => {
+			const widget = {
+				type: 'Buttongrid',
+				buttons: [
+					{ row: 1, column: 1, command: 'POWER', label: 'Power', itemName: 'RemoteItem', state: 'POWER' },
+				],
+				mappings: [
+					{ row: 9, column: 9, command: 'SHOULD_NOT_USE', label: 'Ignored' },
+				],
+			};
+			const buttons = normalizeButtongridButtons(widget);
+			assert.strictEqual(buttons.length, 1);
+			assert.strictEqual(buttons[0].command, 'POWER');
+			assert.strictEqual(buttons[0].itemName, 'RemoteItem');
+			assert.strictEqual(buttons[0].state, 'POWER');
 		});
 
 		it('skips mappings without row or column (regular Switch mappings)', () => {
@@ -146,11 +185,12 @@ describe('Buttongrid Widget', () => {
 		it('extracts itemName from button item', () => {
 			const widget = {
 				widgets: [
-					{ type: 'Button', row: 1, column: 1, command: 'ON', item: { name: 'CustomItem' } },
+					{ type: 'Button', row: 1, column: 1, command: 'ON', item: { name: 'CustomItem', state: 'ON' } },
 				],
 			};
 			const buttons = normalizeButtongridButtons(widget);
 			assert.strictEqual(buttons[0].itemName, 'CustomItem');
+			assert.strictEqual(buttons[0].state, 'ON');
 		});
 
 		it('handles mixed inline and child buttons', () => {
@@ -178,11 +218,11 @@ describe('Buttongrid Widget', () => {
 
 		it('generates deterministic signature', () => {
 			const buttons = [
-				{ row: 1, column: 1, command: 'POWER', releaseCommand: '', label: 'Power', icon: 'material:power', itemName: '', stateless: true },
-				{ row: 1, column: 2, command: 'UP', releaseCommand: '', label: 'Up', icon: '', itemName: '', stateless: false },
+				{ row: 1, column: 1, command: 'POWER', releaseCommand: '', label: 'Power', icon: 'material:power', itemName: '', state: 'POWER', stateless: true },
+				{ row: 1, column: 2, command: 'UP', releaseCommand: '', label: 'Up', icon: '', itemName: '', state: '', stateless: false },
 			];
 			const sig = buttonsSignature(buttons);
-			assert.strictEqual(sig, '1:1:POWER::Power:material:power::true|1:2:UP::Up:::false');
+			assert.strictEqual(sig, '1:1:POWER::Power:material:power::POWER:true|1:2:UP::Up::::false');
 		});
 
 		it('changes when button properties change', () => {

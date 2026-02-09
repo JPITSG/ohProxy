@@ -4792,6 +4792,30 @@ function widgetState(widget) {
 	return safeText(widget?.item?.state ?? widget?.state ?? '');
 }
 
+function setButtongridButtonState(widget, itemName, nextState) {
+	if (!widget) return false;
+	if (widgetType(widget).toLowerCase() !== 'buttongrid') return false;
+	const targetItem = safeText(itemName).trim();
+	if (!targetItem) return false;
+	let buttons = Array.isArray(widget?.buttons) ? widget.buttons : null;
+	if (!buttons) {
+		buttons = normalizeButtongridButtons(widget);
+		if (!buttons.length) return false;
+		widget.buttons = buttons;
+	}
+	const stateValue = safeText(nextState);
+	let changed = false;
+	for (const b of buttons) {
+		const btnItemName = safeText(b?.itemName || b?.item?.name || '').trim();
+		if (!btnItemName || btnItemName !== targetItem) continue;
+		const prevState = safeText(b?.state ?? b?.item?.state ?? '');
+		if (prevState !== stateValue) changed = true;
+		b.state = stateValue;
+		if (b.item && typeof b.item === 'object') b.item.state = stateValue;
+	}
+	return changed;
+}
+
 function updateWidgetState(widget, nextState) {
 	if (!widget || nextState === undefined) return;
 	const prevState = widget?.item?.state ?? widget?.state;
@@ -4812,15 +4836,23 @@ function updateWidgetState(widget, nextState) {
 }
 
 function updateItemState(itemName, nextState) {
-	if (!itemName) return;
+	if (!itemName || nextState === undefined) return false;
 	const name = safeText(itemName);
+	let changed = false;
 	const lists = [state.rawWidgets, state.searchWidgets];
 	for (const list of lists) {
 		if (!Array.isArray(list)) continue;
 		for (const w of list) {
-			if (safeText(w?.item?.name) === name) updateWidgetState(w, nextState);
+			const widgetItemName = safeText(w?.item?.name || w?.itemName || '');
+			if (widgetItemName === name) {
+				const prevState = safeText(w?.item?.state ?? w?.state ?? '');
+				updateWidgetState(w, nextState);
+				if (prevState !== safeText(nextState)) changed = true;
+			}
+			if (setButtongridButtonState(w, name, nextState)) changed = true;
 		}
 	}
+	return changed;
 }
 
 function findWidgetByKey(key) {
@@ -4876,23 +4908,27 @@ function applyDeltaChanges(changes) {
 			const changeItem = safeText(change?.itemName || '');
 			let targets = changeKey ? keyIndex.get(changeKey) : null;
 			if ((!targets || !targets.length) && changeItem) targets = itemIndex.get(changeItem);
-			if (!targets) continue;
-			for (const w of targets) {
-				if (change.label !== undefined) w.label = change.label;
-				if (change.state !== undefined) updateWidgetState(w, change.state);
-				if (change.icon !== undefined) {
-					w.icon = change.icon;
-					if (w.item) w.item.icon = change.icon;
+				if (!targets) continue;
+				for (const w of targets) {
+					const wType = widgetType(w).toLowerCase();
+					if (change.label !== undefined) w.label = change.label;
+					if (change.state !== undefined) updateWidgetState(w, change.state);
+					if (change.icon !== undefined) {
+						w.icon = change.icon;
+						if (w.item) w.item.icon = change.icon;
+					}
+					if (change.mapping !== undefined && wType !== 'buttongrid') {
+						if (w.mappings) w.mappings = change.mapping;
+						else w.mapping = change.mapping;
+					}
+					if (change.buttons !== undefined && wType === 'buttongrid') {
+						w.buttons = Array.isArray(change.buttons) ? change.buttons : [];
+					}
+					if (change.labelcolor !== undefined) w.labelcolor = change.labelcolor;
+					if (change.valuecolor !== undefined) w.valuecolor = change.valuecolor;
+					if (change.iconcolor !== undefined) w.iconcolor = change.iconcolor;
+					updated = true;
 				}
-				if (change.mapping !== undefined) {
-					if (w.mappings) w.mappings = change.mapping;
-					else w.mapping = change.mapping;
-				}
-				if (change.labelcolor !== undefined) w.labelcolor = change.labelcolor;
-				if (change.valuecolor !== undefined) w.valuecolor = change.valuecolor;
-				if (change.iconcolor !== undefined) w.iconcolor = change.iconcolor;
-				updated = true;
-			}
 		}
 	}
 	return updated;
@@ -4915,28 +4951,32 @@ function syncDeltaToCache(pageUrl, changes) {
 	const updateWidgets = (widgets) => {
 		if (!widgets) return;
 		const list = Array.isArray(widgets) ? widgets : (widgets.item ? (Array.isArray(widgets.item) ? widgets.item : [widgets.item]) : [widgets]);
-		for (const w of list) {
-			if (!w) continue;
-			const key = deltaKey(w);
-			if (key && changeMap.has(key)) {
-				const change = changeMap.get(key);
-				if (change.label !== undefined) w.label = change.label;
-				if (change.state !== undefined) {
-					if (w.item) w.item.state = change.state;
-					w.state = change.state;
-				}
+			for (const w of list) {
+				if (!w) continue;
+				const key = deltaKey(w);
+				if (key && changeMap.has(key)) {
+					const change = changeMap.get(key);
+					const wType = widgetType(w).toLowerCase();
+					if (change.label !== undefined) w.label = change.label;
+					if (change.state !== undefined) {
+						if (w.item) w.item.state = change.state;
+						w.state = change.state;
+					}
 				if (change.icon !== undefined) {
 					w.icon = change.icon;
 					if (w.item) w.item.icon = change.icon;
 				}
-				if (change.mapping !== undefined) {
-					if (w.mappings) w.mappings = change.mapping;
-					else w.mapping = change.mapping;
+					if (change.mapping !== undefined && wType !== 'buttongrid') {
+						if (w.mappings) w.mappings = change.mapping;
+						else w.mapping = change.mapping;
+					}
+					if (change.buttons !== undefined && wType === 'buttongrid') {
+						w.buttons = Array.isArray(change.buttons) ? change.buttons : [];
+					}
+					if (change.labelcolor !== undefined) w.labelcolor = change.labelcolor;
+					if (change.valuecolor !== undefined) w.valuecolor = change.valuecolor;
+					if (change.iconcolor !== undefined) w.iconcolor = change.iconcolor;
 				}
-				if (change.labelcolor !== undefined) w.labelcolor = change.labelcolor;
-				if (change.valuecolor !== undefined) w.valuecolor = change.valuecolor;
-				if (change.iconcolor !== undefined) w.iconcolor = change.iconcolor;
-			}
 			// Recurse into nested widgets (Frames, etc.)
 			if (w.widget) updateWidgets(w.widget);
 			if (w.widgets) updateWidgets(w.widgets);
@@ -4964,11 +5004,11 @@ function syncItemsToAllCachedPages(changes) {
 	const updateWidgets = (widgets) => {
 		if (!widgets) return;
 		const list = Array.isArray(widgets) ? widgets : (widgets.item ? (Array.isArray(widgets.item) ? widgets.item : [widgets.item]) : [widgets]);
-		for (const w of list) {
-			if (!w) continue;
-			const itemName = safeText(w?.item?.name || w?.name || '');
-			if (itemName && changeMap.has(itemName)) {
-				const change = changeMap.get(itemName);
+			for (const w of list) {
+				if (!w) continue;
+				const itemName = safeText(w?.item?.name || w?.name || '');
+				if (itemName && changeMap.has(itemName)) {
+					const change = changeMap.get(itemName);
 				if (change.state !== undefined) {
 					if (w.item) w.item.state = change.state;
 					w.state = change.state;
@@ -4976,13 +5016,18 @@ function syncItemsToAllCachedPages(changes) {
 					// Don't update for raw states like "OPEN"/"CLOSED" which have transformers
 					if (w.label && w.label.includes('[') && /^\d+$/.test(change.state)) {
 						w.label = w.label.replace(/\[[^\]]*\]/, `[${change.state}]`);
+						}
 					}
 				}
+				for (const [changedItemName, change] of changeMap.entries()) {
+					if (setButtongridButtonState(w, changedItemName, change.state)) {
+						// Keep cache-only state in sync for button-level items.
+					}
+				}
+				if (w.widget) updateWidgets(w.widget);
+				if (w.widgets) updateWidgets(w.widgets);
 			}
-			if (w.widget) updateWidgets(w.widget);
-			if (w.widgets) updateWidgets(w.widgets);
-		}
-	};
+		};
 
 	// Update all cached pages - support both OH 1.x 'widget' and OH 3.x+ 'widgets'
 	for (const page of state.sitemapCache.values()) {
@@ -5077,7 +5122,7 @@ function normalizeMapping(mapping) {
 				const releaseCommand = safeText(m.releaseCommand ?? '');
 				const label = safeText(m.label ?? m.command ?? '');
 				const icon = safeText(m.icon ?? '');
-				if (!command) return null;
+				if (!command && !label && !icon) return null;
 				return { command, releaseCommand, label: label || command, icon };
 			})
 			.filter(Boolean);
@@ -5088,11 +5133,10 @@ function normalizeMapping(mapping) {
 			const releaseCommand = safeText(mapping.releaseCommand ?? '');
 			const label = safeText(mapping.label ?? mapping.command ?? '');
 			const icon = safeText(mapping.icon ?? '');
-			if (!command) return [];
+			if (!command && !label && !icon) return [];
 			return [{ command, releaseCommand, label: label || command, icon }];
 		}
 		return Object.entries(mapping)
-			.filter(([command]) => safeText(command))
 			.map(([command, mappingValue]) => {
 				const isEntryObject = mappingValue && typeof mappingValue === 'object';
 				const label = isEntryObject
@@ -5112,11 +5156,10 @@ function normalizeMapping(mapping) {
 
 function normalizeButtongridButtons(widget) {
 	const buttons = [];
-	// Inline buttons come through mappings with row/column fields
-	const inlineButtons = widget?.mappings || widget?.mapping;
-	if (Array.isArray(inlineButtons)) {
-		for (const b of inlineButtons) {
-			if (b?.row == null && b?.column == null) continue;
+	if (Array.isArray(widget?.buttons)) {
+		for (const b of widget.buttons) {
+			if (!b || typeof b !== 'object') continue;
+			const itemName = safeText(b?.itemName || b?.item?.name || '');
 			buttons.push({
 				row: parseInt(b?.row, 10) || 1,
 				column: parseInt(b?.column, 10) || 1,
@@ -5124,7 +5167,28 @@ function normalizeButtongridButtons(widget) {
 				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
 				label: safeText(b?.label || ''),
 				icon: safeText(b?.icon || b?.staticIcon || ''),
-				itemName: safeText(b?.item?.name || ''),
+				itemName,
+				state: safeText(b?.state ?? b?.item?.state ?? ''),
+				stateless: !!b?.stateless,
+			});
+		}
+		return buttons;
+	}
+	// Inline buttons come through mappings with row/column fields
+	const inlineButtons = widget?.mappings || widget?.mapping;
+	if (Array.isArray(inlineButtons)) {
+		for (const b of inlineButtons) {
+			if (b?.row == null && b?.column == null) continue;
+			const itemName = safeText(b?.itemName || b?.item?.name || '');
+			buttons.push({
+				row: parseInt(b?.row, 10) || 1,
+				column: parseInt(b?.column, 10) || 1,
+				command: safeText(b?.command || b?.cmd || ''),
+				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
+				label: safeText(b?.label || ''),
+				icon: safeText(b?.icon || b?.staticIcon || ''),
+				itemName,
+				state: safeText(b?.state ?? b?.item?.state ?? ''),
 				stateless: !!b?.stateless,
 			});
 		}
@@ -5134,6 +5198,7 @@ function normalizeButtongridButtons(widget) {
 	if (Array.isArray(children)) {
 		for (const c of children) {
 			if (safeText(c?.type).toLowerCase() !== 'button') continue;
+			const itemName = safeText(c?.itemName || c?.item?.name || '');
 			buttons.push({
 				row: parseInt(c?.row, 10) || 1,
 				column: parseInt(c?.column, 10) || 1,
@@ -5141,7 +5206,8 @@ function normalizeButtongridButtons(widget) {
 				releaseCommand: safeText(c?.releaseCommand || c?.release || ''),
 				label: safeText(c?.label || ''),
 				icon: safeText(c?.icon || c?.staticIcon || ''),
-				itemName: safeText(c?.item?.name || ''),
+				itemName,
+				state: safeText(c?.state ?? c?.item?.state ?? ''),
 				stateless: !!c?.stateless,
 			});
 		}
@@ -5168,6 +5234,10 @@ function parseSwitchMappingCommand(rawMapping) {
 	const press = command.slice(0, firstColon).trim();
 	const release = command.slice(firstColon + 1).trim();
 	if (!press || !release) return { mode: 'single', press: command };
+	const dualToken = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
+	if (!dualToken.test(press) || !dualToken.test(release)) {
+		return { mode: 'single', press: command };
+	}
 	return { mode: 'dual', press, release };
 }
 
@@ -5233,10 +5303,19 @@ function mappingIconCandidates(icon) {
 	return iconCandidates(raw);
 }
 
+function escapeCssUrl(url) {
+	return safeText(url)
+		.replace(/\\/g, '\\\\')
+		.replace(/"/g, '\\"')
+		.replace(/[\n\r\f]/g, ' ')
+		.replace(/\)/g, '\\)');
+}
+
 function applyMappingIconUrl(iconEl, url) {
 	if (!iconEl || !url) return;
-	iconEl.style.webkitMaskImage = `url("${url}")`;
-	iconEl.style.maskImage = `url("${url}")`;
+	const safeUrl = escapeCssUrl(url);
+	iconEl.style.webkitMaskImage = `url("${safeUrl}")`;
+	iconEl.style.maskImage = `url("${safeUrl}")`;
 }
 
 function clearMappingIconUrl(iconEl) {
@@ -5477,24 +5556,27 @@ function bindSwitchDualCommand(btn, itemName, pressCommand, releaseCommand, card
 	const controller = new AbortController();
 	let activePress = false;
 	let activePointerId = null;
-	let refreshHeld = false;
-	let releasePending = false;
+	let refreshHoldCount = 0;
+	let pendingReleases = 0;
 	let commandChain = Promise.resolve();
 
 	const holdRefresh = () => {
-		if (refreshHeld) return;
-		refreshHeld = true;
+		refreshHoldCount += 1;
 		state.suppressRefreshCount += 1;
 	};
 
 	const releaseRefresh = () => {
-		if (!refreshHeld) return;
-		refreshHeld = false;
+		if (refreshHoldCount <= 0) return;
+		refreshHoldCount -= 1;
 		state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
-		if (state.pendingRefresh) {
+		if (refreshHoldCount === 0 && state.pendingRefresh) {
 			state.pendingRefresh = false;
 			refresh(false);
 		}
+	};
+
+	const releaseAllRefresh = () => {
+		while (refreshHoldCount > 0) releaseRefresh();
 	};
 
 	const queueCommand = (command, refreshAfter) => {
@@ -5521,15 +5603,15 @@ function bindSwitchDualCommand(btn, itemName, pressCommand, releaseCommand, card
 
 	const endPress = () => {
 		if (!activePress) {
-			if (!releasePending) releaseRefresh();
+			if (pendingReleases === 0) releaseAllRefresh();
 			return;
 		}
 		activePress = false;
 		activePointerId = null;
-		releasePending = true;
+		pendingReleases += 1;
 		queueCommand(releaseCommand, true);
 		commandChain.finally(() => {
-			releasePending = false;
+			pendingReleases = Math.max(0, pendingReleases - 1);
 			releaseRefresh();
 		});
 	};
@@ -5814,7 +5896,7 @@ function getWidgetRenderInfo(w) {
 	const mappingSig = mapping.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}:${m.icon || ''}`).join('|');
 	const buttons = isButtongrid ? normalizeButtongridButtons(w) : [];
 	const buttonsSig = buttons.map((b) =>
-		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.stateless}`
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}`
 	).join('|');
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
@@ -6002,6 +6084,10 @@ function updateCard(card, w, info) {
 	controls.classList.remove('hidden', 'mt-3');
 	labelRow.classList.remove('hidden');
 	if (iconWrap) iconWrap.classList.remove('hidden');
+	// Reset inline visibility overrides from buttongrid rendering before reusing card.
+	labelStack.style.display = '';
+	navHint.style.display = '';
+	metaEl.style.display = '';
 	navHint.classList.add('hidden');
 	// Capture switch controls for smooth state transitions
 	const isSwitchType = t.includes('switch') || t === 'switch';
@@ -6502,7 +6588,8 @@ function updateCard(card, w, info) {
 		return true;
 	}
 
-	if (!itemName) {
+	const hasButtongridButtonItem = isButtongrid && Array.isArray(buttons) && buttons.some((b) => safeText(b?.itemName).trim());
+	if (!itemName && !hasButtongridButtonItem) {
 		if (!isText) {
 			navHint.classList.add('hidden');
 			controls.classList.add('mt-3');
@@ -6774,6 +6861,21 @@ function updateCard(card, w, info) {
 					const parsed = parseSwitchMappingCommand(m);
 					setMappingControlContent(btn, m);
 					btn.dataset.command = m.command;
+					const hasPressCommand = !!safeText(parsed.press).trim();
+					if (!hasPressCommand) {
+						btn.disabled = true;
+						btn.classList.remove('is-active');
+						btn.onclick = null;
+						btn.onpointerdown = null;
+						btn.onpointerup = null;
+						btn.onpointercancel = null;
+						btn.onlostpointercapture = null;
+						btn.onkeydown = null;
+						btn.onkeyup = null;
+						btn.onblur = null;
+						continue;
+					}
+					btn.disabled = false;
 					const shouldBeActive = parsed.mode === 'single' && safeText(m.command) === currentState;
 					btn.classList.toggle('is-active', shouldBeActive);
 					if (parsed.mode === 'dual') {
@@ -6833,6 +6935,13 @@ function updateCard(card, w, info) {
 				b.className = btnClass;
 				setMappingControlContent(b, m);
 				b.dataset.command = m.command;
+				const hasPressCommand = !!safeText(parsed.press).trim();
+				if (!hasPressCommand) {
+					b.disabled = true;
+					inlineControls.appendChild(b);
+					continue;
+				}
+				b.disabled = false;
 				if (parsed.mode === 'single' && safeText(m.command) === currentState) b.classList.add('is-active');
 				if (parsed.mode === 'dual') {
 					const handlers = bindSwitchDualCommand(b, itemName, parsed.press, parsed.release, card);
@@ -7607,24 +7716,30 @@ function updateCard(card, w, info) {
 			btn.style.gridRow = String(b.row);
 			btn.style.gridColumn = String(b.column);
 
-			const btnItemName = b.itemName || parentItemName;
+			const pressCommand = safeText(b.command).trim();
+			const releaseCommand = safeText(b.releaseCommand).trim();
+			const btnItemName = safeText(b.itemName || parentItemName).trim();
 
 			setMappingControlContent(btn, {
-				command: b.command,
-				releaseCommand: b.releaseCommand,
-				label: b.label || b.command,
+				command: pressCommand,
+				releaseCommand,
+				label: safeText(b.label || pressCommand),
 				icon: b.icon,
 			});
 
-			if (b.releaseCommand) {
-				bindSwitchDualCommand(btn, btnItemName, b.command, b.releaseCommand, card);
+			if (!btnItemName || !pressCommand) {
+				btn.disabled = true;
+			} else if (releaseCommand) {
+				bindSwitchDualCommand(btn, btnItemName, pressCommand, releaseCommand, card);
 			} else {
-				bindSwitchSingleCommand(btn, btnItemName, b.command);
+				bindSwitchSingleCommand(btn, btnItemName, pressCommand);
 			}
 
 			if (!b.stateless) {
-				const currentState = safeText(w?.item?.state || '');
-				if (safeText(b.command) === currentState) {
+				const currentState = safeText(
+					b?.state ?? b?.item?.state ?? (btnItemName === parentItemName ? w?.item?.state : '')
+				);
+				if (pressCommand === currentState) {
 					btn.classList.add('is-active');
 				}
 			}
@@ -8416,33 +8531,35 @@ async function checkChartHashes() {
 			const item = urlObj.searchParams.get('item') || '';
 			const period = urlObj.searchParams.get('period') || '';
 			const title = urlObj.searchParams.get('title') || '';
+			const legend = urlObj.searchParams.get('legend') === 'false' ? 'false' : 'true';
+			const yAxisDecimalPattern = urlObj.searchParams.get('yAxisDecimalPattern') || '';
+			const interpolation = (urlObj.searchParams.get('interpolation') || 'linear').toLowerCase();
 			if (!item || !period) continue;
 
 			// Cache key includes assetVersion to match server
-			const cacheKey = `${item}|${period}|${mode}|${assetVersion}`;
+			const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${yAxisDecimalPattern}|${interpolation}`;
 			const prevHash = chartHashes.get(cacheKey) || null;
 
-			try {
-				const legend = urlObj.searchParams.get('legend');
-				const yAxisDecimalPattern = urlObj.searchParams.get('yAxisDecimalPattern');
-				const hashUrl = `/api/chart-hash?item=${encodeURIComponent(item)}&period=${period}&mode=${mode}` +
-					(title ? `&title=${encodeURIComponent(title)}` : '') +
-					(legend === 'false' ? '&legend=false' : '') +
-					(yAxisDecimalPattern ? `&yAxisDecimalPattern=${encodeURIComponent(yAxisDecimalPattern)}` : '');
+				try {
+						const hashUrl = `/api/chart-hash?item=${encodeURIComponent(item)}&period=${encodeURIComponent(period)}&mode=${mode}` +
+							(title ? `&title=${encodeURIComponent(title)}` : '') +
+							(legend === 'false' ? '&legend=false' : '') +
+							(yAxisDecimalPattern ? `&yAxisDecimalPattern=${encodeURIComponent(yAxisDecimalPattern)}` : '') +
+						(interpolation === 'step' ? '&interpolation=step' : '');
 				const res = await fetch(hashUrl, { cache: 'no-store' });
 				if (!res.ok) continue;
 				const data = await res.json();
 				if (!data.hash) continue;
 
-				// On first check, read hash from iframe and compare
-				let swapped = false;
-				if (!prevHash) {
-					const iframeHash = readIframeChartHash(iframe);
-					if (iframeHash && iframeHash !== data.hash) {
-						// Skip if user is interacting with chart
-						if (!isChartBeingInteracted(iframe)) {
-							const newUrl = buildChartReloadUrl(chartUrl, data.hash);
-							swapChartIframe(iframe, newUrl, chartUrl);
+					// On first check, read hash from iframe and compare
+					let swapped = false;
+					if (!prevHash) {
+						const iframeHash = readIframeChartHash(iframe);
+						if (iframeHash !== data.hash) {
+							// Skip if user is interacting with chart
+							if (!isChartBeingInteracted(iframe)) {
+								const newUrl = buildChartReloadUrl(chartUrl, data.hash);
+								swapChartIframe(iframe, newUrl, chartUrl);
 							swapped = true;
 						}
 					} else {
@@ -8752,7 +8869,11 @@ function applyWsUpdate(data) {
 		itemName: item.name,
 		state: item.state,
 	}));
-	const didUpdate = applyDeltaChanges(deltaChanges);
+	let didItemStateUpdate = false;
+	for (const change of deltaChanges) {
+		if (updateItemState(change.itemName, change.state)) didItemStateUpdate = true;
+	}
+	const didUpdate = applyDeltaChanges(deltaChanges) || didItemStateUpdate;
 	// Also sync to sitemap cache so navigation shows updated states
 	syncItemsToAllCachedPages(deltaChanges);
 	if (didUpdate) {
@@ -8767,6 +8888,28 @@ function applyWsUpdate(data) {
 			wsRefreshTimer = null;
 			refresh(false);
 		}, WS_REFRESH_DEBOUNCE_MS);
+	}
+}
+
+function handleWsPong(_data) {
+	// Reserved for future server-driven ping/pong payloads.
+}
+
+function handleWsChartHashResponse(data) {
+	if (!data || typeof data !== 'object') return;
+	const item = safeText(data.item || '').trim();
+	const period = safeText(data.period || '').trim();
+	const hash = safeText(data.hash || '').trim();
+	if (!item || !period || !hash) return;
+	const mode = safeText(data.mode || getThemeMode() || 'dark').toLowerCase();
+	const assetVersion = OH_CONFIG.assetVersion || 'v1';
+	const title = safeText(data.title || '');
+	const legend = data.legend === false || data.legend === 'false' ? 'false' : 'true';
+	const yAxisDecimalPattern = safeText(data.yAxisDecimalPattern || '');
+	const interpolation = safeText(data.interpolation || 'linear').toLowerCase() === 'step' ? 'step' : 'linear';
+	const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${yAxisDecimalPattern}|${interpolation}`;
+	if (MAX_CHART_HASHES > 0) {
+		setBoundedCache(chartHashes, cacheKey, hash, MAX_CHART_HASHES);
 	}
 }
 

@@ -15,11 +15,7 @@ const assert = require('node:assert');
 
 const MAX_PERIOD_SEC = 10 * 365.25 * 86400;
 
-function parsePeriodToSeconds(period) {
-	if (typeof period !== 'string' || !period) return 0;
-	if (/^\d+[hDWMY]-\d+[hDWMY]$/.test(period)) {
-		return parsePeriodToSeconds(period.split('-')[0]);
-	}
+function parseBasePeriodToSeconds(period) {
 	const simpleMatch = period.match(/^(\d*)([hDWMY])$/);
 	if (simpleMatch) {
 		const multiplier = simpleMatch[1] ? parseInt(simpleMatch[1], 10) : 1;
@@ -37,9 +33,26 @@ function parsePeriodToSeconds(period) {
 			+ (parseInt(h || 0) * 3600)
 			+ (parseInt(mi || 0) * 60)
 			+ (parseInt(s || 0));
-		return sec > 0 ? Math.min(sec, MAX_PERIOD_SEC) : 0;
+			return sec > 0 ? Math.min(sec, MAX_PERIOD_SEC) : 0;
 	}
 	return 0;
+}
+
+function parsePeriodToSeconds(period) {
+	if (typeof period !== 'string') return 0;
+	const raw = period.trim();
+	if (!raw) return 0;
+	const dashCount = (raw.match(/-/g) || []).length;
+	if (dashCount > 1) return 0;
+	if (dashCount === 1) {
+		const [past, future] = raw.split('-');
+		if (!past) return 0;
+		const pastSec = parseBasePeriodToSeconds(past);
+		if (!pastSec) return 0;
+		if (future && !parseBasePeriodToSeconds(future)) return 0;
+		return pastSec;
+	}
+	return parseBasePeriodToSeconds(raw);
 }
 
 function chartCacheTtl(durationSec) {
@@ -80,29 +93,12 @@ function chartShowCurStat(durationSec) {
 // ── Replicate client-side periodDurationTier ────────────────────────────
 
 function periodDurationTier(p) {
-	if (typeof p !== 'string' || !p) return 'hD';
-	if (/^\d+[hDWMY]-\d+[hDWMY]$/.test(p)) p = p.split('-')[0];
-	var sm = p.match(/^(\d*)([hDWMY])$/);
-	if (sm) {
-		var mul = sm[1] ? parseInt(sm[1], 10) : 1;
-		var uSec = { h: 3600, D: 86400, W: 604800, M: 2592000, Y: 31536000 };
-		var sec = mul * uSec[sm[2]];
-		if (sec <= 86400) return 'hD';
-		if (sec <= 604800) return 'W';
-		if (sec <= 7776000) return 'M';
-		return 'Y';
-	}
-	var im = p.match(/^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
-	if (im) {
-		var sec2 = (parseInt(im[1]||0)*31536000) + (parseInt(im[2]||0)*2592000)
-			+ (parseInt(im[3]||0)*604800) + (parseInt(im[4]||0)*86400)
-			+ (parseInt(im[5]||0)*3600) + (parseInt(im[6]||0)*60) + parseInt(im[7]||0);
-		if (sec2 <= 86400) return 'hD';
-		if (sec2 <= 604800) return 'W';
-		if (sec2 <= 7776000) return 'M';
-		return 'Y';
-	}
-	return 'hD';
+	var sec = parsePeriodToSeconds(p);
+	if (!sec) return 'hD';
+	if (sec <= 86400) return 'hD';
+	if (sec <= 604800) return 'W';
+	if (sec <= 7776000) return 'M';
+	return 'Y';
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -172,11 +168,26 @@ describe('parsePeriodToSeconds', () => {
 		it('parses 2h-1h using past portion', () => {
 			assert.strictEqual(parsePeriodToSeconds('2h-1h'), 7200);
 		});
+		it('parses h-1h using past portion', () => {
+			assert.strictEqual(parsePeriodToSeconds('h-1h'), 3600);
+		});
 		it('parses 4h-2h using past portion', () => {
 			assert.strictEqual(parsePeriodToSeconds('4h-2h'), 14400);
 		});
+		it('parses D-1D using past portion', () => {
+			assert.strictEqual(parsePeriodToSeconds('D-1D'), 86400);
+		});
 		it('parses 2W-1D using past portion', () => {
 			assert.strictEqual(parsePeriodToSeconds('2W-1D'), 1209600);
+		});
+		it('parses D- with empty future portion', () => {
+			assert.strictEqual(parsePeriodToSeconds('D-'), 86400);
+		});
+		it('parses PT1H30M-PT30M using past ISO portion', () => {
+			assert.strictEqual(parsePeriodToSeconds('PT1H30M-PT30M'), 5400);
+		});
+		it('parses long ISO past-future period P10Y6M2DT3H4M5S-PT30M', () => {
+			assert.strictEqual(parsePeriodToSeconds('P10Y6M2DT3H4M5S-PT30M'), MAX_PERIOD_SEC);
 		});
 	});
 
@@ -201,6 +212,12 @@ describe('parsePeriodToSeconds', () => {
 		});
 		it('returns 0 for number only', () => {
 			assert.strictEqual(parsePeriodToSeconds('42'), 0);
+		});
+		it('returns 0 for future-only past-future period', () => {
+			assert.strictEqual(parsePeriodToSeconds('-1h'), 0);
+		});
+		it('returns 0 for malformed multi-dash past-future period', () => {
+			assert.strictEqual(parsePeriodToSeconds('h-1h-1h'), 0);
 		});
 	});
 
@@ -327,6 +344,15 @@ describe('periodDurationTier (client-side)', () => {
 	});
 	it('classifies 2W-1D past-future as M (past=2W>7d)', () => {
 		assert.strictEqual(periodDurationTier('2W-1D'), 'M');
+	});
+	it('classifies D-1D past-future as hD', () => {
+		assert.strictEqual(periodDurationTier('D-1D'), 'hD');
+	});
+	it('classifies D- past-future as hD', () => {
+		assert.strictEqual(periodDurationTier('D-'), 'hD');
+	});
+	it('classifies PT1H30M-PT30M past-future as hD', () => {
+		assert.strictEqual(periodDurationTier('PT1H30M-PT30M'), 'hD');
 	});
 	it('returns hD for invalid input', () => {
 		assert.strictEqual(periodDurationTier('invalid'), 'hD');

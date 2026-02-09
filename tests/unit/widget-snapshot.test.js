@@ -27,8 +27,9 @@ function widgetPageLink(widget) {
 
 function splitLabelState(label) {
 	const raw = safeText(label);
-	const match = raw.match(/^(.*)\s*\[(.+)\]\s*$/);
-	if (!match) return { title: raw, state: '' };
+	const cleaned = raw.replace(/\s*\[\s*-?\s*\]\s*$/, '');
+	const match = cleaned.match(/^(.*)\s*\[(.+)\]\s*$/);
+	if (!match) return { title: cleaned, state: '' };
 	return { title: match[1].trim(), state: match[2].trim() };
 }
 
@@ -56,10 +57,10 @@ function serverWidgetKey(widget) {
 
 function normalizeButtongridButtons(widget) {
 	const buttons = [];
-	const inlineButtons = widget?.mappings || widget?.mapping;
-	if (Array.isArray(inlineButtons)) {
-		for (const b of inlineButtons) {
-			if (b?.row == null && b?.column == null) continue;
+	if (Array.isArray(widget?.buttons)) {
+		for (const b of widget.buttons) {
+			if (!b || typeof b !== 'object') continue;
+			const itemName = safeText(b?.itemName || b?.item?.name || '');
 			buttons.push({
 				row: parseInt(b?.row, 10) || 1,
 				column: parseInt(b?.column, 10) || 1,
@@ -67,7 +68,27 @@ function normalizeButtongridButtons(widget) {
 				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
 				label: safeText(b?.label || ''),
 				icon: safeText(b?.icon || b?.staticIcon || ''),
-				itemName: safeText(b?.item?.name || ''),
+				itemName,
+				state: safeText(b?.state ?? b?.item?.state ?? ''),
+				stateless: !!b?.stateless,
+			});
+		}
+		return buttons;
+	}
+	const inlineButtons = widget?.mappings || widget?.mapping;
+	if (Array.isArray(inlineButtons)) {
+		for (const b of inlineButtons) {
+			if (b?.row == null && b?.column == null) continue;
+			const itemName = safeText(b?.itemName || b?.item?.name || '');
+			buttons.push({
+				row: parseInt(b?.row, 10) || 1,
+				column: parseInt(b?.column, 10) || 1,
+				command: safeText(b?.command || b?.cmd || ''),
+				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
+				label: safeText(b?.label || ''),
+				icon: safeText(b?.icon || b?.staticIcon || ''),
+				itemName,
+				state: safeText(b?.state ?? b?.item?.state ?? ''),
 				stateless: !!b?.stateless,
 			});
 		}
@@ -76,6 +97,7 @@ function normalizeButtongridButtons(widget) {
 	if (Array.isArray(children)) {
 		for (const c of children) {
 			if (safeText(c?.type).toLowerCase() !== 'button') continue;
+			const itemName = safeText(c?.itemName || c?.item?.name || '');
 			buttons.push({
 				row: parseInt(c?.row, 10) || 1,
 				column: parseInt(c?.column, 10) || 1,
@@ -83,7 +105,8 @@ function normalizeButtongridButtons(widget) {
 				releaseCommand: safeText(c?.releaseCommand || c?.release || ''),
 				label: safeText(c?.label || ''),
 				icon: safeText(c?.icon || c?.staticIcon || ''),
-				itemName: safeText(c?.item?.name || ''),
+				itemName,
+				state: safeText(c?.state ?? c?.item?.state ?? ''),
 				stateless: !!c?.stateless,
 			});
 		}
@@ -94,7 +117,7 @@ function normalizeButtongridButtons(widget) {
 function buttonsSignature(buttons) {
 	if (!buttons || !buttons.length) return '';
 	return buttons.map((b) =>
-		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.stateless}`
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}`
 	).join('|');
 }
 
@@ -273,6 +296,11 @@ describe('Widget Snapshot Helpers', () => {
 
 		it('trims label state spacing', () => {
 			assert.strictEqual(serverWidgetKey({ item: { name: 'Item1' }, label: ' Temp  [ 23 ] ' }), 'widget:Item1|Temp||');
+		});
+
+		it('strips empty placeholder state brackets from key labels', () => {
+			assert.strictEqual(serverWidgetKey({ item: { name: 'Item1' }, label: 'Temp []' }), 'widget:Item1|Temp||');
+			assert.strictEqual(serverWidgetKey({ item: { name: 'Item1' }, label: 'Temp [-]' }), 'widget:Item1|Temp||');
 		});
 
 		it('uses linkedPage link when present', () => {
@@ -483,6 +511,23 @@ describe('Widget Snapshot Helpers', () => {
 	});
 
 	describe('widgetSnapshot Buttongrid', () => {
+		it('uses buttons payload when present', () => {
+			const widget = {
+				type: 'Buttongrid',
+				item: { name: 'Remote', state: 'NULL' },
+				buttons: [
+					{ row: 1, column: 1, command: 'POWER', label: 'Power', itemName: 'RemoteButtonItem' },
+				],
+				mappings: [
+					{ row: 9, column: 9, command: 'OLD', label: 'Old' },
+				],
+			};
+			const snap = widgetSnapshot(widget);
+			assert.strictEqual(snap.buttons.length, 1);
+			assert.strictEqual(snap.buttons[0].command, 'POWER');
+			assert.strictEqual(snap.buttons[0].itemName, 'RemoteButtonItem');
+		});
+
 		it('includes buttons array for Buttongrid widget', () => {
 			const widget = {
 				type: 'Buttongrid',
@@ -521,6 +566,22 @@ describe('Widget Snapshot Helpers', () => {
 				type: 'Buttongrid',
 				item: { name: 'Remote' },
 				mappings: [{ row: 1, column: 1, command: 'B', label: 'B' }],
+			};
+			const snap1 = widgetSnapshot(widget1);
+			const snap2 = widgetSnapshot(widget2);
+			assert.notStrictEqual(snap1.buttonsSig, snap2.buttonsSig);
+		});
+
+		it('includes per-button state in buttonsSig', () => {
+			const widget1 = {
+				type: 'Buttongrid',
+				item: { name: 'Remote' },
+				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', state: 'ON' }],
+			};
+			const widget2 = {
+				type: 'Buttongrid',
+				item: { name: 'Remote' },
+				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', state: 'OFF' }],
 			};
 			const snap1 = widgetSnapshot(widget1);
 			const snap2 = widgetSnapshot(widget2);

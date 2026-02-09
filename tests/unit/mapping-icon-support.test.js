@@ -23,7 +23,7 @@ function normalizeMapping(mapping) {
 				const releaseCommand = safeText(m.releaseCommand ?? '');
 				const label = safeText(m.label ?? m.command ?? '');
 				const icon = safeText(m.icon ?? '');
-				if (!command) return null;
+				if (!command && !label && !icon) return null;
 				return { command, releaseCommand, label: label || command, icon };
 			})
 			.filter(Boolean);
@@ -34,11 +34,10 @@ function normalizeMapping(mapping) {
 			const releaseCommand = safeText(mapping.releaseCommand ?? '');
 			const label = safeText(mapping.label ?? mapping.command ?? '');
 			const icon = safeText(mapping.icon ?? '');
-			if (!command) return [];
+			if (!command && !label && !icon) return [];
 			return [{ command, releaseCommand, label: label || command, icon }];
 		}
 		return Object.entries(mapping)
-			.filter(([command]) => safeText(command))
 			.map(([command, mappingValue]) => {
 				const isEntryObject = mappingValue && typeof mappingValue === 'object';
 				const label = isEntryObject
@@ -189,6 +188,11 @@ describe('Mapping Icon Support', () => {
 	it('server normalizeMappings preserves icon values', () => {
 		const normalized = normalizeMappings([{ command: '4', label: 'Stop', icon: 'material:stop' }]);
 		assert.deepStrictEqual(normalized, [{ command: '4', releaseCommand: '', label: 'Stop', icon: 'material:stop' }]);
+	});
+
+	it('client/server normalization stay aligned for icon-only mappings', () => {
+		const input = [{ command: '', label: '', icon: 'material:stop' }];
+		assert.deepStrictEqual(normalizeMapping(input), normalizeMappings(input));
 	});
 
 	it('app render paths call setMappingControlContent for switch and selection', () => {
