@@ -4039,10 +4039,16 @@ function renderWeatherWidget(forecastData, mode) {
 	const unitSymbol = liveConfig.weatherbitUnits === 'I' ? 'F' : 'C';
 
 	const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+	const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 	const forecastCards = days.map((day) => {
 		const date = new Date(day.datetime);
 		const dayName = dayNames[date.getUTCDay()];
+		const dayOfMonth = date.getUTCDate();
+		const suffix = (dayOfMonth === 1 || dayOfMonth === 21 || dayOfMonth === 31) ? 'st'
+		             : (dayOfMonth === 2 || dayOfMonth === 22) ? 'nd'
+		             : (dayOfMonth === 3 || dayOfMonth === 23) ? 'rd' : 'th';
+		const dateLabel = monthNames[date.getUTCMonth()] + ' ' + dayOfMonth + suffix;
 		const icon = escapeHtml(day.weather?.icon || 'c01d');
 		const highTemp = Math.round(day.high_temp || 0);
 		const lowTemp = Math.round(day.low_temp || 0);
@@ -4053,6 +4059,7 @@ function renderWeatherWidget(forecastData, mode) {
 		return `
 			<div class="forecast-day">
 				<div class="day-name">${dayName}</div>
+				<div class="day-date">${dateLabel}</div>
 				<img class="weather-icon" src="/weather/icons/${icon}.png" alt="${escapeHtml(day.weather?.description || '')}">
 				<div class="temps">
 					<div class="temp-high">${highTemp}°</div>
@@ -4125,6 +4132,11 @@ html, body {
 	font-weight: 400;
 	opacity: 0.7;
 }
+.day-date {
+	font-size: .7rem;
+	font-weight: 300;
+	opacity: 0.5;
+}
 .weather-icon {
 	width: 45px;
 	height: 45px;
@@ -4154,6 +4166,23 @@ html, body {
 	width: .625rem;
 	height: .625rem;
 }
+.forecast-dots {
+	display: none;
+	justify-content: center;
+	gap: 4px;
+	padding-top: 12px;
+}
+.forecast-dots.visible { display: flex; }
+.forecast-dot {
+	border-radius: 50%;
+	background: ${textColor};
+	opacity: 0.25;
+	transition: opacity 0.2s;
+	cursor: pointer;
+	border: 4px solid transparent;
+	box-sizing: content-box;
+}
+.forecast-dot.active { opacity: 0.8; }
 </style>
 </head>
 <body>
@@ -4162,6 +4191,7 @@ html, body {
 	<div class="forecast-container">
 		${forecastCards}
 	</div>
+	<div class="forecast-dots"></div>
 </div>
 <script>
 (function() {
@@ -4169,14 +4199,79 @@ html, body {
   if (!container) return;
   var cards = container.querySelectorAll('.forecast-day');
   if (!cards.length) return;
+  var dotsEl = document.querySelector('.forecast-dots');
+  var startIndex = 0;
+  var maxFit = 1;
+
   function fitCards() {
     var contentWidth = container.clientWidth - 10;
-    var maxFit = Math.max(1, Math.floor((contentWidth + 10) / 80));
+    maxFit = Math.max(1, Math.floor((contentWidth + 10) / 80));
+    var maxStart = Math.max(0, cards.length - maxFit);
+    if (startIndex > maxStart) startIndex = maxStart;
     for (var i = 0; i < cards.length; i++) {
-      if (i < maxFit) cards[i].classList.add('visible');
+      if (i >= startIndex && i < startIndex + maxFit) cards[i].classList.add('visible');
       else cards[i].classList.remove('visible');
     }
+    updateDots();
   }
+
+  function updateDots() {
+    if (!dotsEl) return;
+    var totalPages = Math.max(1, cards.length - maxFit + 1);
+    if (totalPages <= 1) {
+      dotsEl.classList.remove('visible');
+      return;
+    }
+    dotsEl.classList.add('visible');
+    var html = '';
+    for (var i = 0; i < totalPages; i++) {
+      html += '<div class="forecast-dot' + (i === startIndex ? ' active' : '') + '"></div>';
+    }
+    dotsEl.innerHTML = html;
+  }
+
+  // Click on dots to navigate
+  if (dotsEl) {
+    dotsEl.addEventListener('click', function(e) {
+      var dot = e.target.closest('.forecast-dot');
+      if (!dot) return;
+      var dots = dotsEl.querySelectorAll('.forecast-dot');
+      for (var i = 0; i < dots.length; i++) {
+        if (dots[i] === dot) { startIndex = i; fitCards(); break; }
+      }
+    });
+  }
+
+  // Touch swipe handling
+  var startX = 0, startY = 0, swiping = false;
+  container.addEventListener('touchstart', function(e) {
+    if (e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    swiping = false;
+  }, { passive: true });
+
+  container.addEventListener('touchmove', function(e) {
+    if (e.touches.length !== 1) return;
+    var dx = Math.abs(e.touches[0].clientX - startX);
+    var dy = Math.abs(e.touches[0].clientY - startY);
+    if (dx > dy && dx > 10) {
+      swiping = true;
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  container.addEventListener('touchend', function(e) {
+    if (!swiping) return;
+    var endX = e.changedTouches[0].clientX;
+    var delta = endX - startX;
+    if (Math.abs(delta) < 50) return;
+    var maxStart = Math.max(0, cards.length - maxFit);
+    if (delta < 0) startIndex = Math.min(startIndex + 1, maxStart);
+    else startIndex = Math.max(startIndex - 1, 0);
+    fitCards();
+  }, { passive: true });
+
   if (typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(fitCards).observe(container);
   } else {
