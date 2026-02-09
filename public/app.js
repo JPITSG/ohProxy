@@ -2986,12 +2986,13 @@ function openCardConfigModal(widget, card) {
 		}
 	}
 
-	// Card width section - show for non-media widgets (media widgets are already full width)
+	// Card width section - show for non-media, non-frame widgets (media widgets are already full width)
 	const cardWidthSection = cardConfigModal.querySelector('.card-width-section');
 	const isMediaWidget = wType.includes('image') || wType === 'chart' || wType.includes('webview') || wType === 'video' || wType === 'mapview';
+	const isSection = !!widget?.__section;
 	if (cardWidthSection) {
-		cardWidthSection.style.display = isMediaWidget ? 'none' : '';
-		if (!isMediaWidget) {
+		cardWidthSection.style.display = (isMediaWidget || isSection) ? 'none' : '';
+		if (!isMediaWidget && !isSection) {
 			const cardWidth = widgetCardWidthMap.get(wKey) || 'standard';
 			const widthRadio = cardConfigModal.querySelector(`input[name="cardWidth"][value="${cardWidth}"]`);
 			if (widthRadio) {
@@ -3003,7 +3004,6 @@ function openCardConfigModal(widget, card) {
 
 	// Check if widget should show glow rules
 	// Any widget with subtext (state in label like "Title [State]") can have glow rules
-	const isSection = !!widget?.__section;
 	const labelParts = splitLabelState(widget?.label || '');
 	const hasSubtext = !!labelParts.state;
 	const glowRulesSection = cardConfigModal.querySelector('.glow-rules-section');
