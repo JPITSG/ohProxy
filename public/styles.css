@@ -1132,6 +1132,7 @@ body.theme-dark #themeToggleBtn svg {
 	.switch-card .inline-controls .switch-btn:hover,
 	.grid-btn:hover,
 	.setpoint-card .setpoint-btn:hover,
+	.colorpicker-card .setpoint-btn:hover,
 	.input-card .input-send-btn:hover {
 		background-color: var(--color-control-off-hover) !important;
 		border-color: var(--color-control-off-border-hover) !important;
@@ -1141,6 +1142,7 @@ body.theme-dark #themeToggleBtn svg {
 .switch-card .inline-controls .switch-btn:disabled,
 .grid-btn:disabled,
 .setpoint-card .setpoint-btn:disabled,
+.colorpicker-card .setpoint-btn:disabled,
 .input-card .input-field:disabled,
 .input-card .input-send-btn:disabled {
 	opacity: .4;
@@ -1225,7 +1227,8 @@ body.theme-dark #themeToggleBtn svg {
 	justify-content: flex-end;
 	gap: .375rem;
 }
-.setpoint-card .setpoint-btn {
+.setpoint-card .setpoint-btn,
+.colorpicker-card .setpoint-btn {
 	width: 36px;
 	height: 36px;
 	display: inline-flex;
@@ -1389,6 +1392,133 @@ body.theme-light .input-card .input-field::-webkit-calendar-picker-indicator {
 	border: 1px solid rgba(0, 0, 0, .22);
 	box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
 	transform: translateY(-1px);
+}
+
+/* Colorpicker card styles */
+.colorpicker-card {
+	position: relative;
+}
+.colorpicker-card .labelStack {
+	flex: 0 1 auto;
+	min-width: 0;
+}
+.colorpicker-card .inline-controls {
+	flex: 0 0 auto;
+	justify-content: flex-end;
+	gap: .375rem;
+}
+.colorpicker-swatch {
+	width: 36px;
+	height: 36px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 10px;
+	border-width: var(--glass-border-width);
+	border-style: solid;
+	border-color: var(--color-control-off-border) !important;
+	cursor: pointer;
+	flex-shrink: 0;
+	transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease;
+	box-shadow: 0 0 8px var(--color-control-off-shadow);
+}
+.colorpicker-swatch-off {
+	background: repeating-conic-gradient(
+		rgba(128, 128, 128, .3) 0% 25%,
+		rgba(128, 128, 128, .1) 0% 50%
+	) 0 0 / 12px 12px !important;
+}
+.colorpicker-overlay {
+	display: none;
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: calc(100% + 6px);
+	width: fit-content;
+	margin-left: auto;
+	margin-right: auto;
+	background: var(--color-select-menu-bg);
+	backdrop-filter: var(--glass-blur);
+	-webkit-backdrop-filter: var(--glass-blur);
+	border: var(--glass-border-width) solid var(--color-select-menu-border);
+	border-radius: 14px;
+	padding: 12px;
+	box-shadow: var(--glass-box-shadow), var(--glass-inset-shadow);
+	z-index: 30;
+}
+.colorpicker-card.colorpicker-open {
+	z-index: 20;
+}
+.colorpicker-card.colorpicker-open .colorpicker-overlay {
+	display: block;
+}
+.colorpicker-card.colorpicker-above .colorpicker-overlay {
+	top: auto;
+	bottom: calc(100% + 6px);
+	box-shadow: 0 -12px 20px rgba(0, 0, 0, 0.28), var(--glass-inset-shadow);
+}
+.colorpicker-overlay-body {
+	display: flex;
+	gap: 12px;
+	align-items: stretch;
+	justify-content: center;
+}
+.colorpicker-wheel-wrap {
+	position: relative;
+	width: 200px;
+	height: 200px;
+	touch-action: none;
+	flex-shrink: 0;
+}
+.colorpicker-wheel {
+	width: 200px;
+	height: 200px;
+	border-radius: 50%;
+	cursor: crosshair;
+	box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .18), 0 0 8px rgba(0, 0, 0, .35);
+}
+body.theme-light .colorpicker-wheel {
+	box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .14), 0 0 8px rgba(0, 0, 0, .15);
+}
+.colorpicker-wheel-cursor {
+	position: absolute;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	border: 2px solid #fff;
+	box-shadow: 0 0 4px rgba(0, 0, 0, .5);
+	pointer-events: none;
+	transform: translate(-50%, -50%);
+}
+.colorpicker-right-col {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+}
+.colorpicker-brightness {
+	writing-mode: vertical-lr;
+	direction: rtl;
+	appearance: slider-vertical;
+	-webkit-appearance: slider-vertical;
+	width: 24px;
+	height: 160px;
+	accent-color: var(--color-primary);
+	cursor: pointer;
+	flex: 1;
+}
+.colorpicker-preview {
+	width: 36px;
+	height: 36px;
+	border-radius: 10px;
+	border-width: var(--glass-border-width);
+	border-style: solid;
+	border-color: var(--color-control-off-border);
+	box-shadow: 0 0 8px var(--color-control-off-shadow);
+	flex-shrink: 0;
+}
+body.theme-light .colorpicker-card.colorpicker-above .colorpicker-overlay {
+	box-shadow: 0 -12px 20px rgba(0, 0, 0, 0.15), var(--glass-inset-shadow);
 }
 
 /* Slider card styles */
