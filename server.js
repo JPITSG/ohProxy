@@ -487,8 +487,8 @@ const CMDAPI_TIMEOUT_MS = 10000;
 let mysqlConnection = null;
 let mysqlConnecting = false;
 let videoPreviewInitialCaptureDone = false;
-const activeRtspStreams = new Map(); // Track active RTSP streams: id -> { url, user, ip, startTime }
-let rtspStreamIdCounter = 0;
+const activeVideoStreams = new Map(); // Track active video streams: id -> { url, user, ip, startTime, encoding }
+let videoStreamIdCounter = 0;
 const authLockouts = new Map();
 
 function logMessage(message) {
@@ -2846,37 +2846,71 @@ function extractPageIds(data, pages = new Set()) {
 	return pages;
 }
 
-// Extract all RTSP URLs from Video widgets in sitemap data
-function extractRtspUrls(data, urls = new Set()) {
-	if (!data) return urls;
-	// Check if this is a Video widget with rtsp:// label
+// Extract all video URLs from Video widgets in sitemap data
+function extractVideoUrls(data, results = new Map()) {
+	if (!data) return results;
 	const type = (data.type || '').toLowerCase();
 	if (type === 'video') {
-		const label = data.label || '';
-		if (label.startsWith('rtsp://')) {
-			urls.add(label);
+		const url = (data.label || '').trim();
+		if (url) {
+			const encoding = (data.encoding || '').trim().toLowerCase();
+			results.set(url, encoding || null);
 		}
 	}
 	// Recurse into widgets - support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
 	const widgetSource = data.widgets || data.widget;
 	const widgets = Array.isArray(widgetSource) ? widgetSource : (widgetSource ? [widgetSource] : []);
 	for (const w of widgets) {
-		extractRtspUrls(w, urls);
+		extractVideoUrls(w, results);
 	}
 	// Recurse into linkedPage
 	if (data.linkedPage) {
-		extractRtspUrls(data.linkedPage, urls);
+		extractVideoUrls(data.linkedPage, results);
 	}
 	// Recurse into homepage
 	if (data.homepage) {
-		extractRtspUrls(data.homepage, urls);
+		extractVideoUrls(data.homepage, results);
 	}
-	return urls;
+	return results;
 }
 
-// Hash RTSP URL to generate filename
-function rtspUrlHash(url) {
+// Hash video URL to generate filename
+function videoUrlHash(url) {
 	return crypto.createHash('md5').update(url).digest('hex').substring(0, 16);
+}
+
+// Resolve video encoding from explicit param or auto-detect from URL
+const VALID_VIDEO_ENCODINGS = new Set(['rtsp', 'mjpeg', 'hls', 'mp4']);
+
+function resolveVideoEncoding(rawEncoding, target) {
+	if (typeof rawEncoding === 'string' && rawEncoding.trim()) {
+		const enc = rawEncoding.trim().toLowerCase();
+		if (VALID_VIDEO_ENCODINGS.has(enc)) return enc;
+	}
+	// Auto-detect from URL
+	if (target.protocol === 'rtsp:') return 'rtsp';
+	const pathname = (target.pathname || '').toLowerCase();
+	if (pathname.endsWith('.m3u8')) return 'hls';
+	if (pathname.endsWith('.mp4') || pathname.endsWith('.m4v')) return 'mp4';
+	if (pathname.endsWith('.mjpg') || pathname.endsWith('.mjpeg') || pathname.includes('mjpeg')) return 'mjpeg';
+	return null;
+}
+
+// Build ffmpeg input arguments for a given encoding type
+function buildFfmpegInputArgs(encoding, url) {
+	const common = ['-probesize', '100000', '-analyzeduration', '100000', '-fflags', '+nobuffer+genpts+discardcorrupt', '-flags', 'low_delay'];
+	switch (encoding) {
+	case 'rtsp':
+		return [...common, '-rtsp_transport', 'tcp', '-i', url];
+	case 'mjpeg':
+		return [...common, '-f', 'mjpeg', '-i', url];
+	case 'hls':
+		return [...common, '-protocol_whitelist', 'file,http,https,tcp,tls', '-i', url];
+	case 'mp4':
+		return [...common, '-protocol_whitelist', 'file,http,https,tcp,tls', '-i', url];
+	default:
+		return [...common, '-i', url];
+	}
 }
 
 // Chart cache helpers
@@ -7674,16 +7708,16 @@ app.get('/video-preview', (req, res) => {
 		}
 	}
 
-	if (target.protocol !== 'rtsp:') {
-		return res.status(400).type('text/plain').send('Invalid RTSP URL');
+	if (!['http:', 'https:', 'rtsp:'].includes(target.protocol)) {
+		return res.status(400).type('text/plain').send('Invalid video URL');
 	}
 
 	// Validate against proxy allowlist
 	if (!isProxyTargetAllowed(target, liveConfig.proxyAllowlist)) {
-		return res.status(403).type('text/plain').send('RTSP target not allowed');
+		return res.status(403).type('text/plain').send('Video target not allowed');
 	}
 
-	const hash = rtspUrlHash(url);
+	const hash = videoUrlHash(url);
 	const filePath = path.join(VIDEO_PREVIEW_DIR, `${hash}.jpg`);
 
 	let stats;
@@ -8783,13 +8817,20 @@ app.get('/proxy', async (req, res, next) => {
 			return res.status(403).send('Proxy target not allowed');
 		}
 
-		// RTSP stream - convert to MP4 via FFmpeg
-		if (target.protocol === 'rtsp:') {
-			const rtspUrl = target.toString();
-			const rtspUrlLog = redactUrlCredentials(rtspUrl);
+		// Validate encoding param
+		const rawEncoding = req.query?.encoding;
+		if (rawEncoding !== undefined && typeof rawEncoding !== 'string') {
+			return res.status(400).send('Invalid encoding parameter');
+		}
+		const encoding = resolveVideoEncoding(rawEncoding, target);
+
+		// Video stream - convert to MP4 via FFmpeg
+		if (encoding) {
+			const streamUrl = target.toString();
+			const streamUrlLog = redactUrlCredentials(streamUrl);
 			const clientIp = getRemoteIp(req) || 'unknown';
 			const username = req.ohProxyUser || 'anonymous';
-			const streamId = ++rtspStreamIdCounter;
+			const streamId = ++videoStreamIdCounter;
 
 			// Get viewport width for scaling time overlay (0-10000, invalid = 0)
 			if (req.query?.w !== undefined && typeof req.query.w !== 'string') {
@@ -8804,8 +8845,8 @@ app.get('/proxy', async (req, res, next) => {
 			const fontSize = viewportWidth > 0 ? Math.max(16, Math.min(48, Math.round(viewportWidth / 40))) : 24;
 
 			// Track and log stream start
-			activeRtspStreams.set(streamId, { url: rtspUrlLog, user: username, ip: clientIp, startTime: Date.now() });
-			logMessage(`[RTSP] Starting stream ${rtspUrlLog} to ${username}@${clientIp} (w=${viewportWidth})`);
+			activeVideoStreams.set(streamId, { url: streamUrlLog, user: username, ip: clientIp, startTime: Date.now(), encoding });
+			logMessage(`[Video] Starting ${encoding} stream ${streamUrlLog} to ${username}@${clientIp} (w=${viewportWidth})`);
 
 			// Time overlay filter: top-right, using configured timeFormat (strftime expansion)
 			const timeOverlay = (liveConfig.clientConfig?.timeFormat || 'H:mm:ss')
@@ -8820,14 +8861,9 @@ app.get('/proxy', async (req, res, next) => {
 				? `scale=${scaleWidth}:-2,${drawtext}`
 				: drawtext;
 
+			const inputArgs = buildFfmpegInputArgs(encoding, streamUrl);
 			const ffmpegArgs = [
-				// Input options - minimize probing delay
-				'-probesize', '100000',
-				'-analyzeduration', '100000',
-				'-fflags', '+nobuffer+genpts+discardcorrupt',
-				'-flags', 'low_delay',
-				'-rtsp_transport', 'tcp',
-				'-i', rtspUrl,
+				...inputArgs,
 				// Video encoding - low latency
 				'-vf', videoFilter,
 				'-c:v', 'libx264',
@@ -8874,23 +8910,23 @@ app.get('/proxy', async (req, res, next) => {
 							}
 						}
 						if (inputStreams.length || outputStreams.length) {
-							logMessage(`[RTSP] Stream info for ${username}@${clientIp}: in:[${inputStreams.join(', ')}] out:[${outputStreams.join(', ')}]`);
+							logMessage(`[Video] Stream info for ${username}@${clientIp}: in:[${inputStreams.join(', ')}] out:[${outputStreams.join(', ')}]`);
 						}
 					} catch {}
 				}
 			});
 
 			const endStream = () => {
-				if (activeRtspStreams.has(streamId)) {
-					activeRtspStreams.delete(streamId);
-					logMessage(`[RTSP] Ending stream ${rtspUrlLog} to ${username}@${clientIp}`);
+				if (activeVideoStreams.has(streamId)) {
+					activeVideoStreams.delete(streamId);
+					logMessage(`[Video] Ending ${encoding} stream ${streamUrlLog} to ${username}@${clientIp}`);
 				}
 			};
 
 			ffmpeg.on('error', (err) => {
 				endStream();
 				if (!res.headersSent) {
-					res.status(502).send('RTSP proxy error');
+					res.status(502).send('Video proxy error');
 				}
 			});
 			ffmpeg.on('close', () => {
@@ -9095,16 +9131,17 @@ registerBackgroundTask('icon-cache-cleanup', 3600000, () => {
 });
 
 // Video preview capture function
-async function captureRtspPreview(rtspUrl) {
+async function captureVideoPreview(videoUrl, encoding) {
 	ensureDir(VIDEO_PREVIEW_DIR);
-	const hash = rtspUrlHash(rtspUrl);
+	const hash = videoUrlHash(videoUrl);
 	const outputPath = path.join(VIDEO_PREVIEW_DIR, `${hash}.jpg`);
+
+	const inputArgs = buildFfmpegInputArgs(encoding, videoUrl);
 
 	return new Promise((resolve) => {
 		const ffmpeg = spawn(liveConfig.binFfmpeg, [
 			'-y',
-			'-rtsp_transport', 'tcp',
-			'-i', rtspUrl,
+			...inputArgs,
 			'-vframes', '1',
 			'-q:v', '2',
 			outputPath,
@@ -9206,7 +9243,7 @@ function pruneVideoPreviews() {
 			}
 		}
 	} catch (err) {
-		logMessage(`[RTSP] Preview prune failed: ${err.message || err}`);
+		logMessage(`[Video] Preview prune failed: ${err.message || err}`);
 	}
 }
 
@@ -9219,30 +9256,38 @@ async function captureVideoPreviewsTask() {
 	try {
 		const response = await fetchOpenhab(`/rest/sitemaps/${sitemapName}?type=json`);
 		if (!response || !response.ok) {
-			logMessage(`[RTSP] Preview sitemap fetch failed (HTTP ${response?.status || 'unknown'})`);
+			logMessage(`[Video] Preview sitemap fetch failed (HTTP ${response?.status || 'unknown'})`);
 			return;
 		}
 		sitemapData = JSON.parse(response.body);
 	} catch (err) {
-		logMessage(`[RTSP] Preview failed to fetch/parse sitemap: ${err.message || err}`);
+		logMessage(`[Video] Preview failed to fetch/parse sitemap: ${err.message || err}`);
 		return;
 	}
 
-	const rtspUrls = extractRtspUrls(sitemapData);
-	if (rtspUrls.size === 0) return;
+	const videoUrls = extractVideoUrls(sitemapData);
+	if (videoUrls.size === 0) return;
 
 	// Capture screenshots sequentially
-	for (const url of rtspUrls) {
+	for (const [url, rawEnc] of videoUrls) {
 		const safeUrl = redactUrlCredentials(url);
+		let resolved;
 		try {
-			const ok = await captureRtspPreview(url);
+			resolved = resolveVideoEncoding(rawEnc, new URL(url));
+		} catch {
+			logMessage(`[Video] Preview skipping invalid URL ${safeUrl}`);
+			continue;
+		}
+		if (!resolved) continue;
+		try {
+			const ok = await captureVideoPreview(url, resolved);
 			if (ok) {
-				logMessage(`[RTSP] Preview captured screenshot for ${safeUrl}`);
+				logMessage(`[Video] Preview captured screenshot for ${safeUrl}`);
 			} else {
-				logMessage(`[RTSP] Preview failed to capture ${safeUrl}`);
+				logMessage(`[Video] Preview failed to capture ${safeUrl}`);
 			}
 		} catch (err) {
-			logMessage(`[RTSP] Preview error capturing ${safeUrl}: ${err.message || err}`);
+			logMessage(`[Video] Preview error capturing ${safeUrl}: ${err.message || err}`);
 		}
 	}
 
@@ -9256,11 +9301,11 @@ registerBackgroundTask('video-preview', liveConfig.videoPreviewIntervalMs, captu
 // Register chart cache prune task (every 24 hours)
 registerBackgroundTask('chart-cache-prune', 24 * 60 * 60 * 1000, pruneChartCache);
 
-// Periodic RTSP stream status logging (every 10 seconds, only if streams active)
+// Periodic video stream status logging (every 10 seconds, only if streams active)
 setInterval(() => {
-	const count = activeRtspStreams.size;
+	const count = activeVideoStreams.size;
 	if (count > 0) {
-		logMessage(`[RTSP] ${count} stream${count === 1 ? '' : 's'} active`);
+		logMessage(`[Video] ${count} stream${count === 1 ? '' : 's'} active`);
 	}
 }, 10000);
 

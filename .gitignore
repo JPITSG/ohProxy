@@ -27,3 +27,4 @@ pnpm-debug.log*
 Thumbs.db
 __pycache__/
 ws-monitor.js
+LOG.md

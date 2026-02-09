@@ -77,6 +77,8 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawInterpolation\s*=\s*req\.query\?\.interpolation\s*;/,
 			/const\s+rawFormat\s*=\s*safeText\(req\.query\?\.format\s*\|\|\s*''\)\.trim\(\)\.toLowerCase\(\)\s*;/,
 			/const\s+rawState\s*=\s*req\.query\?\.state\s*;/,
+			/const\s+rawEncoding\s*=\s*req\.query\?\.encoding\s*;/,
+			/if\s*\(rawEncoding\s*!==\s*undefined\s*&&\s*typeof\s+rawEncoding\s*!==\s*'string'\s*\)/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));
@@ -138,7 +140,7 @@ describe('Input Validation Coverage', () => {
 
 		assert.ok(content.includes('parseOptionalInt(req.query?.w, { min: 0, max: 10000 })'));
 
-		assert.ok(content.includes("target.protocol !== 'rtsp:'"));
+		assert.ok(content.includes("'Invalid video URL'"));
 
 		assert.ok(content.includes("/^[a-zA-Z0-9_]{1,50}$/"), 'Missing itemName regex validation');
 		assert.ok(content.includes('offset > 100000'), 'Missing history offset upper bound');
@@ -172,7 +174,7 @@ describe('Request-Derived File Paths', () => {
 		assert.ok(content.includes("rawName = decodeURIComponent(safeText(match[2])).replace(/\\\\/g, '/').trim();"));
 		assert.ok(content.includes("segments.some((seg) => seg === '.' || seg === '..' || seg === '')"));
 
-		assert.ok(content.includes('const hash = rtspUrlHash(url);'));
+		assert.ok(content.includes('const hash = videoUrlHash(url);'));
 		assert.ok(/const\s+filePath\s*=\s*path\.join\(VIDEO_PREVIEW_DIR,\s*`\$\{hash\}\.jpg`\s*\);/.test(content));
 
 		assert.ok(/const\s+rrdPath\s*=\s*path\.join\(rrdDir,\s*`\$\{item\}\.rrd`\s*\);/.test(content));

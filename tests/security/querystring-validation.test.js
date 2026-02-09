@@ -58,7 +58,23 @@ function createQueryStringTestApp() {
 	const PROXY_ALLOWLIST = [
 		{ host: 'camera.local', port: '554' },
 		{ host: 'allowed.example.com', port: null },
+		{ host: 'stream.local', port: null },
 	];
+
+	const VALID_VIDEO_ENCODINGS = new Set(['rtsp', 'mjpeg', 'hls', 'mp4']);
+
+	function resolveVideoEncoding(rawEncoding, target) {
+		if (typeof rawEncoding === 'string' && rawEncoding.trim()) {
+			const enc = rawEncoding.trim().toLowerCase();
+			if (VALID_VIDEO_ENCODINGS.has(enc)) return enc;
+		}
+		if (target.protocol === 'rtsp:') return 'rtsp';
+		const pathname = (target.pathname || '').toLowerCase();
+		if (pathname.endsWith('.m3u8')) return 'hls';
+		if (pathname.endsWith('.mp4') || pathname.endsWith('.m4v')) return 'mp4';
+		if (pathname.endsWith('.mjpg') || pathname.endsWith('.mjpeg') || pathname.includes('mjpeg')) return 'mjpeg';
+		return null;
+	}
 
 	function isProxyTargetAllowed(url, allowlist) {
 		if (!allowlist.length) return false;
@@ -184,8 +200,15 @@ function createQueryStringTestApp() {
 				return res.status(403).send('Proxy target not allowed');
 			}
 
-			// Validate viewport width (w param) for RTSP streams
-			if (target.protocol === 'rtsp:') {
+			// Validate encoding param
+			const rawEncoding = req.query?.encoding;
+			if (rawEncoding !== undefined && typeof rawEncoding !== 'string') {
+				return res.status(400).send('Invalid encoding parameter');
+			}
+			const encoding = resolveVideoEncoding(rawEncoding, target);
+
+			// Validate viewport width (w param) for video streams
+			if (encoding) {
 				if (req.query?.w !== undefined && typeof req.query.w !== 'string') {
 					return res.status(400).send('Invalid viewport width');
 				}
@@ -194,7 +217,7 @@ function createQueryStringTestApp() {
 					return res.status(400).send('Invalid viewport width');
 				}
 				const viewportWidth = Number.isFinite(rawWidth) ? rawWidth : 0;
-				return res.json({ ok: true, protocol: 'rtsp', viewportWidth });
+				return res.json({ ok: true, encoding, viewportWidth });
 			}
 
 			return res.json({ ok: true, protocol: target.protocol });
@@ -414,6 +437,7 @@ describe('Query String Parameter Validation Tests', () => {
 			});
 			const data = await res.json();
 			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'rtsp');
 			assert.strictEqual(data.viewportWidth, 800);
 		});
 
@@ -424,6 +448,7 @@ describe('Query String Parameter Validation Tests', () => {
 			});
 			const data = await res.json();
 			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'rtsp');
 			assert.strictEqual(data.viewportWidth, 800);
 		});
 
@@ -457,6 +482,7 @@ describe('Query String Parameter Validation Tests', () => {
 				headers: { 'Authorization': authHeader },
 			});
 			const data = await res.json();
+			assert.strictEqual(data.encoding, 'rtsp');
 			assert.strictEqual(data.viewportWidth, 10000);
 		});
 
@@ -474,6 +500,131 @@ describe('Query String Parameter Validation Tests', () => {
 			});
 			const data = await res.json();
 			assert.strictEqual(res.status, 200);
+		});
+	});
+
+	describe('/proxy - Encoding Parameter Validation', () => {
+		it('accepts encoding=mjpeg (lowercase)', async () => {
+			const url = encodeURIComponent('http://stream.local/cam');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}&encoding=mjpeg`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'mjpeg');
+		});
+
+		it('accepts encoding=HLS (uppercase, case insensitive)', async () => {
+			const url = encodeURIComponent('http://stream.local/live');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}&encoding=HLS`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'hls');
+		});
+
+		it('accepts encoding=Mp4 (mixed case)', async () => {
+			const url = encodeURIComponent('http://stream.local/video');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}&encoding=Mp4`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'mp4');
+		});
+
+		it('accepts encoding=RTSP (explicit)', async () => {
+			const url = encodeURIComponent('rtsp://camera.local:554/stream');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}&encoding=RTSP`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'rtsp');
+		});
+
+		it('auto-detects hls from .m3u8 URL when encoding absent', async () => {
+			const url = encodeURIComponent('http://stream.local/live/index.m3u8');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'hls');
+		});
+
+		it('auto-detects mp4 from .mp4 URL when encoding absent', async () => {
+			const url = encodeURIComponent('http://stream.local/clip.mp4');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'mp4');
+		});
+
+		it('auto-detects mjpeg from .mjpeg URL when encoding absent', async () => {
+			const url = encodeURIComponent('http://stream.local/cam.mjpeg');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'mjpeg');
+		});
+
+		it('auto-detects rtsp from rtsp:// protocol when encoding absent', async () => {
+			const url = encodeURIComponent('rtsp://camera.local:554/stream');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'rtsp');
+		});
+
+		it('falls through to HTTP proxy when no encoding match', async () => {
+			const url = encodeURIComponent('http://allowed.example.com/image.jpg');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.protocol, 'http:');
+			assert.strictEqual(data.encoding, undefined);
+		});
+
+		it('ignores unrecognized encoding value and auto-detects', async () => {
+			const url = encodeURIComponent('rtsp://camera.local:554/stream');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}&encoding=bogus`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'rtsp');
+		});
+
+		it('accepts viewport width for non-RTSP encoding (hls)', async () => {
+			const url = encodeURIComponent('http://stream.local/live/index.m3u8');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}&encoding=hls&w=1920`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'hls');
+			assert.strictEqual(data.viewportWidth, 1920);
+		});
+
+		it('accepts viewport width for mjpeg encoding', async () => {
+			const url = encodeURIComponent('http://stream.local/cam');
+			const res = await fetch(`${baseUrl}/proxy?url=${url}&encoding=mjpeg&w=640`, {
+				headers: { 'Authorization': authHeader },
+			});
+			const data = await res.json();
+			assert.strictEqual(res.status, 200);
+			assert.strictEqual(data.encoding, 'mjpeg');
+			assert.strictEqual(data.viewportWidth, 640);
 		});
 	});
 });
