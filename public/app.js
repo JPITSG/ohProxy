@@ -5167,10 +5167,6 @@ function parseSwitchMappingCommand(rawMapping) {
 	const press = command.slice(0, firstColon).trim();
 	const release = command.slice(firstColon + 1).trim();
 	if (!press || !release) return { mode: 'single', press: command };
-	const dualToken = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
-	if (!dualToken.test(press) || !dualToken.test(release)) {
-		return { mode: 'single', press: command };
-	}
 	return { mode: 'dual', press, release };
 }
 
