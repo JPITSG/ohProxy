@@ -5266,10 +5266,11 @@ function clearMappingIconUrl(iconEl) {
 	iconEl.style.maskImage = '';
 }
 
-function setMappingControlContent(el, mapping) {
+function setMappingControlContent(el, mapping, options = {}) {
 	if (!el) return;
 	const text = mappingLabel(mapping);
 	const iconToken = safeText(mapping?.icon ?? '').trim();
+	const ignoreIcon = !!options?.ignoreIcon;
 	const renderToken = `${Date.now()}-${Math.random()}`;
 	el.dataset.mappingIconRenderToken = renderToken;
 	el.textContent = '';
@@ -5312,7 +5313,7 @@ function setMappingControlContent(el, mapping) {
 		textEl.classList.add('hidden');
 	};
 
-	if (!iconToken) {
+	if (ignoreIcon || !iconToken) {
 		showText();
 		return;
 	}
@@ -6804,7 +6805,7 @@ function updateCard(card, w, info) {
 				fakeSelect.className = 'fake-select';
 				const syncFake = () => {
 					const selectedMapping = findMappingByCommand(mapping, select.value);
-					setMappingControlContent(fakeSelect, selectedMapping || fallbackSelectionMapping());
+					setMappingControlContent(fakeSelect, selectedMapping || fallbackSelectionMapping(), { ignoreIcon: true });
 				};
 				syncFake();
 				let released = false;
@@ -6835,7 +6836,7 @@ function updateCard(card, w, info) {
 				const fakeSelect = document.createElement('button');
 				fakeSelect.type = 'button';
 				fakeSelect.className = 'fake-select';
-				setMappingControlContent(fakeSelect, current || fallbackSelectionMapping());
+				setMappingControlContent(fakeSelect, current || fallbackSelectionMapping(), { ignoreIcon: true });
 
 				const menu = document.createElement('div');
 				menu.className = 'select-menu';
@@ -6860,7 +6861,7 @@ function updateCard(card, w, info) {
 					const optBtn = document.createElement('button');
 					optBtn.type = 'button';
 					optBtn.className = 'select-option';
-					setMappingControlContent(optBtn, m);
+					setMappingControlContent(optBtn, m, { ignoreIcon: true });
 					optBtn.dataset.command = m.command;
 					optBtn.onclick = async (e) => {
 						haptic();
@@ -6872,7 +6873,7 @@ function updateCard(card, w, info) {
 						}
 						const ok = await sendSelection(m.command);
 						if (ok) {
-							setMappingControlContent(fakeSelect, m);
+							setMappingControlContent(fakeSelect, m, { ignoreIcon: true });
 							setActive(m.command);
 						}
 						closeMenu();
