@@ -7777,13 +7777,16 @@ function updateCard(card, w, info) {
 		navHint.style.display = 'none';
 		metaEl.style.display = 'none';
 
-		const hasHeader = !!labelParts.title;
+		const autoLabel = splitLabelState(w?.item?.label || '').title || itemName;
+		const hasHeader = !!labelParts.title && labelParts.title !== autoLabel;
 		const hasExplicitIcon = (w?.icon && w.icon.toLowerCase() !== t) || (w?.staticIcon && w.staticIcon !== false);
 		card.classList.toggle('has-header', hasHeader);
 		if (hasHeader) {
+			if (labelRow) labelRow.style.display = '';
 			labelStack.style.display = '';
 			if (iconWrap) iconWrap.style.display = hasExplicitIcon ? '' : 'none';
 		} else {
+			if (labelRow) labelRow.style.display = 'none';
 			labelStack.style.display = 'none';
 			if (iconWrap) iconWrap.style.display = 'none';
 		}
