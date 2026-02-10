@@ -1574,11 +1574,14 @@ function updateThemeMeta() {
 }
 
 let serverSettingsLoaded = false;
+const colorResolveCache = new Map();
+let colorResolveEl = null;
 
 function setTheme(mode, syncToServer = true) {
 	const isLight = mode === 'light';
 	document.body.classList.toggle('theme-light', isLight);
 	document.body.classList.toggle('theme-dark', !isLight);
+	colorResolveCache.clear();
 	if (els.lightMode) els.lightMode.classList.toggle('active', isLight);
 	if (els.darkMode) els.darkMode.classList.toggle('active', !isLight);
 	if (typeof requestAnimationFrame === 'function') {
@@ -1797,9 +1800,6 @@ function stripLeadingSlash(path) {
 	return path[0] === '/' ? path.slice(1) : path;
 }
 
-const colorResolveCache = new Map();
-let colorResolveEl = null;
-
 function hexToRgb(hex) {
 	const raw = hex.replace('#', '').trim();
 	if (![3, 6, 8].includes(raw.length)) return null;
@@ -1877,11 +1877,9 @@ function parseHsbState(stateStr) {
 	};
 }
 
-function resolveColorToRgb(color) {
+function resolveLiteralColorToRgb(color) {
 	const c = safeText(color).trim();
 	if (!c) return null;
-	const key = c.toLowerCase();
-	if (colorResolveCache.has(key)) return colorResolveCache.get(key);
 	let rgb = null;
 	if (c.startsWith('#')) {
 		rgb = hexToRgb(c);
@@ -1890,7 +1888,70 @@ function resolveColorToRgb(color) {
 	} else {
 		rgb = resolveNamedColor(c);
 	}
-	colorResolveCache.set(key, rgb);
+	return rgb;
+}
+
+function resolveCssVarColor(varName) {
+	if (typeof document === 'undefined') return null;
+	const root = document.body || document.documentElement;
+	if (!root) return null;
+	const raw = getComputedStyle(root).getPropertyValue(varName);
+	return resolveLiteralColorToRgb(raw || '');
+}
+
+function parseHsbTriplet(value) {
+	const raw = safeText(value).trim();
+	if (!raw) return null;
+	const parts = raw.split(',');
+	if (parts.length < 3) return null;
+	const h = Number(parts[0]);
+	const s = Number(parts[1]);
+	const b = Number(parts[2]);
+	if (!Number.isFinite(h) || !Number.isFinite(s) || !Number.isFinite(b)) return null;
+	return {
+		h: Math.max(0, Math.min(360, h)),
+		s: Math.max(0, Math.min(100, s)),
+		b: Math.max(0, Math.min(100, b)),
+	};
+}
+
+function resolveItemValueColor(itemState) {
+	const raw = safeText(itemState).trim();
+	if (!raw || raw === 'NULL' || raw === 'UNDEF') return null;
+	const hsb = parseHsbTriplet(raw);
+	if (hsb) return hsbToRgb(hsb.h, hsb.s, hsb.b);
+	return resolveLiteralColorToRgb(raw);
+}
+
+function resolveOpenHabColorKeyword(color, ctx = {}) {
+	const key = safeText(color).trim().toLowerCase();
+	if (!key) return null;
+	if (key === 'primary') return resolveCssVarColor('--color-primary');
+	if (key === 'secondary') return resolveCssVarColor('--color-primary-light');
+	if (key === 'itemvalue') return resolveItemValueColor(ctx.itemState);
+	return null;
+}
+
+function colorResolveCacheKey(color, ctx = {}) {
+	const key = safeText(color).trim().toLowerCase();
+	if (!key) return '';
+	if (key === 'itemvalue') {
+		return `${key}|${safeText(ctx.itemState).trim()}`;
+	}
+	if (key === 'primary' || key === 'secondary') {
+		return `${key}|${safeText(ctx.themeMode).trim().toLowerCase()}`;
+	}
+	return key;
+}
+
+function resolveColorToRgb(color, ctx = {}) {
+	const c = safeText(color).trim();
+	if (!c) return null;
+	const cacheKey = colorResolveCacheKey(c, ctx);
+	if (cacheKey && colorResolveCache.has(cacheKey)) return colorResolveCache.get(cacheKey);
+	let rgb = resolveOpenHabColorKeyword(c, ctx);
+	if (!rgb) rgb = resolveLiteralColorToRgb(c);
+	if (cacheKey) colorResolveCache.set(cacheKey, rgb);
 	return rgb;
 }
 
@@ -6283,8 +6344,9 @@ function updateCard(card, w, info) {
 	// Apply openHAB labelcolor / valuecolor
 	const lc = data.labelcolor;
 	const vc = data.valuecolor;
-	const lcRgb = lc ? resolveColorToRgb(lc) : null;
-	const vcRgb = vc ? resolveColorToRgb(vc) : null;
+	const colorCtx = { itemState: st, themeMode: getThemeMode() };
+	const lcRgb = lc ? resolveColorToRgb(lc, colorCtx) : null;
+	const vcRgb = vc ? resolveColorToRgb(vc, colorCtx) : null;
 	titleEl.style.color = lcRgb ? `rgb(${lcRgb.r},${lcRgb.g},${lcRgb.b})` : '';
 	metaEl.style.color = vcRgb ? `rgb(${vcRgb.r},${vcRgb.g},${vcRgb.b})` : '';
 	// Apply glow from ohProxy rules
@@ -6317,7 +6379,7 @@ function updateCard(card, w, info) {
 	// Apply openHAB iconcolor
 	if (iconWrap) {
 		const ic = data.iconcolor;
-		const icRgb = ic ? resolveColorToRgb(ic) : null;
+		const icRgb = ic ? resolveColorToRgb(ic, colorCtx) : null;
 		iconWrap.dataset.iconcolor = icRgb ? `${icRgb.r},${icRgb.g},${icRgb.b}` : '';
 		applyIconColor(iconWrap);
 	}
