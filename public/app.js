@@ -4991,7 +4991,7 @@ function deltaKey(widget) {
 function widgetIconName(widget) {
 	// In many sitemap JSON payloads, icon is in widget.icon
 	// Fallback to item.category/icon if present.
-	return safeText(widget?.icon || widget?.item?.icon || widget?.item?.category || '');
+	return safeText(widget?.icon || widget?.staticIcon || widget?.item?.icon || widget?.item?.category || '');
 }
 
 function widgetKey(widget) {
@@ -7774,10 +7774,18 @@ function updateCard(card, w, info) {
 		const hasIcon = !!icon;
 		if (!hasIcon) card.classList.add('buttongrid-no-icon');
 
-		// Hide label row - buttongrid is all buttons
-		labelStack.style.display = 'none';
 		navHint.style.display = 'none';
 		metaEl.style.display = 'none';
+
+		const hasHeader = !!labelParts.title;
+		card.classList.toggle('has-header', hasHeader);
+		if (hasHeader) {
+			labelStack.style.display = '';
+			if (iconWrap) iconWrap.style.display = icon ? '' : 'none';
+		} else {
+			labelStack.style.display = 'none';
+			if (iconWrap) iconWrap.style.display = 'none';
+		}
 
 		// Build grid
 		const maxCol = Math.max(...buttons.map((b) => b.column), 1);

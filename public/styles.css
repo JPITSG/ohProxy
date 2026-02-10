@@ -1173,12 +1173,23 @@ body.theme-dark #themeToggleBtn svg {
 }
 
 /* Buttongrid card styles */
-.buttongrid-card .labelStack { display: none; }
-.buttongrid-card .iconWrap { display: none; }
-.buttongrid-card .labelRow { display: none; }
 .buttongrid-card .cardRow { gap: 0; }
 .buttongrid-card .controls { width: 100%; margin-top: 0; }
 .buttongrid-card .navHint { display: none; }
+.buttongrid-card.has-header .cardRow {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 0.5rem 0.75rem;
+}
+.buttongrid-card.has-header .cardRow > .flex-1 {
+	display: contents;
+}
+.buttongrid-card.has-header .labelRow {
+	align-self: center;
+}
+.buttongrid-card.has-header .controls {
+	grid-column: 1 / -1;
+}
 
 .btn-grid {
 	display: grid;
