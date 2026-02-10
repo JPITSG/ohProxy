@@ -195,10 +195,17 @@ describe('Mapping Icon Support', () => {
 		assert.deepStrictEqual(normalizeMapping(input), normalizeMappings(input));
 	});
 
-	it('app render paths call setMappingControlContent for switch and selection', () => {
+	it('app render paths keep switch mapping icons enabled', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
-		assert.match(app, /setMappingControlContent\(optBtn, m\);/);
 		assert.match(app, /setMappingControlContent\(btn, m\);/);
 		assert.match(app, /setMappingControlContent\(b, m\);/);
+	});
+
+	it('app selection render path ignores mapping icons', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		assert.match(app, /setMappingControlContent\(optBtn, m, \{ ignoreIcon: true \}\);/);
+		assert.match(app, /setMappingControlContent\(fakeSelect, m, \{ ignoreIcon: true \}\);/);
+		assert.match(app, /setMappingControlContent\(fakeSelect, current \|\| fallbackSelectionMapping\(\), \{ ignoreIcon: true \}\);/);
+		assert.match(app, /setMappingControlContent\(fakeSelect, selectedMapping \|\| fallbackSelectionMapping\(\), \{ ignoreIcon: true \}\);/);
 	});
 });
