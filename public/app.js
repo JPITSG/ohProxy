@@ -5170,6 +5170,19 @@ function parseSwitchMappingCommand(rawMapping) {
 	return { mode: 'dual', press, release };
 }
 
+function switchSupportToggleCommand({ isDimmer, sliderMin, sliderMax, currentValue, liveState }) {
+	const min = Number(sliderMin);
+	const max = Number(sliderMax);
+	const current = Number(currentValue);
+	if (isDimmer) {
+		const live = Number.parseFloat(safeText(liveState).trim());
+		const isOn = Number.isFinite(live) ? live > min : (Number.isFinite(current) && current > min);
+		return isOn ? 'OFF' : 'ON';
+	}
+	const next = current > min ? min : max;
+	return String(next);
+}
+
 const MAPPING_ICON_LOAD_TIMEOUT_MS = 2500;
 const MAX_MAPPING_ICON_CACHE = 128;
 const mappingIconUrlCache = new Map();
@@ -7711,9 +7724,14 @@ function updateCard(card, w, info) {
 
 		if (switchSupport) {
 			const toggleSlider = async () => {
-				haptic();
-				const next = current > sliderMin ? sliderMin : sliderMax;
-				try { await sendCommand(itemName, String(next)); await refresh(false); }
+				const command = switchSupportToggleCommand({
+					isDimmer,
+					sliderMin,
+					sliderMax,
+					currentValue: current,
+					liveState: widgetState(w),
+				});
+				try { await sendCommand(itemName, command); await refresh(false); }
 				catch (e) {
 					logJsError(`toggleSlider failed for ${itemName}`, e);
 					alert(e.message);
@@ -7723,7 +7741,7 @@ function updateCard(card, w, info) {
 			card.onclick = (e) => {
 				if (e.target.closest('button, a, input, select, textarea')) return;
 				haptic();
-				toggleSlider();
+				void toggleSlider();
 			};
 		}
 
