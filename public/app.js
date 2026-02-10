@@ -7778,10 +7778,11 @@ function updateCard(card, w, info) {
 		metaEl.style.display = 'none';
 
 		const hasHeader = !!labelParts.title;
+		const hasExplicitIcon = (w?.icon && w.icon.toLowerCase() !== t) || (w?.staticIcon && w.staticIcon !== false);
 		card.classList.toggle('has-header', hasHeader);
 		if (hasHeader) {
 			labelStack.style.display = '';
-			if (iconWrap) iconWrap.style.display = icon ? '' : 'none';
+			if (iconWrap) iconWrap.style.display = hasExplicitIcon ? '' : 'none';
 		} else {
 			labelStack.style.display = 'none';
 			if (iconWrap) iconWrap.style.display = 'none';
