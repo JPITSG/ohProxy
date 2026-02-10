@@ -27,10 +27,6 @@ function parseSwitchMappingCommand(rawMapping) {
 	const press = command.slice(0, firstColon).trim();
 	const release = command.slice(firstColon + 1).trim();
 	if (!press || !release) return { mode: 'single', press: command };
-	const dualToken = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
-	if (!dualToken.test(press) || !dualToken.test(release)) {
-		return { mode: 'single', press: command };
-	}
 	return { mode: 'dual', press, release };
 }
 
@@ -70,13 +66,18 @@ describe('Switch Mapping Parser', () => {
 		assert.deepStrictEqual(parsed, { mode: 'single', press: 'A:B:C' });
 	});
 
-	it('treats time values as single commands', () => {
+	it('treats time-like values as dual commands when they contain one separator', () => {
 		const parsed = parseSwitchMappingCommand('03:30');
-		assert.deepStrictEqual(parsed, { mode: 'single', press: '03:30' });
+		assert.deepStrictEqual(parsed, { mode: 'dual', press: '03', release: '30' });
 	});
 
-	it('treats numeric pair values as single commands', () => {
+	it('treats numeric pair values as dual commands', () => {
 		const parsed = parseSwitchMappingCommand('1:0');
-		assert.deepStrictEqual(parsed, { mode: 'single', press: '1:0' });
+		assert.deepStrictEqual(parsed, { mode: 'dual', press: '1', release: '0' });
+	});
+
+	it('treats values with spaces as dual commands', () => {
+		const parsed = parseSwitchMappingCommand('DIM 50:DIM 0');
+		assert.deepStrictEqual(parsed, { mode: 'dual', press: 'DIM 50', release: 'DIM 0' });
 	});
 });
