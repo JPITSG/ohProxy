@@ -4825,7 +4825,7 @@ function widgetSnapshot(widget) {
 		key: deltaKey(widget),
 		id: safeText(widget?.widgetId || widget?.id || ''),
 		itemName: safeText(widget?.item?.name || widget?.itemName || ''),
-		label: safeText(widget?.label || widget?.item?.label || widget?.item?.name || ''),
+		label: safeText(isButtongrid ? (splitLabelState(widget?.label || '').title === safeText(widget?.item?.name || '') ? '' : (widget?.label || '')) : (widget?.label || widget?.item?.label || widget?.item?.name || '')),
 		state: safeText(widget?.item?.state ?? widget?.state ?? ''),
 		icon: widgetIconName(widget),
 		staticIcon: !!widget?.staticIcon,
