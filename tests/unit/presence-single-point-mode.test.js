@@ -35,9 +35,8 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /if\(!singlePointMode\)\{\s*var hoverControl=new OpenLayers\.Control\.SelectFeature/);
 	});
 
-	it('uses passed lat/lon as zoom-home target in single-point mode', () => {
+	it('uses current red marker as zoom-home target and keeps current zoom level', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(server, /const homeLatValue = singlePointMode \? singlePointLat : hLat;/);
-		assert.match(server, /const homeLonValue = singlePointMode \? singlePointLon : hLon;/);
+		assert.match(server, /document\.getElementById\('zoom-home'\)\.addEventListener\('click',function\(\)\{\s*if\(red\)\{\s*map\.setCenter\(new OpenLayers\.LonLat\(red\[1\],red\[0\]\)\.transform\(wgs84,proj\)\);/);
 	});
 });

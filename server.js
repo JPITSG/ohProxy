@@ -8337,13 +8337,6 @@ app.get('/presence', async (req, res) => {
 
 	const markersJson = JSON.stringify(markers).replace(/</g, '\\u003c');
 
-	const hLat = liveConfig.gpsHomeLat;
-	const hLon = liveConfig.gpsHomeLon;
-	const homeLatValue = singlePointMode ? singlePointLat : hLat;
-	const homeLonValue = singlePointMode ? singlePointLon : hLon;
-	const homeLatJson = Number.isFinite(homeLatValue) ? String(homeLatValue) : "''";
-	const homeLonJson = Number.isFinite(homeLonValue) ? String(homeLonValue) : "''";
-
 	const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -8717,13 +8710,11 @@ map.zoomToExtent(extent);
 	if(!singlePointMode)setTimeout(updateAnchoredTooltips,100);
 	}
 
-var homeLat=${homeLatJson};
-var homeLon=${homeLonJson};
 document.getElementById('zoom-in').addEventListener('click',function(){map.zoomIn()});
 document.getElementById('zoom-out').addEventListener('click',function(){map.zoomOut()});
 	document.getElementById('zoom-home').addEventListener('click',function(){
-	if(typeof homeLat==='number'&&typeof homeLon==='number'){
-	map.setCenter(new OpenLayers.LonLat(homeLon,homeLat).transform(wgs84,proj),15);
+	if(red){
+	map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj));
 	}
 	});
 
