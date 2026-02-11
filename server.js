@@ -8359,10 +8359,11 @@ app.get('/presence', async (req, res) => {
 @media(pointer:coarse){#map-controls{background:none;border:none;box-shadow:none;padding:0;gap:6px}}
 .map-ctrl-btn{width:36px;height:36px;border-radius:10px;border:1px solid rgba(19,21,54,0.2);background:rgba(19,21,54,0.08);color:#0f172a;font-size:18px;font-weight:300;font-family:'Rubik',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;outline:none;transition:background-color .4s ease,border-color .4s ease,box-shadow .4s ease}
 .map-ctrl-btn:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}
-.map-ctrl-btn svg{width:16px;height:16px;fill:currentColor}
-#map{position:absolute;top:0;left:0;right:0;bottom:0;z-index:0}
-body{margin:0;padding:0;overflow:hidden}
-.tooltip{position:absolute;background:#f1f2f9;border:1px solid #ccccd1;border-radius:10px;padding:0.5rem 0.75rem;font-size:.7rem;line-height:1.5;font-family:'Rubik',sans-serif;color:#0f172a;pointer-events:none;user-select:none;z-index:100;white-space:nowrap;box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.08),0 4px 6px -4px rgb(0 0 0 / 0.05)}
+	.map-ctrl-btn svg{width:16px;height:16px;fill:currentColor}
+	#map{position:absolute;top:0;left:0;right:0;bottom:0;z-index:0}
+	body{margin:0;padding:0;overflow:hidden}
+	html,body,#map{overscroll-behavior:none}
+	.tooltip{position:absolute;background:#f1f2f9;border:1px solid #ccccd1;border-radius:10px;padding:0.5rem 0.75rem;font-size:.7rem;line-height:1.5;font-family:'Rubik',sans-serif;color:#0f172a;pointer-events:none;user-select:none;z-index:100;white-space:nowrap;box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.08),0 4px 6px -4px rgb(0 0 0 / 0.05)}
 .tooltip .tt-date{font-weight:500}
 .tooltip .tt-time{font-weight:300;margin-top:0.125rem}
 #hover-tooltip{display:none}
@@ -8473,6 +8474,8 @@ vector.addFeatures(feature);
 	var redTooltip=singlePointMode?null:document.getElementById('red-tooltip');
 	var mapEl=document.getElementById('map');
 	var isTouchDevice=('ontouchstart' in window)||navigator.maxTouchPoints>0;
+	mapEl.addEventListener('wheel',function(e){e.preventDefault()},{passive:false});
+	mapEl.addEventListener('mousewheel',function(e){e.preventDefault()},{passive:false});
 	var tooltipOffsets={redAnchor:{x:15,y:-60},blueAnchor:{x:15,y:-55},pointer:{x:15,y:15}};
 	var lastClickFeature=null;
 	var lastClickTime=0;
