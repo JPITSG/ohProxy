@@ -135,6 +135,7 @@ async function softReset() {
 	_softResetRunning = true;
 	closeImageViewer();
 	exitVideoFullscreen();
+	exitIframeFullscreen();
 	closeCardConfigModal();
 	closeAdminConfigModal();
 	hideStatusTooltip();
