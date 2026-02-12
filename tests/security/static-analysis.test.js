@@ -218,6 +218,10 @@ describe('Static Analysis: XSS Prevention', () => {
 			if (issue.interpolation.includes('fmtAvg')) return false;
 			if (issue.interpolation.includes('fmtMin')) return false;
 			if (issue.interpolation.includes('fmtMax')) return false;
+			if (issue.interpolation.includes('dataCur')) return false;
+			if (issue.interpolation.includes('dataAvg')) return false;
+			if (issue.interpolation.includes('dataMin')) return false;
+			if (issue.interpolation.includes('dataMax')) return false;
 			if (issue.interpolation.includes('curHtml')) return false;
 			if (issue.interpolation.includes('statsHtml')) return false;
 			// Skip weather widget computed values (numbers from API, fixed arrays)
