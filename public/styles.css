@@ -2445,7 +2445,13 @@ html.fs-no-scroll body {
 	aspect-ratio: auto !important;
 	padding-bottom: 0 !important;
 }
-.iframe-fs-active > iframe {
+.iframe-fs-active > div {
+	width: 100% !important;
+	height: 100% !important;
+	aspect-ratio: auto !important;
+	padding-bottom: 0 !important;
+}
+.iframe-fs-active iframe {
 	position: fixed !important;
 	top: 0 !important;
 	left: 0 !important;
