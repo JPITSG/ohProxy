@@ -451,6 +451,11 @@ let videoFsPlaceholder = null;
 let videosPausedForVisibility = false;
 const videoZoomStateMap = new WeakMap();
 
+let iframeFsActive = false;
+let iframeFsContainer = null;
+let iframeFsIframe = null;
+let iframeFsEscHandler = null;
+
 const widgetIframeConfigMap = buildWidgetMap(OH_CONFIG.widgetIframeConfigs);
 const widgetProxyCacheConfigMap = buildWidgetMap(OH_CONFIG.widgetProxyCacheConfigs);
 const widgetCardWidthMap = buildWidgetMap(OH_CONFIG.widgetCardWidths, {
@@ -780,6 +785,70 @@ function cleanupVideoFullscreen() {
 	videoFullscreenVideoEl = null;
 	videoFullscreenContainer = null;
 }
+
+function findIframeBySource(source) {
+	const iframes = document.querySelectorAll('#grid iframe.chart-frame, #grid iframe.webview-frame, #grid iframe.mapview-frame');
+	for (const iframe of iframes) {
+		try {
+			if (iframe.contentWindow === source) {
+				return { iframe, container: iframe.closest('#grid > .glass[data-widget-key]') };
+			}
+		} catch (_) { /* cross-origin */ }
+	}
+	return null;
+}
+
+function enterIframeFullscreen(container, iframe) {
+	if (iframeFsActive) exitIframeFullscreen();
+	if (videoFullscreenActive) cleanupVideoFullscreen();
+
+	container.classList.add('iframe-fs-active');
+	document.documentElement.classList.add('fs-no-scroll');
+
+	iframeFsActive = true;
+	iframeFsContainer = container;
+	iframeFsIframe = iframe;
+
+	iframeFsEscHandler = function (e) {
+		if (e.key === 'Escape') exitIframeFullscreen();
+	};
+	document.addEventListener('keydown', iframeFsEscHandler);
+
+	iframe.contentWindow.postMessage({ type: 'ohproxy-fullscreen-state', active: true }, '*');
+}
+
+function exitIframeFullscreen() {
+	if (!iframeFsActive) return;
+
+	iframeFsContainer.classList.remove('iframe-fs-active');
+	document.documentElement.classList.remove('fs-no-scroll');
+
+	if (iframeFsEscHandler) {
+		document.removeEventListener('keydown', iframeFsEscHandler);
+		iframeFsEscHandler = null;
+	}
+
+	const iframe = iframeFsIframe;
+	iframeFsActive = false;
+	iframeFsContainer = null;
+	iframeFsIframe = null;
+
+	if (iframe) {
+		try { iframe.contentWindow.postMessage({ type: 'ohproxy-fullscreen-state', active: false }, '*'); } catch (_) {}
+	}
+}
+
+window.addEventListener('message', function (e) {
+	if (!e.data || typeof e.data !== 'object') return;
+	if (e.data.type === 'ohproxy-fullscreen-request') {
+		const match = findIframeBySource(e.source);
+		if (match) enterIframeFullscreen(match.container, match.iframe);
+	} else if (e.data.type === 'ohproxy-fullscreen-exit') {
+		if (iframeFsActive && iframeFsIframe && iframeFsIframe.contentWindow === e.source) {
+			exitIframeFullscreen();
+		}
+	}
+});
 
 function getVideoZoomState(videoEl) {
 	if (!videoEl) return null;
