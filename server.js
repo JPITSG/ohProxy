@@ -7020,6 +7020,7 @@ app.post('/api/voice/transcribe', express.raw({ type: 'application/octet-stream'
 		const text = await new Promise((resolve, reject) => {
 			const ws = new WebSocket(`ws://${liveConfig.voskHost}`);
 			let result = '';
+			let lastPartial = '';
 			const timeout = setTimeout(() => {
 				ws.terminate();
 				reject(new Error('Vosk timeout'));
@@ -7035,12 +7036,13 @@ app.post('/api/voice/transcribe', express.raw({ type: 'application/octet-stream'
 				try {
 					const msg = JSON.parse(data);
 					if (msg.text !== undefined) result = msg.text;
+					if (msg.partial !== undefined) lastPartial = msg.partial;
 				} catch {}
 			});
 
 			ws.on('close', () => {
 				clearTimeout(timeout);
-				resolve(result);
+				resolve(result || lastPartial);
 			});
 
 			ws.on('error', (err) => {
