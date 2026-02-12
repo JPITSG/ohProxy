@@ -8397,6 +8397,7 @@ app.get('/presence', async (req, res) => {
 .ctx-nav{display:flex;gap:6px;margin-top:8px}
 .ctx-nav .ctx-older,.ctx-nav .ctx-newer{margin-top:0}
 .ctx-empty,.ctx-loading{font-size:0.625rem;font-weight:300;letter-spacing:0.08em;color:rgba(19,21,54,0.5);font-family:'Rubik',sans-serif}
+#map-fullscreen{display:none}
 </style>
 	<script src="/vendor/OpenLayers.js"></script>
 	</head>
@@ -8409,6 +8410,7 @@ app.get('/presence', async (req, res) => {
 	<div id="map-controls">
 	<button class="map-ctrl-btn" id="zoom-in" type="button">+</button>
 	<button class="map-ctrl-btn" id="zoom-home" type="button"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></button>
+	<button class="map-ctrl-btn" id="map-fullscreen" type="button"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg></button>
 	<button class="map-ctrl-btn" id="zoom-out" type="button">&minus;</button>
 	</div>
 	${singlePointMode ? '' : `<div id="search-modal">
@@ -8717,6 +8719,27 @@ document.getElementById('zoom-out').addEventListener('click',function(){map.zoom
 	map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj));
 	}
 	});
+
+	(function(){
+	if(window===window.top)return;
+	var fsBtn=document.getElementById('map-fullscreen');
+	fsBtn.style.display='flex';
+	var fsActive=false;
+	var expandSvg='<svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg>';
+	var minimizeSvg='<svg viewBox="0 0 24 24"><path d="M9 3v6H3V7h4V3h2zm6 0h2v4h4v2h-6V3zM3 15h6v6H7v-4H3v-2zm12 0h6v2h-4v4h-2v-6z"/></svg>';
+	fsBtn.addEventListener('click',function(){
+	if(!fsActive){
+	window.parent.postMessage({type:'ohproxy-fullscreen-request'},'*');
+	}else{
+	window.parent.postMessage({type:'ohproxy-fullscreen-exit'},'*');
+	}
+	});
+	window.addEventListener('message',function(e){
+	if(!e.data||e.data.type!=='ohproxy-fullscreen-state')return;
+	fsActive=!!e.data.active;
+	fsBtn.innerHTML=fsActive?minimizeSvg:expandSvg;
+	});
+	})();
 
 	if(!singlePointMode){
 	document.getElementById('search-modal').addEventListener('keydown',function(e){e.stopPropagation()});
