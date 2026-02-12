@@ -137,6 +137,7 @@ async function softReset() {
 	exitVideoFullscreen();
 	closeCardConfigModal();
 	closeAdminConfigModal();
+	hideStatusTooltip();
 	_spinnerLock = true;
 	showResumeSpinner(true);
 	reportGps();
@@ -1468,6 +1469,14 @@ function showStatusTooltip(e) {
 	}
 	if (e && e.clientX !== undefined) {
 		positionStatusTooltip(e);
+	} else if (els.statusDotWrap) {
+		var rect = els.statusDotWrap.getBoundingClientRect();
+		var tw = els.statusTooltip.offsetWidth;
+		var th = els.statusTooltip.offsetHeight;
+		var x = Math.max(4, Math.min(rect.left - tw - 8, window.innerWidth - tw - 4));
+		var y = Math.max(4, Math.min(rect.top + rect.height / 2 - th / 2, window.innerHeight - th - 4));
+		els.statusTooltip.style.left = x + 'px';
+		els.statusTooltip.style.top = y + 'px';
 	}
 	els.statusTooltip.classList.add('visible');
 }
@@ -9369,6 +9378,14 @@ function restoreNormalPolling() {
 		els.statusDotWrap.addEventListener('mouseenter', showStatusTooltip);
 		els.statusDotWrap.addEventListener('mousemove', positionStatusTooltip);
 		els.statusDotWrap.addEventListener('mouseleave', hideStatusTooltip);
+		els.statusDotWrap.addEventListener('click', function () {
+			if (!isTouchDevice()) return;
+			if (els.statusTooltip.classList.contains('visible')) {
+				hideStatusTooltip();
+			} else {
+				showStatusTooltip();
+			}
+		});
 	}
 	if (isTouchDevice() && 'Notification' in window && 'serviceWorker' in navigator) {
 		Notification.requestPermission().then(perm => {
@@ -9509,6 +9526,7 @@ function restoreNormalPolling() {
 		state.lastActivity = lastHiddenTime;
 		stopPing();
 		closeStatusNotification();
+		hideStatusTooltip();
 		if (isTouchDevice()) pauseVideoStreamsForVisibility();
 	}
 
