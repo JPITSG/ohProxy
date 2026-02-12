@@ -323,6 +323,19 @@
 				statCur.addEventListener('mouseenter', () => this.showStatTooltip(this.curPoint));
 				statCur.addEventListener('mouseleave', () => this.hideTooltip());
 			}
+			// Reformat legend stat values using yAxisDecimalPattern if set
+			if (CHART_Y_PATTERN) {
+				var statsEl = document.getElementById('chartStats');
+				if (statsEl) {
+					var unit = window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '';
+					statsEl.querySelectorAll('.stat-value[data-raw]').forEach(function(el) {
+						var raw = parseFloat(el.getAttribute('data-raw'));
+						if (Number.isFinite(raw)) {
+							el.textContent = javaDecimalFormat(CHART_Y_PATTERN, raw) + unit;
+						}
+					});
+				}
+			}
 		}
 
 		svg$(tag, attrs) {
