@@ -1058,7 +1058,9 @@
 
 		// Check if title is truncated (scrollWidth > clientWidth)
 		var isOverflowing = title.scrollWidth > title.clientWidth;
-		stats.classList.toggle('hidden', isOverflowing);
+		stats.querySelectorAll('.stat-item').forEach(function(el) {
+			el.classList.toggle('hidden', isOverflowing);
+		});
 	}
 
 	// Script is at end of body, DOM is ready - instantiate immediately
