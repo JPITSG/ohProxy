@@ -3245,7 +3245,7 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 	let legendHtml = '';
 	let statsHtml = '';
 	if (legend !== false) {
-		legendHtml = unitDisplay ? `<div class="chart-legend"><span class="legend-line"></span><span>${unitDisplay}</span></div>` : '';
+		legendHtml = unitDisplay ? `<span class="chart-legend"><span class="legend-line"></span><span>${unitDisplay}</span></span>` : '';
 		// Format stats values with unit
 		const statUnit = unitDisplay ? ' ' + unitDisplay : '';
 		const fmtAvg = typeof dataAvg === 'number' ? formatChartValue(dataAvg) + statUnit : '';
@@ -3253,7 +3253,7 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 		const fmtMax = typeof dataMax === 'number' ? formatChartValue(dataMax) + statUnit : '';
 		const fmtCur = (chartShowCurStat(durationSec || 3600) && typeof dataCur === 'number') ? formatChartValue(dataCur) + statUnit : '';
 		const curHtml = fmtCur ? `<span class="stat-item" id="statCur"><span class="stat-label">Cur</span> <span class="stat-value" data-raw="${dataCur}">${fmtCur}</span></span>` : '';
-		statsHtml = fmtAvg ? `<div class="chart-stats" id="chartStats">${curHtml}<span class="stat-item"><span class="stat-label">Avg</span> <span class="stat-value" data-raw="${dataAvg}">${fmtAvg}</span></span><span class="stat-item" id="statMin"><span class="stat-label">Min</span> <span class="stat-value" data-raw="${dataMin}">${fmtMin}</span></span><span class="stat-item" id="statMax"><span class="stat-label">Max</span> <span class="stat-value" data-raw="${dataMax}">${fmtMax}</span></span></div>` : '';
+		statsHtml = fmtAvg ? `${curHtml}<span class="stat-item"><span class="stat-label">Avg</span> <span class="stat-value" data-raw="${dataAvg}">${fmtAvg}</span></span><span class="stat-item" id="statMin"><span class="stat-label">Min</span> <span class="stat-value" data-raw="${dataMin}">${fmtMin}</span></span><span class="stat-item" id="statMax"><span class="stat-label">Max</span> <span class="stat-value" data-raw="${dataMax}">${fmtMax}</span></span>` : '';
 	}
 
 	return `<!DOCTYPE html>
@@ -3269,7 +3269,7 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 <div class="chart-card">
 <div class="chart-header">
 <div class="chart-title-group"><h2 class="chart-title" id="chartTitle">${safeTitle}</h2></div>
-<div class="chart-header-right">${statsHtml}${legendHtml}</div>
+<div class="chart-header-right" id="chartStats">${statsHtml}${legendHtml}</div>
 </div>
 <div class="chart-container" id="chartContainer">
 <svg class="chart-svg" id="chartSvg"></svg>

@@ -126,7 +126,7 @@ body {
 	font-size: 0.8125rem;
 	font-weight: 300;
 	color: var(--text-primary);
-	padding: 0.375rem 0.75rem;
+	padding: 0.375rem 0;
 	background: var(--bg-tertiary);
 	border-radius: 10px;
 	flex-shrink: 0;
@@ -143,23 +143,18 @@ body {
 .chart-header-right {
 	display: flex;
 	align-items: center;
-}
-
-.chart-stats {
-	display: flex;
-	align-items: center;
 	gap: 1rem;
-	flex-shrink: 0;
-}
-
-.chart-stats.hidden {
-	display: none;
 }
 
 .stat-item {
+	flex-shrink: 0;
 	display: flex;
 	align-items: baseline;
 	gap: 0.25rem;
+}
+
+.stat-item.hidden {
+	display: none;
 }
 
 #statMin,
@@ -319,7 +314,7 @@ body {
 		font-size: 1rem;
 	}
 
-	.chart-stats {
+	.stat-item {
 		display: none;
 	}
 
