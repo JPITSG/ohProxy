@@ -6811,6 +6811,20 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 	res.json({ ok: true, restartRequired: needsRestart, reloadRequired: needsReload });
 });
 
+app.post('/api/admin/restart', jsonParserSmall, (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
+	if (user?.role !== 'admin') {
+		res.status(403).json({ error: 'Admin access required' });
+		return;
+	}
+	logMessage(`[Admin] Restart triggered by ${user.username || 'unknown'}`);
+	res.json({ ok: true });
+	res.once('finish', maybeTriggerRestart);
+	res.once('close', maybeTriggerRestart);
+});
+
 app.get('/api/card-config/:itemName/history', async (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
