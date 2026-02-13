@@ -16,7 +16,9 @@ window.ohLang = {
 
 		loadFailed: 'Failed to load config: ',
 		savedRestart: 'Saved. Restart required for some changes.',
-		savedReload: 'Saved. Reload required for some changes.',
+		savedReload: 'Saved. Reload required to apply changes.',
+		reloadNotice: 'Reload required to apply changes.',
+		reloadBtn: 'Reload',
 		savedOk: 'Saved successfully.',
 		noChanges: 'No changes were made.',
 		saveFailed: 'Save failed: ',

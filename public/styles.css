@@ -1987,6 +1987,7 @@ body.theme-light .oh-modal-footer {
 	color: var(--color-text-secondary);
 	line-height: 1.5;
 	padding: 16px 20px;
+	white-space: pre-line;
 }
 .alert-no-header { display: none !important; }
 .alert-no-footer { display: none !important; }

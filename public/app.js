@@ -4385,6 +4385,15 @@ async function saveAdminConfig() {
 		} else if (result.reloadRequired) {
 			statusEl.className = 'admin-config-status warning';
 			statusEl.textContent = ohLang.adminConfig.savedReload;
+			closeAdminConfigModal();
+			showAlert({
+				header: ohLang.adminConfig.reloadBadge,
+				body: ohLang.adminConfig.savedOk + '\n\n' + ohLang.adminConfig.reloadNotice,
+				buttons: [
+					{ text: ohLang.adminConfig.closeBtn },
+					{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); window.location.reload(); } },
+				],
+			});
 		} else {
 			statusEl.className = 'admin-config-status success';
 			statusEl.textContent = ohLang.adminConfig.savedOk;
