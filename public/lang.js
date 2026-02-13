@@ -25,6 +25,7 @@ window.ohLang = {
 		restartSuccess: 'Server restarted successfully.',
 		restartFailed: 'Failed to trigger restart.',
 		restartTimeout: 'Server has not responded yet. It may still be restarting.',
+		updateNotice: 'An update is available. Reload is recommended.',
 		savedOk: 'Saved successfully.',
 		noChanges: 'No changes were made.',
 		saveFailed: 'Save failed: ',
