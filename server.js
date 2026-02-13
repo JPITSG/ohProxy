@@ -10,7 +10,6 @@ const zlib = require('zlib');
 const { execFile, spawn } = require('child_process');
 const http = require('http');
 const https = require('https');
-const http2 = require('http2');
 const crypto = require('crypto');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const WebSocket = require('ws');
@@ -282,7 +281,6 @@ const HTTPS_HOST = safeText(HTTPS_CONFIG.host);
 const HTTPS_PORT = configNumber(HTTPS_CONFIG.port);
 const HTTPS_CERT_FILE = safeText(HTTPS_CONFIG.certFile);
 const HTTPS_KEY_FILE = safeText(HTTPS_CONFIG.keyFile);
-const HTTPS_HTTP2 = typeof HTTPS_CONFIG.http2 === 'boolean' ? HTTPS_CONFIG.http2 : false;
 const ALLOW_SUBNETS = SERVER_CONFIG.allowSubnets;
 const TRUST_PROXY = SERVER_CONFIG.trustProxy === true;
 const DENY_XFF_SUBNETS = SERVER_CONFIG.denyXFFSubnets;
@@ -1915,7 +1913,7 @@ migrateGlowRulesToDb();
 // Values that require restart if changed
 const restartRequiredKeys = [
 	'http.enabled', 'http.host', 'http.port',
-	'https.enabled', 'https.host', 'https.port', 'https.certFile', 'https.keyFile', 'https.http2',
+	'https.enabled', 'https.host', 'https.port', 'https.certFile', 'https.keyFile',
 	'mysql.socket', 'mysql.host', 'mysql.port', 'mysql.database', 'mysql.username', 'mysql.password',
 ];
 
@@ -9303,7 +9301,6 @@ app.get('/proxy', async (req, res, next) => {
 	}
 
 	// openHAB internal proxy (sitemap/widgetId images, etc.)
-	// Use buffered fetch to avoid HTTP/2 streaming cutoff issues with spdy
 	const proxyPath = `/proxy${req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''}`;
 	try {
 		const result = await fetchOpenhabBinary(proxyPath);
@@ -9850,9 +9847,7 @@ function startHttpsServer() {
 		logMessage(`Failed to read HTTPS credentials: ${err.message || err}`);
 		process.exit(1);
 	}
-	httpsServer = HTTPS_HTTP2
-		? http2.createSecureServer({ ...tlsOptions, allowHTTP1: true }, app)
-		: https.createServer(tlsOptions, app);
+	httpsServer = https.createServer(tlsOptions, app);
 	const server = httpsServer;
 	server.on('error', (err) => {
 		logMessage(`HTTPS server error: ${err.message || err}`);
@@ -9861,8 +9856,7 @@ function startHttpsServer() {
 	server.on('upgrade', handleWsUpgrade);
 	server.listen(HTTPS_PORT, HTTPS_HOST || undefined, () => {
 		const host = HTTPS_HOST || '0.0.0.0';
-		const proto = HTTPS_HTTP2 ? 'h2' : 'https';
-		logMessage(`[Startup] Listening (HTTPS${HTTPS_HTTP2 ? '+HTTP/2' : ''}): ${proto}://${host}:${HTTPS_PORT}`);
+		logMessage(`[Startup] Listening (HTTPS): https://${host}:${HTTPS_PORT}`);
 	});
 }
 
