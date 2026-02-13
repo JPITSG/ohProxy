@@ -8862,6 +8862,7 @@ loadDay(month,day,year);
 });
 
 document.querySelector('.search-today').addEventListener('click',function(){
+closeCtxMenu();
 var now=new Date();var m=now.getMonth(),d=now.getDate(),y=now.getFullYear();
 monthBtn.textContent=months[m];
 monthMenu.querySelectorAll('div').forEach(function(el,i){if(i===m)el.classList.add('selected');else el.classList.remove('selected')});
