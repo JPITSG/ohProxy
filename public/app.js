@@ -4382,6 +4382,15 @@ async function saveAdminConfig() {
 		if (result.restartRequired) {
 			statusEl.className = 'admin-config-status warning';
 			statusEl.textContent = ohLang.adminConfig.savedRestart;
+			closeAdminConfigModal();
+			showAlert({
+				header: ohLang.adminConfig.restartBadge,
+				body: ohLang.adminConfig.savedOk + '\n\n' + ohLang.adminConfig.restartNotice,
+				buttons: [
+					{ text: ohLang.adminConfig.closeBtn },
+					{ text: ohLang.adminConfig.restartBtn, onClick: () => { dismissAllAlerts(); restartServer(); } },
+				],
+			});
 		} else if (result.reloadRequired) {
 			statusEl.className = 'admin-config-status warning';
 			statusEl.textContent = ohLang.adminConfig.savedReload;
@@ -4406,6 +4415,67 @@ async function saveAdminConfig() {
 	}
 
 	saveBtn.disabled = false;
+}
+
+async function restartServer() {
+	// Phase 1: Trigger restart
+	try {
+		const resp = await fetch('/api/admin/restart', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: '{}',
+		});
+		if (!resp.ok) {
+			showAlert({ body: ohLang.adminConfig.restartFailed });
+			return;
+		}
+	} catch {
+		showAlert({ body: ohLang.adminConfig.restartFailed });
+		return;
+	}
+
+	// Phase 2: Show non-dismissable "restarting" alert and poll heartbeat
+	showAlert({
+		body: ohLang.adminConfig.restartingNotice,
+		showClose: false,
+		dismissOnBackdrop: false,
+		dismissOnEscape: false,
+	});
+
+	const pollStart = Date.now();
+	const maxWait = 20000;
+	const interval = 1000;
+	let serverUp = false;
+
+	// Brief initial delay so the process has time to exit
+	await new Promise(r => setTimeout(r, 1500));
+
+	while (Date.now() - pollStart < maxWait) {
+		try {
+			const hb = await fetch('/api/heartbeat', { cache: 'no-store' });
+			if (hb.ok) { serverUp = true; break; }
+		} catch { /* server still down */ }
+		await new Promise(r => setTimeout(r, interval));
+	}
+
+	// Phase 3: Result
+	dismissAllAlerts();
+	if (serverUp) {
+		showAlert({
+			body: ohLang.adminConfig.restartSuccess,
+			buttons: [
+				{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); window.location.reload(); } },
+			],
+		});
+	} else {
+		showAlert({
+			body: ohLang.adminConfig.restartTimeout,
+			buttons: [
+				{ text: ohLang.adminConfig.closeBtn },
+				{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); window.location.reload(); } },
+			],
+		});
+	}
 }
 
 function updateAdminConfigBtnVisibility() {
