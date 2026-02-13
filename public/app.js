@@ -2630,6 +2630,11 @@ let historyGlowColor = null;
 let historyAbort = null;
 let cardConfigInitialStateJson = null;
 
+let alertModal = null;
+let alertQueue = [];
+let alertCurrentOptions = null;
+let alertDismissListener = null;
+
 function makeFrameDraggable(frame, handle) {
 	let dragging = false;
 	let startX = 0, startY = 0;
@@ -2696,19 +2701,19 @@ function ensureCardConfigModal() {
 	if (cardConfigModal) return;
 	const wrap = document.createElement('div');
 	wrap.id = 'cardConfigModal';
-	wrap.className = 'card-config-modal hidden';
+	wrap.className = 'card-config-modal oh-modal hidden';
 	const cc = ohLang.cardConfig;
 	wrap.innerHTML = `
-		<div class="card-config-frame glass">
-			<div class="card-config-header">
+		<div class="card-config-frame oh-modal-frame glass">
+			<div class="card-config-header oh-modal-header">
 				<h2>${cc.title}</h2>
-				<button type="button" class="card-config-close">
+				<button type="button" class="card-config-close oh-modal-close">
 					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M18 6L6 18M6 6l12 12"/>
 					</svg>
 				</button>
 			</div>
-			<div class="card-config-body">
+			<div class="card-config-body oh-modal-body">
 				<div class="history-section" style="display:none;">
 					<div class="item-config-section-header">${cc.historyHeader}</div>
 					<div class="history-entries"></div>
@@ -2775,7 +2780,7 @@ function ensureCardConfigModal() {
 					<button type="button" class="card-config-add">${cc.addRuleBtn}</button>
 				</div>
 			</div>
-			<div class="card-config-footer">
+			<div class="card-config-footer oh-modal-footer">
 				<span class="card-config-status"></span>
 				<button type="button" class="card-config-cancel">${cc.closeBtn}</button>
 				<button type="button" class="card-config-save">${cc.saveBtn}</button>
@@ -3390,6 +3395,172 @@ function shakeElement(el) {
 		el.removeEventListener('animationend', onEnd);
 		el.classList.remove('shake');
 	});
+}
+
+function ensureAlertModal() {
+	if (alertModal) return;
+	const wrap = document.createElement('div');
+	wrap.id = 'alertModal';
+	wrap.className = 'alert-modal oh-modal hidden';
+	wrap.innerHTML = `
+		<div class="oh-modal-frame alert-frame glass">
+			<div class="oh-modal-header alert-header">
+				<h2></h2>
+				<button type="button" class="oh-modal-close alert-close">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M18 6L6 18M6 6l12 12"/>
+					</svg>
+				</button>
+			</div>
+			<div class="oh-modal-body alert-body"></div>
+			<div class="oh-modal-footer alert-footer"></div>
+		</div>
+	`;
+	document.body.appendChild(wrap);
+	alertModal = wrap;
+
+	wrap.querySelector('.alert-close').addEventListener('click', () => { haptic(); closeAlert(); });
+	makeFrameDraggable(wrap.querySelector('.alert-frame'), wrap.querySelector('.alert-header h2'));
+}
+
+function showAlert(options = {}) {
+	ensureAlertModal();
+
+	if (options.clearQueue) alertQueue = [];
+
+	if (alertModal && !alertModal.classList.contains('hidden')) {
+		alertQueue.push(options);
+		return;
+	}
+
+	alertCurrentOptions = options;
+
+	const headerEl = alertModal.querySelector('.alert-header');
+	const titleEl = headerEl.querySelector('h2');
+	const closeBtn = alertModal.querySelector('.alert-close');
+	const bodyEl = alertModal.querySelector('.alert-body');
+	const footerEl = alertModal.querySelector('.alert-footer');
+
+	// Header
+	if (options.header !== undefined) {
+		titleEl.textContent = options.header;
+		headerEl.classList.remove('alert-no-header');
+	} else {
+		titleEl.textContent = '';
+		headerEl.classList.add('alert-no-header');
+	}
+
+	// Close button
+	if (options.showClose === false) {
+		closeBtn.classList.add('alert-no-close');
+	} else {
+		closeBtn.classList.remove('alert-no-close');
+	}
+
+	// Body
+	if (options.body !== undefined) {
+		if (options.bodyIsHtml) {
+			bodyEl.innerHTML = options.body;
+		} else {
+			bodyEl.textContent = options.body;
+		}
+		bodyEl.style.display = '';
+	} else {
+		bodyEl.textContent = '';
+		bodyEl.style.display = 'none';
+	}
+
+	// Footer buttons
+	if (options.buttons && options.buttons.length > 0) {
+		footerEl.innerHTML = '';
+		footerEl.classList.remove('alert-no-footer');
+		for (const btn of options.buttons) {
+			const b = document.createElement('button');
+			b.type = 'button';
+			b.textContent = btn.text;
+			if (btn.className) b.className = btn.className;
+			b.addEventListener('click', () => {
+				haptic();
+				if (typeof btn.onClick === 'function') btn.onClick();
+				closeAlert();
+			});
+			footerEl.appendChild(b);
+		}
+	} else {
+		footerEl.innerHTML = '';
+		footerEl.classList.add('alert-no-footer');
+	}
+
+	// Backdrop dismiss listener
+	const dismissOnBackdrop = options.dismissOnBackdrop !== false;
+	const dismissOnEscape = options.dismissOnEscape !== false;
+
+	function onBackdropClick(e) {
+		if (e.target === alertModal) { haptic(); closeAlert(); }
+	}
+	function onEscapeKey(e) {
+		if (e.key === 'Escape' && alertModal && !alertModal.classList.contains('hidden')) {
+			haptic();
+			closeAlert();
+		}
+	}
+
+	if (dismissOnBackdrop) alertModal.addEventListener('click', onBackdropClick);
+	if (dismissOnEscape) document.addEventListener('keydown', onEscapeKey);
+
+	alertDismissListener = { onBackdropClick, onEscapeKey, dismissOnBackdrop, dismissOnEscape };
+
+	// Open — piggyback if another modal already has scroll lock
+	const alreadyLocked = document.body.classList.contains('card-config-open')
+		|| document.body.classList.contains('admin-config-open');
+
+	if (alreadyLocked) {
+		alertModal.classList.remove('hidden');
+	} else {
+		openModalBase(alertModal, 'alert-open');
+	}
+}
+
+function closeAlert() {
+	if (!alertModal || alertModal.classList.contains('hidden')) return;
+
+	if (alertCurrentOptions && typeof alertCurrentOptions.onClose === 'function') {
+		alertCurrentOptions.onClose();
+	}
+	alertCurrentOptions = null;
+
+	// Remove per-invocation listeners
+	if (alertDismissListener) {
+		if (alertDismissListener.dismissOnBackdrop) alertModal.removeEventListener('click', alertDismissListener.onBackdropClick);
+		if (alertDismissListener.dismissOnEscape) document.removeEventListener('keydown', alertDismissListener.onEscapeKey);
+		alertDismissListener = null;
+	}
+
+	// Close — piggyback path or full close
+	const alreadyLocked = document.body.classList.contains('card-config-open')
+		|| document.body.classList.contains('admin-config-open');
+
+	if (alreadyLocked) {
+		alertModal.classList.add('hidden');
+		const frame = alertModal.querySelector('.alert-frame');
+		if (frame?._resetDragPosition) frame._resetDragPosition();
+	} else {
+		closeModalBase(alertModal, '.alert-frame', 'alert-open');
+	}
+
+	// Process queue
+	if (alertQueue.length > 0) {
+		setTimeout(() => showAlert(alertQueue.shift()), 80);
+	}
+}
+
+function clearAlertQueue() {
+	alertQueue = [];
+}
+
+function dismissAllAlerts() {
+	alertQueue = [];
+	closeAlert();
 }
 
 function closeCardConfigModal() {
@@ -4021,19 +4192,19 @@ function ensureAdminConfigModal() {
 	if (adminConfigModal) return;
 	const wrap = document.createElement('div');
 	wrap.id = 'adminConfigModal';
-	wrap.className = 'admin-config-modal hidden';
+	wrap.className = 'admin-config-modal oh-modal hidden';
 	wrap.innerHTML = `
-		<div class="admin-config-frame glass">
-			<div class="admin-config-header">
+		<div class="admin-config-frame oh-modal-frame glass">
+			<div class="admin-config-header oh-modal-header">
 				<h2>${ohLang.adminConfig.title}</h2>
-				<button type="button" class="admin-config-close">
+				<button type="button" class="admin-config-close oh-modal-close">
 					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M18 6L6 18M6 6l12 12"/>
 					</svg>
 				</button>
 			</div>
 			<div class="admin-config-sections"></div>
-			<div class="admin-config-footer">
+			<div class="admin-config-footer oh-modal-footer">
 				<div class="admin-config-status"></div>
 				<button type="button" class="admin-config-cancel">${ohLang.adminConfig.closeBtn}</button>
 				<button type="button" class="admin-config-save">${ohLang.adminConfig.saveBtn}</button>
