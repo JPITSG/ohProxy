@@ -3381,6 +3381,17 @@ function attachModalDismissListeners(wrap, modal, closeFn) {
 	});
 }
 
+function shakeElement(el) {
+	if (!el) return;
+	el.classList.remove('shake');
+	void el.offsetWidth;
+	el.classList.add('shake');
+	el.addEventListener('animationend', function onEnd() {
+		el.removeEventListener('animationend', onEnd);
+		el.classList.remove('shake');
+	});
+}
+
 function closeCardConfigModal() {
 	if (!cardConfigModal) return;
 	// Abort any in-flight history fetches
@@ -3431,6 +3442,7 @@ async function saveCardConfig() {
 			let msg = ohLang.cardConfig.saveFailed;
 			try { const body = await resp.json(); if (body.error) msg = body.error; } catch (e) {}
 			if (statusEl) { statusEl.className = 'card-config-status error'; statusEl.textContent = msg; }
+			shakeElement(cardConfigModal.querySelector('.card-config-frame'));
 			if (saveBtn) saveBtn.disabled = false;
 			return false;
 		}
@@ -3517,6 +3529,7 @@ async function saveCardConfig() {
 	} catch (e) {
 		logJsError('applyGlowConfig failed', e);
 		if (statusEl) { statusEl.className = 'card-config-status error'; statusEl.textContent = ohLang.cardConfig.saveFailed; }
+		shakeElement(cardConfigModal.querySelector('.card-config-frame'));
 		if (saveBtn) saveBtn.disabled = false;
 		return false;
 	}
@@ -4076,6 +4089,7 @@ async function openAdminConfigModal() {
 		if (e.name === 'AbortError') return;
 		statusEl.className = 'admin-config-status error';
 		statusEl.textContent = ohLang.adminConfig.loadFailed + e.message;
+		shakeElement(adminConfigModal.querySelector('.admin-config-frame'));
 		return;
 	}
 
@@ -4189,6 +4203,7 @@ async function saveAdminConfig() {
 			const msg = result.errors ? result.errors.join('; ') : (result.error || ohLang.adminConfig.saveFailedGeneric);
 			statusEl.className = 'admin-config-status error';
 			statusEl.textContent = msg;
+			shakeElement(adminConfigModal.querySelector('.admin-config-frame'));
 			saveBtn.disabled = false;
 			return;
 		}
@@ -4207,6 +4222,7 @@ async function saveAdminConfig() {
 	} catch (e) {
 		statusEl.className = 'admin-config-status error';
 		statusEl.textContent = ohLang.adminConfig.saveFailed + e.message;
+		shakeElement(adminConfigModal.querySelector('.admin-config-frame'));
 	}
 
 	saveBtn.disabled = false;
