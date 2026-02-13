@@ -3233,6 +3233,7 @@ function openCardConfigModal(widget, card) {
 	}
 
 	openModalBase(cardConfigModal, 'card-config-open');
+	equalizeFooterButtons(cardConfigModal.querySelector('.card-config-footer'));
 }
 
 function formatHistoryTime(isoString) {
@@ -3409,6 +3410,16 @@ function shakeElement(el) {
 	});
 }
 
+function equalizeFooterButtons(footer) {
+	if (!footer) return;
+	const buttons = footer.querySelectorAll('button');
+	if (buttons.length < 2) return;
+	buttons.forEach(b => { b.style.minWidth = ''; });
+	let widest = 0;
+	buttons.forEach(b => { if (b.offsetWidth > widest) widest = b.offsetWidth; });
+	if (widest > 0) buttons.forEach(b => { b.style.minWidth = widest + 'px'; });
+}
+
 function ensureAlertModal() {
 	if (alertModal) return;
 	const wrap = document.createElement('div');
@@ -3498,6 +3509,7 @@ function showAlert(options = {}) {
 			});
 			footerEl.appendChild(b);
 		}
+		equalizeFooterButtons(footerEl);
 	} else {
 		footerEl.innerHTML = '';
 		footerEl.classList.add('alert-no-footer');
@@ -4252,6 +4264,7 @@ async function openAdminConfigModal() {
 	// Show modal immediately with loading state
 	sectionsEl.innerHTML = '';
 	openModalBase(adminConfigModal, 'admin-config-open');
+	equalizeFooterButtons(adminConfigModal.querySelector('.admin-config-footer'));
 
 	// Abort any in-flight config fetch
 	if (adminConfigAbort) adminConfigAbort.abort();

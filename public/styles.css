@@ -1962,7 +1962,6 @@ body.theme-light .oh-modal-footer {
 	border-top-color: var(--header-border);
 }
 .oh-modal-footer button {
-	flex: 1 1 0;
 	padding: 11px 12px;
 	font-size: .75rem;
 	line-height: 1;
