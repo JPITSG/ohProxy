@@ -126,6 +126,17 @@ function triggerReload() {
 	window.location.reload();
 }
 
+function promptAssetReload() {
+	showAlert({
+		header: ohLang.adminConfig.reloadBadge,
+		body: ohLang.adminConfig.updateNotice,
+		buttons: [
+			{ text: ohLang.adminConfig.closeBtn },
+			{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); window.location.reload(); } },
+		],
+	});
+}
+
 const SOFT_RESET_TIMEOUT_MS = 1000; // Short timeout per attempt
 let _spinnerLock = false;
 
@@ -9446,7 +9457,7 @@ function connectWs() {
 				if (msg.event === 'connected' && msg.data?.assetVersion) {
 					if (msg.data.assetVersion !== OH_CONFIG.assetVersion) {
 						console.log('Asset version mismatch on reconnect, reloading...');
-						triggerReload();
+						promptAssetReload();
 						return;
 					}
 				}
@@ -9458,7 +9469,7 @@ function connectWs() {
 				if (msg.event === 'assetVersionChanged') {
 					// Server assets updated - reload to get new version
 					console.log('Asset version changed, reloading...');
-					triggerReload();
+					promptAssetReload();
 					return;
 				}
 				if (msg.event === 'pong' && msg.data) {
