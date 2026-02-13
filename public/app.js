@@ -3739,7 +3739,6 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'server.https.port', type: 'number', min: 1, max: 65535 },
 			{ key: 'server.https.certFile', type: 'text' },
 			{ key: 'server.https.keyFile', type: 'text' },
-			{ key: 'server.https.http2', type: 'toggle' },
 		],
 	},
 	{
