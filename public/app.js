@@ -130,6 +130,7 @@ function promptAssetReload() {
 	showAlert({
 		header: ohLang.adminConfig.reloadBadge,
 		body: ohLang.adminConfig.updateNotice,
+		bodyIsHtml: true,
 		buttons: [
 			{ text: ohLang.adminConfig.closeBtn },
 			{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); window.location.reload(); } },
@@ -4396,7 +4397,8 @@ async function saveAdminConfig() {
 			closeAdminConfigModal();
 			showAlert({
 				header: ohLang.adminConfig.restartBadge,
-				body: ohLang.adminConfig.savedOk + '\n\n' + ohLang.adminConfig.restartNotice,
+				body: ohLang.adminConfig.savedOk + '<br/><br/>' + ohLang.adminConfig.restartNotice,
+				bodyIsHtml: true,
 				buttons: [
 					{ text: ohLang.adminConfig.closeBtn },
 					{ text: ohLang.adminConfig.restartBtn, onClick: () => { dismissAllAlerts(); restartServer(); } },
@@ -4408,7 +4410,8 @@ async function saveAdminConfig() {
 			closeAdminConfigModal();
 			showAlert({
 				header: ohLang.adminConfig.reloadBadge,
-				body: ohLang.adminConfig.savedOk + '\n\n' + ohLang.adminConfig.reloadNotice,
+				body: ohLang.adminConfig.savedOk + '<br/><br/>' + ohLang.adminConfig.reloadNotice,
+				bodyIsHtml: true,
 				buttons: [
 					{ text: ohLang.adminConfig.closeBtn },
 					{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); window.location.reload(); } },
@@ -4481,6 +4484,7 @@ async function restartServer() {
 	} else {
 		showAlert({
 			body: ohLang.adminConfig.restartTimeout,
+			bodyIsHtml: true,
 			buttons: [
 				{ text: ohLang.adminConfig.closeBtn },
 				{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); window.location.reload(); } },
