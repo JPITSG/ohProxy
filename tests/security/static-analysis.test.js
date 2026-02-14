@@ -232,6 +232,8 @@ describe('Static Analysis: XSS Prevention', () => {
 			if (issue.interpolation === 'rainOpacity') return false;
 			if (issue.interpolation === 'rainTextColor') return false;
 			if (issue.interpolation === 'forecastCards') return false;
+			// dateLabel is built from fixed monthNames array + numeric day + hardcoded suffix
+			if (issue.interpolation === 'dateLabel') return false;
 			if (issue.interpolation.includes('bgColor')) return false;
 			if (issue.interpolation.includes('cardBg')) return false;
 			if (issue.interpolation.includes('textColor')) return false;
