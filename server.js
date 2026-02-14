@@ -5701,10 +5701,17 @@ async function resolveIcon(name, state, format) {
 		const fetchPath = hasDynState
 			? `/icon/${name}?state=${encodeURIComponent(state)}&format=${fmt}`
 			: `/images/${name}.${fmt}`;
-		const res = await fetchOpenhabBinary(fetchPath);
+		let res = await fetchOpenhabBinary(fetchPath);
+		// Static path (/images/) may 404 for icons that only exist at /icon/;
+		// fall back to the dynamic endpoint without state.
+		if (!hasDynState && (!res.ok || !isImageContentType(res.contentType))) {
+			const fallbackPath = `/icon/${name}?format=${fmt}`;
+			res = await fetchOpenhabBinary(fallbackPath);
+		}
 		if (!res.ok || !isImageContentType(res.contentType)) {
+			const fullUrl = buildTargetUrl(liveConfig.ohTarget, fetchPath);
 			const reason = !res.ok ? `status ${res.status}` : `content-type ${res.contentType || 'unknown'}`;
-			logMessage(`[Icon] Not found: ${fetchPath} -> ${reason}`);
+			logMessage(`[Icon] Not found: ${fullUrl} -> ${reason}`);
 			throw new Error(`Icon not found: ${name}`);
 		}
 		if (fmt === 'png') return resizeToPng(res.body);
