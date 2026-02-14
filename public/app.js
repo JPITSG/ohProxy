@@ -469,6 +469,8 @@ let iframeFsActive = false;
 let iframeFsContainer = null;
 let iframeFsIframe = null;
 let iframeFsEscHandler = null;
+let iframeFsHistoryPushed = false;
+let iframeFsClosePending = false;
 
 const widgetIframeConfigMap = buildWidgetMap(OH_CONFIG.widgetIframeConfigs);
 const widgetProxyCacheConfigMap = buildWidgetMap(OH_CONFIG.widgetProxyCacheConfigs);
@@ -822,6 +824,8 @@ function enterIframeFullscreen(container, iframe) {
 	iframeFsActive = true;
 	iframeFsContainer = container;
 	iframeFsIframe = iframe;
+	iframeFsHistoryPushed = true;
+	history.pushState(null, '', window.location.pathname + window.location.search + window.location.hash);
 
 	iframeFsEscHandler = function (e) {
 		if (e.key === 'Escape') exitIframeFullscreen();
@@ -833,6 +837,11 @@ function enterIframeFullscreen(container, iframe) {
 
 function exitIframeFullscreen() {
 	if (!iframeFsActive) return;
+	if (iframeFsHistoryPushed) {
+		iframeFsHistoryPushed = false;
+		iframeFsClosePending = true;
+		history.back();
+	}
 
 	iframeFsContainer.classList.remove('iframe-fs-active');
 	document.documentElement.classList.remove('fs-no-scroll');
@@ -9917,6 +9926,17 @@ function restoreNormalPolling() {
 	});
 
 	window.addEventListener('popstate', (event) => {
+		// Absorb popstate fired by iframe fullscreen exiting via UI/ESC.
+		if (iframeFsClosePending) {
+			iframeFsClosePending = false;
+			return;
+		}
+		// Back button pressed while iframe is fullscreen — exit it.
+		if (iframeFsHistoryPushed) {
+			iframeFsHistoryPushed = false;
+			exitIframeFullscreen();
+			return;
+		}
 		// Absorb the popstate fired by a config modal closing via UI.
 		if (configModalClosePending) {
 			configModalClosePending = false;
