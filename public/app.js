@@ -4353,12 +4353,14 @@ async function openAdminConfigModal() {
 	saveBtn.disabled = false;
 }
 
-function closeAdminConfigModal() {
+function closeAdminConfigModal({ skipHistory } = {}) {
 	if (!adminConfigModal) return;
 	if (configModalHistoryPushed) {
 		configModalHistoryPushed = false;
-		configModalClosePending = true;
-		history.back();
+		if (!skipHistory) {
+			configModalClosePending = true;
+			history.back();
+		}
 	}
 	// Abort any in-flight config fetch
 	if (adminConfigAbort) { adminConfigAbort.abort(); adminConfigAbort = null; }
@@ -4458,7 +4460,7 @@ async function saveAdminConfig() {
 		if (result.restartRequired) {
 			statusEl.className = 'admin-config-status warning';
 			statusEl.textContent = ohLang.adminConfig.savedRestart;
-			closeAdminConfigModal();
+			closeAdminConfigModal({ skipHistory: true });
 			showAlert({
 				header: ohLang.adminConfig.restartBadge,
 				body: ohLang.adminConfig.savedOk + '<br/><br/>' + ohLang.adminConfig.restartNotice,
@@ -4471,7 +4473,7 @@ async function saveAdminConfig() {
 		} else if (result.reloadRequired) {
 			statusEl.className = 'admin-config-status warning';
 			statusEl.textContent = ohLang.adminConfig.savedReload;
-			closeAdminConfigModal();
+			closeAdminConfigModal({ skipHistory: true });
 			showAlert({
 				header: ohLang.adminConfig.reloadBadge,
 				body: ohLang.adminConfig.savedOk + '<br/><br/>' + ohLang.adminConfig.reloadNotice,
