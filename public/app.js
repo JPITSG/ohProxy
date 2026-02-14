@@ -3509,6 +3509,8 @@ function showAlert(options = {}) {
 	if (options.clearQueue) alertQueue = [];
 
 	if (alertModal && !alertModal.classList.contains('hidden')) {
+		const isDup = (a, b) => (a.header || '') === (b.header || '') && (a.body || '') === (b.body || '');
+		if (isDup(options, alertCurrentOptions) || alertQueue.some(q => isDup(options, q))) return;
 		alertQueue.push(options);
 		return;
 	}
