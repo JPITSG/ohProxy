@@ -9680,6 +9680,7 @@ function restoreNormalPolling() {
 						const result = await navigator.permissions.query({ name: 'microphone' });
 						if (result.state === 'denied') return;
 						els.voice.classList.remove('hidden');
+						scheduleSearchPlaceholderUpdate();
 						return;
 					} catch {
 						// Permissions API doesn't support microphone query, fall through
@@ -9689,10 +9690,14 @@ function restoreNormalPolling() {
 				if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
 					const devices = await navigator.mediaDevices.enumerateDevices();
 					const hasMic = devices.some(d => d.kind === 'audioinput');
-					if (hasMic) els.voice.classList.remove('hidden');
+					if (hasMic) {
+						els.voice.classList.remove('hidden');
+						scheduleSearchPlaceholderUpdate();
+					}
 				} else {
 					// No way to check, just show the button
 					els.voice.classList.remove('hidden');
+					scheduleSearchPlaceholderUpdate();
 				}
 			} catch {}
 		})();
