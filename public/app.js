@@ -2671,6 +2671,8 @@ let alertModal = null;
 let alertQueue = [];
 let alertCurrentOptions = null;
 let alertDismissListener = null;
+let alertHistoryPushed = false;
+let alertClosePending = false;
 
 function makeFrameDraggable(frame, handle) {
 	let dragging = false;
@@ -3570,10 +3572,21 @@ function showAlert(options = {}) {
 	} else {
 		openModalBase(alertModal, 'alert-open');
 	}
+
+	// Push a history entry for dismissible alerts so back closes them.
+	if (dismissOnBackdrop || dismissOnEscape) {
+		alertHistoryPushed = true;
+		history.pushState(null, '', window.location.pathname + window.location.search + window.location.hash);
+	}
 }
 
 function closeAlert() {
 	if (!alertModal || alertModal.classList.contains('hidden')) return;
+	if (alertHistoryPushed) {
+		alertHistoryPushed = false;
+		alertClosePending = true;
+		history.back();
+	}
 
 	if (alertCurrentOptions && typeof alertCurrentOptions.onClose === 'function') {
 		alertCurrentOptions.onClose();
@@ -9926,6 +9939,17 @@ function restoreNormalPolling() {
 	});
 
 	window.addEventListener('popstate', (event) => {
+		// Absorb popstate fired by alert closing via UI.
+		if (alertClosePending) {
+			alertClosePending = false;
+			return;
+		}
+		// Back button pressed while a dismissible alert is open — close it.
+		if (alertHistoryPushed) {
+			alertHistoryPushed = false;
+			closeAlert();
+			return;
+		}
 		// Absorb popstate fired by iframe fullscreen exiting via UI/ESC.
 		if (iframeFsClosePending) {
 			iframeFsClosePending = false;
