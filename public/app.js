@@ -2643,6 +2643,10 @@ function pushImageViewerHistory(url, refreshMs) {
 	history.pushState(payload, '', window.location.pathname + window.location.search + window.location.hash);
 }
 
+// Config modal history (back-button closes modals)
+let configModalHistoryPushed = false;
+let configModalClosePending = false;
+
 // Card Config Modal
 let cardConfigModal = null;
 let cardConfigWidgetKey = '';
@@ -3245,6 +3249,8 @@ function openCardConfigModal(widget, card) {
 	}
 
 	openModalBase(cardConfigModal, 'card-config-open');
+	configModalHistoryPushed = true;
+	history.pushState(null, '', window.location.pathname + window.location.search + window.location.hash);
 	equalizeFooterButtons(cardConfigModal.querySelector('.card-config-footer'));
 }
 
@@ -3601,6 +3607,11 @@ function dismissAllAlerts() {
 
 function closeCardConfigModal() {
 	if (!cardConfigModal) return;
+	if (configModalHistoryPushed) {
+		configModalHistoryPushed = false;
+		configModalClosePending = true;
+		history.back();
+	}
 	// Abort any in-flight history fetches
 	if (historyAbort) { historyAbort.abort(); historyAbort = null; }
 	// Close any open select menus (removes scroll listeners) then remove from body
@@ -4276,6 +4287,8 @@ async function openAdminConfigModal() {
 	// Show modal immediately with loading state
 	sectionsEl.innerHTML = '';
 	openModalBase(adminConfigModal, 'admin-config-open');
+	configModalHistoryPushed = true;
+	history.pushState(null, '', window.location.pathname + window.location.search + window.location.hash);
 	equalizeFooterButtons(adminConfigModal.querySelector('.admin-config-footer'));
 
 	// Abort any in-flight config fetch
@@ -4320,6 +4333,11 @@ async function openAdminConfigModal() {
 
 function closeAdminConfigModal() {
 	if (!adminConfigModal) return;
+	if (configModalHistoryPushed) {
+		configModalHistoryPushed = false;
+		configModalClosePending = true;
+		history.back();
+	}
 	// Abort any in-flight config fetch
 	if (adminConfigAbort) { adminConfigAbort.abort(); adminConfigAbort = null; }
 	// Close any open select menus (removes scroll listeners)
@@ -9899,6 +9917,21 @@ function restoreNormalPolling() {
 	});
 
 	window.addEventListener('popstate', (event) => {
+		// Absorb the popstate fired by a config modal closing via UI.
+		if (configModalClosePending) {
+			configModalClosePending = false;
+			return;
+		}
+		// Back button pressed while a config modal is open — close it.
+		if (configModalHistoryPushed) {
+			configModalHistoryPushed = false;
+			if (document.body.classList.contains('card-config-open')) {
+				closeCardConfigModal();
+			} else if (document.body.classList.contains('admin-config-open')) {
+				closeAdminConfigModal();
+			}
+			return;
+		}
 		if (searchFocusHistoryPushed) {
 			searchFocusHistoryPushed = false;
 			if (els.search && document.activeElement === els.search) {
