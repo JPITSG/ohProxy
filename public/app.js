@@ -9701,6 +9701,9 @@ function restoreNormalPolling() {
 		els.search.setAttribute('autocomplete', 'off');
 		els.search.setAttribute('name', `oh-search-${Date.now()}`);
 		scheduleSearchPlaceholderUpdate();
+		if (document.fonts && document.fonts.ready) {
+			document.fonts.ready.then(() => scheduleSearchPlaceholderUpdate());
+		}
 	}
 	if (state.headerMode === 'small') applyHeaderSmallLayout();
 	syncSearchFocusedLayout();
