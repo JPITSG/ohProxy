@@ -334,6 +334,18 @@ const state = {
 	sitemapCacheReady: false,		// Whether the full sitemap has been loaded
 };
 
+function holdRefresh() {
+	state.suppressRefreshCount += 1;
+}
+
+function releaseRefresh() {
+	state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
+	if (state.pendingRefresh) {
+		state.pendingRefresh = false;
+		refresh(false);
+	}
+}
+
 let searchPlaceholderFull = '';
 let searchPlaceholderCompact = '';
 let searchPlaceholderRaf = 0;
@@ -657,6 +669,24 @@ function isTouchDevice() {
 
 function haptic(ms = 30) {
 	if (navigator.vibrate) navigator.vibrate(ms);
+}
+
+function trySetPointerCapture(el, pointerId) {
+	if (pointerId !== null && typeof el.setPointerCapture === 'function') {
+		try { el.setPointerCapture(pointerId); } catch {}
+	}
+}
+
+function tryReleasePointerCapture(el, pointerId) {
+	if (pointerId !== null && typeof el.releasePointerCapture === 'function') {
+		try { el.releasePointerCapture(pointerId); } catch {}
+	}
+}
+
+function menuFitsBelow(anchorRect, menuHeight, gap = 10) {
+	const spaceBelow = window.innerHeight - anchorRect.bottom - gap;
+	const spaceAbove = anchorRect.top - gap;
+	return spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
 }
 
 function isIOSSafari() {
@@ -2947,10 +2977,8 @@ function createSelect(options, initialValue, config) {
 		// Measure menu height to decide direction
 		menu.style.top = '-9999px';
 		const menuH = menu.offsetHeight;
-		const spaceBelow = window.innerHeight - rect.bottom - 4;
-		const spaceAbove = rect.top - 4;
 
-		if (spaceBelow >= menuH || spaceBelow >= spaceAbove) {
+		if (menuFitsBelow(rect, menuH, 4)) {
 			menu.style.top = (rect.bottom + 4) + 'px';
 			menu.style.bottom = '';
 		} else {
@@ -5990,18 +6018,14 @@ function bindSwitchDualCommand(btn, itemName, pressCommand, releaseCommand, card
 		if (typeof e.button === 'number' && e.button !== 0) return;
 		e.preventDefault();
 		activePointerId = (typeof e.pointerId === 'number') ? e.pointerId : null;
-		if (activePointerId !== null && typeof btn.setPointerCapture === 'function') {
-			try { btn.setPointerCapture(activePointerId); } catch {}
-		}
+		trySetPointerCapture(btn, activePointerId);
 		beginPress();
 	};
 
 	const onPointerEnd = (e) => {
 		const pointerId = (e && typeof e.pointerId === 'number') ? e.pointerId : activePointerId;
 		if (activePointerId !== null && pointerId !== null && pointerId !== activePointerId) return;
-		if (pointerId !== null && typeof btn.releasePointerCapture === 'function') {
-			try { btn.releasePointerCapture(pointerId); } catch {}
-		}
+		tryReleasePointerCapture(btn, pointerId);
 		endPress();
 	};
 
@@ -6045,9 +6069,7 @@ function bindCardDualSwitchProxy(card, handlers) {
 		if (typeof e.button === 'number' && e.button !== 0) return;
 		e.preventDefault();
 		activePointerId = (typeof e.pointerId === 'number') ? e.pointerId : null;
-		if (activePointerId !== null && typeof card.setPointerCapture === 'function') {
-			try { card.setPointerCapture(activePointerId); } catch {}
-		}
+		trySetPointerCapture(card, activePointerId);
 		handlers.press();
 	};
 
@@ -6055,9 +6077,7 @@ function bindCardDualSwitchProxy(card, handlers) {
 		if (activePointerId === null) return;
 		const pointerId = (e && typeof e.pointerId === 'number') ? e.pointerId : activePointerId;
 		if (activePointerId !== null && pointerId !== null && pointerId !== activePointerId) return;
-		if (pointerId !== null && typeof card.releasePointerCapture === 'function') {
-			try { card.releasePointerCapture(pointerId); } catch {}
-		}
+		tryReleasePointerCapture(card, pointerId);
 		activePointerId = null;
 		handlers.release();
 	};
@@ -6197,17 +6217,13 @@ function createSliderDragKit(input, inlineSlider, card, config) {
 	const releaseSliderRefresh = () => {
 		if (!sliderHeld) return;
 		sliderHeld = false;
-		state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
-		if (state.pendingRefresh) {
-			state.pendingRefresh = false;
-			refresh(false);
-		}
+		releaseRefresh();
 	};
 
 	const holdSliderRefresh = () => {
 		if (sliderHeld) return;
 		sliderHeld = true;
-		state.suppressRefreshCount += 1;
+		holdRefresh();
 	};
 
 	let lastSentValue = null;
@@ -6282,9 +6298,7 @@ function createSliderDragKit(input, inlineSlider, card, config) {
 		releaseSliderRefresh();
 		delete inlineSlider.dataset.dragging;
 		const pointerId = (e && typeof e.pointerId === 'number') ? e.pointerId : activePointerId;
-		if (pointerId !== null && typeof input.releasePointerCapture === 'function') {
-			try { input.releasePointerCapture(pointerId); } catch {}
-		}
+		tryReleasePointerCapture(input, pointerId);
 		activePointerId = null;
 		detachGlobalDragListeners();
 	};
@@ -6293,9 +6307,7 @@ function createSliderDragKit(input, inlineSlider, card, config) {
 		inlineSlider.dataset.dragging = 'true';
 		const pointerId = e && typeof e.pointerId === 'number' ? e.pointerId : null;
 		activePointerId = pointerId;
-		if (pointerId !== null && typeof input.setPointerCapture === 'function') {
-			try { input.setPointerCapture(pointerId); } catch {}
-		}
+		trySetPointerCapture(input, pointerId);
 		attachGlobalDragListeners();
 	};
 	input.addEventListener('pointerdown', startDrag);
@@ -7200,14 +7212,6 @@ function updateCard(card, w, info) {
 				return { command: fallbackValue, releaseCommand: '', label: fallbackValue, icon: '' };
 			};
 
-			const releaseRefresh = () => {
-				state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
-				if (state.pendingRefresh) {
-					state.pendingRefresh = false;
-					refresh(false);
-				}
-			};
-
 			let sending = false;
 			const sendSelection = async (command, disableEl) => {
 				if (!command || safeText(command) === safeText(widgetState(w)) || sending) return false;
@@ -7236,7 +7240,7 @@ function updateCard(card, w, info) {
 				syncFake();
 				let released = false;
 				select.onfocus = () => {
-					state.suppressRefreshCount += 1;
+					holdRefresh();
 					released = false;
 				};
 				select.onblur = () => {
@@ -7333,19 +7337,12 @@ function updateCard(card, w, info) {
 					if (menuOpen) return;
 					menuOpen = true;
 					card.classList.add('menu-open');
-					state.suppressRefreshCount += 1;
+					holdRefresh();
 					addDocClickListener();
 					// Decide whether to show menu above or below
 					requestAnimationFrame(() => {
 						const btnRect = fakeSelect.getBoundingClientRect();
-						const menuHeight = menu.offsetHeight;
-						const spaceBelow = window.innerHeight - btnRect.bottom - 10;
-						const spaceAbove = btnRect.top - 10;
-						if (spaceBelow < menuHeight && spaceAbove > spaceBelow) {
-							card.classList.add('menu-above');
-						} else {
-							card.classList.remove('menu-above');
-						}
+						card.classList.toggle('menu-above', !menuFitsBelow(btnRect, menu.offsetHeight));
 					});
 					// Calculate scroll dimensions on first open based on actual sizes
 					if (!scrollHeightSet && scrollInner && optionButtons.length > 1) {
@@ -7640,16 +7637,12 @@ function updateCard(card, w, info) {
 		const onInputFocus = () => {
 			if (inputFocused) return;
 			inputFocused = true;
-			state.suppressRefreshCount += 1;
+			holdRefresh();
 		};
 		const onInputBlur = () => {
 			if (!inputFocused) return;
 			inputFocused = false;
-			state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
-			if (state.pendingRefresh) {
-				state.pendingRefresh = false;
-				refresh(false);
-			}
+			releaseRefresh();
 		};
 		inputEl.addEventListener('focus', onInputFocus);
 		inputEl.addEventListener('blur', onInputBlur);
@@ -7658,7 +7651,7 @@ function updateCard(card, w, info) {
 		registerCardCleanup(card, () => {
 			if (inputFocused) {
 				inputFocused = false;
-				state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
+				releaseRefresh();
 			}
 			inputEl.removeEventListener('focus', onInputFocus);
 			inputEl.removeEventListener('blur', onInputBlur);
@@ -7993,7 +7986,7 @@ function updateCard(card, w, info) {
 			overlayOpen = true;
 			haptic();
 			card.classList.add('colorpicker-open');
-			state.suppressRefreshCount += 1;
+			holdRefresh();
 			addDocClickListener();
 			addEscListener();
 			// Re-draw with current state
@@ -8003,14 +7996,7 @@ function updateCard(card, w, info) {
 			// Position above/below
 			requestAnimationFrame(() => {
 				const swatchRect = swatch.getBoundingClientRect();
-				const overlayHeight = overlay.offsetHeight;
-				const spaceBelow = window.innerHeight - swatchRect.bottom - 10;
-				const spaceAbove = swatchRect.top - 10;
-				if (spaceBelow < overlayHeight && spaceAbove > spaceBelow) {
-					card.classList.add('colorpicker-above');
-				} else {
-					card.classList.remove('colorpicker-above');
-				}
+				card.classList.toggle('colorpicker-above', !menuFitsBelow(swatchRect, overlay.offsetHeight));
 			});
 		};
 
@@ -8021,11 +8007,7 @@ function updateCard(card, w, info) {
 			removeDocClickListener();
 			removeEscListener();
 			flushHsbSend();
-			state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
-			if (state.pendingRefresh) {
-				state.pendingRefresh = false;
-				refresh(false);
-			}
+			releaseRefresh();
 		};
 
 		swatch.onclick = (e) => {
@@ -8523,11 +8505,11 @@ async function pushPage(pageUrl, pageTitle) {
 	updateNavButtons();
 	syncHistory(replaceFilterEntry);
 	queueScrollTop();
-	state.suppressRefreshCount += 1;
+	holdRefresh();
 	try {
 		await refresh(true);
 	} finally {
-		state.suppressRefreshCount = Math.max(0, state.suppressRefreshCount - 1);
+		releaseRefresh();
 	}
 }
 
