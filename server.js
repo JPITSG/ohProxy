@@ -336,6 +336,7 @@ const SECURITY_REFERRER_POLICY = safeText(SECURITY_HEADERS.referrerPolicy || '')
 const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(TASK_CONFIG.sitemapRefreshMs);
 const STRUCTURE_MAP_REFRESH_MS = configNumber(TASK_CONFIG.structureMapRefreshMs);
+const NPM_UPDATE_CHECK_MS = configNumber(TASK_CONFIG.npmUpdateCheckMs);
 const WEBSOCKET_CONFIG = SERVER_CONFIG.websocket || {};
 const WS_MODE = ['atmosphere', 'sse'].includes(WEBSOCKET_CONFIG.mode) ? WEBSOCKET_CONFIG.mode : 'polling';
 const WS_POLLING_INTERVAL_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalMs) || 500;
@@ -906,6 +907,7 @@ function validateConfig() {
 	if (ensureObject(SERVER_CONFIG.backgroundTasks, 'server.backgroundTasks', errors)) {
 		ensureNumber(SITEMAP_REFRESH_MS, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
 		ensureNumber(STRUCTURE_MAP_REFRESH_MS, 'server.backgroundTasks.structureMapRefreshMs', { min: 0 }, errors);
+		ensureNumber(NPM_UPDATE_CHECK_MS, 'server.backgroundTasks.npmUpdateCheckMs', { min: 0 }, errors);
 	}
 
 	if (ensureObject(SERVER_CONFIG.videoPreview, 'server.videoPreview', errors)) {
@@ -1164,6 +1166,9 @@ function validateAdminConfig(config) {
 		ensureNumber(s.backgroundTasks.sitemapRefreshMs, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
 		if (s.backgroundTasks.structureMapRefreshMs !== undefined) {
 			ensureNumber(s.backgroundTasks.structureMapRefreshMs, 'server.backgroundTasks.structureMapRefreshMs', { min: 0 }, errors);
+		}
+		if (s.backgroundTasks.npmUpdateCheckMs !== undefined) {
+			ensureNumber(s.backgroundTasks.npmUpdateCheckMs, 'server.backgroundTasks.npmUpdateCheckMs', { min: 0 }, errors);
 		}
 	}
 
@@ -1845,6 +1850,7 @@ const liveConfig = {
 	securityReferrerPolicy: SECURITY_REFERRER_POLICY,
 	sitemapRefreshMs: SITEMAP_REFRESH_MS,
 	structureMapRefreshMs: STRUCTURE_MAP_REFRESH_MS,
+	npmUpdateCheckMs: NPM_UPDATE_CHECK_MS,
 	clientConfig: CLIENT_CONFIG,
 	wsMode: WS_MODE,
 	wsPollingIntervalMs: WS_POLLING_INTERVAL_MS,
@@ -2035,6 +2041,8 @@ function reloadLiveConfig() {
 	liveConfig.sitemapRefreshMs = configNumber(newTasks.sitemapRefreshMs);
 	const prevStructureMapRefreshMs = liveConfig.structureMapRefreshMs;
 	liveConfig.structureMapRefreshMs = configNumber(newTasks.structureMapRefreshMs);
+	const prevNpmUpdateCheckMs = liveConfig.npmUpdateCheckMs;
+	liveConfig.npmUpdateCheckMs = configNumber(newTasks.npmUpdateCheckMs);
 	liveConfig.clientConfig = newConfig.client || {};
 
 	// WebSocket config - handle mode changes
@@ -2134,6 +2142,10 @@ function reloadLiveConfig() {
 
 	if (liveConfig.structureMapRefreshMs !== prevStructureMapRefreshMs) {
 		updateBackgroundTaskInterval('structure-map', liveConfig.structureMapRefreshMs);
+	}
+
+	if (liveConfig.npmUpdateCheckMs !== prevNpmUpdateCheckMs) {
+		updateBackgroundTaskInterval('npm-update-check', liveConfig.npmUpdateCheckMs);
 	}
 
 	// If mode changed and clients are connected, switch modes
@@ -9619,6 +9631,98 @@ registerBackgroundTask('session-cleanup', SESSION_CLEANUP_MS, () => {
 		logMessage(`Session cleanup failed: ${err.message || err}`);
 	}
 });
+
+// NPM module update checker
+function fetchNpmLatestVersion(pkgName) {
+	return new Promise((resolve, reject) => {
+		const req = https.get(`https://registry.npmjs.org/${encodeURIComponent(pkgName)}`, {
+			headers: { Accept: 'application/vnd.npm.install-v1+json' },
+			timeout: 10000,
+		}, (res) => {
+			if (res.statusCode === 301 || res.statusCode === 302) {
+				const location = res.headers.location;
+				res.resume();
+				if (!location) { reject(new Error(`redirect with no location`)); return; }
+				https.get(location, { headers: { Accept: 'application/vnd.npm.install-v1+json' }, timeout: 10000 }, (res2) => {
+					let data = '';
+					res2.on('data', chunk => data += chunk);
+					res2.on('end', () => {
+						if (res2.statusCode !== 200) { reject(new Error(`HTTP ${res2.statusCode}`)); return; }
+						try { resolve(JSON.parse(data)['dist-tags']?.latest || null); } catch { reject(new Error('invalid JSON')); }
+					});
+				}).on('error', reject);
+				return;
+			}
+			let data = '';
+			res.on('data', chunk => data += chunk);
+			res.on('end', () => {
+				if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}`)); return; }
+				try { resolve(JSON.parse(data)['dist-tags']?.latest || null); } catch { reject(new Error('invalid JSON')); }
+			});
+		});
+		req.on('error', reject);
+		req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+	});
+}
+
+async function checkNpmUpdates() {
+	let pkg;
+	try {
+		pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+	} catch (err) {
+		logMessage(`[NPM] Failed to read package.json: ${err.message || err}`);
+		return;
+	}
+
+	const deps = Object.keys(pkg.dependencies || {});
+	if (!deps.length) { logMessage('[NPM] No dependencies found in package.json'); return; }
+	logMessage(`[NPM] Checking ${deps.length} module(s) for updates...`);
+
+	const upgrades = [];
+	const errors = [];
+	const concurrency = 4;
+
+	for (let i = 0; i < deps.length; i += concurrency) {
+		const batch = deps.slice(i, i + concurrency);
+		const results = await Promise.allSettled(batch.map(async (name) => {
+			let installed;
+			try {
+				const modPkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'node_modules', name, 'package.json'), 'utf8'));
+				installed = modPkg.version;
+			} catch {
+				errors.push(`${name}: unable to read installed version`);
+				return;
+			}
+			try {
+				const latest = await fetchNpmLatestVersion(name);
+				if (latest && latest !== installed) {
+					upgrades.push({ name, installed, latest });
+				}
+			} catch (err) {
+				errors.push(`${name}: ${err.message || err}`);
+			}
+		}));
+		// allSettled never rejects, results are consumed above
+	}
+
+	if (upgrades.length) {
+		logMessage(`[NPM] ${upgrades.length} update(s) available:`);
+		for (const u of upgrades) {
+			logMessage(`[NPM]   ${u.name}: ${u.installed} -> ${u.latest}`);
+		}
+		if (upgrades.length < deps.length) {
+			logMessage('[NPM] All other modules are up to date');
+		}
+	} else {
+		logMessage('[NPM] All modules are up to date');
+	}
+	if (errors.length) {
+		logMessage(`[NPM] ${errors.length} error(s) during check:`);
+		for (const e of errors) { logMessage(`[NPM]   ${e}`); }
+	}
+}
+
+registerBackgroundTask('npm-update-check', liveConfig.npmUpdateCheckMs, checkNpmUpdates);
 
 // Weatherbit weather data fetch
 function isWeatherbitConfigured() {
