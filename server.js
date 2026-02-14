@@ -8431,6 +8431,8 @@ app.get('/presence', async (req, res) => {
 .ctx-nav .ctx-older,.ctx-nav .ctx-newer{margin-top:0}
 .ctx-empty,.ctx-loading{font-size:0.625rem;font-weight:300;letter-spacing:0.08em;color:rgba(19,21,54,0.5);font-family:'Rubik',sans-serif}
 #map-fullscreen{display:none}
+@keyframes shake{0%,100%{transform:translateX(0)}10%,30%,50%,70%,90%{transform:translateX(-5px)}20%,40%,60%,80%{transform:translateX(5px)}}
+.shake{animation:shake 0.5s ease-in-out}
 </style>
 	<script src="/vendor/OpenLayers.js"></script>
 	</head>
@@ -8841,10 +8843,20 @@ ddInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&ddInput.value
 yyyyInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&yyyyInput.value.length===4)document.querySelector('.search-go').click()});
 
 var searchEmpty=document.querySelector('.search-empty');
+var searchModal=document.getElementById('search-modal');
+function shakeSearch(){
+searchModal.classList.remove('shake');
+void searchModal.offsetWidth;
+searchModal.classList.add('shake');
+searchModal.addEventListener('animationend',function onEnd(){
+searchModal.removeEventListener('animationend',onEnd);
+searchModal.classList.remove('shake');
+});
+}
 function loadDay(month,day,year){
 fetch('/api/presence?month='+month+'&day='+day+'&year='+year).then(function(r){return r.json()}).then(function(data){
-if(!data.ok){searchEmpty.textContent=data.error||'Request failed';searchEmpty.style.display='block';return}
-if(!data.markers.length){searchEmpty.textContent='No results found';searchEmpty.style.display='block';return}
+if(!data.ok){searchEmpty.textContent=data.error||'Request failed';searchEmpty.style.display='block';shakeSearch();return}
+if(!data.markers.length){searchEmpty.textContent='No results found';searchEmpty.style.display='block';shakeSearch();return}
 searchEmpty.style.display='none';
 clearBlueTooltipSelectionState();
 vector.removeAllFeatures();
@@ -8861,7 +8873,7 @@ red=markers[markers.length-1];
 setTooltipHtml(redTooltip,red[3]);
 zoomToMarkers();
 setTimeout(updateAnchoredTooltips,100);
-}).catch(function(){searchEmpty.textContent='Request failed';searchEmpty.style.display='block'});
+}).catch(function(){searchEmpty.textContent='Request failed';searchEmpty.style.display='block';shakeSearch()});
 }
 
 document.querySelector('.search-go').addEventListener('click',function(){
@@ -8874,7 +8886,7 @@ if(isNaN(month)||isNaN(day)||isNaN(year)||!ddInput.value||!yyyyInput.value)retur
 var maxDay=new Date(year,month+1,0).getDate();
 if(day<1||day>maxDay)return;
 var tomorrow=new Date();tomorrow.setDate(tomorrow.getDate()+1);tomorrow.setHours(0,0,0,0);
-if(new Date(year,month,day)>=tomorrow)return;
+if(new Date(year,month,day)>=tomorrow){searchEmpty.textContent='No results found';searchEmpty.style.display='block';shakeSearch();return}
 loadDay(month,day,year);
 });
 
