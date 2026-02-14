@@ -1837,6 +1837,8 @@ function scheduleSearchPlaceholderUpdate() {
 }
 
 let searchFocusHistoryPushed = false;
+let searchBlurNavPending = false;
+let searchFilterHistoryPushed = false;
 
 function isSmallSearchViewport() {
 	return window.matchMedia('(max-width: 639px)').matches;
@@ -1855,11 +1857,21 @@ function setSearchFocusedLayout(enabled) {
 	if (root.classList.contains(className) === enabled) return;
 	root.classList.toggle(className, enabled);
 	if (enabled) {
-		history.pushState(null, '', window.location.pathname + window.location.search + window.location.hash);
+		if (!searchFilterHistoryPushed) {
+			history.pushState(null, '', window.location.pathname + window.location.search + window.location.hash);
+		}
 		searchFocusHistoryPushed = true;
+		searchFilterHistoryPushed = false;
 	} else if (searchFocusHistoryPushed) {
 		searchFocusHistoryPushed = false;
-		history.back();
+		if (state.filter.trim()) {
+			// Keep the history entry as a search-filter marker so back
+			// clears the search before navigating away.
+			searchFilterHistoryPushed = true;
+		} else {
+			searchBlurNavPending = true;
+			history.back();
+		}
 	}
 	scheduleSearchPlaceholderUpdate();
 }
@@ -8428,6 +8440,11 @@ function clearSearchFilter() {
 		clearTimeout(searchDebounceTimer);
 		searchDebounceTimer = null;
 	}
+	if (searchFilterHistoryPushed) {
+		searchFilterHistoryPushed = false;
+		searchBlurNavPending = true;
+		history.back();
+	}
 	updateNavButtons();
 	render();
 	return true;
@@ -8451,6 +8468,8 @@ function syncHistory(replace) {
 async function pushPage(pageUrl, pageTitle) {
 	// Block navigation when offline
 	if (!state.connectionOk) return;
+	const replaceFilterEntry = searchFilterHistoryPushed;
+	if (searchFilterHistoryPushed) searchFilterHistoryPushed = false;
 	if (state.filter.trim()) {
 		state.filter = '';
 		if (els.search) els.search.value = '';
@@ -8460,7 +8479,7 @@ async function pushPage(pageUrl, pageTitle) {
 	state.pageTitle = pageTitle || 'openHAB';
 	resetChartAnimState();
 	updateNavButtons();
-	syncHistory(false);
+	syncHistory(replaceFilterEntry);
 	queueScrollTop();
 	state.suppressRefreshCount += 1;
 	try {
@@ -9885,6 +9904,51 @@ function restoreNormalPolling() {
 			if (els.search && document.activeElement === els.search) {
 				els.search.blur();
 			}
+			// Android back while search focused with text: re-push
+			// a filter entry so the next back clears the search.
+			if (state.filter.trim()) {
+				searchFilterHistoryPushed = true;
+				history.pushState(null, '', window.location.pathname + window.location.search + window.location.hash);
+			}
+			return;
+		}
+		// Absorb programmatic history.back() from blur or clearSearchFilter.
+		if (searchBlurNavPending) {
+			searchBlurNavPending = false;
+			return;
+		}
+		// Back pressed while a search-filter history entry is on top;
+		// clear the filter and stay on the current page.
+		if (searchFilterHistoryPushed) {
+			searchFilterHistoryPushed = false;
+			if (state.filter.trim()) {
+				state.filter = '';
+				if (els.search) els.search.value = '';
+				state.searchStateToken += 1;
+				cancelSearchStateRequests();
+				if (searchDebounceTimer) {
+					clearTimeout(searchDebounceTimer);
+					searchDebounceTimer = null;
+				}
+			}
+			updateNavButtons();
+			render();
+			return;
+		}
+		// Desktop / large-viewport fallback: no focus-expand entries
+		// were pushed, so use pushState to stay on the current page.
+		if (state.filter.trim()) {
+			state.filter = '';
+			if (els.search) els.search.value = '';
+			state.searchStateToken += 1;
+			cancelSearchStateRequests();
+			if (searchDebounceTimer) {
+				clearTimeout(searchDebounceTimer);
+				searchDebounceTimer = null;
+			}
+			updateNavButtons();
+			render();
+			syncHistory(false);
 			return;
 		}
 		const next = event.state;
@@ -9978,13 +10042,15 @@ function restoreNormalPolling() {
 	els.home.addEventListener('click', () => {
 		haptic();
 		if (!state.rootPageUrl) return;
+		const replaceFilterEntry = searchFilterHistoryPushed;
+		if (searchFilterHistoryPushed) searchFilterHistoryPushed = false;
 		els.search.value = '';
 		state.filter = '';
 		state.stack = [];
 		state.pageUrl = state.rootPageUrl;
 		state.pageTitle = state.rootPageTitle || state.pageTitle;
 		updateNavButtons();
-		syncHistory(false);
+		syncHistory(replaceFilterEntry);
 		queueScrollTop();
 		refresh(true);
 	});
