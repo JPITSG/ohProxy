@@ -7,6 +7,7 @@ const PRECACHE_URLS = [
 	'./index.html',
 	// Note: config.js excluded - contains user-specific data, must not be cached
 	'./lang.__JS_VERSION__.js',
+	'./widget-normalizer.__JS_VERSION__.js',
 	'./app.__JS_VERSION__.js',
 	'./tailwind.__CSS_VERSION__.css',
 	'./styles.__CSS_VERSION__.css',

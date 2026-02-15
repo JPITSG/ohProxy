@@ -14,25 +14,7 @@ const STRUCTURE_MAP_ALL = path.join(AI_CACHE_DIR, 'structuremap-all.json');
 const STRUCTURE_MAP_READABLE = path.join(AI_CACHE_DIR, 'structuremap-readable.json');
 const STRUCTURE_MAP_WRITABLE = path.join(AI_CACHE_DIR, 'structuremap-writable.json');
 
-// Load config (same pattern as server.js)
-const configDefaults = require('./config.defaults.js');
-const configLocal = (() => {
-	try { return require('./config.local.js'); } catch { return {}; }
-})();
-
-function deepMerge(target, source) {
-	const result = { ...target };
-	for (const key of Object.keys(source)) {
-		if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-			result[key] = deepMerge(result[key] || {}, source[key]);
-		} else {
-			result[key] = source[key];
-		}
-	}
-	return result;
-}
-
-const config = deepMerge(configDefaults, configLocal);
+const config = require('./config');
 const serverConfig = config.server || {};
 
 const args = process.argv.slice(2);

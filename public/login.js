@@ -1,9 +1,7 @@
 'use strict';
 
 (function() {
-	function haptic(ms) {
-		if (navigator.vibrate) navigator.vibrate(ms || 30);
-	}
+	var haptic = ohUtils.haptic;
 
 	const form = document.getElementById('login-form');
 	const submitBtn = form.querySelector('.submit-btn');
@@ -16,10 +14,7 @@
 	}
 
 	function shake() {
-		loginCard.classList.remove('shake');
-		// Trigger reflow to restart animation
-		void loginCard.offsetWidth;
-		loginCard.classList.add('shake');
+		ohUtils.shakeElement(loginCard);
 	}
 
 	function formatTime(seconds) {
@@ -115,8 +110,4 @@
 		}
 	});
 
-	// Remove shake class after animation
-	loginCard.addEventListener('animationend', function() {
-		loginCard.classList.remove('shake');
-	});
 })();

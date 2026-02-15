@@ -42,6 +42,12 @@
 	window.__logJsError = reportError;
 })();
 
+/* Shared widget helpers (loaded from widget-normalizer.js before this script) */
+const {
+	widgetType, widgetLink, widgetPageLink, widgetIconName,
+	deltaKey, splitLabelState, widgetKey, normalizeMapping, normalizeButtongridButtons,
+} = window.WidgetNormalizer;
+
 function logJsError(message, error) {
 	if (typeof window.__logJsError !== 'function') return;
 	window.__logJsError(message, '', 0, 0, error || {});
@@ -667,9 +673,7 @@ function isTouchDevice() {
 	return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
 
-function haptic(ms = 30) {
-	if (navigator.vibrate) navigator.vibrate(ms);
-}
+var haptic = ohUtils.haptic;
 
 function trySetPointerCapture(el, pointerId) {
 	if (pointerId !== null && typeof el.setPointerCapture === 'function') {
@@ -1503,22 +1507,7 @@ function positionStatusTooltip(e) {
 
 function showStatusTooltip(e) {
 	if (!els.statusTooltip) return;
-	const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
-	if (valueEl) {
-		if (isLanClient === true) {
-			valueEl.textContent = 'LAN';
-			valueEl.classList.remove('loading');
-		} else {
-			const latency = getDisplayLatency();
-			if (latency !== null) {
-				valueEl.textContent = latency + 'ms';
-				valueEl.classList.remove('loading');
-			} else {
-				valueEl.textContent = '';
-				valueEl.classList.add('loading');
-			}
-		}
-	}
+	updateTooltipLatency();
 	if (e && e.clientX !== undefined) {
 		positionStatusTooltip(e);
 	} else if (els.statusDotWrap) {
@@ -1531,6 +1520,25 @@ function showStatusTooltip(e) {
 		els.statusTooltip.style.top = y + 'px';
 	}
 	els.statusTooltip.classList.add('visible');
+}
+
+function updateTooltipLatency() {
+	if (!els.statusTooltip) return;
+	const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
+	if (!valueEl) return;
+	if (isLanClient === true) {
+		valueEl.textContent = 'LAN';
+		valueEl.classList.remove('loading');
+		return;
+	}
+	const latency = getDisplayLatency();
+	if (latency !== null) {
+		valueEl.textContent = latency + 'ms';
+		valueEl.classList.remove('loading');
+	} else {
+		valueEl.textContent = '';
+		valueEl.classList.add('loading');
+	}
 }
 
 function hideStatusTooltip() {
@@ -2209,13 +2217,6 @@ function toRelativeRestLink(link) {
 		logJsError(`toRelativeRestLink failed for ${link}`, err);
 		return stripLeadingSlash(link);
 	}
-}
-
-function widgetPageLink(widget) {
-	const link = widget?.linkedPage?.link || widget?.link;
-	if (typeof link !== 'string') return null;
-	if (!link.includes('/rest/sitemaps/')) return null;
-	return link;
 }
 
 function toRelativeUrl(link) {
@@ -3456,16 +3457,7 @@ function attachModalDismissListeners(wrap, modal, closeFn) {
 	});
 }
 
-function shakeElement(el) {
-	if (!el) return;
-	el.classList.remove('shake');
-	void el.offsetWidth;
-	el.classList.add('shake');
-	el.addEventListener('animationend', function onEnd() {
-		el.removeEventListener('animationend', onEnd);
-		el.classList.remove('shake');
-	});
-}
+var shakeElement = ohUtils.shakeElement;
 
 function equalizeFooterButtons(footer) {
 	if (!footer) return;
@@ -5426,51 +5418,6 @@ function buildChangeMap(changes, keyFn) {
 	return changeMap;
 }
 
-function widgetType(widget) {
-	return safeText(widget?.type || widget?.widgetType || widget?.item?.type || '');
-}
-
-function widgetLink(widget) {
-	return safeText(widget?.linkedPage?.link || widget?.link || '');
-}
-
-function deltaKey(widget) {
-	const id = safeText(widget?.widgetId || widget?.id || '');
-	if (id) return `id:${id}`;
-	const itemName = safeText(widget?.item?.name || widget?.itemName || '');
-	const type = widgetType(widget);
-	const link = widgetLink(widget);
-	if (itemName) return `item:${itemName}|${type}|${link}`;
-	const label = safeText(widget?.label || widget?.item?.label || widget?.item?.name || '');
-	return `label:${label}|${type}|${link}`;
-}
-
-function widgetIconName(widget) {
-	// In many sitemap JSON payloads, icon is in widget.icon
-	// Fallback to item.category/icon if present.
-	return safeText(widget?.icon || widget?.staticIcon || widget?.item?.icon || widget?.item?.category || '');
-}
-
-function widgetKey(widget) {
-	if (widget?.__section) return `section:${safeText(widget.label)}`;
-	// Don't use widgetId - it's positional and changes when visibility shifts widgets
-	const item = safeText(widget?.item?.name || '');
-	// Use title only (without state) so key is stable when state changes
-	const fullLabel = safeText(widget?.label || '');
-	const label = splitLabelState(fullLabel).title || fullLabel;
-	const type = widgetType(widget);
-	const link = safeText(widgetPageLink(widget) || '');
-	return `widget:${item}|${label}|${type}|${link}`;
-}
-
-function splitLabelState(label) {
-	const raw = safeText(label);
-	// Strip trailing empty brackets [] or [-] (openHAB uses these when no state)
-	const cleaned = raw.replace(/\s*\[\s*-?\s*\]\s*$/, '');
-	const match = cleaned.match(/^(.*)\s*\[(.+)\]\s*$/);
-	if (!match) return { title: cleaned, state: '' };
-	return { title: match[1].trim(), state: match[2].trim() };
-}
 
 function labelPathSegments(label) {
 	const parts = splitLabelState(label);
@@ -5500,109 +5447,6 @@ function searchWidgetKey(widget) {
 	const path = Array.isArray(widget?.__path) ? widget.__path.join('>') : '';
 	const frame = safeText(widget?.__frame || '');
 	return `${base}|${path}|${frame}`;
-}
-
-function normalizeMapping(mapping) {
-	if (!mapping) return [];
-	if (Array.isArray(mapping)) {
-		return mapping
-			.map((m) => {
-				if (!m || typeof m !== 'object') return null;
-				const command = safeText(m.command ?? '');
-				const releaseCommand = safeText(m.releaseCommand ?? '');
-				const label = safeText(m.label ?? m.command ?? '');
-				const icon = safeText(m.icon ?? '');
-				if (!command && !label && !icon) return null;
-				return { command, releaseCommand, label: label || command, icon };
-			})
-			.filter(Boolean);
-	}
-	if (typeof mapping === 'object') {
-		if ('command' in mapping || 'label' in mapping || 'releaseCommand' in mapping || 'icon' in mapping) {
-			const command = safeText(mapping.command ?? '');
-			const releaseCommand = safeText(mapping.releaseCommand ?? '');
-			const label = safeText(mapping.label ?? mapping.command ?? '');
-			const icon = safeText(mapping.icon ?? '');
-			if (!command && !label && !icon) return [];
-			return [{ command, releaseCommand, label: label || command, icon }];
-		}
-		return Object.entries(mapping)
-			.map(([command, mappingValue]) => {
-				const isEntryObject = mappingValue && typeof mappingValue === 'object';
-				const label = isEntryObject
-					? safeText(mappingValue.label ?? command)
-					: safeText(mappingValue);
-				const icon = isEntryObject ? safeText(mappingValue.icon ?? '') : '';
-				return {
-					command: safeText(command),
-					releaseCommand: '',
-					label: label || safeText(command),
-					icon,
-				};
-			});
-	}
-	return [];
-}
-
-function normalizeButtongridButtons(widget) {
-	const buttons = [];
-	if (Array.isArray(widget?.buttons)) {
-		for (const b of widget.buttons) {
-			if (!b || typeof b !== 'object') continue;
-			const itemName = safeText(b?.itemName || b?.item?.name || '');
-			buttons.push({
-				row: parseInt(b?.row, 10) || 1,
-				column: parseInt(b?.column, 10) || 1,
-				command: safeText(b?.command || b?.cmd || ''),
-				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
-				label: safeText(b?.label || ''),
-				icon: safeText(b?.icon || b?.staticIcon || ''),
-				itemName,
-				state: safeText(b?.state ?? b?.item?.state ?? ''),
-				stateless: !!b?.stateless,
-			});
-		}
-		return buttons;
-	}
-	// Inline buttons come through mappings with row/column fields
-	const inlineButtons = widget?.mappings || widget?.mapping;
-	if (Array.isArray(inlineButtons)) {
-		for (const b of inlineButtons) {
-			if (b?.row == null && b?.column == null) continue;
-			const itemName = safeText(b?.itemName || b?.item?.name || '');
-			buttons.push({
-				row: parseInt(b?.row, 10) || 1,
-				column: parseInt(b?.column, 10) || 1,
-				command: safeText(b?.command || b?.cmd || ''),
-				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
-				label: safeText(b?.label || ''),
-				icon: safeText(b?.icon || b?.staticIcon || ''),
-				itemName,
-				state: safeText(b?.state ?? b?.item?.state ?? ''),
-				stateless: !!b?.stateless,
-			});
-		}
-	}
-	// Child Button widgets from widget.widgets
-	const children = widget?.widgets || widget?.widget;
-	if (Array.isArray(children)) {
-		for (const c of children) {
-			if (safeText(c?.type).toLowerCase() !== 'button') continue;
-			const itemName = safeText(c?.itemName || c?.item?.name || '');
-			buttons.push({
-				row: parseInt(c?.row, 10) || 1,
-				column: parseInt(c?.column, 10) || 1,
-				command: safeText(c?.command || c?.cmd || c?.click || ''),
-				releaseCommand: safeText(c?.releaseCommand || c?.release || ''),
-				label: safeText(c?.label || ''),
-				icon: safeText(c?.icon || c?.staticIcon || ''),
-				itemName,
-				state: safeText(c?.state ?? c?.item?.state ?? ''),
-				stateless: !!c?.stateless,
-			});
-		}
-	}
-	return buttons;
 }
 
 function parseSwitchMappingCommand(rawMapping) {
@@ -9159,13 +9003,9 @@ function invalidatePing() {
 	fastConnectionActive = false;
 	pingNeedsPrefill = true;
 	if (wasFast) updateStatusBar();
-	// Update tooltip if visible (skip if LAN client - already showing "LAN")
-	if (!isLanClient && els.statusTooltip && els.statusTooltip.classList.contains('visible')) {
-		const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
-		if (valueEl) {
-			valueEl.textContent = '';
-			valueEl.classList.add('loading');
-		}
+	// Update tooltip if visible
+	if (els.statusTooltip && els.statusTooltip.classList.contains('visible')) {
+		updateTooltipLatency();
 	}
 }
 
@@ -9204,19 +9044,9 @@ function updateFastConnectionState() {
 	}
 	// Update notification with latest latency
 	if (state.connectionOk) showStatusNotification();
-	// Update tooltip if visible (skip if LAN client - already showing "LAN")
-	if (!isLanClient && els.statusTooltip && els.statusTooltip.classList.contains('visible')) {
-		const displayLatency = getDisplayLatency();
-		const valueEl = els.statusTooltip.querySelector('.status-tooltip-value');
-		if (valueEl) {
-			if (displayLatency !== null) {
-				valueEl.textContent = displayLatency + 'ms';
-				valueEl.classList.remove('loading');
-			} else {
-				valueEl.textContent = '';
-				valueEl.classList.add('loading');
-			}
-		}
+	// Update tooltip if visible
+	if (els.statusTooltip && els.statusTooltip.classList.contains('visible')) {
+		updateTooltipLatency();
 	}
 }
 

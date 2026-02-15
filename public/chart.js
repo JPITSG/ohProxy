@@ -1,7 +1,5 @@
 (function() {
-	function haptic(ms) {
-		if (navigator.vibrate) navigator.vibrate(ms || 30);
-	}
+	var haptic = ohUtils.haptic;
 
 	// Set theme from URL param, localStorage, or system preference
 	var params = new URLSearchParams(window.location.search);
