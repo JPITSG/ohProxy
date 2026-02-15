@@ -13,13 +13,13 @@ describe('Presence Single-Point Mode', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /const rawLat = req\.query\?\.lat;/);
 		assert.match(server, /const rawLon = req\.query\?\.lon;/);
-		assert.match(server, /if \(hasLat !== hasLon\) \{\s*return res\.status\(400\)\.type\('text\/plain'\)\.send\('Both lat and lon are required'\);/);
-		assert.match(server, /return res\.status\(400\)\.type\('text\/plain'\)\.send\('Invalid lat\/lon'\);/);
+		assert.match(server, /if \(hasLat !== hasLon\) \{\s*return sendStyledError\(res, req, 400, 'Both lat and lon are required'\);/);
+		assert.match(server, /return sendStyledError\(res, req, 400, 'Invalid lat\/lon'\);/);
 	});
 
 	it('allows single-point mode without trackgps while keeping history mode gated', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(server, /if \(!singlePointMode && !user\.trackgps\) \{\s*return res\.status\(403\)\.type\('text\/html'\)\.send\('<!DOCTYPE html><html><head><\/head><body><\/body><\/html>'\);/);
+		assert.match(server, /if \(!singlePointMode && !user\.trackgps\) \{\s*return sendStyledError\(res, req, 403\);/);
 	});
 
 	it('builds a single red marker with no tooltip content in single-point mode', () => {
