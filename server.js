@@ -4501,6 +4501,24 @@ function sendServiceWorker(res) {
 	res.send(renderServiceWorker());
 }
 
+function styledErrorPage(message, req) {
+	const rawMode = typeof req.query?.mode === 'string' ? req.query.mode.trim().toLowerCase() : '';
+	const dark = rawMode === 'dark';
+	const bg = dark ? '#1e1e1e' : '#f5f6fa';
+	const fg = dark ? 'rgba(234,235,238,0.98)' : 'rgba(19,21,54,0.98)';
+	return '<!DOCTYPE html><html><head><meta charset="utf-8">'
+		+ '<meta name="viewport" content="width=device-width,initial-scale=1">'
+		+ '<style>@font-face{font-family:Rubik;src:url(/fonts/rubik-300.woff2) format("woff2");font-weight:300;font-display:swap}'
+		+ 'html,body{margin:0;height:100%;box-sizing:border-box}'
+		+ 'body{font-family:Rubik,system-ui,sans-serif;font-weight:300;font-size:1.125rem;'
+		+ 'background:' + bg + ';color:' + fg + ';display:flex;align-items:center;justify-content:center;text-align:center;padding:1rem}'
+		+ '</style></head><body>' + (message || '') + '</body></html>';
+}
+
+function sendStyledError(res, req, status, message) {
+	return res.status(status).type('text/html').send(styledErrorPage(message || '', req));
+}
+
 function sendVersionedAsset(res, filePath, contentType) {
 	if (!fs.existsSync(filePath)) {
 		res.status(404).send('Not found');
@@ -7344,12 +7362,7 @@ app.get('/weather', (req, res) => {
 	try {
 		weatherData = JSON.parse(fs.readFileSync(WEATHERBIT_FORECAST_FILE, 'utf8'));
 	} catch {
-		res.status(503).setHeader('Content-Type', 'text/html; charset=utf-8').setHeader('Cache-Control', 'no-store').send(`<!DOCTYPE html>
-<html><head><title>Weather</title><style>@font-face{font-family:'Rubik';src:url('/fonts/rubik-300.woff2') format('woff2');font-weight:300;font-display:swap}body{font-family:'Rubik',system-ui,sans-serif;font-weight:300;padding:2rem;text-align:center}</style></head>
-<body>
-<h1>Weather data not available</h1>
-<p>Weather data has not been fetched yet. Please check the server configuration.</p>
-</body></html>`);
+		sendStyledError(res, req, 503, 'Weather data not available');
 		return;
 	}
 
@@ -7700,19 +7713,19 @@ app.get('/chart', (req, res) => {
 	const rawInterpolation = req.query?.interpolation;
 	const legend = rawLegend === 'false' ? false : true;
 	if (typeof rawItem !== 'string') {
-		return res.status(400).type('text/plain').send('Invalid item parameter');
+		return sendStyledError(res, req, 400, 'Invalid item parameter');
 	}
 	if (rawPeriod !== undefined && typeof rawPeriod !== 'string') {
-		return res.status(400).type('text/plain').send('Invalid period parameter');
+		return sendStyledError(res, req, 400, 'Invalid period parameter');
 	}
 	if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
-		return res.status(400).type('text/plain').send('Invalid mode parameter');
+		return sendStyledError(res, req, 400, 'Invalid mode parameter');
 	}
 	if (rawYAxisDecimalPattern !== undefined && typeof rawYAxisDecimalPattern !== 'string') {
-		return res.status(400).type('text/plain').send('Invalid yAxisDecimalPattern parameter');
+		return sendStyledError(res, req, 400, 'Invalid yAxisDecimalPattern parameter');
 	}
 	if (rawInterpolation !== undefined && typeof rawInterpolation !== 'string') {
-		return res.status(400).type('text/plain').send('Invalid interpolation parameter');
+		return sendStyledError(res, req, 400, 'Invalid interpolation parameter');
 	}
 	const item = rawItem.trim();
 	const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
@@ -7721,35 +7734,35 @@ app.get('/chart', (req, res) => {
 	const yAxisDecimalPattern = typeof rawYAxisDecimalPattern === 'string' ? rawYAxisDecimalPattern.trim() : '';
 	const interpolation = typeof rawInterpolation === 'string' ? rawInterpolation.trim().toLowerCase() : 'linear';
 	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
-		return res.status(400).type('text/plain').send('Invalid parameters');
+		return sendStyledError(res, req, 400, 'Invalid parameters');
 	}
 	if (yAxisDecimalPattern && (hasAnyControlChars(yAxisDecimalPattern) || yAxisDecimalPattern.length > 50)) {
-		return res.status(400).type('text/plain').send('Invalid yAxisDecimalPattern parameter');
+		return sendStyledError(res, req, 400, 'Invalid yAxisDecimalPattern parameter');
 	}
 	if (title && title.length > 200) {
-		return res.status(400).type('text/plain').send('Invalid title parameter');
+		return sendStyledError(res, req, 400, 'Invalid title parameter');
 	}
 	if (!['linear', 'step'].includes(interpolation)) {
-		return res.status(400).type('text/plain').send('Invalid interpolation parameter');
+		return sendStyledError(res, req, 400, 'Invalid interpolation parameter');
 	}
 
 	// Validate item: a-zA-Z0-9_- max 50 chars
 	if (!item || !/^[a-zA-Z0-9_-]{1,50}$/.test(item)) {
-		return res.status(400).type('text/plain').send('Invalid item parameter');
+		return sendStyledError(res, req, 400, 'Invalid item parameter');
 	}
 
 		// Validate period: safe chars, bounded length, and must parse to a positive duration
 		if (period.length > CHART_PERIOD_MAX_LEN || !/^[0-9A-Za-z-]+$/.test(period)) {
-			return res.status(400).type('text/plain').send('Invalid period parameter');
+			return sendStyledError(res, req, 400, 'Invalid period parameter');
 		}
 	const durationSec = parsePeriodToSeconds(period);
 	if (!durationSec) {
-		return res.status(400).type('text/plain').send('Invalid period parameter');
+		return sendStyledError(res, req, 400, 'Invalid period parameter');
 	}
 
 	// Validate mode: light or dark
 	if (!['light', 'dark'].includes(mode)) {
-		return res.status(400).type('text/plain').send('Invalid mode parameter');
+		return sendStyledError(res, req, 400, 'Invalid mode parameter');
 	}
 
 	const cacheTtlMs = chartCacheTtl(durationSec);
@@ -7773,7 +7786,7 @@ app.get('/chart', (req, res) => {
 	try {
 		const html = generateChart(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern, durationSec, interpolation);
 		if (!html) {
-			return res.status(404).type('text/plain').send('Chart data not available');
+			return sendStyledError(res, req, 404, 'Chart data not available');
 		}
 
 			// Cache the generated HTML
@@ -7789,7 +7802,7 @@ app.get('/chart', (req, res) => {
 		res.send(html);
 	} catch (err) {
 		logMessage(`Chart generation failed: ${err.message || err}`);
-		res.status(500).type('text/plain').send('Chart generation failed');
+		sendStyledError(res, req, 500, 'Chart generation failed');
 	}
 });
 
@@ -8060,11 +8073,11 @@ app.get('/api/presence/nearby-days', async (req, res) => {
 app.get('/presence', async (req, res) => {
 	const username = req.ohProxyUser;
 	if (!username) {
-		return res.status(401).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
+		return sendStyledError(res, req, 401);
 	}
 	const user = sessions.getUser(username);
 	if (!user) {
-		return res.status(403).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
+		return sendStyledError(res, req, 403);
 	}
 
 	const rawLat = req.query?.lat;
@@ -8072,7 +8085,7 @@ app.get('/presence', async (req, res) => {
 	const hasLat = rawLat !== undefined;
 	const hasLon = rawLon !== undefined;
 	if (hasLat !== hasLon) {
-		return res.status(400).type('text/plain').send('Both lat and lon are required');
+		return sendStyledError(res, req, 400, 'Both lat and lon are required');
 	}
 
 	let singlePointMode = false;
@@ -8080,7 +8093,7 @@ app.get('/presence', async (req, res) => {
 	let singlePointLon = null;
 	if (hasLat && hasLon) {
 		if (typeof rawLat !== 'string' || typeof rawLon !== 'string') {
-			return res.status(400).type('text/plain').send('Invalid lat/lon');
+			return sendStyledError(res, req, 400, 'Invalid lat/lon');
 		}
 		const parsedLat = Number(rawLat.trim());
 		const parsedLon = Number(rawLon.trim());
@@ -8092,7 +8105,7 @@ app.get('/presence', async (req, res) => {
 			|| parsedLon < -180
 			|| parsedLon > 180
 		) {
-			return res.status(400).type('text/plain').send('Invalid lat/lon');
+			return sendStyledError(res, req, 400, 'Invalid lat/lon');
 		}
 		singlePointMode = true;
 		singlePointLat = parsedLat;
@@ -8101,14 +8114,14 @@ app.get('/presence', async (req, res) => {
 
 	// History mode requires GPS tracking; single-point viewer mode does not.
 	if (!singlePointMode && !user.trackgps) {
-		return res.status(403).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
+		return sendStyledError(res, req, 403);
 	}
 
 	let conn = null;
 	if (!singlePointMode) {
 		conn = getMysqlConnection();
 		if (!conn) {
-			return res.status(503).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
+			return sendStyledError(res, req, 503);
 		}
 	}
 
@@ -8130,7 +8143,7 @@ app.get('/presence', async (req, res) => {
 			}
 		} catch (err) {
 			logMessage(`[Presence] Query failed: ${err.message || err}`);
-			return res.status(504).type('text/html').send('<!DOCTYPE html><html><head></head><body></body></html>');
+			return sendStyledError(res, req, 504);
 		}
 	}
 
@@ -8894,11 +8907,11 @@ app.get('/proxy', async (req, res, next) => {
 	// External URL proxy (url= parameter) - supports regular images and MJPEG streams
 	if (raw !== undefined) {
 		if (typeof raw !== 'string') {
-			return res.status(400).send('Invalid proxy target');
+			return sendStyledError(res, req, 400, 'Invalid proxy target');
 		}
 		const text = raw.trim();
 		if (!text || text.length > 2048 || hasAnyControlChars(text)) {
-			return res.status(400).send('Invalid proxy target');
+			return sendStyledError(res, req, 400, 'Invalid proxy target');
 		}
 
 		let target;
@@ -8908,29 +8921,29 @@ app.get('/proxy', async (req, res, next) => {
 			let decoded = text;
 			try { decoded = decodeURIComponent(text); } catch {}
 			if (!decoded || decoded.length > 2048 || hasAnyControlChars(decoded)) {
-				return res.status(400).send('Invalid proxy target');
+				return sendStyledError(res, req, 400, 'Invalid proxy target');
 			}
 			try {
 				target = new URL(decoded);
 			} catch {
-				return res.status(400).send('Invalid proxy target');
+				return sendStyledError(res, req, 400, 'Invalid proxy target');
 			}
 		}
 
 		if (!['http:', 'https:', 'rtsp:'].includes(target.protocol)) {
-			return res.status(400).send('Invalid proxy target');
+			return sendStyledError(res, req, 400, 'Invalid proxy target');
 		}
 		if (target.port && (!/^\d+$/.test(target.port) || Number(target.port) < 1 || Number(target.port) > 65535)) {
-			return res.status(400).send('Invalid proxy target');
+			return sendStyledError(res, req, 400, 'Invalid proxy target');
 		}
 		if (!isProxyTargetAllowed(target, liveConfig.proxyAllowlist)) {
-			return res.status(403).send('Proxy target not allowed');
+			return sendStyledError(res, req, 403, 'Proxy target not allowed');
 		}
 
 		// Validate encoding param
 		const rawEncoding = req.query?.encoding;
 		if (rawEncoding !== undefined && typeof rawEncoding !== 'string') {
-			return res.status(400).send('Invalid encoding parameter');
+			return sendStyledError(res, req, 400, 'Invalid encoding parameter');
 		}
 		const encoding = resolveVideoEncoding(rawEncoding, target);
 
@@ -8944,11 +8957,11 @@ app.get('/proxy', async (req, res, next) => {
 
 			// Get viewport width for scaling time overlay (0-10000, invalid = 0)
 			if (req.query?.w !== undefined && typeof req.query.w !== 'string') {
-				return res.status(400).send('Invalid viewport width');
+				return sendStyledError(res, req, 400, 'Invalid viewport width');
 			}
 			const rawWidth = parseOptionalInt(req.query?.w, { min: 0, max: 10000 });
 			if (req.query?.w !== undefined && !Number.isFinite(rawWidth)) {
-				return res.status(400).send('Invalid viewport width');
+				return sendStyledError(res, req, 400, 'Invalid viewport width');
 			}
 			const viewportWidth = Number.isFinite(rawWidth) ? rawWidth : 0;
 			// Font size scales with viewport: ~2.5% of width, min 16px, max 48px
@@ -9036,7 +9049,7 @@ app.get('/proxy', async (req, res, next) => {
 			ffmpeg.on('error', (err) => {
 				endStream();
 				if (!res.headersSent) {
-					res.status(502).send('Video proxy error');
+					sendStyledError(res, req, 502, 'Video proxy error');
 				}
 			});
 			ffmpeg.on('close', () => {
@@ -9055,11 +9068,11 @@ app.get('/proxy', async (req, res, next) => {
 
 		// Check for cache parameter (seconds)
 		if (req.query?.cache !== undefined && typeof req.query.cache !== 'string') {
-			return res.status(400).send('Invalid cache parameter');
+			return sendStyledError(res, req, 400, 'Invalid cache parameter');
 		}
 		const cacheSeconds = parseOptionalInt(req.query?.cache, { min: 0, max: 86400 });
 		if (req.query?.cache !== undefined && !Number.isFinite(cacheSeconds)) {
-			return res.status(400).send('Invalid cache parameter');
+			return sendStyledError(res, req, 400, 'Invalid cache parameter');
 		}
 		const shouldCache = Number.isFinite(cacheSeconds) && cacheSeconds > 0;
 
@@ -9110,7 +9123,7 @@ app.get('/proxy', async (req, res, next) => {
 			} catch (err) {
 				logMessage(`Cached proxy fetch failed for ${targetUrlLog}: ${err.message || err}`);
 				if (!res.headersSent) {
-					res.status(502).send('Proxy error');
+					sendStyledError(res, req, 502, 'Proxy error');
 				}
 			}
 			return;
@@ -9122,7 +9135,7 @@ app.get('/proxy', async (req, res, next) => {
 		} catch (err) {
 			logMessage(`Direct proxy failed for ${redactUrlCredentials(target.toString())}: ${err.message || err}`);
 			if (!res.headersSent) {
-				res.status(502).send('Proxy error');
+				sendStyledError(res, req, 502, 'Proxy error');
 			}
 		}
 		return;
@@ -9138,7 +9151,7 @@ app.get('/proxy', async (req, res, next) => {
 		res.send(result.body);
 	} catch (err) {
 		logMessage(`openHAB proxy failed for ${proxyPath}: ${err.message || err}`);
-		res.status(502).send('Proxy error');
+		sendStyledError(res, req, 502, 'Proxy error');
 	}
 });
 

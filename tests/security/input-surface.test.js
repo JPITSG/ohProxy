@@ -41,7 +41,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawTheme\s*=\s*req\.query\?\.theme\s*;/,
 			/const\s+rawRoot\s*=\s*typeof\s+req\.query\?\.root\s*===\s*'string'\s*\?\s*req\.query\.root\s*:\s*''\s*;/,
 			/const\s+rawSitemap\s*=\s*typeof\s+req\.query\?\.sitemap\s*===\s*'string'\s*\?\s*req\.query\.sitemap\s*:\s*''\s*;/,
-			/const\s+rawMode\s*=\s*typeof\s+req\.query\?\.mode\s*===\s*'string'\s*\?\s*req\.query\.mode\s*:\s*''\s*;/,
+			/const\s+rawMode\s*=\s*typeof\s+req\.query\?\.mode\s*===\s*'string'\s*\?\s*req\.query\.mode(?:\.trim\(\)\.toLowerCase\(\))?\s*:\s*''\s*;/,
 			/const\s+rawDelta\s*=\s*req\.query\?\.delta\s*;/,
 			/const\s+rawUrl\s*=\s*req\.query\?\.url\s*;/,
 			/const\s+rawItem\s*=\s*req\.query\?\.item\s*;/,
