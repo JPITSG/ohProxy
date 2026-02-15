@@ -7,6 +7,10 @@ const crypto = require('crypto');
 const DB_PATH = path.join(__dirname, 'sessions.db');
 const DEFAULT_SETTINGS = { darkMode: true };
 
+function setDefaultTheme(theme) {
+	DEFAULT_SETTINGS.darkMode = theme !== 'light';
+}
+
 let sessionMaxAgeDays = 14; // Default, can be overridden via setMaxAgeDays()
 
 let db = null;
@@ -753,6 +757,7 @@ module.exports = {
 	closeDb,
 	getDefaultSettings,
 	setMaxAgeDays,
+	setDefaultTheme,
 	// Glow rules
 	getAllGlowRules,
 	getGlowRules,

@@ -972,6 +972,12 @@ function validateConfig() {
 		ensureNumber(CLIENT_CONFIG.idleAfterMs, 'client.idleAfterMs', { min: 0 }, errors);
 		ensureNumber(CLIENT_CONFIG.activityThrottleMs, 'client.activityThrottleMs', { min: 0 }, errors);
 		ensureBoolean(CLIENT_CONFIG.statusNotification, 'client.statusNotification', errors);
+		if (CLIENT_CONFIG.defaultTheme !== undefined) {
+			const validThemes = ['dark', 'light'];
+			if (!validThemes.includes(CLIENT_CONFIG.defaultTheme)) {
+				errors.push('client.defaultTheme must be one of: ' + validThemes.join(', '));
+			}
+		}
 	}
 
 	return errors;
@@ -1307,6 +1313,12 @@ function validateAdminConfig(config) {
 		if (c.activityThrottleMs !== undefined) ensureNumber(c.activityThrottleMs, 'client.activityThrottleMs', { min: 0 }, errors);
 		if (c.voiceResponseTimeoutMs !== undefined) ensureNumber(c.voiceResponseTimeoutMs, 'client.voiceResponseTimeoutMs', { min: 0 }, errors);
 		if (c.touchReloadMinHiddenMs !== undefined) ensureNumber(c.touchReloadMinHiddenMs, 'client.touchReloadMinHiddenMs', { min: 0 }, errors);
+		if (c.defaultTheme !== undefined) {
+			const validThemes = ['dark', 'light'];
+			if (!validThemes.includes(c.defaultTheme)) {
+				errors.push('client.defaultTheme must be one of: ' + validThemes.join(', '));
+			}
+		}
 		if (c.dateFormat !== undefined) ensureString(c.dateFormat, 'client.dateFormat', { allowEmpty: false, maxLen: 64 }, errors);
 		if (c.timeFormat !== undefined) ensureString(c.timeFormat, 'client.timeFormat', { allowEmpty: false, maxLen: 64 }, errors);
 		if (isPlainObject(c.pollIntervalsMs)) {
@@ -2048,6 +2060,7 @@ function reloadLiveConfig() {
 	const prevNpmUpdateCheckMs = liveConfig.npmUpdateCheckMs;
 	liveConfig.npmUpdateCheckMs = configNumber(newTasks.npmUpdateCheckMs);
 	liveConfig.clientConfig = newConfig.client || {};
+	sessions.setDefaultTheme(liveConfig.clientConfig.defaultTheme || 'light');
 
 	// WebSocket config - handle mode changes
 	const oldWsMode = liveConfig.wsMode;
@@ -9437,6 +9450,7 @@ setInterval(pruneAuthLockouts, AUTH_LOCKOUT_PRUNE_MS);
 // Initialize sessions database
 try {
 	sessions.setMaxAgeDays(SESSION_MAX_AGE_DAYS);
+	sessions.setDefaultTheme(CLIENT_CONFIG.defaultTheme || 'light');
 	sessions.initDb();
 	logMessage(`[Sessions] Database initialized (max age: ${SESSION_MAX_AGE_DAYS} days)`);
 	hardenSensitiveFilePermissions();

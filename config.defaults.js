@@ -323,6 +323,8 @@ module.exports = {
 		// Minimum time app must be hidden before touch-device reload (ms; >=0).
 		// Prevents unnecessary reloads when quickly switching apps.
 		touchReloadMinHiddenMs: 60000,
+		// Default theme for new sessions ('dark' or 'light').
+		defaultTheme: 'light',
 
 		// === Date/Time Formatting ===
 		// Date format used across all client-facing timestamps.
