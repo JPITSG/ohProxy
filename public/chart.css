@@ -305,6 +305,40 @@ body {
 	}
 }
 
+.chart-fs-divider {
+	display: none;
+	width: 1px;
+	height: 1rem;
+	background: var(--border-light);
+	flex-shrink: 0;
+}
+
+.chart-fs-btn {
+	display: none;
+	width: 28px;
+	height: 28px;
+	border: none;
+	background: transparent;
+	color: var(--text-primary);
+	cursor: pointer;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	outline: none;
+	flex-shrink: 0;
+	transition: background-color .4s ease;
+}
+
+.chart-fs-btn:hover {
+	background: var(--bg-tertiary);
+}
+
+.chart-fs-btn svg {
+	width: 14px;
+	height: 14px;
+	fill: currentColor;
+}
+
 @media (max-width: 600px) {
 	.chart-header {
 		padding: 0.75rem;

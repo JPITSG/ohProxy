@@ -3285,7 +3285,7 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 <div class="chart-card">
 <div class="chart-header">
 <div class="chart-title-group"><h2 class="chart-title" id="chartTitle">${safeTitle}</h2></div>
-<div class="chart-header-right" id="chartStats">${statsHtml}${legendHtml}</div>
+<div class="chart-header-right" id="chartStats">${statsHtml}${legendHtml}<span class="chart-fs-divider" id="fsDivider"></span><button class="chart-fs-btn" id="chartFullscreen" type="button"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg></button></div>
 </div>
 <div class="chart-container" id="chartContainer">
 <svg class="chart-svg" id="chartSvg"></svg>

@@ -1065,4 +1065,33 @@
 	new window.ChartRenderer('chartContainer', 'chartSvg');
 	checkTitleOverflow();
 	window.addEventListener('resize', checkTitleOverflow);
+
+	// Fullscreen toggle (only when embedded in an iframe)
+	(function() {
+		if (window === window.top) return;
+
+		var fsBtn = document.getElementById('chartFullscreen');
+		var fsDivider = document.getElementById('fsDivider');
+		if (!fsBtn) return;
+		fsBtn.style.display = 'flex';
+		if (fsDivider) fsDivider.style.display = 'block';
+
+		var fsActive = false;
+		var expandSvg = '<svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg>';
+		var minimizeSvg = '<svg viewBox="0 0 24 24"><path d="M9 3v6H3V7h4V3h2zm6 0h2v4h4v2h-6V3zM3 15h6v6H7v-4H3v-2zm12 0h6v2h-4v4h-2v-6z"/></svg>';
+
+		fsBtn.addEventListener('click', function() {
+			if (!fsActive) {
+				window.parent.postMessage({ type: 'ohproxy-fullscreen-request' }, '*');
+			} else {
+				window.parent.postMessage({ type: 'ohproxy-fullscreen-exit' }, '*');
+			}
+		});
+
+		window.addEventListener('message', function(e) {
+			if (!e.data || e.data.type !== 'ohproxy-fullscreen-state') return;
+			fsActive = !!e.data.active;
+			fsBtn.innerHTML = fsActive ? minimizeSvg : expandSvg;
+		});
+	})();
 })();
