@@ -17,6 +17,10 @@ const net = require('net');
 const mysql = require('mysql2');
 const sessions = require('./sessions');
 const { generateStructureMap } = require('./lib/structure-map');
+const {
+	widgetType, widgetLink, widgetPageLink, widgetIconName,
+	deltaKey, splitLabelState, widgetKey, normalizeMapping, normalizeButtongridButtons,
+} = require('./lib/widget-normalizer');
 
 // Keep-alive agents for openHAB backend connections (eliminates TIME_WAIT buildup)
 const ohHttpAgent = new http.Agent({ keepAlive: true });
@@ -2199,6 +2203,8 @@ const CHART_JS_PATH = path.join(PUBLIC_DIR, 'chart.js');
 const CHART_CSS_PATH = path.join(PUBLIC_DIR, 'chart.css');
 const LOGIN_JS_PATH = path.join(PUBLIC_DIR, 'login.js');
 const LANG_JS_PATH = path.join(PUBLIC_DIR, 'lang.js');
+const OH_UTILS_JS_PATH = path.join(PUBLIC_DIR, 'oh-utils.js');
+const WIDGET_NORMALIZER_PATH = path.join(__dirname, 'lib', 'widget-normalizer.js');
 const MATERIAL_ICONS_DIR = path.join(__dirname, 'node_modules', '@material-design-icons', 'svg');
 const MATERIAL_ICONS_FILLED_DIR = path.join(MATERIAL_ICONS_DIR, 'filled');
 const LOGIN_HTML_PATH = path.join(PUBLIC_DIR, 'login.html');
@@ -3301,6 +3307,7 @@ window._chartTimeFormat=${inlineJson(liveConfig.clientConfig?.timeFormat || 'H:m
 window._chartYAxisPattern=${inlineJson(yAxisDecimalPattern || null)};
 window._chartInterpolation=${inlineJson(interpolation || 'linear')};
 </script>
+<script src="/oh-utils.${assetVersion}.js"></script>
 <script src="/chart.${assetVersion}.js"></script>
 </body>
 </html>`;
@@ -4377,7 +4384,7 @@ function filterSitemapCacheVisibility(cache, userRole) {
 
 	const shouldHide = (w) => {
 		if (!w) return false;
-		const wKey = serverWidgetKey(w);
+		const wKey = widgetKey(w);
 		const vis = visibilityMap.get(wKey) || 'all';
 		if (vis === 'admin') return true;
 		if (vis === 'normal' && userRole !== 'normal' && userRole !== 'readonly') return true;
@@ -4445,16 +4452,7 @@ async function getHomepageData(req) {
 		const visibilityRules = sessions.getAllVisibilityRules();
 		const visibilityMap = new Map(visibilityRules.map((r) => [r.widgetId, r.visibility]));
 
-		const visibleWidgets = widgets.filter((w) => {
-			if (userRole === 'admin') return true;
-			if (w?.__section) return true;
-			const wKey = serverWidgetKey(w);
-			const vis = visibilityMap.get(wKey) || 'all';
-			if (vis === 'all') return true;
-			if (vis === 'admin') return false;
-			if (vis === 'normal') return userRole === 'normal' || userRole === 'readonly';
-			return true;
-		});
+		const visibleWidgets = widgets.filter((w) => isWidgetVisibleForRole(w, userRole, visibilityMap));
 		const inlineIcons = await buildHomepageInlineIcons(visibleWidgets);
 
 		return {
@@ -4594,18 +4592,7 @@ function widgetLabel(widget) {
 	return safeText(widget?.item?.name || widget?.name || '');
 }
 
-function widgetIconName(widget) {
-	return safeText(widget?.icon || widget?.item?.icon || widget?.item?.category || '');
-}
 
-function splitLabelState(label) {
-	const raw = safeText(label);
-	// Strip trailing empty brackets [] or [-] (openHAB uses these when no state)
-	const cleaned = raw.replace(/\s*\[\s*-?\s*\]\s*$/, '');
-	const match = cleaned.match(/^(.*)\s*\[(.+)\]\s*$/);
-	if (!match) return { title: cleaned, state: '' };
-	return { title: match[1].trim(), state: match[2].trim() };
-}
 
 function labelPathSegments(label) {
 	const parts = splitLabelState(label);
@@ -4613,13 +4600,6 @@ function labelPathSegments(label) {
 	if (parts.title && parts.title !== '-') segs.push(parts.title);
 	if (parts.state && parts.state !== '-') segs.push(parts.state);
 	return segs;
-}
-
-function widgetPageLink(widget) {
-	const link = widget?.linkedPage?.link || widget?.link;
-	if (typeof link !== 'string') return null;
-	if (!link.includes('/rest/sitemaps/')) return null;
-	return link;
 }
 
 function normalizeSearchWidgets(page, ctx) {
@@ -4671,75 +4651,16 @@ function extractSitemaps(data) {
 	return [];
 }
 
-function widgetType(widget) {
-	return safeText(widget?.type || widget?.widgetType || widget?.item?.type || '');
-}
 
-function widgetLink(widget) {
-	return safeText(widget?.linkedPage?.link || widget?.link || '');
-}
-
-function deltaKey(widget) {
-	const id = safeText(widget?.widgetId || widget?.id || '');
-	if (id) return `id:${id}`;
-	const itemName = safeText(widget?.item?.name || widget?.itemName || '');
-	const type = widgetType(widget);
-	const link = widgetLink(widget);
-	if (itemName) return `item:${itemName}|${type}|${link}`;
-	const label = safeText(widget?.label || widget?.item?.label || widget?.item?.name || '');
-	return `label:${label}|${type}|${link}`;
-}
-
-function serverWidgetKey(widget) {
-	if (widget?.__section || widgetType(widget) === 'Frame') return `section:${safeText(widget?.label || widget?.item?.label || widget?.item?.name || '')}`;
-	const item = safeText(widget?.item?.name || '');
-	const fullLabel = safeText(widget?.label || '');
-	const { title } = splitLabelState(fullLabel);
-	const label = title || fullLabel;
-	const type = widgetType(widget);
-	const link = safeText(widgetPageLink(widget) || '');
-	return `widget:${item}|${label}|${type}|${link}`;
-}
-
-function normalizeMappings(mapping) {
-	if (!mapping) return [];
-	if (Array.isArray(mapping)) {
-		return mapping
-			.map((m) => {
-				if (!m || typeof m !== 'object') return null;
-				const command = safeText(m.command ?? '');
-				const releaseCommand = safeText(m.releaseCommand ?? '');
-				const label = safeText(m.label ?? m.command ?? '');
-				const icon = safeText(m.icon ?? '');
-				if (!command && !label && !icon) return null;
-				return { command, releaseCommand, label: label || command, icon };
-			})
-			.filter(Boolean);
-	}
-	if (typeof mapping === 'object') {
-		if ('command' in mapping || 'label' in mapping || 'releaseCommand' in mapping || 'icon' in mapping) {
-			const command = safeText(mapping.command ?? '');
-			const releaseCommand = safeText(mapping.releaseCommand ?? '');
-			const label = safeText(mapping.label ?? mapping.command ?? '');
-			const icon = safeText(mapping.icon ?? '');
-			if (!command && !label && !icon) return [];
-			return [{ command, releaseCommand, label: label || command, icon }];
-		}
-		return Object.entries(mapping).map(([command, mappingValue]) => {
-			const isEntryObject = mappingValue && typeof mappingValue === 'object';
-			const label = isEntryObject
-				? safeText(mappingValue.label ?? command)
-				: safeText(mappingValue);
-			const icon = isEntryObject ? safeText(mappingValue.icon ?? '') : '';
-			return {
-				command: safeText(command),
-				releaseCommand: '',
-				label: label || safeText(command),
-				icon,
-			};
-		});
-	}
-	return [];
+function isWidgetVisibleForRole(widget, userRole, visibilityMap) {
+	if (userRole === 'admin') return true;
+	if (widget?.__section) return true;
+	const wKey = widgetKey(widget);
+	const vis = visibilityMap.get(wKey) || 'all';
+	if (vis === 'all') return true;
+	if (vis === 'admin') return false;
+	if (vis === 'normal') return userRole === 'normal' || userRole === 'readonly';
+	return true;
 }
 
 function mappingsSignatureFromNormalized(normalized) {
@@ -4748,71 +4669,7 @@ function mappingsSignatureFromNormalized(normalized) {
 }
 
 function mappingsSignature(mapping) {
-	return mappingsSignatureFromNormalized(normalizeMappings(mapping));
-}
-
-function normalizeButtongridButtons(widget) {
-	const buttons = [];
-	if (Array.isArray(widget?.buttons)) {
-		for (const b of widget.buttons) {
-			if (!b || typeof b !== 'object') continue;
-			const itemName = safeText(b?.itemName || b?.item?.name || '');
-			const state = safeText(b?.state ?? b?.item?.state ?? (itemName ? itemStates.get(itemName) : ''));
-			buttons.push({
-				row: parseInt(b?.row, 10) || 1,
-				column: parseInt(b?.column, 10) || 1,
-				command: safeText(b?.command || b?.cmd || ''),
-				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
-				label: safeText(b?.label || ''),
-				icon: safeText(b?.icon || b?.staticIcon || ''),
-				itemName,
-				state,
-				stateless: !!b?.stateless,
-			});
-		}
-		return buttons;
-	}
-	// Inline buttons come through mappings with row/column fields
-	const inlineButtons = widget?.mappings || widget?.mapping;
-	if (Array.isArray(inlineButtons)) {
-		for (const b of inlineButtons) {
-			if (b?.row == null && b?.column == null) continue;
-			const itemName = safeText(b?.itemName || b?.item?.name || '');
-			const state = safeText(b?.state ?? b?.item?.state ?? (itemName ? itemStates.get(itemName) : ''));
-			buttons.push({
-				row: parseInt(b?.row, 10) || 1,
-				column: parseInt(b?.column, 10) || 1,
-				command: safeText(b?.command || b?.cmd || ''),
-				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
-				label: safeText(b?.label || ''),
-				icon: safeText(b?.icon || b?.staticIcon || ''),
-				itemName,
-				state,
-				stateless: !!b?.stateless,
-			});
-		}
-	}
-	// Child Button widgets from widget.widgets
-	const children = widget?.widgets || widget?.widget;
-	if (Array.isArray(children)) {
-		for (const c of children) {
-			if (safeText(c?.type).toLowerCase() !== 'button') continue;
-			const itemName = safeText(c?.itemName || c?.item?.name || '');
-			const state = safeText(c?.state ?? c?.item?.state ?? (itemName ? itemStates.get(itemName) : ''));
-			buttons.push({
-				row: parseInt(c?.row, 10) || 1,
-				column: parseInt(c?.column, 10) || 1,
-				command: safeText(c?.command || c?.cmd || c?.click || ''),
-				releaseCommand: safeText(c?.releaseCommand || c?.release || ''),
-				label: safeText(c?.label || ''),
-				icon: safeText(c?.icon || c?.staticIcon || ''),
-				itemName,
-				state,
-				stateless: !!c?.stateless,
-			});
-		}
-	}
-	return buttons;
+	return mappingsSignatureFromNormalized(normalizeMapping(mapping));
 }
 
 function buttonsSignature(buttons) {
@@ -4827,9 +4684,9 @@ function widgetSnapshot(widget) {
 	const type = safeText(widget?.type || '').toLowerCase();
 	const isButtongrid = type === 'buttongrid';
 	const widgetMapping = isButtongrid ? null : (widget?.mappings || widget?.mapping);
-	const normalizedMapping = isButtongrid ? [] : normalizeMappings(widgetMapping);
+	const normalizedMapping = isButtongrid ? [] : normalizeMapping(widgetMapping);
 	const mappingSig = mappingsSignatureFromNormalized(normalizedMapping);
-	const buttons = type === 'buttongrid' ? normalizeButtongridButtons(widget) : [];
+	const buttons = type === 'buttongrid' ? normalizeButtongridButtons(widget, (name) => name ? itemStates.get(name) : '') : [];
 	const btnSig = buttonsSignature(buttons);
 	return {
 		key: deltaKey(widget),
@@ -5739,6 +5596,16 @@ const jsonParserSmall = express.json({ limit: '4kb', strict: true, type: 'applic
 const jsonParserMedium = express.json({ limit: '16kb', strict: true, type: 'application/json' });
 const jsonParserLarge = express.json({ limit: '64kb', strict: true, type: 'application/json' });
 const urlencodedParserSmall = express.urlencoded({ extended: false, limit: '4kb' });
+
+function requireAdmin(req, res, next) {
+	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
+	if (user?.role !== 'admin') {
+		res.status(403).json({ error: 'Admin access required' });
+		return;
+	}
+	req.ohAdminUser = user;
+	next();
+}
 app.use(morgan('combined', {
 	skip: (req, res) => shouldSkipAccessLog(res),
 	stream: {
@@ -6492,15 +6359,9 @@ app.post('/api/gps', jsonParserMedium, (req, res) => {
 });
 
 // Widget card config API (admin only)
-app.get('/api/card-config/:widgetId', (req, res) => {
+app.get('/api/card-config/:widgetId', requireAdmin, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	// Admin only
-	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
-	if (user?.role !== 'admin') {
-		res.status(403).json({ error: 'Admin access required' });
-		return;
-	}
 	const rawWidgetId = req.params.widgetId;
 	if (typeof rawWidgetId !== 'string') {
 		res.status(400).json({ error: 'Missing widgetId' });
@@ -6515,15 +6376,9 @@ app.get('/api/card-config/:widgetId', (req, res) => {
 	res.json({ widgetId, rules });
 });
 
-app.post('/api/card-config', jsonParserLarge, (req, res) => {
+app.post('/api/card-config', jsonParserLarge, requireAdmin, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	// Admin only
-	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
-	if (user?.role !== 'admin') {
-		res.status(403).json({ error: 'Admin access required' });
-		return;
-	}
 
 	if (!isPlainObject(req.body)) {
 		res.status(400).json({ error: 'Invalid request body' });
@@ -6672,14 +6527,9 @@ app.post('/api/card-config', jsonParserLarge, (req, res) => {
 });
 
 // Admin config endpoints
-app.get('/api/admin/config', (req, res) => {
+app.get('/api/admin/config', requireAdmin, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
-	if (user?.role !== 'admin') {
-		res.status(403).json({ error: 'Admin access required' });
-		return;
-	}
 
 	let config;
 	try {
@@ -6700,20 +6550,16 @@ app.get('/api/admin/config', (req, res) => {
 	}
 
 	if (!isPlainObject(config.user)) config.user = {};
-	config.user.trackGps = user.trackgps === true;
-	config.user.voiceModel = isValidUserVoicePreference(user.voicePreference) ? user.voicePreference : 'system';
+	config.user.trackGps = req.ohAdminUser.trackgps === true;
+	config.user.voiceModel = isValidUserVoicePreference(req.ohAdminUser.voicePreference) ? req.ohAdminUser.voicePreference : 'system';
 
 	res.json(config);
 });
 
-app.post('/api/admin/config', jsonParserLarge, (req, res) => {
+app.post('/api/admin/config', jsonParserLarge, requireAdmin, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
-	if (user?.role !== 'admin') {
-		res.status(403).json({ error: 'Admin access required' });
-		return;
-	}
+	const user = req.ohAdminUser;
 
 	const incoming = req.body;
 	if (!isPlainObject(incoming)) {
@@ -6828,29 +6674,18 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 	res.json({ ok: true, restartRequired: needsRestart, reloadRequired: needsReload });
 });
 
-app.post('/api/admin/restart', jsonParserSmall, (req, res) => {
+app.post('/api/admin/restart', jsonParserSmall, requireAdmin, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
-	if (user?.role !== 'admin') {
-		res.status(403).json({ error: 'Admin access required' });
-		return;
-	}
-	logMessage(`[Admin] Restart triggered by ${user.username || 'unknown'}`);
+	logMessage(`[Admin] Restart triggered by ${req.ohAdminUser.username || 'unknown'}`);
 	res.json({ ok: true });
 	res.once('finish', maybeTriggerRestart);
 	res.once('close', maybeTriggerRestart);
 });
 
-app.get('/api/card-config/:itemName/history', async (req, res) => {
+app.get('/api/card-config/:itemName/history', requireAdmin, async (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	// Admin only
-	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
-	if (user?.role !== 'admin') {
-		res.status(403).json({ error: 'Admin access required' });
-		return;
-	}
 	const rawItemName = req.params.itemName;
 	if (typeof rawItemName !== 'string' || !/^[a-zA-Z0-9_]{1,50}$/.test(rawItemName)) {
 		res.status(400).json({ error: 'Invalid item name' });
@@ -6870,15 +6705,6 @@ app.get('/api/card-config/:itemName/history', async (req, res) => {
 	if (!conn) {
 		return res.status(503).json({ ok: false, error: 'Database unavailable' });
 	}
-	const QUERY_TIMEOUT_MS = 10000;
-	function queryWithTimeout(sql, params) {
-		return new Promise((resolve, reject) => {
-			conn.query({ sql, timeout: QUERY_TIMEOUT_MS }, params, (err, results) => {
-				if (err) reject(err);
-				else resolve(results);
-			});
-		});
-	}
 	try {
 		// Group items: merged timeline from all members
 		if (groupToMembers.has(rawItemName)) {
@@ -6889,7 +6715,7 @@ app.get('/api/card-config/:itemName/history', async (req, res) => {
 			// Batch-lookup ItemIds for all member names
 			const memberNames = members.map(m => m.name);
 			const placeholders = memberNames.map(() => '?').join(',');
-			const idRows = await queryWithTimeout('SELECT ItemName, ItemId FROM items WHERE ItemName IN (' + placeholders + ')', memberNames);
+			const idRows = await queryWithTimeout(conn, 'SELECT ItemName, ItemId FROM items WHERE ItemName IN (' + placeholders + ')', memberNames);
 			const memberIdMap = new Map();
 			for (const row of idRows) {
 				const id = parseInt(row.ItemId, 10);
@@ -6920,7 +6746,7 @@ app.get('/api/card-config/:itemName/history', async (req, res) => {
 						? 'SELECT Time, Value FROM Item' + tableId + ' WHERE Time < ? ORDER BY Time DESC LIMIT ' + MEMBER_BATCH + ' OFFSET ?'
 						: 'SELECT Time, Value FROM Item' + tableId + ' ORDER BY Time DESC LIMIT ' + MEMBER_BATCH + ' OFFSET ?';
 					const params = beforeDate ? [beforeDate, mCursor] : [mCursor];
-					const rows = await queryWithTimeout(sql, params);
+					const rows = await queryWithTimeout(conn, sql, params);
 					for (let i = 0; i < rows.length; i++) {
 						const val = String(rows[i].Value).trim();
 						if (!val || val === 'NULL' || val === 'UNDEF') continue;
@@ -6962,7 +6788,7 @@ app.get('/api/card-config/:itemName/history', async (req, res) => {
 			});
 		}
 		// Look up ItemId from the items mapping table
-		const itemRows = await queryWithTimeout('SELECT ItemId FROM items WHERE ItemName = ? LIMIT 1', [rawItemName]);
+		const itemRows = await queryWithTimeout(conn, 'SELECT ItemId FROM items WHERE ItemName = ? LIMIT 1', [rawItemName]);
 		if (!itemRows.length) {
 			return res.json({ ok: true, entries: [], hasNewer: false, hasOlder: false });
 		}
@@ -6980,7 +6806,7 @@ app.get('/api/card-config/:itemName/history', async (req, res) => {
 		let cursor = offset;
 		let exhausted = false;
 		for (let batch = 0; batch < MAX_BATCHES && deduped.length < 4; batch++) {
-			const rows = await queryWithTimeout('SELECT Time, Value FROM `' + tableName + '` ORDER BY Time DESC LIMIT ' + BATCH + ' OFFSET ?', [cursor]);
+			const rows = await queryWithTimeout(conn, 'SELECT Time, Value FROM `' + tableName + '` ORDER BY Time DESC LIMIT ' + BATCH + ' OFFSET ?', [cursor]);
 			for (let i = 0; i < rows.length; i++) {
 				const val = String(rows[i].Value).trim();
 				if (!val || val === 'NULL' || val === 'UNDEF') continue;
@@ -7377,15 +7203,7 @@ app.get('/search-index', async (req, res) => {
 	const visibilityRules = sessions.getAllVisibilityRules();
 	const visibilityMap = new Map(visibilityRules.map(r => [r.widgetId, r.visibility]));
 
-	const filteredWidgets = widgets.filter(w => {
-		if (userRole === 'admin') return true;
-		const wKey = serverWidgetKey(w);
-		const vis = visibilityMap.get(wKey) || 'all';
-		if (vis === 'all') return true;
-		if (vis === 'admin') return false;
-		if (vis === 'normal') return userRole === 'normal' || userRole === 'readonly';
-		return true;
-	});
+	const filteredWidgets = widgets.filter(w => isWidgetVisibleForRole(w, userRole, visibilityMap));
 
 	const filteredFrames = frames.filter(f => {
 		if (userRole === 'admin') return true;
@@ -7641,6 +7459,14 @@ app.get(/^\/login\.v[\w.-]+\.js$/i, (req, res) => {
 
 app.get(/^\/lang\.v[\w.-]+\.js$/i, (req, res) => {
 	sendVersionedAsset(res, LANG_JS_PATH, 'application/javascript; charset=utf-8');
+});
+
+app.get(/^\/oh-utils\.v[\w.-]+\.js$/i, (req, res) => {
+	sendVersionedAsset(res, OH_UTILS_JS_PATH, 'application/javascript; charset=utf-8');
+});
+
+app.get(/^\/widget-normalizer\.v[\w.-]+\.js$/i, (req, res) => {
+	sendVersionedAsset(res, WIDGET_NORMALIZER_PATH, 'application/javascript; charset=utf-8');
 });
 
 // --- Proxy FIRST (so bodies aren't eaten by any parsers) ---
@@ -8115,19 +7941,9 @@ app.get('/api/presence', async (req, res) => {
 
 	const dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
 
-	const QUERY_TIMEOUT_MS = 10000;
-	function queryWithTimeout(sql, params) {
-		return new Promise((resolve, reject) => {
-			conn.query({ sql, timeout: QUERY_TIMEOUT_MS }, params, (err, results) => {
-				if (err) reject(err);
-				else resolve(results);
-			});
-		});
-	}
-
 	let rows;
 	try {
-		rows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = ? ORDER BY id DESC', [username, dateStr]);
+		rows = await queryWithTimeout(conn, 'SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = ? ORDER BY id DESC', [username, dateStr]);
 	} catch (err) {
 		logMessage(`[Presence API] Query failed: ${err.message || err}`);
 		return res.status(504).json({ ok: false, error: 'Query failed' });
@@ -8201,17 +8017,9 @@ app.get('/api/presence/nearby-days', async (req, res) => {
 	const lonMin = lon - lonDelta;
 	const lonMax = lon + lonDelta;
 
-	const QUERY_TIMEOUT_MS = 10000;
 	let rows;
 	try {
-		rows = await new Promise((resolve, reject) => {
-			const timeout = setTimeout(() => reject(new Error('Query timeout')), QUERY_TIMEOUT_MS);
-			conn.query(
-				'SELECT lat, lon, timestamp, DATE(timestamp) AS day_date FROM log_gps WHERE username = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT 5000',
-				[username, latMin, latMax, lonMin, lonMax],
-				(err, results) => { clearTimeout(timeout); if (err) reject(err); else resolve(results); }
-			);
-		});
+		rows = await queryWithTimeout(conn, 'SELECT lat, lon, timestamp, DATE(timestamp) AS day_date FROM log_gps WHERE username = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT 5000', [username, latMin, latMax, lonMin, lonMax]);
 	} catch (err) {
 		logMessage(`[Nearby Days API] Query failed: ${err.message || err}`);
 		return res.status(504).json({ ok: false, error: 'Query failed' });
@@ -8304,31 +8112,20 @@ app.get('/presence', async (req, res) => {
 		}
 	}
 
-	const QUERY_TIMEOUT_MS = 10000;
-
-	function queryWithTimeout(sql, params) {
-		return new Promise((resolve, reject) => {
-			conn.query({ sql, timeout: QUERY_TIMEOUT_MS }, params, (err, results) => {
-				if (err) reject(err);
-				else resolve(results);
-			});
-		});
-	}
-
 	let rows = [];
 	let displayDate = new Date();
 	if (!singlePointMode) {
 		try {
 			// Try today first
-			rows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = CURDATE() ORDER BY id DESC', [username]);
+			rows = await queryWithTimeout(conn, 'SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = CURDATE() ORDER BY id DESC', [username]);
 
 			// If no results for today, fall back to the most recent date with data
 			if (!rows.length) {
-				const fallbackRows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? ORDER BY timestamp DESC LIMIT 1', [username]);
+				const fallbackRows = await queryWithTimeout(conn, 'SELECT * FROM log_gps WHERE username = ? ORDER BY timestamp DESC LIMIT 1', [username]);
 				if (fallbackRows.length && fallbackRows[0].timestamp) {
 					displayDate = new Date(fallbackRows[0].timestamp);
 					const dateStr = displayDate.toISOString().slice(0, 10);
-					rows = await queryWithTimeout('SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = ? ORDER BY id DESC', [username, dateStr]);
+					rows = await queryWithTimeout(conn, 'SELECT * FROM log_gps WHERE username = ? AND DATE(timestamp) = ? ORDER BY id DESC', [username, dateStr]);
 				}
 			}
 		} catch (err) {
@@ -9933,6 +9730,15 @@ function scheduleMysqlReconnect() {
 
 function getMysqlConnection() {
 	return mysqlConnection;
+}
+
+function queryWithTimeout(conn, sql, params, timeoutMs = 10000) {
+	return new Promise((resolve, reject) => {
+		conn.query({ sql, timeout: timeoutMs }, params, (err, results) => {
+			if (err) reject(err);
+			else resolve(results);
+		});
+	});
 }
 
 // Initialize MySQL connection if configured

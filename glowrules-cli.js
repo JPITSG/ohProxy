@@ -7,26 +7,9 @@ const https = require('https');
 const path = require('path');
 
 const sessions = require('./sessions');
+const { safeText, splitLabelState, widgetKey } = require('./lib/widget-normalizer');
 
-// Load config (same pattern as ai-cli.js / server.js)
-const configDefaults = require('./config.defaults.js');
-const configLocal = (() => {
-	try { return require('./config.local.js'); } catch { return {}; }
-})();
-
-function deepMerge(target, source) {
-	const result = { ...target };
-	for (const key of Object.keys(source)) {
-		if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-			result[key] = deepMerge(result[key] || {}, source[key]);
-		} else {
-			result[key] = source[key];
-		}
-	}
-	return result;
-}
-
-const config = deepMerge(configDefaults, configLocal);
+const config = require('./config');
 const serverConfig = config.server || {};
 
 // Supported glow colors in ohProxy
@@ -108,32 +91,6 @@ function fetchOpenhab(pathname) {
 }
 
 // ============================================
-// Widget key computation (mirrors server.js serverWidgetKey)
-// ============================================
-
-function safeText(value) {
-	return value === null || value === undefined ? '' : String(value);
-}
-
-function splitLabelState(label) {
-	const raw = safeText(label);
-	const cleaned = raw.replace(/\s*\[\]\s*$/, '');
-	const match = cleaned.match(/^(.*)\s*\[(.+)\]\s*$/);
-	if (!match) return { title: cleaned, state: '' };
-	return { title: match[1].trim(), state: match[2].trim() };
-}
-
-function computeWidgetKey(widget) {
-	const item = safeText(widget?.item?.name || '');
-	const fullLabel = safeText(widget?.label || '');
-	const { title } = splitLabelState(fullLabel);
-	const label = title || fullLabel;
-	const type = safeText(widget?.type || widget?.widgetType || widget?.item?.type || '');
-	const rawLink = widget?.linkedPage?.link || '';
-	const link = (typeof rawLink === 'string' && rawLink.includes('/rest/sitemaps/')) ? rawLink : '';
-	return `widget:${item}|${label}|${type}|${link}`;
-}
-
 // Compute a widget key from DSL-parsed data (fallback when REST API doesn't have the widget)
 function computeKeyFromDsl(itemName, dslLabel, dslType) {
 	const { title } = splitLabelState(dslLabel);
@@ -396,7 +353,7 @@ async function main() {
 		for (const widget of allWidgets) {
 			const name = widget.item?.name;
 			if (!name) continue;
-			const key = computeWidgetKey(widget);
+			const key = widgetKey(widget);
 			if (!restWidgetMap.has(name)) restWidgetMap.set(name, []);
 			restWidgetMap.get(name).push({ widget, key });
 		}
