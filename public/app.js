@@ -3977,6 +3977,7 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'client.siteName', type: 'text', allowEmpty: true },
 			{ key: 'client.statusNotification', type: 'toggle' },
 			{ key: 'client.touchReloadMinHiddenMs', type: 'number', min: 0 },
+			{ key: 'client.defaultTheme', type: 'select', options: ['dark', 'light'] },
 		],
 	},
 	{
