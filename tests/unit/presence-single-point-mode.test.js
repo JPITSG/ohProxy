@@ -39,4 +39,19 @@ describe('Presence Single-Point Mode', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /document\.getElementById\('zoom-home'\)\.addEventListener\('click',function\(\)\{\s*if\(red\)\{\s*map\.setCenter\(new OpenLayers\.LonLat\(red\[1\],red\[0\]\)\.transform\(wgs84,proj\)\);/);
 	});
+
+	it('adds fullscreen touch rotate control that resets on fullscreen exit', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /<div id="presence-root">/);
+		assert.match(server, /#presence-root\.presence-rotated\{top:50%;left:50%;width:100vh;height:100vw;transform:translate\(-50%,-50%\) rotate\(90deg\)\}/);
+		assert.match(server, /#map-rotate\{display:none\}/);
+		assert.match(server, /<button class="map-ctrl-btn" id="map-rotate" type="button">/);
+		assert.match(server, /var rotateBtn=document\.getElementById\('map-rotate'\);/);
+		assert.match(server, /rotateBtn\.style\.display=\(isTouchDevice&&fsActive\)\?'flex':'none';/);
+		assert.match(server, /rotateBtn\.addEventListener\('click',function\(\)\{\s*if\(!isTouchDevice\|\|!fsActive\)return;\s*isRotated=!isRotated;\s*applyRotation\(\);/);
+		assert.match(server, /function isRotatedTouchPanMode\(\)\{\s*return isTouchDevice&&presenceFullscreenActive&&presenceRotated;\s*\}/);
+		assert.match(server, /map\.pan\(-dy,dx,\{animate:false\}\);/);
+		assert.match(server, /presenceFullscreenActive=fsActive;/);
+		assert.match(server, /if\(!fsActive\)\{\s*isRotated=false;\s*applyRotation\(\);\s*\}/);
+	});
 });

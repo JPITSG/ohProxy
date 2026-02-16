@@ -8234,9 +8234,12 @@ app.get('/presence', async (req, res) => {
 .map-ctrl-btn{width:36px;height:36px;border-radius:10px;border:1px solid rgba(19,21,54,0.2);background:rgba(19,21,54,0.08);color:#0f172a;font-size:18px;font-weight:300;font-family:'Rubik',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;outline:none;transition:background-color .4s ease,border-color .4s ease,box-shadow .4s ease}
 .map-ctrl-btn:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}
 	.map-ctrl-btn svg{width:16px;height:16px;fill:currentColor}
+	#presence-root{position:fixed;top:0;left:0;width:100vw;height:100vh;overflow:hidden;transform-origin:center center}
+	#presence-root.presence-rotated{top:50%;left:50%;width:100vh;height:100vw;transform:translate(-50%,-50%) rotate(90deg)}
 	#map{position:absolute;top:0;left:0;right:0;bottom:0;z-index:0}
 	body{margin:0;padding:0;overflow:hidden}
-	html,body,#map{overscroll-behavior:none}
+	html,body{width:100%;height:100%;overscroll-behavior:none}
+	html,body,#presence-root,#map{overscroll-behavior:none}
 	.tooltip{position:absolute;background:#f1f2f9;border:1px solid #ccccd1;border-radius:10px;padding:0.5rem 0.75rem;font-size:.7rem;line-height:1.5;font-family:'Rubik',sans-serif;color:#0f172a;pointer-events:none;user-select:none;z-index:100;white-space:nowrap;box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.08),0 4px 6px -4px rgb(0 0 0 / 0.05)}
 .tooltip .tt-date{font-weight:500}
 .tooltip .tt-time{font-weight:300;margin-top:0.125rem}
@@ -8279,12 +8282,14 @@ app.get('/presence', async (req, res) => {
 .ctx-nav .ctx-older,.ctx-nav .ctx-newer{margin-top:0}
 .ctx-empty,.ctx-loading{font-size:0.625rem;font-weight:300;letter-spacing:0.08em;color:rgba(19,21,54,0.5);font-family:'Rubik',sans-serif}
 #map-fullscreen{display:none}
+#map-rotate{display:none}
 @keyframes shake{0%,100%{transform:translateX(0)}10%,30%,50%,70%,90%{transform:translateX(-5px)}20%,40%,60%,80%{transform:translateX(5px)}}
 .shake{animation:shake 0.5s ease-in-out}
 </style>
 	<script src="/vendor/OpenLayers.js"></script>
 	</head>
 	<body>
+	<div id="presence-root">
 	<div id="map"></div>
 	${singlePointMode ? '' : `<div id="red-tooltip" class="tooltip"></div>
 	<div id="hover-tooltip" class="tooltip"></div>
@@ -8294,6 +8299,7 @@ app.get('/presence', async (req, res) => {
 	<button class="map-ctrl-btn" id="zoom-in" type="button">+</button>
 	<button class="map-ctrl-btn" id="zoom-home" type="button"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></button>
 	<button class="map-ctrl-btn" id="map-fullscreen" type="button"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg></button>
+	<button class="map-ctrl-btn" id="map-rotate" type="button"><svg viewBox="0 0 24 24"><path d="M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.96-.7 2.8l1.46 1.46A7.944 7.944 0 0 0 20 13c0-4.42-3.58-8-8-8zM6.7 9.2 5.24 7.74A7.944 7.944 0 0 0 4 13c0 4.42 3.58 8 8 8v3l4-4-4-4v3c-3.31 0-6-2.69-6-6 0-1.01.25-1.96.7-2.8z"/></svg></button>
 	<button class="map-ctrl-btn" id="zoom-out" type="button">&minus;</button>
 	</div>
 	${singlePointMode ? '' : `<div id="search-modal">
@@ -8306,6 +8312,7 @@ app.get('/presence', async (req, res) => {
 	<button class="search-go" type="button">Search</button>
 	</div>
 	</div>`}
+	</div>
 	<script>
 	(function(){
 	var markers=${markersJson};
@@ -8352,8 +8359,60 @@ vector.addFeatures(feature);
 	var redTooltip=singlePointMode?null:document.getElementById('red-tooltip');
 	var mapEl=document.getElementById('map');
 	var isTouchDevice=('ontouchstart' in window)||navigator.maxTouchPoints>0;
+	var presenceFullscreenActive=false;
+	var presenceRotated=false;
+	var rotatedPanTracking=false;
+	var rotatedPanMoved=false;
+	var rotatedPanLastX=0;
+	var rotatedPanLastY=0;
+	function isRotatedTouchPanMode(){
+	return isTouchDevice&&presenceFullscreenActive&&presenceRotated;
+	}
 	mapEl.addEventListener('wheel',function(e){e.preventDefault()},{passive:false});
 	mapEl.addEventListener('mousewheel',function(e){e.preventDefault()},{passive:false});
+	mapEl.addEventListener('touchstart',function(e){
+	if(!isRotatedTouchPanMode()||!e.touches||e.touches.length!==1){
+	rotatedPanTracking=false;
+	rotatedPanMoved=false;
+	return;
+	}
+	rotatedPanTracking=true;
+	rotatedPanMoved=false;
+	rotatedPanLastX=e.touches[0].clientX;
+	rotatedPanLastY=e.touches[0].clientY;
+	},{passive:true,capture:true});
+	mapEl.addEventListener('touchmove',function(e){
+	if(!rotatedPanTracking||!isRotatedTouchPanMode()||!e.touches||e.touches.length!==1)return;
+	var x=e.touches[0].clientX;
+	var y=e.touches[0].clientY;
+	var dx=x-rotatedPanLastX;
+	var dy=y-rotatedPanLastY;
+	rotatedPanLastX=x;
+	rotatedPanLastY=y;
+	if(!dx&&!dy)return;
+	rotatedPanMoved=true;
+	// Remap touch movement to match rotated (90deg) viewport direction.
+	map.pan(-dy,dx,{animate:false});
+	e.preventDefault();
+	e.stopPropagation();
+	},{passive:false,capture:true});
+	mapEl.addEventListener('touchend',function(e){
+	if(!rotatedPanTracking)return;
+	var moved=rotatedPanMoved;
+	rotatedPanTracking=false;
+	rotatedPanMoved=false;
+	if(moved){
+	e.preventDefault();
+	e.stopPropagation();
+	}
+	},{passive:false,capture:true});
+	mapEl.addEventListener('touchcancel',function(e){
+	if(!rotatedPanTracking)return;
+	rotatedPanTracking=false;
+	rotatedPanMoved=false;
+	e.preventDefault();
+	e.stopPropagation();
+	},{passive:false,capture:true});
 	var tooltipOffsets={redAnchor:{x:15,y:-60},blueAnchor:{x:15,y:-55},pointer:{x:15,y:15}};
 	var lastClickFeature=null;
 	var lastClickTime=0;
@@ -8606,10 +8665,37 @@ document.getElementById('zoom-out').addEventListener('click',function(){map.zoom
 	(function(){
 	if(window===window.top)return;
 	var fsBtn=document.getElementById('map-fullscreen');
+	var rotateBtn=document.getElementById('map-rotate');
+	var presenceRoot=document.getElementById('presence-root');
 	fsBtn.style.display='flex';
 	var fsActive=false;
+	var isRotated=false;
 	var expandSvg='<svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg>';
 	var minimizeSvg='<svg viewBox="0 0 24 24"><path d="M9 3v6H3V7h4V3h2zm6 0h2v4h4v2h-6V3zM3 15h6v6H7v-4H3v-2zm12 0h6v2h-4v4h-2v-6z"/></svg>';
+	function scheduleMapReflow(){
+	setTimeout(function(){
+	map.updateSize();
+	if(!singlePointMode)updateAnchoredTooltips();
+	},60);
+	}
+	function applyRotation(){
+	if(isRotated){
+	presenceRoot.classList.add('presence-rotated');
+	presenceRotated=true;
+	}else{
+	presenceRoot.classList.remove('presence-rotated');
+	presenceRotated=false;
+	}
+	scheduleMapReflow();
+	}
+	function syncRotateButton(){
+	rotateBtn.style.display=(isTouchDevice&&fsActive)?'flex':'none';
+	}
+	rotateBtn.addEventListener('click',function(){
+	if(!isTouchDevice||!fsActive)return;
+	isRotated=!isRotated;
+	applyRotation();
+	});
 	fsBtn.addEventListener('click',function(){
 	if(!fsActive){
 	window.parent.postMessage({type:'ohproxy-fullscreen-request'},'*');
@@ -8620,8 +8706,17 @@ document.getElementById('zoom-out').addEventListener('click',function(){map.zoom
 	window.addEventListener('message',function(e){
 	if(!e.data||e.data.type!=='ohproxy-fullscreen-state')return;
 	fsActive=!!e.data.active;
+	presenceFullscreenActive=fsActive;
 	fsBtn.innerHTML=fsActive?minimizeSvg:expandSvg;
+	if(!fsActive){
+	isRotated=false;
+	applyRotation();
+	}else{
+	scheduleMapReflow();
+	}
+	syncRotateButton();
 	});
+	syncRotateButton();
 	})();
 
 	if(!singlePointMode){
