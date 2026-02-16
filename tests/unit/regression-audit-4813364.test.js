@@ -85,6 +85,14 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		assert.doesNotMatch(app, /if \(iframeHash && iframeHash !== data\.hash\) \{/);
 	});
 
+	it('chart refresh interaction suppression uses press/touch engagement instead of hover', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		assert.match(app, /const chartMouseDownActive = new WeakSet\(\);/);
+		assert.match(app, /iframe\.addEventListener\('mousedown', \(\) => chartMouseDownActive\.add\(iframe\), \{ passive: true \}\);/);
+		assert.match(app, /return chartTouchActive\.has\(iframe\) \|\| chartMouseDownActive\.has\(iframe\);/);
+		assert.doesNotMatch(app, /iframe\.matches\(':hover'\)/);
+	});
+
 	it('buttongrid allows button-level item binding when parent item is missing', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /const hasButtongridButtonItem = isButtongrid && Array\.isArray\(buttons\) && buttons\.some\(\(b\) => safeText\(b\?\.itemName\)\.trim\(\)\);/);

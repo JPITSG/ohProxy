@@ -8747,23 +8747,43 @@ function noteActivity() {
 // --- Chart Hash Check (smart iframe refresh) ---
 let chartHashCheckInProgress = false;
 const chartTouchActive = new WeakSet();
+const chartMouseDownActive = new WeakSet();
+let chartInteractionReleaseBound = false;
+
+function clearChartInteractionState() {
+	const iframes = document.querySelectorAll('iframe.chart-frame');
+	for (const iframe of iframes) {
+		chartTouchActive.delete(iframe);
+		chartMouseDownActive.delete(iframe);
+	}
+}
+
+function bindChartInteractionReleaseHandlers() {
+	if (chartInteractionReleaseBound) return;
+	chartInteractionReleaseBound = true;
+	window.addEventListener('mouseup', clearChartInteractionState, { passive: true });
+	window.addEventListener('touchend', clearChartInteractionState, { passive: true });
+	window.addEventListener('touchcancel', clearChartInteractionState, { passive: true });
+	window.addEventListener('blur', clearChartInteractionState, { passive: true });
+	document.addEventListener('visibilitychange', () => {
+		if (document.visibilityState === 'hidden') clearChartInteractionState();
+	});
+}
 
 function setupChartInteractionTracking(iframe) {
 	if (iframe.dataset.interactionTracked) return;
 	iframe.dataset.interactionTracked = 'true';
+	bindChartInteractionReleaseHandlers();
+	iframe.addEventListener('mousedown', () => chartMouseDownActive.add(iframe), { passive: true });
+	iframe.addEventListener('mouseup', () => chartMouseDownActive.delete(iframe), { passive: true });
+	iframe.addEventListener('mouseleave', () => chartMouseDownActive.delete(iframe), { passive: true });
 	iframe.addEventListener('touchstart', () => chartTouchActive.add(iframe), { passive: true });
 	iframe.addEventListener('touchend', () => chartTouchActive.delete(iframe), { passive: true });
 	iframe.addEventListener('touchcancel', () => chartTouchActive.delete(iframe), { passive: true });
 }
 
 function isChartBeingInteracted(iframe) {
-	// Check for touch interaction
-	if (chartTouchActive.has(iframe)) return true;
-	// Check for mouse hover
-	try {
-		if (iframe.matches(':hover')) return true;
-	} catch { /* ignore */ }
-	return false;
+	return chartTouchActive.has(iframe) || chartMouseDownActive.has(iframe);
 }
 
 function readIframeChartHash(iframe) {
