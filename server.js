@@ -9589,8 +9589,9 @@ registerBackgroundTask('session-cleanup', SESSION_CLEANUP_MS, () => {
 });
 
 // NPM module update checker
-function fetchNpmLatestVersion(pkgName) {
+function fetchNpmVersions(pkgName) {
 	return new Promise((resolve, reject) => {
+		const parseVersions = (data) => Object.keys(JSON.parse(data).versions || {});
 		const req = https.get(`https://registry.npmjs.org/${encodeURIComponent(pkgName)}`, {
 			headers: { Accept: 'application/vnd.npm.install-v1+json' },
 			timeout: 10000,
@@ -9604,7 +9605,7 @@ function fetchNpmLatestVersion(pkgName) {
 					res2.on('data', chunk => data += chunk);
 					res2.on('end', () => {
 						if (res2.statusCode !== 200) { reject(new Error(`HTTP ${res2.statusCode}`)); return; }
-						try { resolve(JSON.parse(data)['dist-tags']?.latest || null); } catch { reject(new Error('invalid JSON')); }
+						try { resolve(parseVersions(data)); } catch { reject(new Error('invalid JSON')); }
 					});
 				}).on('error', reject);
 				return;
@@ -9613,12 +9614,38 @@ function fetchNpmLatestVersion(pkgName) {
 			res.on('data', chunk => data += chunk);
 			res.on('end', () => {
 				if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}`)); return; }
-				try { resolve(JSON.parse(data)['dist-tags']?.latest || null); } catch { reject(new Error('invalid JSON')); }
+				try { resolve(parseVersions(data)); } catch { reject(new Error('invalid JSON')); }
 			});
 		});
 		req.on('error', reject);
 		req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
 	});
+}
+
+function highestMinorPatch(installed, versions) {
+	const parts = installed.split('.');
+	if (parts.length < 3) return null;
+	const major = parseInt(parts[0], 10);
+	const iMinor = parseInt(parts[1], 10);
+	const iPatch = parseInt(parts[2], 10);
+	let best = null;
+	let bestMinor = iMinor;
+	let bestPatch = iPatch;
+	for (const v of versions) {
+		if (v.includes('-')) continue;
+		const p = v.split('.');
+		if (p.length < 3) continue;
+		const vMajor = parseInt(p[0], 10);
+		const vMinor = parseInt(p[1], 10);
+		const vPatch = parseInt(p[2], 10);
+		if (vMajor !== major) continue;
+		if (vMinor > bestMinor || (vMinor === bestMinor && vPatch > bestPatch)) {
+			best = v;
+			bestMinor = vMinor;
+			bestPatch = vPatch;
+		}
+	}
+	return best;
 }
 
 async function checkNpmUpdates() {
@@ -9650,9 +9677,10 @@ async function checkNpmUpdates() {
 				return;
 			}
 			try {
-				const latest = await fetchNpmLatestVersion(name);
-				if (latest && latest !== installed) {
-					upgrades.push({ name, installed, latest });
+				const versions = await fetchNpmVersions(name);
+				const best = highestMinorPatch(installed, versions);
+				if (best && best !== installed) {
+					upgrades.push({ name, installed, latest: best });
 				}
 			} catch (err) {
 				errors.push(`${name}: ${err.message || err}`);
