@@ -79,6 +79,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawState\s*=\s*req\.query\?\.state\s*;/,
 			/const\s+rawEncoding\s*=\s*req\.query\?\.encoding\s*;/,
 			/if\s*\(rawEncoding\s*!==\s*undefined\s*&&\s*typeof\s+rawEncoding\s*!==\s*'string'\s*\)/,
+			/const\s+key\s*=\s*req\.query\.key\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));

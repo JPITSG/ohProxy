@@ -6587,6 +6587,31 @@ app.get('/api/admin/config', requireAdmin, (req, res) => {
 	res.json(config);
 });
 
+app.get('/api/admin/config/secret', requireAdmin, (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-store');
+
+	const key = req.query.key;
+	if (!key || typeof key !== 'string' || !SENSITIVE_CONFIG_KEYS.includes(key)) {
+		res.status(403).json({ error: 'Forbidden' });
+		return;
+	}
+
+	let config;
+	try {
+		delete require.cache[require.resolve('./config.local.js')];
+		delete require.cache[require.resolve('./config.js')];
+		config = loadUserConfig();
+	} catch (err) {
+		logMessage(`Failed to load config for secret reveal: ${err.message || err}`);
+		res.status(500).json({ error: 'Failed to load config' });
+		return;
+	}
+
+	const val = getNestedValue(config, key);
+	res.json({ value: val !== undefined ? String(val) : '' });
+});
+
 app.post('/api/admin/config', jsonParserLarge, requireAdmin, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
