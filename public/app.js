@@ -4153,7 +4153,7 @@ function createAdminField(field, value) {
 			input.value = '';
 			input.placeholder = ohLang.adminConfig.secretPlaceholder;
 			input.dataset.masked = '1';
-			input.addEventListener('input', () => { delete input.dataset.masked; }, { once: true });
+			input.addEventListener('input', () => { delete input.dataset.masked; });
 		} else {
 			input.value = rawVal;
 			if (fieldPlaceholder) input.placeholder = fieldPlaceholder;
@@ -4162,11 +4162,35 @@ function createAdminField(field, value) {
 		eyeBtn.type = 'button';
 		eyeBtn.className = 'admin-secret-eye';
 		eyeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-		eyeBtn.addEventListener('click', (e) => {
+		eyeBtn.addEventListener('click', async (e) => {
 			e.preventDefault();
 			e.stopPropagation();
 			haptic();
-			input.type = input.type === 'password' ? 'text' : 'password';
+			if (input.dataset.masked === '1') {
+				eyeBtn.disabled = true;
+				eyeBtn.style.opacity = '0.4';
+				try {
+					const resp = await fetch('/api/admin/config/secret?key=' + encodeURIComponent(input.dataset.key));
+					if (!resp.ok) throw new Error('HTTP ' + resp.status);
+					const data = await resp.json();
+					input.value = data.value;
+					input.placeholder = '';
+					input.dataset.masked = 'revealed';
+					input.type = 'text';
+				} catch {
+					input.placeholder = 'Error loading value';
+				} finally {
+					eyeBtn.disabled = false;
+					eyeBtn.style.opacity = '';
+				}
+			} else if (input.dataset.masked === 'revealed') {
+				input.value = '';
+				input.placeholder = ohLang.adminConfig.secretPlaceholder;
+				input.dataset.masked = '1';
+				input.type = 'password';
+			} else {
+				input.type = input.type === 'password' ? 'text' : 'password';
+			}
 		});
 		wrap.appendChild(input);
 		wrap.appendChild(eyeBtn);
