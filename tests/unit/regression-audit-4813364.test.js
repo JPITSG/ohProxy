@@ -93,6 +93,14 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		assert.doesNotMatch(app, /iframe\.matches\(':hover'\)/);
 	});
 
+	it('chart iframe swaps preserve fullscreen ownership and state', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		assert.match(app, /const preserveFullscreen = iframeFsActive && iframeFsIframe === iframe;/);
+		assert.match(app, /if \(preserveFullscreen && iframeFsActive\) \{/);
+		assert.match(app, /iframeFsIframe = newIframe;/);
+		assert.match(app, /newIframe\.contentWindow\.postMessage\(\{ type: 'ohproxy-fullscreen-state', active: true \}, '\*'\);/);
+	});
+
 	it('buttongrid allows button-level item binding when parent item is missing', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /const hasButtongridButtonItem = isButtongrid && Array\.isArray\(buttons\) && buttons\.some\(\(b\) => safeText\(b\?\.itemName\)\.trim\(\)\);/);
