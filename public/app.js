@@ -8820,6 +8820,7 @@ function swapChartIframe(iframe, newSrc, baseUrl) {
 		iframe.src = newSrc;
 		return;
 	}
+	const preserveFullscreen = iframeFsActive && iframeFsIframe === iframe;
 
 	const newIframe = document.createElement('iframe');
 	newIframe.className = iframe.className;
@@ -8853,6 +8854,10 @@ function swapChartIframe(iframe, newSrc, baseUrl) {
 
 	newIframe.addEventListener('load', () => {
 		clearTimeout(timeoutId);
+		if (preserveFullscreen && iframeFsActive) {
+			iframeFsIframe = newIframe;
+			try { newIframe.contentWindow.postMessage({ type: 'ohproxy-fullscreen-state', active: true }, '*'); } catch (_) {}
+		}
 		// Crossfade: fade in new iframe
 		newIframe.style.opacity = '1';
 		// After transition completes, remove old iframe and reset positioning
