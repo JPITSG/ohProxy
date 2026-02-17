@@ -250,7 +250,7 @@ window.ohLang = {
 			'server.weatherbit.apiKey': 'Weatherbit API key',
 			'server.weatherbit.latitude': 'Weather latitude',
 			'server.weatherbit.longitude': 'Weather longitude',
-			'server.weatherbit.units': 'Temperature units (\u2018M\u2019 = Celsius, \u2018I\u2019 = Fahrenheit)',
+			'server.weatherbit.units': 'Temperature units (metric = Celsius, imperial = Fahrenheit)',
 			'server.weatherbit.refreshIntervalMs': 'Weather refresh interval (ms)',
 			'server.voice.model': 'Speech-to-text engine (browser = browser SpeechRecognition, vosk = local Vosk server)',
 			'server.voice.voskHost': 'Vosk WebSocket server host:port (required when model is vosk)',

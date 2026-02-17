@@ -470,7 +470,7 @@ const WEATHERBIT_CONFIG = SERVER_CONFIG.weatherbit || {};
 const WEATHERBIT_API_KEY = safeText(WEATHERBIT_CONFIG.apiKey).trim();
 const WEATHERBIT_LATITUDE = safeText(WEATHERBIT_CONFIG.latitude).trim();
 const WEATHERBIT_LONGITUDE = safeText(WEATHERBIT_CONFIG.longitude).trim();
-const WEATHERBIT_UNITS = safeText(WEATHERBIT_CONFIG.units).trim() || 'M';
+const WEATHERBIT_UNITS = safeText(WEATHERBIT_CONFIG.units).trim() || 'metric';
 const WEATHERBIT_REFRESH_MS = configNumber(WEATHERBIT_CONFIG.refreshIntervalMs, 3600000);
 const WEATHERBIT_CACHE_DIR = path.join(__dirname, 'cache', 'weatherbit');
 const WEATHERBIT_FORECAST_FILE = path.join(WEATHERBIT_CACHE_DIR, 'forecast.json');
@@ -1280,8 +1280,8 @@ function validateAdminConfig(config) {
 				errors.push('server.weatherbit.longitude must be a number between -180 and 180');
 			}
 		}
-		if (s.weatherbit.units !== undefined && s.weatherbit.units !== 'M' && s.weatherbit.units !== 'I') {
-			errors.push('server.weatherbit.units must be "M" or "I"');
+		if (s.weatherbit.units !== undefined && s.weatherbit.units !== 'metric' && s.weatherbit.units !== 'imperial') {
+			errors.push('server.weatherbit.units must be "metric" or "imperial"');
 		}
 		if (s.weatherbit.refreshIntervalMs !== undefined) {
 			ensureNumber(s.weatherbit.refreshIntervalMs, 'server.weatherbit.refreshIntervalMs', { min: 1 }, errors);
@@ -2114,7 +2114,7 @@ function reloadLiveConfig() {
 	liveConfig.weatherbitApiKey = safeText(newWeatherbit.apiKey).trim();
 	liveConfig.weatherbitLatitude = safeText(newWeatherbit.latitude).trim();
 	liveConfig.weatherbitLongitude = safeText(newWeatherbit.longitude).trim();
-	liveConfig.weatherbitUnits = safeText(newWeatherbit.units).trim() || 'M';
+	liveConfig.weatherbitUnits = safeText(newWeatherbit.units).trim() || 'metric';
 	liveConfig.weatherbitRefreshMs = configNumber(newWeatherbit.refreshIntervalMs, 3600000);
 	updateBackgroundTaskInterval('weatherbit', isWeatherbitConfigured() ? liveConfig.weatherbitRefreshMs : 0);
 	if (liveConfig.weatherbitUnits !== prevWeatherbitUnits && isWeatherbitConfigured()) {
@@ -4066,7 +4066,7 @@ function renderWeatherWidget(forecastData, mode) {
 </body></html>`;
 	}
 	const cityName = escapeHtml(forecastData?.city_name || '');
-	const unitSymbol = liveConfig.weatherbitUnits === 'I' ? 'F' : 'C';
+	const unitSymbol = liveConfig.weatherbitUnits === 'imperial' ? 'F' : 'C';
 
 	const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 	const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -9713,6 +9713,10 @@ function isWeatherbitConfigured() {
 	return !!(liveConfig.weatherbitApiKey && liveConfig.weatherbitLatitude && liveConfig.weatherbitLongitude);
 }
 
+function mapWeatherbitUnits(units) {
+	return units === 'imperial' ? 'I' : 'M';
+}
+
 function getWeatherbitCacheAgeMs() {
 	try {
 		const stats = fs.statSync(WEATHERBIT_FORECAST_FILE);
@@ -9744,8 +9748,9 @@ async function fetchWeatherbitData() {
 	logMessage('[Weather] Fetching forecast from Weatherbit API...');
 
 	try {
+		const weatherbitApiUnits = mapWeatherbitUnits(liveConfig.weatherbitUnits);
 		// Fetch forecast
-		const forecastUrl = `https://api.weatherbit.io/v2.0/forecast/daily?lat=${encodeURIComponent(liveConfig.weatherbitLatitude)}&lon=${encodeURIComponent(liveConfig.weatherbitLongitude)}&key=${encodeURIComponent(liveConfig.weatherbitApiKey)}&units=${encodeURIComponent(liveConfig.weatherbitUnits)}&days=16`;
+		const forecastUrl = `https://api.weatherbit.io/v2.0/forecast/daily?lat=${encodeURIComponent(liveConfig.weatherbitLatitude)}&lon=${encodeURIComponent(liveConfig.weatherbitLongitude)}&key=${encodeURIComponent(liveConfig.weatherbitApiKey)}&units=${encodeURIComponent(weatherbitApiUnits)}&days=16`;
 		const forecastResponse = await fetch(forecastUrl, {
 			headers: { 'User-Agent': USER_AGENT },
 			signal: AbortSignal.timeout(30000),
@@ -9764,7 +9769,7 @@ async function fetchWeatherbitData() {
 		let currentDescription = null;
 		try {
 			logMessage('[Weather] Fetching current weather...');
-			const currentUrl = `https://api.weatherbit.io/v2.0/current?lat=${encodeURIComponent(liveConfig.weatherbitLatitude)}&lon=${encodeURIComponent(liveConfig.weatherbitLongitude)}&key=${encodeURIComponent(liveConfig.weatherbitApiKey)}&units=${encodeURIComponent(liveConfig.weatherbitUnits)}`;
+			const currentUrl = `https://api.weatherbit.io/v2.0/current?lat=${encodeURIComponent(liveConfig.weatherbitLatitude)}&lon=${encodeURIComponent(liveConfig.weatherbitLongitude)}&key=${encodeURIComponent(liveConfig.weatherbitApiKey)}&units=${encodeURIComponent(weatherbitApiUnits)}`;
 			const currentResponse = await fetch(currentUrl, {
 				headers: { 'User-Agent': USER_AGENT },
 				signal: AbortSignal.timeout(30000),

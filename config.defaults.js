@@ -247,8 +247,8 @@ module.exports = {
 			latitude: '',
 			// Location longitude (decimal, e.g. -0.1278).
 			longitude: '',
-			// Temperature units ('M' = Celsius, 'I' = Fahrenheit).
-			units: 'M',
+			// Temperature units ('metric' = Celsius, 'imperial' = Fahrenheit).
+			units: 'metric',
 			// Data refresh interval in milliseconds (default: 1 hour).
 			refreshIntervalMs: 3600000,
 		},

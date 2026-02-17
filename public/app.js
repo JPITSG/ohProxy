@@ -3965,7 +3965,7 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'server.weatherbit.apiKey', type: 'secret', allowEmpty: true },
 			{ key: 'server.weatherbit.latitude', type: 'text', allowEmpty: true },
 			{ key: 'server.weatherbit.longitude', type: 'text', allowEmpty: true },
-			{ key: 'server.weatherbit.units', type: 'select', options: ['M', 'I'] },
+			{ key: 'server.weatherbit.units', type: 'select', options: ['metric', 'imperial'] },
 			{ key: 'server.weatherbit.refreshIntervalMs', type: 'number', min: 1 },
 			{ key: 'server.voice.model', type: 'select', options: ['browser', 'vosk'] },
 			{ key: 'server.voice.voskHost', type: 'text', allowEmpty: true },
