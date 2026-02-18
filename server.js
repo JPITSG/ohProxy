@@ -8863,7 +8863,8 @@ monthMenu.style.width=r.width+'px';
 monthMenu.classList.add('open');
 monthBtn.classList.add('active');
 });
-document.addEventListener('click',function(){monthMenu.classList.remove('open');monthBtn.classList.remove('active')});
+function closeMonthMenu(){monthMenu.classList.remove('open');monthBtn.classList.remove('active')}
+document.addEventListener('click',closeMonthMenu);
 monthMenu.addEventListener('click',function(e){e.stopPropagation()});
 
 function setupInput(inp,validate){
@@ -8923,6 +8924,7 @@ setupInput(ddInput,function(v){var n=parseInt(v,10);return n>=1&&n<=31});
 	if(!isTouchDevice)return;
 	var active=document.activeElement;
 	if(isSearchDateInput(active))active.blur();
+	closeMonthMenu();
 	}
 	mapEl.addEventListener('touchstart',blurSearchDateInputsFromMapTouch,{passive:true,capture:true});
 
