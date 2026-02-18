@@ -73,4 +73,13 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /function blurSearchDateInputsFromMapTouch\(\)\{/);
 		assert.match(server, /mapEl\.addEventListener\('touchstart',blurSearchDateInputsFromMapTouch,\{passive:true,capture:true\}\);/);
 	});
+
+	it('gates presence hover glow styles to hover-capable pointers', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /@media\(hover:hover\)\{\.map-ctrl-btn:hover\{/);
+		assert.match(server, /@media\(hover:hover\)\{\.search-controls button:hover,\.search-controls input:hover\{/);
+		assert.match(server, /@media\(pointer:coarse\)\{\.map-ctrl-btn:hover\{background:rgba\(19,21,54,0\.12\);border-color:rgba\(19,21,54,0\.2\);box-shadow:none\}\}/);
+		assert.match(server, /@media\(pointer:coarse\)\{\.search-controls button:hover\{background:rgba\(19,21,54,0\.08\);border-color:rgba\(19,21,54,0\.2\);box-shadow:none\}\}/);
+		assert.match(server, /@media\(pointer:coarse\)\{\.search-controls input:hover\{background:rgba\(255,255,255,0\.7\);border-color:rgba\(19,21,54,0\.2\);box-shadow:inset 0 1px 3px rgba\(0,0,0,0\.08\)\}\}/);
+	});
 });
