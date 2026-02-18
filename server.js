@@ -8875,16 +8875,56 @@ lastGood=v;
 });
 }
 setupInput(ddInput,function(v){var n=parseInt(v,10);return n>=1&&n<=31});
-setupInput(yyyyInput,function(v){
-var n=parseInt(v,10);
-if(v.length===1)return n===2;
-if(v.length===2)return v==='20';
-if(v.length===3)return n>=200&&n<=205;
-return n>=2000&&n<=2050;
-});
+	setupInput(yyyyInput,function(v){
+	var n=parseInt(v,10);
+	if(v.length===1)return n===2;
+	if(v.length===2)return v==='20';
+	if(v.length===3)return n>=200&&n<=205;
+	return n>=2000&&n<=2050;
+	});
 
-ddInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&ddInput.value)yyyyInput.focus()});
-yyyyInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&yyyyInput.value.length===4)document.querySelector('.search-go').click()});
+	function isSearchDateInput(el){return el===ddInput||el===yyyyInput}
+	var viewportHeightBaseline=(window.visualViewport&&window.visualViewport.height)||window.innerHeight;
+	var keyboardWasOpen=false;
+	var keyboardOpenThreshold=80;
+	var keyboardCloseThreshold=24;
+	function updateViewportHeightBaseline(currentHeight){if(currentHeight>viewportHeightBaseline)viewportHeightBaseline=currentHeight}
+	function handleDateInputFocus(){
+	var currentHeight=(window.visualViewport&&window.visualViewport.height)||window.innerHeight;
+	updateViewportHeightBaseline(currentHeight);
+	keyboardWasOpen=false;
+	}
+	function handleDateInputViewportResize(){
+	var currentHeight=(window.visualViewport&&window.visualViewport.height)||window.innerHeight;
+	var active=document.activeElement;
+	if(!isSearchDateInput(active)){
+	updateViewportHeightBaseline(currentHeight);
+	keyboardWasOpen=false;
+	return;
+	}
+	if(currentHeight<viewportHeightBaseline-keyboardOpenThreshold){
+	keyboardWasOpen=true;
+	return;
+	}
+	if(keyboardWasOpen&&currentHeight>=viewportHeightBaseline-keyboardCloseThreshold){
+	active.blur();
+	keyboardWasOpen=false;
+	updateViewportHeightBaseline(currentHeight);
+	}
+	}
+	ddInput.addEventListener('focus',handleDateInputFocus);
+	yyyyInput.addEventListener('focus',handleDateInputFocus);
+	if(window.visualViewport)window.visualViewport.addEventListener('resize',handleDateInputViewportResize);
+	window.addEventListener('resize',handleDateInputViewportResize);
+	function blurSearchDateInputsFromMapTouch(){
+	if(!isTouchDevice)return;
+	var active=document.activeElement;
+	if(isSearchDateInput(active))active.blur();
+	}
+	mapEl.addEventListener('touchstart',blurSearchDateInputsFromMapTouch,{passive:true,capture:true});
+
+	ddInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&ddInput.value)yyyyInput.focus()});
+	yyyyInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&yyyyInput.value.length===4)document.querySelector('.search-go').click()});
 
 var searchEmpty=document.querySelector('.search-empty');
 var searchModal=document.getElementById('search-modal');
