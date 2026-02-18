@@ -10107,6 +10107,8 @@ function restoreNormalPolling() {
 
 					if (data.response) {
 						speakText(data.response);
+					} else if (data.voiceError) {
+						speakText(data.voiceError);
 					}
 				} catch (err) {
 					handleVoiceError(currentRequestId, err, 'voice request failed');

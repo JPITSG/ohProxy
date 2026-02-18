@@ -323,15 +323,15 @@ function createExtraValidationTestApp() {
 
 	app.post('/api/voice', (req, res) => {
 		if (!isPlainObject(req.body)) {
-			return res.status(400).json({ error: 'Invalid request body' });
+			return res.status(400).json({ error: 'Invalid request body', voiceError: 'Sorry, something went wrong with the voice request.' });
 		}
 		const { command } = req.body;
 		if (!command || typeof command !== 'string' || command.length > 500 || hasAnyControlChars(command)) {
-			return res.status(400).json({ error: 'Missing or invalid command' });
+			return res.status(400).json({ error: 'Missing or invalid command', voiceError: 'Sorry, I could not understand the command.' });
 		}
 		const trimmed = command.trim();
 		if (!trimmed || trimmed.length > 500) {
-			return res.status(400).json({ error: 'Empty or too long command' });
+			return res.status(400).json({ error: 'Empty or too long command', voiceError: 'Sorry, the command was empty or too long.' });
 		}
 		return res.json({ ok: true, command: trimmed });
 	});

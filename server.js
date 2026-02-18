@@ -5384,7 +5384,10 @@ function callAnthropicApi(requestBody) {
 						reject(new Error('Invalid JSON response from Anthropic'));
 					}
 				} else {
-					reject(new Error(`Anthropic API error ${res.statusCode}`));
+					const err = new Error(`Anthropic API error ${res.statusCode}`);
+					err.statusCode = res.statusCode;
+					try { err.apiBody = JSON.parse(data); } catch {}
+					reject(err);
 				}
 			});
 		});
@@ -5397,6 +5400,38 @@ function callAnthropicApi(requestBody) {
 		req.write(postData);
 		req.end();
 	});
+}
+
+function getVoiceErrorMessage(err) {
+	if (!err) return 'Voice command processing failed. Please try again.';
+	const msg = err.message || '';
+	const code = err.statusCode;
+	const bodyMsg = err.apiBody?.error?.message || '';
+
+	// Network failures
+	if (['ECONNREFUSED', 'ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT'].some(c => msg.includes(c))) {
+		return 'Unable to reach the AI service. Please check the network connection.';
+	}
+	// Timeout
+	if (msg.includes('timeout') || msg.includes('Timeout')) {
+		return 'The AI service took too long to respond. Please try again.';
+	}
+	// Invalid JSON from Anthropic
+	if (msg.includes('Invalid JSON response')) {
+		return 'The AI service returned an unreadable response. Please try again.';
+	}
+	// HTTP status codes
+	if (code === 400 && (bodyMsg.toLowerCase().includes('credit balance') || msg.toLowerCase().includes('credit balance'))) {
+		return 'The AI service has run out of credits. Please top up the account.';
+	}
+	if (code === 401) return 'The AI service API key is invalid. Please check the configuration.';
+	if (code === 403) return 'The AI service denied access. Please check the API key permissions.';
+	if (code === 429) return 'The AI service is busy. Please wait a moment and try again.';
+	if (code === 500) return 'The AI service is experiencing an internal error. Please try again later.';
+	if (code === 529) return 'The AI service is currently overloaded. Please try again later.';
+	if (code && code >= 400) return 'The AI service returned an unexpected error. Please try again.';
+
+	return 'Voice command processing failed. Please try again.';
 }
 
 let aiStructureMapCache = null;
@@ -6979,18 +7014,18 @@ app.post('/api/voice', jsonParserSmall, async (req, res) => {
 	res.setHeader('Cache-Control', 'no-cache');
 
 	if (!isPlainObject(req.body)) {
-		res.status(400).json({ error: 'Invalid request body' });
+		res.status(400).json({ error: 'Invalid request body', voiceError: 'Sorry, something went wrong with the voice request.' });
 		return;
 	}
 	const { command } = req.body;
 	if (!command || typeof command !== 'string' || command.length > 500 || hasAnyControlChars(command)) {
-		res.status(400).json({ error: 'Missing or invalid command' });
+		res.status(400).json({ error: 'Missing or invalid command', voiceError: 'Sorry, I could not understand the command.' });
 		return;
 	}
 
 	const trimmed = command.trim();
 	if (!trimmed || trimmed.length > 500) {
-		res.status(400).json({ error: 'Empty or too long command' });
+		res.status(400).json({ error: 'Empty or too long command', voiceError: 'Sorry, the command was empty or too long.' });
 		return;
 	}
 
@@ -7000,7 +7035,7 @@ app.post('/api/voice', jsonParserSmall, async (req, res) => {
 	// Check if AI is configured
 	if (!liveConfig.anthropicApiKey) {
 		logMessage(`[Voice] [${username}] "${trimmed}" - AI not configured`);
-		res.status(503).json({ error: 'Voice AI not configured' });
+		res.status(503).json({ error: 'Voice AI not configured', voiceError: 'Voice commands are not configured. Please ask an administrator to set up the AI service.' });
 		return;
 	}
 
@@ -7008,14 +7043,14 @@ app.post('/api/voice', jsonParserSmall, async (req, res) => {
 	const structureMap = getAiStructureMap();
 	if (!structureMap) {
 		logMessage(`[Voice] [${username}] "${trimmed}" - structure map not found`);
-		res.status(503).json({ error: 'Voice AI structure map not found. Run ai-cli.js genstructuremap first.' });
+		res.status(503).json({ error: 'Voice AI structure map not found. Run ai-cli.js genstructuremap first.', voiceError: 'Voice commands are not ready. The system structure map needs to be generated.' });
 		return;
 	}
 
 	const itemList = structureMap.request?.messages?.[0]?.content;
 	if (!itemList) {
 		logMessage(`[Voice] [${username}] "${trimmed}" - invalid structure map`);
-		res.status(503).json({ error: 'Invalid structure map format' });
+		res.status(503).json({ error: 'Invalid structure map format', voiceError: 'Voice commands are not working. The system structure map is invalid.' });
 		return;
 	}
 
@@ -7069,7 +7104,7 @@ Rules:
 		const textContent = aiResponse.content?.find(c => c.type === 'text');
 		if (!textContent?.text) {
 			logMessage(`[Voice] [${username}] "${trimmed}" - empty AI response`);
-			res.status(502).json({ error: 'Empty response from AI' });
+			res.status(502).json({ error: 'Empty response from AI', voiceError: 'The AI returned an empty response. Please try again.' });
 			return;
 		}
 
@@ -7091,7 +7126,7 @@ Rules:
 			parsed = JSON.parse(jsonText);
 		} catch {
 			logMessage(`[Voice] [${username}] "${trimmed}" - invalid AI JSON: ${textContent.text}`);
-			res.status(502).json({ error: 'Invalid response from AI' });
+			res.status(502).json({ error: 'Invalid response from AI', voiceError: 'The AI returned a garbled response. Please try again.' });
 			return;
 		}
 
@@ -7139,7 +7174,7 @@ Rules:
 
 	} catch (err) {
 		logMessage(`[Voice] [${username}] "${trimmed}" - error: ${err.message}`);
-		res.status(502).json({ error: 'AI processing failed' });
+		res.status(502).json({ error: 'AI processing failed', voiceError: getVoiceErrorMessage(err) });
 	}
 });
 
