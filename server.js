@@ -8268,7 +8268,8 @@ app.get('/presence', async (req, res) => {
 	@media(pointer:coarse){#map-controls{background:none;border:none;box-shadow:none;padding:0;gap:6px}}
 	@media(pointer:coarse){#presence-root.presence-fs-search-visible #map-controls{background:rgb(245,246,250);border:1px solid rgba(150,150,150,0.3);box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:6px;gap:4px}}
 .map-ctrl-btn{width:36px;height:36px;border-radius:10px;border:1px solid rgba(19,21,54,0.2);background:rgba(19,21,54,0.12);color:#0f172a;font-size:18px;font-weight:300;font-family:'Rubik',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;outline:none;transition:background-color .4s ease,border-color .4s ease,box-shadow .4s ease}
-.map-ctrl-btn:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}
+	@media(hover:hover){.map-ctrl-btn:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}}
+	@media(pointer:coarse){.map-ctrl-btn:hover{background:rgba(19,21,54,0.12);border-color:rgba(19,21,54,0.2);box-shadow:none}}
 	.map-ctrl-btn svg{width:16px;height:16px;fill:currentColor}
 	#presence-root{position:fixed;top:0;left:0;width:100vw;height:100vh;overflow:hidden;transform-origin:center center}
 	#presence-root.presence-rotated{top:50%;left:50%;width:100vh;height:100vw;transform:translate(-50%,-50%) rotate(90deg)}
@@ -8289,8 +8290,10 @@ app.get('/presence', async (req, res) => {
 .search-today{cursor:pointer}
 .search-controls{display:flex;gap:6px;align-items:center}
 .search-controls button,.search-controls input{box-sizing:border-box;height:36px;padding:0 12px;font-size:.75rem;font-weight:300;font-family:'Rubik',sans-serif;color:#0f172a;background:rgba(19,21,54,0.08);border:1px solid rgba(19,21,54,0.2);border-radius:10px;cursor:pointer;transition:background-color .4s ease,border-color .4s ease,box-shadow .4s ease;outline:none}
-.search-controls button:hover,.search-controls input:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}
+	@media(hover:hover){.search-controls button:hover,.search-controls input:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}}
 .search-controls input{background:rgba(255,255,255,0.7);box-shadow:inset 0 1px 3px rgba(0,0,0,0.08);cursor:text}
+	@media(pointer:coarse){.search-controls button:hover{background:rgba(19,21,54,0.08);border-color:rgba(19,21,54,0.2);box-shadow:none}}
+	@media(pointer:coarse){.search-controls input:hover{background:rgba(255,255,255,0.7);border-color:rgba(19,21,54,0.2);box-shadow:inset 0 1px 3px rgba(0,0,0,0.08)}}
 .search-controls input:focus{border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35),inset 0 1px 3px rgba(0,0,0,0.08)}
 .search-controls input.search-dd{width:48px;text-align:center}
 .search-controls input.search-yyyy{width:64px;text-align:center}
