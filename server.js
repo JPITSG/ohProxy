@@ -8264,8 +8264,9 @@ app.get('/presence', async (req, res) => {
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-500.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
 .olControlAttribution{display:none!important}
 .olControlZoom{display:none!important}
-#map-controls{position:fixed;top:16px;left:16px;z-index:150;background:rgb(245,246,250);border:1px solid rgba(150,150,150,0.3);border-radius:18px;box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:6px;display:flex;flex-direction:column;gap:4px}
-@media(pointer:coarse){#map-controls{background:none;border:none;box-shadow:none;padding:0;gap:6px}}
+	#map-controls{position:fixed;top:16px;left:16px;z-index:150;background:rgb(245,246,250);border:1px solid rgba(150,150,150,0.3);border-radius:18px;box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:6px;display:flex;flex-direction:column;gap:4px}
+	@media(pointer:coarse){#map-controls{background:none;border:none;box-shadow:none;padding:0;gap:6px}}
+	@media(pointer:coarse){#presence-root.presence-fs-search-visible #map-controls{background:rgb(245,246,250);border:1px solid rgba(150,150,150,0.3);box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:6px;gap:4px}}
 .map-ctrl-btn{width:36px;height:36px;border-radius:10px;border:1px solid rgba(19,21,54,0.2);background:rgba(19,21,54,0.12);color:#0f172a;font-size:18px;font-weight:300;font-family:'Rubik',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;outline:none;transition:background-color .4s ease,border-color .4s ease,box-shadow .4s ease}
 .map-ctrl-btn:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}
 	.map-ctrl-btn svg{width:16px;height:16px;fill:currentColor}
@@ -8281,7 +8282,8 @@ app.get('/presence', async (req, res) => {
 #hover-tooltip{display:none}
 #preview-tooltip{display:none}
 .ctx-drag-handle{cursor:move;user-select:none}
-@media(max-width:767px){#search-modal{display:none!important}}
+	@media(max-width:767px){#search-modal{display:none!important}}
+	@media(max-width:767px){#presence-root.presence-fs-search-visible #search-modal{display:block!important}}
 #search-modal{position:fixed;top:16px;right:16px;z-index:150;background:rgb(245,246,250);border:1px solid rgba(150,150,150,0.3);border-radius:18px;box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:12px;font-family:'Rubik',sans-serif}
 .search-header{display:flex;justify-content:space-between;align-items:center;font-size:0.625rem;font-weight:500;letter-spacing:0.08em;color:rgba(19,21,54,0.5);margin-bottom:8px}
 .search-today{cursor:pointer}
@@ -8404,6 +8406,7 @@ vector.addFeatures(feature);
 	var rotatedPanMoved=false;
 	var rotatedPanLastX=0;
 	var rotatedPanLastY=0;
+	var updateFullscreenSearchVisibility=function(){};
 	function isRotatedTouchPanMode(){
 	return isTouchDevice&&presenceFullscreenActive&&presenceRotated;
 	}
@@ -8711,12 +8714,13 @@ document.getElementById('zoom-out').addEventListener('click',function(){map.zoom
 	var isRotated=false;
 	var expandSvg='<svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg>';
 	var minimizeSvg='<svg viewBox="0 0 24 24"><path d="M9 3v6H3V7h4V3h2zm6 0h2v4h4v2h-6V3zM3 15h6v6H7v-4H3v-2zm12 0h6v2h-4v4h-2v-6z"/></svg>';
-	function scheduleMapReflow(){
-	setTimeout(function(){
-	map.updateSize();
-	if(!singlePointMode)updateAnchoredTooltips();
-	},60);
-	}
+		function scheduleMapReflow(){
+		setTimeout(function(){
+		map.updateSize();
+		if(!singlePointMode)updateAnchoredTooltips();
+		updateFullscreenSearchVisibility();
+		},60);
+		}
 	function applyRotation(){
 	if(isRotated){
 	presenceRoot.classList.add('presence-rotated');
@@ -8742,24 +8746,82 @@ document.getElementById('zoom-out').addEventListener('click',function(){map.zoom
 	window.parent.postMessage({type:'ohproxy-fullscreen-exit'},'*');
 	}
 	});
-	window.addEventListener('message',function(e){
-	if(!e.data||e.data.type!=='ohproxy-fullscreen-state')return;
-	fsActive=!!e.data.active;
-	presenceFullscreenActive=fsActive;
-	fsBtn.innerHTML=fsActive?minimizeSvg:expandSvg;
+		window.addEventListener('message',function(e){
+		if(!e.data||e.data.type!=='ohproxy-fullscreen-state')return;
+		fsActive=!!e.data.active;
+		presenceFullscreenActive=fsActive;
+		fsBtn.innerHTML=fsActive?minimizeSvg:expandSvg;
 	if(!fsActive){
 	isRotated=false;
 	applyRotation();
 	}else{
 	scheduleMapReflow();
-	}
-	syncRotateButton();
-	});
-	syncRotateButton();
-	})();
+		}
+		syncRotateButton();
+		updateFullscreenSearchVisibility();
+		});
+		syncRotateButton();
+		})();
 
-	if(!singlePointMode){
-	document.getElementById('search-modal').addEventListener('keydown',function(e){e.stopPropagation()});
+		if(!singlePointMode){
+		var presenceRoot=document.getElementById('presence-root');
+		var searchModal=document.getElementById('search-modal');
+		var mapControls=document.getElementById('map-controls');
+		var searchVisibilityClass='presence-fs-search-visible';
+		var searchVisibilityGap=8;
+		var searchVisibilityRaf=0;
+		var searchVisibilityResizeBound=false;
+
+		function isSpaceConstrainedViewport(){
+		return window.matchMedia('(max-width:767px)').matches;
+		}
+
+		function computeSearchModalFullscreenFit(){
+		if(!presenceRoot||!searchModal||!mapControls)return false;
+		var rootRect=presenceRoot.getBoundingClientRect();
+		if(!rootRect.width||!rootRect.height)return false;
+		var hadClass=presenceRoot.classList.contains(searchVisibilityClass);
+		var prevVisibility=searchModal.style.visibility;
+		var prevPointerEvents=searchModal.style.pointerEvents;
+		searchModal.style.visibility='hidden';
+		searchModal.style.pointerEvents='none';
+		if(!hadClass)presenceRoot.classList.add(searchVisibilityClass);
+		var modalRect=searchModal.getBoundingClientRect();
+		var controlsRect=mapControls.getBoundingClientRect();
+		searchModal.style.visibility=prevVisibility;
+		searchModal.style.pointerEvents=prevPointerEvents;
+		if(!hadClass)presenceRoot.classList.remove(searchVisibilityClass);
+		if(!modalRect.width||!modalRect.height)return false;
+		var fitsRootBounds=modalRect.left>=rootRect.left+8&&modalRect.right<=rootRect.right-8&&modalRect.top>=rootRect.top+8&&modalRect.bottom<=rootRect.bottom-8;
+		var clearOfControls=
+		controlsRect.right+searchVisibilityGap<=modalRect.left||
+		modalRect.right+searchVisibilityGap<=controlsRect.left||
+		controlsRect.bottom+searchVisibilityGap<=modalRect.top||
+		modalRect.bottom+searchVisibilityGap<=controlsRect.top;
+		return fitsRootBounds&&clearOfControls;
+		}
+
+		function updateSearchModalFullscreenVisibility(){
+		var shouldShow=presenceFullscreenActive&&isSpaceConstrainedViewport()&&computeSearchModalFullscreenFit();
+		presenceRoot.classList.toggle(searchVisibilityClass,shouldShow);
+		}
+
+		function queueSearchModalFullscreenVisibilityUpdate(){
+		if(searchVisibilityRaf)cancelAnimationFrame(searchVisibilityRaf);
+		searchVisibilityRaf=requestAnimationFrame(function(){
+		searchVisibilityRaf=0;
+		updateSearchModalFullscreenVisibility();
+		});
+		}
+
+		updateFullscreenSearchVisibility=queueSearchModalFullscreenVisibilityUpdate;
+		if(!searchVisibilityResizeBound){
+		searchVisibilityResizeBound=true;
+		window.addEventListener('resize',queueSearchModalFullscreenVisibilityUpdate);
+		window.addEventListener('orientationchange',queueSearchModalFullscreenVisibilityUpdate);
+		}
+		queueSearchModalFullscreenVisibilityUpdate();
+		searchModal.addEventListener('keydown',function(e){e.stopPropagation()});
 
 var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 var displayMonth=${displayDate.getMonth()};

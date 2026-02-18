@@ -31,7 +31,8 @@ describe('Presence Single-Point Mode', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /\$\{singlePointMode \? '' : `<div id="red-tooltip" class="tooltip"><\/div>/);
 		assert.match(server, /\$\{singlePointMode \? '' : `<div id="search-modal">/);
-		assert.match(server, /if\(!singlePointMode\)\{\s*document\.getElementById\('search-modal'\)\.addEventListener\('keydown'/);
+		assert.match(server, /if\(!singlePointMode\)\{\s*var presenceRoot=document\.getElementById\('presence-root'\);\s*var searchModal=document\.getElementById\('search-modal'\);/);
+		assert.match(server, /searchModal\.addEventListener\('keydown'/);
 		assert.match(server, /if\(!singlePointMode\)\{\s*var hoverControl=new OpenLayers\.Control\.SelectFeature/);
 	});
 
@@ -53,5 +54,18 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /map\.pan\(-dy,dx,\{animate:false\}\);/);
 		assert.match(server, /presenceFullscreenActive=fsActive;/);
 		assert.match(server, /if\(!fsActive\)\{\s*isRotated=false;\s*applyRotation\(\);\s*\}/);
+	});
+
+	it('shows search modal in constrained fullscreen only when measured layout fit allows', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /@media\(max-width:767px\)\{#search-modal\{display:none!important\}\}/);
+		assert.match(server, /@media\(max-width:767px\)\{#presence-root\.presence-fs-search-visible #search-modal\{display:block!important\}\}/);
+		assert.match(server, /@media\(pointer:coarse\)\{#presence-root\.presence-fs-search-visible #map-controls\{background:rgb\(245,246,250\);border:1px solid rgba\(150,150,150,0\.3\);box-shadow:/);
+		assert.match(server, /function computeSearchModalFullscreenFit\(\)\{/);
+		assert.match(server, /var clearOfControls=\s*controlsRect\.right\+searchVisibilityGap<=modalRect\.left\|\|\s*modalRect\.right\+searchVisibilityGap<=controlsRect\.left\|\|\s*controlsRect\.bottom\+searchVisibilityGap<=modalRect\.top\|\|\s*modalRect\.bottom\+searchVisibilityGap<=controlsRect\.top;/);
+		assert.match(server, /var shouldShow=presenceFullscreenActive&&isSpaceConstrainedViewport\(\)&&computeSearchModalFullscreenFit\(\);/);
+		assert.match(server, /updateFullscreenSearchVisibility=queueSearchModalFullscreenVisibilityUpdate;/);
+		assert.match(server, /window\.addEventListener\('resize',queueSearchModalFullscreenVisibilityUpdate\);/);
+		assert.match(server, /window\.addEventListener\('orientationchange',queueSearchModalFullscreenVisibilityUpdate\);/);
 	});
 });
