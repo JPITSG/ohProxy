@@ -1565,42 +1565,30 @@ function getStatusNotificationBody() {
 }
 
 async function showStatusNotification() {
-	if (CLIENT_CONFIG.statusNotification === false) return;
-	if (notificationPermission !== 'granted' || !isTouchDevice()) return;
-	if (document.visibilityState === 'hidden') return;
-	try {
-		const reg = await navigator.serviceWorker.ready;
-		if (document.visibilityState === 'hidden') return;
-		const siteName = CLIENT_CONFIG.siteName || state.rootPageTitle || state.pageTitle || 'openHAB';
-		await reg.showNotification(siteName, {
-			tag: STATUS_NOTIFICATION_TAG,
-			body: getStatusNotificationBody(),
-			icon: './icons/transparent-192.png',
-			silent: true,
-			renotify: false,
-			requireInteraction: true,
-		});
-		startNotificationHeartbeat();
-	} catch (_) { /* ignore */ }
+	if (!shouldShowStatusNotification()) {
+		closeStatusNotification();
+		return;
+	}
+	postStatusNotificationUpdate();
+	startNotificationHeartbeat();
 }
 
 async function closeStatusNotification() {
 	stopNotificationHeartbeat();
-	try {
-		const reg = await navigator.serviceWorker.ready;
-		const notifications = await reg.getNotifications({ tag: STATUS_NOTIFICATION_TAG });
-		notifications.forEach(n => n.close());
-	} catch (_) { /* ignore */ }
+	postStatusNotificationUpdate({ enabled: false });
 }
 
 let notificationHeartbeatTimer = null;
+const NOTIFICATION_HEARTBEAT_MS = 500;
 function startNotificationHeartbeat() {
-	stopNotificationHeartbeat();
+	if (notificationHeartbeatTimer) return;
 	notificationHeartbeatTimer = setInterval(() => {
-		if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-			navigator.serviceWorker.controller.postMessage({ type: 'notification-heartbeat' });
+		if (!shouldShowStatusNotification()) {
+			closeStatusNotification();
+			return;
 		}
-	}, 1000);
+		postStatusNotificationUpdate();
+	}, NOTIFICATION_HEARTBEAT_MS);
 }
 function stopNotificationHeartbeat() {
 	if (notificationHeartbeatTimer) { clearInterval(notificationHeartbeatTimer); notificationHeartbeatTimer = null; }
@@ -9045,7 +9033,44 @@ let isLanClient = null;  // null = unknown, true = LAN, false = WAN (set by serv
 let fastConnectionActive = false;
 let pingNeedsPrefill = true;
 let notificationPermission = 'default';
-const STATUS_NOTIFICATION_TAG = 'ohproxy-status';
+
+function shouldShowStatusNotification() {
+	return CLIENT_CONFIG.statusNotification !== false
+		&& notificationPermission === 'granted'
+		&& isTouchDevice()
+		&& state.connectionOk
+		&& document.visibilityState === 'visible';
+}
+
+function getStatusNotificationPayload() {
+	if (!shouldShowStatusNotification()) return { enabled: false };
+	const siteName = CLIENT_CONFIG.siteName || state.rootPageTitle || state.pageTitle || 'openHAB';
+	return {
+		enabled: true,
+		title: siteName,
+		body: getStatusNotificationBody(),
+	};
+}
+
+function postStatusNotificationUpdate(payload) {
+	if (!('serviceWorker' in navigator)) return;
+	const data = payload || getStatusNotificationPayload();
+	const message = (data && data.enabled === true)
+		? { type: 'statusUpdate', enabled: true, title: data.title, body: data.body }
+		: { type: 'statusUpdate', enabled: false };
+	const sentWorkers = new Set();
+	const send = (worker) => {
+		if (!worker || sentWorkers.has(worker)) return;
+		sentWorkers.add(worker);
+		try { worker.postMessage(message); } catch (_) {}
+	};
+	send(navigator.serviceWorker.controller);
+	navigator.serviceWorker.ready.then((reg) => {
+		send(reg.active);
+		send(reg.waiting);
+		send(reg.installing);
+	}).catch(() => {});
+}
 
 function invalidatePing() {
 	const wasFast = fastConnectionActive;
