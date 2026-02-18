@@ -8307,8 +8307,12 @@ app.get('/presence', async (req, res) => {
 @media(max-width:767px){#ctx-menu{display:none!important}}
 #ctx-menu{display:none;position:absolute;z-index:200;background:rgb(245,246,250);border:1px solid rgba(150,150,150,0.3);border-radius:18px;box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:12px;font-family:'Rubik',sans-serif;min-width:160px}
 .ctx-header{display:flex;align-items:center;justify-content:space-between;font-size:0.625rem;font-weight:500;letter-spacing:0.08em;color:rgba(19,21,54,0.5);margin-bottom:8px}
+.ctx-actions{display:flex;align-items:center}
+.ctx-radius-wrap{display:flex;align-items:center}
 .ctx-radius{box-sizing:content-box;padding:1px 1px 1px 0;margin-right:2px;font-size:0.625rem;font-weight:500;letter-spacing:0;color:rgba(19,21,54,0.5);font-family:'Rubik',sans-serif;background:none;border:none;border-bottom:1px solid rgba(19,21,54,0.2);outline:none;text-align:right;transition:border-color .4s ease}
 .ctx-radius:focus{border-bottom-color:rgba(78,183,128,0.45)}
+.ctx-close{margin-left:8px;padding:0;border:none;background:none;font-size:0.625rem;font-weight:500;letter-spacing:0.08em;line-height:1;color:rgba(19,21,54,0.5);font-family:'Rubik',sans-serif;cursor:pointer;transition:color .4s ease}
+.ctx-close:hover{color:rgba(19,21,54,0.8)}
 .ctx-day{display:flex;align-items:center;justify-content:space-between;padding:6px 0;cursor:pointer;font-size:.75rem;font-weight:300;font-family:'Rubik',sans-serif;color:#0f172a}
 .ctx-count{font-size:0.625rem;color:rgba(19,21,54,0.4);margin-left:12px;white-space:nowrap}
 .ctx-older,.ctx-newer{box-sizing:border-box;display:block;width:100%;height:36px;padding:0 12px;margin-top:8px;font-size:.75rem;font-weight:300;font-family:'Rubik',sans-serif;color:#0f172a;background:rgba(19,21,54,0.08);border:1px solid rgba(19,21,54,0.2);border-radius:10px;cursor:pointer;transition:background-color .4s ease,border-color .4s ease,box-shadow .4s ease;outline:none}
@@ -8907,7 +8911,28 @@ sizeRadius(inp);
 inp.addEventListener('click',function(e){e.stopPropagation()});
 }
 
-function ctxHeader(){return '<div class="ctx-header"><span class="ctx-drag-handle">NEARBY DAYS</span><span><input class="ctx-radius" type="text" value="'+ctxRadius+'" maxlength="5">m</span></div>'}
+function bindCtxClose(){
+var btn=ctxMenu.querySelector('.ctx-close');
+if(!btn)return;
+btn.addEventListener('click',function(e){
+e.preventDefault();
+e.stopPropagation();
+closeCtxMenu();
+});
+}
+
+function bindCtxHeaderControls(){
+bindRadiusInput();
+bindCtxDrag();
+bindCtxClose();
+}
+
+function renderCtxMenuBody(bodyHtml){
+ctxMenu.innerHTML=ctxHeader()+bodyHtml;
+bindCtxHeaderControls();
+}
+
+function ctxHeader(){return '<div class="ctx-header"><span class="ctx-drag-handle">NEARBY DAYS</span><span class="ctx-actions"><span class="ctx-radius-wrap"><input class="ctx-radius" type="text" value="'+ctxRadius+'" maxlength="5">m</span><button class="ctx-close" type="button" aria-label="Close nearby days">X</button></span></div>'}
 
 var ctxDragActive=false,ctxDragStartX=0,ctxDragStartY=0,ctxMenuStartX=0,ctxMenuStartY=0;
 function bindCtxDrag(){
@@ -8945,14 +8970,13 @@ document.addEventListener('mouseup',function(){ctxDragActive=false},true)
 
 function loadNearbyDays(){
 if(!ctxDragging){
-ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-loading">Loading\\u2026</div>';
-bindRadiusInput();bindCtxDrag();
+renderCtxMenuBody('<div class="ctx-loading">Loading\\u2026</div>');
 }
 ctxMenu.style.display='block';
 fetch('/api/presence/nearby-days?lat='+ctxLat+'&lon='+ctxLon+'&offset='+ctxOffset+'&radius='+ctxRadius).then(function(r){return r.json()}).then(function(data){
-if(!data.ok){ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-empty">'+(data.error||'Request failed')+'</div>';bindRadiusInput();bindCtxDrag();previewLayer.removeAllFeatures();return}
-var html=ctxHeader();
-if(!data.days.length){html+='<div class="ctx-empty">No entries nearby</div>';ctxMenu.innerHTML=html;bindRadiusInput();bindCtxDrag();previewLayer.removeAllFeatures();return}
+if(!data.ok){renderCtxMenuBody('<div class="ctx-empty">'+(data.error||'Request failed')+'</div>');previewLayer.removeAllFeatures();return}
+var html='';
+if(!data.days.length){renderCtxMenuBody('<div class="ctx-empty">No entries nearby</div>');previewLayer.removeAllFeatures();return}
 data.days.forEach(function(d){
 html+='<div class="ctx-day" data-month="'+d.month+'" data-day="'+d.day+'" data-year="'+d.year+'"><span>'+d.label+'</span><span class="ctx-count">'+d.count+'</span></div>';
 });
@@ -8963,8 +8987,7 @@ if(hasNewer)html+='<button class="ctx-newer" type="button">Newer \\u25B4</button
 if(data.hasMore)html+='<button class="ctx-older" type="button">Older \\u25BE</button>';
 if(hasNewer&&data.hasMore)html+='</div>';
 }
-ctxMenu.innerHTML=html;
-bindRadiusInput();bindCtxDrag();
+renderCtxMenuBody(html);
 previewLayer.removeAllFeatures();
 data.days.forEach(function(d){
 if(d.lat!==undefined&&d.lon!==undefined){
@@ -8986,7 +9009,7 @@ if(newerBtn)newerBtn.addEventListener('click',function(e){e.stopPropagation();ct
 var olderBtn=ctxMenu.querySelector('.ctx-older');
 if(olderBtn)olderBtn.addEventListener('click',function(e){e.stopPropagation();ctxOffset+=5;loadNearbyDays()});
 clampCtxMenu();
-}).catch(function(){ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-empty">Request failed</div>';bindRadiusInput();bindCtxDrag();previewLayer.removeAllFeatures()});
+}).catch(function(){renderCtxMenuBody('<div class="ctx-empty">Request failed</div>');previewLayer.removeAllFeatures()});
 }
 
 function loadDayFromCtx(month,day,year){
@@ -9019,10 +9042,9 @@ if(e.button!==2)return;
 if(!ctxUpdatePos(e))return;
 ctxOffset=0;
 ctxDragging=true;
-ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-loading">Release to search</div>';
+renderCtxMenuBody('<div class="ctx-loading">Release to search</div>');
 ctxMenu.style.display='block';
 ctxMenu.style.pointerEvents='none';
-bindRadiusInput();bindCtxDrag();
 },true);
 
 var ctxThrottle=0;
