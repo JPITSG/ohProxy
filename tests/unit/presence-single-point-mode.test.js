@@ -67,5 +67,10 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /updateFullscreenSearchVisibility=queueSearchModalFullscreenVisibilityUpdate;/);
 		assert.match(server, /window\.addEventListener\('resize',queueSearchModalFullscreenVisibilityUpdate\);/);
 		assert.match(server, /window\.addEventListener\('orientationchange',queueSearchModalFullscreenVisibilityUpdate\);/);
+		assert.match(server, /function handleDateInputViewportResize\(\)\{/);
+		assert.match(server, /if\(keyboardWasOpen&&currentHeight>=viewportHeightBaseline-keyboardCloseThreshold\)\{\s*active\.blur\(\);/);
+		assert.match(server, /if\(window\.visualViewport\)window\.visualViewport\.addEventListener\('resize',handleDateInputViewportResize\);/);
+		assert.match(server, /function blurSearchDateInputsFromMapTouch\(\)\{/);
+		assert.match(server, /mapEl\.addEventListener\('touchstart',blurSearchDateInputsFromMapTouch,\{passive:true,capture:true\}\);/);
 	});
 });
