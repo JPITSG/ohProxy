@@ -288,6 +288,16 @@ module.exports = {
 			slim: { active: 10000, idle: 20000 },
 		},
 
+		// === Worker Transport ===
+		transport: {
+			// Route WebSocket traffic through SharedWorker (true/false).
+			sharedWorkerEnabled: true,
+			// Route same-origin HTTP fetch requests through Service Worker RPC (true/false).
+			swHttpEnabled: true,
+			// Timeout for worker RPC responses in milliseconds (>=1).
+			workerRpcTimeoutMs: 15000,
+		},
+
 		// === Search ===
 		// Search debounce timing (ms; default/slim; >=0).
 		searchDebounceMs: {

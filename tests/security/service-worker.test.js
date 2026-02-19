@@ -193,3 +193,22 @@ describe('Service Worker: Security Headers', () => {
 		}
 	});
 });
+
+describe('Service Worker: Transport RPC Security', () => {
+	it('enforces same-origin validation for transport-http-request URLs', () => {
+		const content = readFile(SW_FILE);
+		assert.match(content, /new URL\(url,\s*self\.location\.origin\)/, 'transport HTTP RPC should parse URLs against service worker origin');
+		assert.match(content, /parsedUrl\.origin !== self\.location\.origin/, 'transport HTTP RPC should reject cross-origin URLs');
+		assert.match(content, /Cross-origin transport requests are not allowed/, 'transport HTTP RPC should emit explicit cross-origin rejection');
+	});
+
+	it('prunes stale paused transport clients to avoid long-lived set growth', () => {
+		const content = readFile(SW_FILE);
+		assert.match(content, /const transportPausedClients = new Set\(\);/, 'transport paused client set should exist');
+		assert.match(content, /async function pruneStaleTransportClients\(/, 'service worker should define paused-client prune helper');
+		assert.match(content, /self\.clients\.matchAll\(\{ type: 'window', includeUncontrolled: true \}\)/, 'paused-client prune should inspect active window clients');
+		assert.match(content, /if \(!activeClientIds\.has\(clientId\)\)/, 'paused-client prune should remove non-active client IDs');
+		assert.match(content, /if \(data\.type === 'transport-http-pause'\) \{\s*await pruneStaleTransportClients\(\);/, 'pause handler should trigger stale paused-client pruning');
+		assert.match(content, /if \(data\.type === 'transport-http-resume'\) \{\s*await pruneStaleTransportClients\(\);/, 'resume handler should trigger stale paused-client pruning');
+	});
+});

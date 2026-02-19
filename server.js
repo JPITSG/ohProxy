@@ -953,6 +953,12 @@ function validateConfig() {
 			ensureNumber(CLIENT_CONFIG.pollIntervalsMs?.slim?.idle, 'client.pollIntervalsMs.slim.idle', { min: 1 }, errors);
 		}
 
+		if (ensureObject(CLIENT_CONFIG.transport, 'client.transport', errors)) {
+			ensureBoolean(CLIENT_CONFIG.transport?.sharedWorkerEnabled, 'client.transport.sharedWorkerEnabled', errors);
+			ensureBoolean(CLIENT_CONFIG.transport?.swHttpEnabled, 'client.transport.swHttpEnabled', errors);
+			ensureNumber(CLIENT_CONFIG.transport?.workerRpcTimeoutMs, 'client.transport.workerRpcTimeoutMs', { min: 1 }, errors);
+		}
+
 		if (ensureObject(CLIENT_CONFIG.searchDebounceMs, 'client.searchDebounceMs', errors)) {
 			ensureNumber(CLIENT_CONFIG.searchDebounceMs?.default, 'client.searchDebounceMs.default', { min: 0 }, errors);
 			ensureNumber(CLIENT_CONFIG.searchDebounceMs?.slim, 'client.searchDebounceMs.slim', { min: 0 }, errors);
@@ -1329,6 +1335,17 @@ function validateAdminConfig(config) {
 			if (c.pollIntervalsMs.slim) {
 				ensureNumber(c.pollIntervalsMs.slim.active, 'client.pollIntervalsMs.slim.active', { min: 1 }, errors);
 				ensureNumber(c.pollIntervalsMs.slim.idle, 'client.pollIntervalsMs.slim.idle', { min: 1 }, errors);
+			}
+		}
+		if (isPlainObject(c.transport)) {
+			if (c.transport.sharedWorkerEnabled !== undefined) {
+				ensureBoolean(c.transport.sharedWorkerEnabled, 'client.transport.sharedWorkerEnabled', errors);
+			}
+			if (c.transport.swHttpEnabled !== undefined) {
+				ensureBoolean(c.transport.swHttpEnabled, 'client.transport.swHttpEnabled', errors);
+			}
+			if (c.transport.workerRpcTimeoutMs !== undefined) {
+				ensureNumber(c.transport.workerRpcTimeoutMs, 'client.transport.workerRpcTimeoutMs', { min: 1 }, errors);
 			}
 		}
 		if (isPlainObject(c.searchDebounceMs)) {
@@ -2217,6 +2234,8 @@ const CHART_CSS_PATH = path.join(PUBLIC_DIR, 'chart.css');
 const LOGIN_JS_PATH = path.join(PUBLIC_DIR, 'login.js');
 const LANG_JS_PATH = path.join(PUBLIC_DIR, 'lang.js');
 const OH_UTILS_JS_PATH = path.join(PUBLIC_DIR, 'oh-utils.js');
+const TRANSPORT_CLIENT_JS_PATH = path.join(PUBLIC_DIR, 'transport-client.js');
+const TRANSPORT_SHAREDWORKER_JS_PATH = path.join(PUBLIC_DIR, 'transport.sharedworker.js');
 const WIDGET_NORMALIZER_PATH = path.join(__dirname, 'lib', 'widget-normalizer.js');
 const MATERIAL_ICONS_DIR = path.join(__dirname, 'node_modules', '@material-design-icons', 'svg');
 const MATERIAL_ICONS_FILLED_DIR = path.join(MATERIAL_ICONS_DIR, 'filled');
@@ -7549,6 +7568,14 @@ app.get(/^\/lang\.v[\w.-]+\.js$/i, (req, res) => {
 
 app.get(/^\/oh-utils\.v[\w.-]+\.js$/i, (req, res) => {
 	sendVersionedAsset(res, OH_UTILS_JS_PATH, 'application/javascript; charset=utf-8');
+});
+
+app.get(/^\/transport-client\.v[\w.-]+\.js$/i, (req, res) => {
+	sendVersionedAsset(res, TRANSPORT_CLIENT_JS_PATH, 'application/javascript; charset=utf-8');
+});
+
+app.get(/^\/transport\.sharedworker\.v[\w.-]+\.js$/i, (req, res) => {
+	sendVersionedAsset(res, TRANSPORT_SHAREDWORKER_JS_PATH, 'application/javascript; charset=utf-8');
 });
 
 app.get(/^\/widget-normalizer\.v[\w.-]+\.js$/i, (req, res) => {
