@@ -7,6 +7,8 @@ const PRECACHE_URLS = [
 	'./index.html',
 	// Note: config.js excluded - contains user-specific data, must not be cached
 	'./lang.__JS_VERSION__.js',
+	'./transport-client.__JS_VERSION__.js',
+	'./transport.sharedworker.__JS_VERSION__.js',
 	'./widget-normalizer.__JS_VERSION__.js',
 	'./app.__JS_VERSION__.js',
 	'./tailwind.__CSS_VERSION__.css',
@@ -131,6 +133,11 @@ let statusTimeoutTimer = null;
 let statusSweepTimer = null;
 let statusDesired = { enabled: false, title: '', body: '' };
 let statusRenderedFingerprint = '';
+const transportHttpInflight = new Map(); // requestId -> { controller, clientId }
+const transportPausedClients = new Set();
+const TRANSPORT_CLIENT_PRUNE_MIN_INTERVAL_MS = 10000;
+let lastTransportClientPruneAt = 0;
+let transportClientPruneInFlight = null;
 
 function statusFingerprint(payload) {
 	if (!payload || payload.enabled !== true) return '';
@@ -213,10 +220,227 @@ async function handleStatusWake(source) {
 	await closeStatusForStaleHeartbeat(source);
 }
 
+function transportClientIdFromEvent(event) {
+	const source = event?.source;
+	const id = source && typeof source.id === 'string' ? source.id : '';
+	return id;
+}
+
+function shouldPruneTransportClients(now) {
+	return (now - lastTransportClientPruneAt) >= TRANSPORT_CLIENT_PRUNE_MIN_INTERVAL_MS;
+}
+
+async function pruneStaleTransportClients(options) {
+	if (transportPausedClients.size === 0) return;
+	const force = options?.force === true;
+	const now = Date.now();
+	if (!force && !shouldPruneTransportClients(now)) return;
+	if (transportClientPruneInFlight) return transportClientPruneInFlight;
+	lastTransportClientPruneAt = now;
+	transportClientPruneInFlight = (async () => {
+		try {
+			const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+			const activeClientIds = new Set(clients.map((client) => String(client?.id || '')));
+			for (const clientId of transportPausedClients) {
+				if (!activeClientIds.has(clientId)) {
+					transportPausedClients.delete(clientId);
+				}
+			}
+		} catch (_) {
+			// Non-fatal: transport pause tracking is best-effort.
+		} finally {
+			transportClientPruneInFlight = null;
+		}
+	})();
+	return transportClientPruneInFlight;
+}
+
+function transportArrayBufferToBase64(buffer) {
+	const bytes = new Uint8Array(buffer);
+	let binary = '';
+	const chunkSize = 0x8000;
+	for (let i = 0; i < bytes.length; i += chunkSize) {
+		const chunk = bytes.subarray(i, i + chunkSize);
+		binary += String.fromCharCode.apply(null, chunk);
+	}
+	return btoa(binary);
+}
+
+function transportBase64ToArrayBuffer(base64) {
+	if (!base64) return new ArrayBuffer(0);
+	const binary = atob(base64);
+	const out = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i++) {
+		out[i] = binary.charCodeAt(i);
+	}
+	return out.buffer;
+}
+
+function transportHeadersToObject(headers) {
+	const out = {};
+	if (!headers || typeof headers.entries !== 'function') return out;
+	for (const [key, value] of headers.entries()) {
+		out[key] = value;
+	}
+	return out;
+}
+
+async function handleTransportHttpRequest(event, data) {
+	const source = event?.source;
+	const requestId = String(data?.requestId || '').trim();
+	const clientId = transportClientIdFromEvent(event);
+	if (!source || !requestId) return;
+	if (clientId && transportPausedClients.has(clientId)) {
+		source.postMessage({
+			type: 'transport-http-error',
+			requestId,
+			name: 'AbortError',
+			error: 'Transport paused',
+		});
+		return;
+	}
+
+	const method = String(data?.method || 'GET').toUpperCase();
+	const url = String(data?.url || '').trim();
+	const headers = (data?.headers && typeof data.headers === 'object') ? data.headers : {};
+
+	if (!url) {
+		source.postMessage({
+			type: 'transport-http-error',
+			requestId,
+			name: 'TypeError',
+			error: 'Missing URL',
+		});
+		return;
+	}
+
+	let requestUrl = '';
+	try {
+		// Defense-in-depth: enforce same-origin at the SW boundary.
+		const parsedUrl = new URL(url, self.location.origin);
+		if (parsedUrl.origin !== self.location.origin) {
+			source.postMessage({
+				type: 'transport-http-error',
+				requestId,
+				name: 'SecurityError',
+				error: 'Cross-origin transport requests are not allowed',
+			});
+			return;
+		}
+		requestUrl = parsedUrl.toString();
+	} catch {
+		source.postMessage({
+			type: 'transport-http-error',
+			requestId,
+			name: 'TypeError',
+			error: 'Invalid URL',
+		});
+		return;
+	}
+
+	const init = {
+		method,
+		headers,
+		cache: data?.cache || 'default',
+		credentials: data?.credentials || 'same-origin',
+		mode: data?.mode || 'same-origin',
+		redirect: data?.redirect || 'follow',
+		keepalive: data?.keepalive === true,
+	};
+	const controller = new AbortController();
+	init.signal = controller.signal;
+	const referrer = String(data?.referrer || '').trim();
+	if (referrer && referrer !== 'about:client') {
+		init.referrer = referrer;
+	}
+	const referrerPolicy = String(data?.referrerPolicy || '').trim();
+	if (referrerPolicy) {
+		init.referrerPolicy = referrerPolicy;
+	}
+	const integrity = String(data?.integrity || '').trim();
+	if (integrity) {
+		init.integrity = integrity;
+	}
+
+	if (method !== 'GET' && method !== 'HEAD' && typeof data?.bodyBase64 === 'string' && data.bodyBase64) {
+		init.body = transportBase64ToArrayBuffer(data.bodyBase64);
+	}
+	transportHttpInflight.set(requestId, { controller, clientId });
+
+	try {
+		const response = await fetch(requestUrl, init);
+		const responseClone = response.clone();
+		// Transport HTTP RPC currently ships responses as a single message payload.
+		// This buffers the full body; streaming responses are not yet supported here.
+		const bodyBuffer = await responseClone.arrayBuffer();
+		source.postMessage({
+			type: 'transport-http-response',
+			requestId,
+			status: response.status,
+			statusText: response.statusText || '',
+			headers: transportHeadersToObject(response.headers),
+			bodyBase64: transportArrayBufferToBase64(bodyBuffer),
+		});
+	} catch (err) {
+		source.postMessage({
+			type: 'transport-http-error',
+			requestId,
+			name: String(err?.name || 'Error'),
+			error: String(err?.message || 'Transport HTTP request failed'),
+		});
+	} finally {
+		transportHttpInflight.delete(requestId);
+	}
+}
+
+function abortTransportRequest(requestId) {
+	const pending = transportHttpInflight.get(requestId);
+	if (!pending) return;
+	transportHttpInflight.delete(requestId);
+	try {
+		pending.controller.abort();
+	} catch {}
+}
+
+function abortTransportRequestsForClient(clientId) {
+	if (!clientId) return;
+	for (const [requestId, pending] of transportHttpInflight.entries()) {
+		if (pending.clientId !== clientId) continue;
+		transportHttpInflight.delete(requestId);
+		try {
+			pending.controller.abort();
+		} catch {}
+	}
+}
+
 self.addEventListener('message', (event) => {
 	event.waitUntil((async () => {
 		await handleStatusWake('message');
 		const data = event?.data || {};
+		if (data.type === 'transport-http-cancel') {
+			abortTransportRequest(String(data.requestId || '').trim());
+			return;
+		}
+		if (data.type === 'transport-http-pause') {
+			await pruneStaleTransportClients();
+			const clientId = transportClientIdFromEvent(event);
+			if (clientId) {
+				transportPausedClients.add(clientId);
+				abortTransportRequestsForClient(clientId);
+			}
+			return;
+		}
+		if (data.type === 'transport-http-resume') {
+			await pruneStaleTransportClients();
+			const clientId = transportClientIdFromEvent(event);
+			if (clientId) transportPausedClients.delete(clientId);
+			return;
+		}
+		if (data.type === 'transport-http-request') {
+			void pruneStaleTransportClients();
+			await handleTransportHttpRequest(event, data);
+			return;
+		}
 		// Backward compatibility for older page scripts still sending heartbeat.
 		if (data.type === 'notification-heartbeat') {
 			statusHeartbeatAt = Date.now();

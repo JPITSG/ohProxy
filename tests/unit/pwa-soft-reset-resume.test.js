@@ -27,7 +27,10 @@ describe('PWA Soft Reset Resume', () => {
 
 	it('suppresses websocket on-open refresh during resume lock', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
-		assert.match(app, /setConnectionStatus\(true\);\s*if \(!isResumeUiLocked\(\)\) \{\s*refresh\(false\);/);
+		assert.match(app, /const skipOpenRefresh = wsSkipNextOpenRefresh === true;/);
+		assert.match(app, /setConnectionStatus\(true\);\s*if \(!isResumeUiLocked\(\) && !skipOpenRefresh\) \{\s*refresh\(false\);/);
+		assert.match(app, /if \(!wsConnected && CLIENT_CONFIG\.websocketDisabled !== true\) \{\s*wsSkipNextOpenRefresh = true;/);
+		assert.match(app, /resumeVideoStreamsFromVisibility\(\);\s*noteActivity\(\);\s*startPolling\(\);\s*if \(!wsConnected && CLIENT_CONFIG\.websocketDisabled !== true\)/);
 	});
 
 	it('completes soft reset through a settle window and hard timeout', () => {

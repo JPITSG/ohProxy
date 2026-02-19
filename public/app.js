@@ -4071,6 +4071,14 @@ const ADMIN_CONFIG_SCHEMA = [
 		],
 	},
 	{
+		id: 'client-transport', group: 'client', reloadRequired: true,
+		fields: [
+			{ key: 'client.transport.sharedWorkerEnabled', type: 'toggle' },
+			{ key: 'client.transport.swHttpEnabled', type: 'toggle' },
+			{ key: 'client.transport.workerRpcTimeoutMs', type: 'number', min: 1 },
+		],
+	},
+	{
 		id: 'client-format', group: 'client', reloadRequired: true,
 		fields: [
 			{ key: 'client.dateFormat', type: 'text' },
@@ -9288,6 +9296,7 @@ const WS_MAX_FAILURES = 5; // Stop trying WebSocket after this many consecutive 
 let wsConnectTimer = null;
 let wsConnectToken = 0;
 let wsTimedOutToken = 0;
+let wsSkipNextOpenRefresh = false;
 let wsDeltaRequestId = 0;
 const wsDeltaPending = new Map(); // requestId -> { resolve, reject, timer }
 
@@ -9453,6 +9462,7 @@ function connectWs() {
 	if (wsConnection) return;
 	if (CLIENT_CONFIG.websocketDisabled === true) return;
 	if (wsFailCount >= WS_MAX_FAILURES) return;
+	if (document.visibilityState !== 'visible') return;
 
 	try {
 		wsConnection = new WebSocket(getWsUrl());
@@ -9478,6 +9488,8 @@ function connectWs() {
 			clearWsConnectTimer();
 			wsConnected = true;
 			wsFailCount = 0;
+			const skipOpenRefresh = wsSkipNextOpenRefresh === true;
+			wsSkipNextOpenRefresh = false;
 			if (wsReconnectTimer) {
 				clearTimeout(wsReconnectTimer);
 				wsReconnectTimer = null;
@@ -9487,7 +9499,7 @@ function connectWs() {
 			}
 			// Update connection status and refresh data
 			setConnectionStatus(true);
-			if (!isResumeUiLocked()) {
+			if (!isResumeUiLocked() && !skipOpenRefresh) {
 				refresh(false);
 			}
 			// Initialize focus tracking and send initial state
@@ -9567,12 +9579,13 @@ function connectWs() {
 			const wasConnected = wsConnected;
 			const token = event?.target?.__ohProxyToken;
 			const timedOut = token && token === wsTimedOutToken;
+			const hidden = document.visibilityState !== 'visible';
 			if (timedOut) wsTimedOutToken = 0;
 			wsConnected = false;
 			wsConnection = null;
 			isLanClient = null;  // Reset LAN status; will be set on reconnect
 			// Don't count as failure if clean close or timeout
-			if (!timedOut && (!wasConnected || event.code === 1002 || event.code === 1006)) {
+			if (!hidden && !timedOut && (!wasConnected || event.code === 1002 || event.code === 1006)) {
 				wsFailCount++;
 				invalidatePing();
 				if (wsFailCount >= WS_MAX_FAILURES) {
@@ -9580,7 +9593,7 @@ function connectWs() {
 					return;
 				}
 			}
-			if (!timedOut) {
+			if (!hidden && !timedOut) {
 				scheduleWsReconnect();
 			}
 		};
@@ -9611,6 +9624,7 @@ function closeWs() {
 }
 
 function scheduleWsReconnect() {
+	if (document.visibilityState !== 'visible') return;
 	if (wsReconnectTimer) return;
 	wsReconnectTimer = setTimeout(() => {
 		wsReconnectTimer = null;
@@ -9855,6 +9869,8 @@ function restoreNormalPolling() {
 		lastHiddenTime = Date.now();
 		// Also update lastActivity as backup timestamp
 		state.lastActivity = lastHiddenTime;
+		wsSkipNextOpenRefresh = false;
+		stopPolling();
 		stopPing();
 		closeStatusNotification();
 		hideStatusTooltip();
@@ -9873,6 +9889,10 @@ function restoreNormalPolling() {
 			// Brief hide - resume where we left off
 			resumeVideoStreamsFromVisibility();
 			noteActivity();
+			startPolling();
+			if (!wsConnected && CLIENT_CONFIG.websocketDisabled !== true) {
+				wsSkipNextOpenRefresh = true;
+			}
 			refresh(false);
 			if (!wsConnection) connectWs();
 			startPingDelayed();
