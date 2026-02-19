@@ -145,136 +145,185 @@ function promptAssetReload() {
 }
 
 const SOFT_RESET_TIMEOUT_MS = 1000; // Short timeout per attempt
+const RESUME_SETTLE_WINDOW_MS = 1200;
+const RESUME_HARD_TIMEOUT_MS = 8000;
+const RESUME_TRIGGER_DEBOUNCE_MS = 2000;
 let _spinnerLock = false;
 
 let _softResetRunning = false;
+let _lastSoftResetAt = 0;
+
+function isResumeUiLocked() {
+	return state.resumeInProgress === true;
+}
+
+function beginResumeTransition() {
+	const fallback = state.initialStatusText || connectionStatusInfo().label || 'Connected';
+	const current = safeText(els.statusText ? els.statusText.textContent : '');
+	state.resumeHeldStatusText = current || fallback;
+	state.resumeHeldStatusOk = !!state.connectionOk;
+	state.resumeInProgress = true;
+	state.resumePhase = 'loading';
+	state.resumeStartedAt = Date.now();
+	state.resumeSettleReadyAt = 0;
+	_spinnerLock = true;
+	showResumeSpinner(true);
+	closeStatusNotification();
+	updateStatusBar();
+}
+
+function markResumeSettling() {
+	if (!state.resumeInProgress) return;
+	state.resumePhase = 'settling';
+	state.resumeSettleReadyAt = Date.now() + RESUME_SETTLE_WINDOW_MS;
+}
+
+async function waitForResumeSettleWindow() {
+	if (!state.resumeInProgress) return;
+	const waitMs = Math.max(0, state.resumeSettleReadyAt - Date.now());
+	if (waitMs > 0) await delay(waitMs);
+}
+
+function endResumeTransition() {
+	state.resumeInProgress = false;
+	state.resumePhase = 'idle';
+	state.resumeStartedAt = 0;
+	state.resumeSettleReadyAt = 0;
+	state.resumeHeldStatusText = '';
+	state.resumeHeldStatusOk = !!state.connectionOk;
+	_spinnerLock = false;
+	updateStatusBar();
+}
+
+async function completeSoftResetSuccess() {
+	startPolling();
+	resumePingPending = true;
+	markResumeSettling();
+	connectWs();
+	fetchFullSitemap().catch(() => {});
+	await waitForResumeSettleWindow();
+	if (!state.connectionOk) {
+		throw new Error(state.lastError || 'Connection issue');
+	}
+}
+
 async function softReset() {
 	if (_softResetRunning) return;
+	if (Date.now() - _lastSoftResetAt < RESUME_TRIGGER_DEBOUNCE_MS) return;
+	_lastSoftResetAt = Date.now();
 	_softResetRunning = true;
+	beginResumeTransition();
 	closeImageViewer();
 	exitVideoFullscreen();
 	exitIframeFullscreen();
 	closeCardConfigModal();
 	closeAdminConfigModal();
 	hideStatusTooltip();
-	_spinnerLock = true;
-	showResumeSpinner(true);
 	reportGps();
 
-	// Show cached home snapshot behind the blur (if available)
-	const snapshot = loadHomeSnapshot();
-	const snapshotApplied = snapshot && applyHomeSnapshot(snapshot);
-	if (snapshotApplied) {
-		render();
-		window.scrollTo(0, 0);
-	}
-
-	// Clear transient state for fresh start
-	state.filter = '';
-	if (els.search) els.search.value = '';
-	state.searchWidgets = null;
-	state.searchIndexReady = false;
-	state.searchFrames = [];
-	state.sitemapCache.clear();
-	state.sitemapCacheReady = false;
-
-	// Stop existing connections/timers
-	stopPolling();
-	stopPing();
-	closeWs();
-	setConnectionStatus(false);
-
-	// Fast path: if snapshot provided valid rootPageUrl, skip sitemap fetch
-	if (snapshotApplied && state.rootPageUrl) {
-		state.pageUrl = state.rootPageUrl;
-		try {
-			setConnectionStatus(true);
-			await refresh(true);
-			_spinnerLock = false;
-			showResumeSpinner(false);
-
-			// Restart background services
-			startPolling();
-			resumePingPending = true;
-			connectWs();
-			fetchFullSitemap().catch(() => {});
-			_softResetRunning = false;
-			return; // Done!
-		} catch (e) {
-			// Fast path failed, fall through to sitemap fetch
+	try {
+		// Show cached home snapshot behind the blur (if available)
+		const snapshot = loadHomeSnapshot();
+		const snapshotApplied = snapshot && applyHomeSnapshot(snapshot);
+		if (snapshotApplied) {
+			render();
+			window.scrollTo(0, 0);
 		}
-	}
 
-	// Fallback: fetch sitemap with aggressive retry loop (backoff after 60s)
-	const softResetStart = Date.now();
-	while (true) {
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), SOFT_RESET_TIMEOUT_MS);
+		// Clear transient state for fresh start
+		state.filter = '';
+		if (els.search) els.search.value = '';
+		state.searchWidgets = null;
+		state.searchIndexReady = false;
+		state.searchFrames = [];
+		state.sitemapCache.clear();
+		state.sitemapCacheReady = false;
 
-		try {
-			// Fetch sitemap list
-			const res = await fetch('rest/sitemaps?type=json', {
-				signal: controller.signal,
-				headers: { 'Accept': 'application/json' },
-			});
+		// Stop existing connections/timers
+		stopPolling();
+		stopPing();
+		closeWs();
 
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const data = await res.json();
+		const hardDeadline = Date.now() + RESUME_HARD_TIMEOUT_MS;
 
-			// Parse sitemap (same logic as loadDefaultSitemap)
-			let sitemaps = [];
-			if (Array.isArray(data)) sitemaps = data;
-			else if (Array.isArray(data?.sitemaps)) sitemaps = data.sitemaps;
-			else if (Array.isArray(data?.sitemaps?.sitemap)) sitemaps = data.sitemaps.sitemap;
-			else if (Array.isArray(data?.sitemap)) sitemaps = data.sitemap;
-			else if (data?.sitemap && typeof data.sitemap === 'object') sitemaps = [data.sitemap];
-			else if (data?.sitemaps && typeof data.sitemaps === 'object') sitemaps = [data.sitemaps];
+		// Fast path: if snapshot provided valid rootPageUrl, skip sitemap fetch
+		if (snapshotApplied && state.rootPageUrl) {
+			state.pageUrl = state.rootPageUrl;
+			setConnectionStatus(true);
+			const refreshed = await refresh(true);
+			if (refreshed && state.connectionOk) {
+				await completeSoftResetSuccess();
+				return; // Done!
+			}
+		}
 
-			const first = Array.isArray(sitemaps) ? sitemaps[0] : null;
-			const name = first?.name || first?.id || first?.homepage?.link?.split('/').pop();
-			if (!name) throw new Error('No sitemap name');
+		// Fallback: fetch sitemap with short retries until hard timeout
+		while (Date.now() < hardDeadline) {
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), SOFT_RESET_TIMEOUT_MS);
+			try {
+				// Fetch sitemap list
+				const res = await fetch('rest/sitemaps?type=json', {
+					signal: controller.signal,
+					headers: { 'Accept': 'application/json' },
+				});
 
-			state.sitemapName = name;
-			const nameEnc = encodeURIComponent(name);
-			let pageLink = first?.homepage?.link;
-			if (!pageLink && typeof first?.link === 'string') {
-				const rel = toRelativeRestLink(first.link);
-				if (rel.includes('/rest/sitemaps/')) {
-					pageLink = rel.endsWith(`/${nameEnc}`) ? rel : `${rel.replace(/\/$/, '')}/${nameEnc}`;
-				} else {
-					pageLink = rel;
+				if (!res.ok) throw new Error(`HTTP ${res.status}`);
+				const data = await res.json();
+
+				// Parse sitemap (same logic as loadDefaultSitemap)
+				let sitemaps = [];
+				if (Array.isArray(data)) sitemaps = data;
+				else if (Array.isArray(data?.sitemaps)) sitemaps = data.sitemaps;
+				else if (Array.isArray(data?.sitemaps?.sitemap)) sitemaps = data.sitemaps.sitemap;
+				else if (Array.isArray(data?.sitemap)) sitemaps = data.sitemap;
+				else if (data?.sitemap && typeof data.sitemap === 'object') sitemaps = [data.sitemap];
+				else if (data?.sitemaps && typeof data.sitemaps === 'object') sitemaps = [data.sitemaps];
+
+				const first = Array.isArray(sitemaps) ? sitemaps[0] : null;
+				const name = first?.name || first?.id || first?.homepage?.link?.split('/').pop();
+				if (!name) throw new Error('No sitemap name');
+
+				state.sitemapName = name;
+				const nameEnc = encodeURIComponent(name);
+				let pageLink = first?.homepage?.link;
+				if (!pageLink && typeof first?.link === 'string') {
+					const rel = toRelativeRestLink(first.link);
+					if (rel.includes('/rest/sitemaps/')) {
+						pageLink = rel.endsWith(`/${nameEnc}`) ? rel : `${rel.replace(/\/$/, '')}/${nameEnc}`;
+					} else {
+						pageLink = rel;
+					}
 				}
+				if (!pageLink) pageLink = `rest/sitemaps/${nameEnc}/${nameEnc}`;
+
+				state.pageUrl = ensureJsonParam(toRelativeRestLink(pageLink));
+				state.pageTitle = first?.label || first?.title || name;
+				state.rootPageUrl = state.pageUrl;
+				state.rootPageTitle = state.pageTitle;
+
+				// Success - now refresh to get widgets
+				setConnectionStatus(true);
+				const refreshed = await refresh(true);
+				if (refreshed && state.connectionOk) {
+					await completeSoftResetSuccess();
+					return; // Done!
+				}
+			} catch (e) {
+				if (Date.now() >= hardDeadline) break;
+				await delay(250 + Math.random() * 250);
+			} finally {
+				clearTimeout(timeoutId);
 			}
-			if (!pageLink) pageLink = `rest/sitemaps/${nameEnc}/${nameEnc}`;
-
-			state.pageUrl = ensureJsonParam(toRelativeRestLink(pageLink));
-			state.pageTitle = first?.label || first?.title || name;
-			state.rootPageUrl = state.pageUrl;
-			state.rootPageTitle = state.pageTitle;
-
-			// Success - now refresh to get widgets
-			setConnectionStatus(true);
-			await refresh(true);
-			_spinnerLock = false;
-			showResumeSpinner(false);
-
-			// Restart background services
-			startPolling();
-			resumePingPending = true;
-			connectWs();
-			fetchFullSitemap().catch(() => {});
-			_softResetRunning = false;
-			return; // Done!
-
-		} catch (e) {
-			const elapsed = Date.now() - softResetStart;
-			if (elapsed > 60000) {
-				const jitter = Math.random() * 2000;
-				await new Promise(r => setTimeout(r, 5000 + jitter));
-			}
-		} finally {
-			clearTimeout(timeoutId);
 		}
+
+		throw new Error('Resume timeout');
+	} catch (e) {
+		logJsError('softReset failed', e);
+		setConnectionStatus(false, e?.message || 'Resume timeout');
+	} finally {
+		endResumeTransition();
+		_softResetRunning = false;
 	}
 }
 
@@ -336,6 +385,12 @@ const state = {
 	isRefreshing: false,
 	pendingScrollTop: false,
 	initialStatusText: '',
+	resumeInProgress: false,
+	resumePhase: 'idle',
+	resumeStartedAt: 0,
+	resumeSettleReadyAt: 0,
+	resumeHeldStatusText: '',
+	resumeHeldStatusOk: true,
 	sitemapCache: new Map(),		// Full sitemap cache: pageUrl -> page data
 	sitemapCacheReady: false,		// Whether the full sitemap has been loaded
 };
@@ -1460,6 +1515,18 @@ function setStatusBarState(bar, ...activeClasses) {
 
 function updateStatusBar() {
 	if (!els.statusBar || !els.statusText) return;
+	if (isResumeUiLocked()) {
+		const label = state.resumeHeldStatusText || state.initialStatusText || connectionStatusInfo().label || 'Connected';
+		els.statusText.textContent = label;
+		if (state.resumeHeldStatusOk) {
+			setStatusBarState(els.statusBar, 'status-ok');
+		} else {
+			setStatusBarState(els.statusBar, 'status-error');
+		}
+		updateErrorUiState();
+		closeStatusNotification();
+		return;
+	}
 	if (!state.connectionReady) {
 		const label = state.initialStatusText || connectionStatusInfo().label || 'Connected';
 		els.statusText.textContent = label;
@@ -1595,6 +1662,12 @@ function stopNotificationHeartbeat() {
 }
 
 function updateErrorUiState() {
+	if (isResumeUiLocked()) {
+		document.documentElement.classList.remove('error-state');
+		if (els.search) els.search.disabled = false;
+		updateNavButtons();
+		return;
+	}
 	const isError = !state.connectionOk;
 	document.documentElement.classList.toggle('error-state', isError);
 	if (els.search) els.search.disabled = isError;
@@ -8597,7 +8670,7 @@ async function refresh(showLoading) {
 	if (showLoading) scheduleLoadingStatus();
 	if (state.suppressRefreshCount > 0 && !showLoading) {
 		state.pendingRefresh = true;
-		return;
+		return false;
 	}
 
 	state.isRefreshing = true;
@@ -8618,7 +8691,7 @@ async function refresh(showLoading) {
 			await applyPageData(cachedPage, fade, shouldScroll);
 			// Background refresh to get fresh transformed labels
 			setTimeout(() => refresh(false), 100);
-			return;
+			return true;
 		}
 	}
 
@@ -8630,7 +8703,7 @@ async function refresh(showLoading) {
 			state.isRefreshing = false;
 			clearLoadingStatusTimer();
 			setConnectionStatus(true);
-			return;
+			return true;
 		}
 		if (result.delta) {
 			if (result.title) state.pageTitle = result.title;
@@ -8647,13 +8720,14 @@ async function refresh(showLoading) {
 				resumePingPending = false;
 				startPingDelayed(RESUME_PING_DELAY_MS);
 			}
-			return;
+			return true;
 		}
 		const page = result.page;
 		updatePageInCache(state.pageUrl, page);
 		clearLoadingStatusTimer();
 		await applyPageData(page, fade, shouldScroll);
 		setConnectionStatus(true);
+		return true;
 	} catch (e) {
 		console.error(e);
 		logJsError('refresh failed', e);
@@ -8665,7 +8739,7 @@ async function refresh(showLoading) {
 			if (cachedPage) {
 				await applyPageData(cachedPage, fade, shouldScroll);
 				setConnectionStatus(false, e.message);
-				return;
+				return false;
 			}
 		}
 
@@ -8697,6 +8771,7 @@ async function refresh(showLoading) {
 			render();
 		}
 		if (fade) runPageFadeIn(fade.token);
+		return false;
 	}
 }
 
@@ -9039,6 +9114,7 @@ function shouldShowStatusNotification() {
 		&& notificationPermission === 'granted'
 		&& isTouchDevice()
 		&& state.connectionOk
+		&& !isResumeUiLocked()
 		&& document.visibilityState === 'visible';
 }
 
@@ -9411,7 +9487,9 @@ function connectWs() {
 			}
 			// Update connection status and refresh data
 			setConnectionStatus(true);
-			refresh(false);
+			if (!isResumeUiLocked()) {
+				refresh(false);
+			}
 			// Initialize focus tracking and send initial state
 			initFocusTracking();
 			lastFocusState = null;  // Reset to ensure initial state is sent
