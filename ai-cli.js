@@ -10,9 +10,6 @@ const { generateStructureMap } = require('./lib/structure-map');
 
 const CACHE_DIR = path.join(__dirname, 'cache');
 const AI_CACHE_DIR = path.join(CACHE_DIR, 'ai');
-const STRUCTURE_MAP_ALL = path.join(AI_CACHE_DIR, 'structuremap-all.json');
-const STRUCTURE_MAP_READABLE = path.join(AI_CACHE_DIR, 'structuremap-readable.json');
-const STRUCTURE_MAP_WRITABLE = path.join(AI_CACHE_DIR, 'structuremap-writable.json');
 
 const config = require('./config');
 const serverConfig = config.server || {};
@@ -32,15 +29,54 @@ Commands:
   testvoice "<command>"        Test a voice command against the structure map
 
 Options:
-  --sitemap <name>             Sitemap name (default: auto-detect first available)
+  --sitemap <name>             Sitemap name (required)
   --dry-run                    Show what would be sent without calling API
 
 Examples:
-  node ai-cli.js genstructuremap
   node ai-cli.js genstructuremap --sitemap home
-  node ai-cli.js testvoice "turn on the kitchen lights"
-  node ai-cli.js testvoice "set bedroom temperature to 22"
+  node ai-cli.js testvoice "turn on the kitchen lights" --sitemap home
+  node ai-cli.js testvoice "set bedroom temperature to 22" --sitemap home
 `);
+}
+
+function getSitemapArg(defaultValue = '') {
+	let sitemapName = defaultValue;
+	const sitemapIdx = args.indexOf('--sitemap');
+	if (sitemapIdx !== -1 && args[sitemapIdx + 1]) {
+		sitemapName = args[sitemapIdx + 1];
+	}
+	return String(sitemapName || '').trim();
+}
+
+function getRequiredSitemapArg(usageLine, defaultValue = '') {
+	const sitemapName = getSitemapArg(defaultValue);
+	if (sitemapName) return sitemapName;
+	console.error('Error: Missing required --sitemap <name>');
+	console.error(`Usage: ${usageLine}`);
+	process.exit(1);
+}
+
+function structureMapScopedPath(sitemapName, type = 'writable') {
+	const normalizedName = String(sitemapName || '').trim();
+	const normalizedType = String(type || '').trim().toLowerCase();
+	if (!normalizedName || !normalizedType) return '';
+	const token = encodeURIComponent(normalizedName);
+	return path.join(AI_CACHE_DIR, `structuremap-${token}-${normalizedType}.json`);
+}
+
+function getTestVoiceCommand() {
+	const parts = [];
+	for (let i = 1; i < args.length; i++) {
+		const token = args[i];
+		if (token === '--sitemap') {
+			i += 1;
+			continue;
+		}
+		if (token === '--dry-run') continue;
+		if (typeof token === 'string' && token.startsWith('--')) continue;
+		parts.push(token);
+	}
+	return parts.join(' ').trim();
 }
 
 function fetchOpenhab(pathname) {
@@ -107,13 +143,7 @@ async function getSitemapFull(sitemapName) {
 }
 
 async function genStructureMap(options = {}) {
-	let sitemapName = options.sitemap;
-
-	// Find --sitemap argument
-	const sitemapIdx = args.indexOf('--sitemap');
-	if (sitemapIdx !== -1 && args[sitemapIdx + 1]) {
-		sitemapName = args[sitemapIdx + 1];
-	}
+	const sitemapName = getRequiredSitemapArg('node ai-cli.js genstructuremap --sitemap <name>', options.sitemap);
 
 	console.log('Fetching sitemap from openHAB...');
 
@@ -160,9 +190,12 @@ async function genStructureMap(options = {}) {
 				fs.mkdirSync(AI_CACHE_DIR, { recursive: true });
 			}
 			const generatedAt = new Date().toISOString();
+			const scopedAllPath = structureMapScopedPath(result.sitemapName, 'all');
+			const scopedWritablePath = structureMapScopedPath(result.sitemapName, 'writable');
+			const scopedReadablePath = structureMapScopedPath(result.sitemapName, 'readable');
 
-			// Save all items
-			fs.writeFileSync(STRUCTURE_MAP_ALL, JSON.stringify({
+			// Save all items (scoped)
+			fs.writeFileSync(scopedAllPath, JSON.stringify({
 				generatedAt,
 				sitemap: result.sitemapName,
 				type: 'all',
@@ -170,8 +203,8 @@ async function genStructureMap(options = {}) {
 				request: result.all.request,
 			}, null, 2));
 
-			// Save writable items
-			fs.writeFileSync(STRUCTURE_MAP_WRITABLE, JSON.stringify({
+			// Save writable items (scoped)
+			fs.writeFileSync(scopedWritablePath, JSON.stringify({
 				generatedAt,
 				sitemap: result.sitemapName,
 				type: 'writable',
@@ -179,8 +212,8 @@ async function genStructureMap(options = {}) {
 				request: result.writable.request,
 			}, null, 2));
 
-			// Save readable items
-			fs.writeFileSync(STRUCTURE_MAP_READABLE, JSON.stringify({
+			// Save readable items (scoped)
+			fs.writeFileSync(scopedReadablePath, JSON.stringify({
 				generatedAt,
 				sitemap: result.sitemapName,
 				type: 'readable',
@@ -189,10 +222,10 @@ async function genStructureMap(options = {}) {
 			}, null, 2));
 
 			console.log('');
-			console.log('Saved structure maps:');
-			console.log(`  - All:      ${STRUCTURE_MAP_ALL}`);
-			console.log(`  - Writable: ${STRUCTURE_MAP_WRITABLE}`);
-			console.log(`  - Readable: ${STRUCTURE_MAP_READABLE}`);
+			console.log(`Saved sitemap-scoped structure maps for "${result.sitemapName}":`);
+			console.log(`  - All:      ${scopedAllPath}`);
+			console.log(`  - Writable: ${scopedWritablePath}`);
+			console.log(`  - Readable: ${scopedReadablePath}`);
 		} catch (saveErr) {
 			console.error(`Warning: Failed to save cache: ${saveErr.message}`);
 		}
@@ -255,20 +288,23 @@ function callAnthropic(requestBody) {
 async function testVoice(voiceCommand) {
 	if (!voiceCommand) {
 		console.error('Error: Please provide a voice command');
-		console.error('Usage: node ai-cli.js testvoice "turn on the kitchen lights"');
+		console.error('Usage: node ai-cli.js testvoice "turn on the kitchen lights" --sitemap <name>');
 		process.exit(1);
 	}
 
-	// Load the writable structure map
-	if (!fs.existsSync(STRUCTURE_MAP_WRITABLE)) {
-		console.error('Error: Structure map not found. Run "genstructuremap" first.');
+	const sitemapName = getRequiredSitemapArg('node ai-cli.js testvoice "turn on the kitchen lights" --sitemap <name>');
+	const writableMapPath = structureMapScopedPath(sitemapName, 'writable');
+	if (!fs.existsSync(writableMapPath)) {
+		console.error(`Error: Writable structure map not found for sitemap "${sitemapName}".`);
+		console.error(`Run: node ai-cli.js genstructuremap --sitemap ${sitemapName}`);
 		process.exit(1);
 	}
 
-	const structureMap = JSON.parse(fs.readFileSync(STRUCTURE_MAP_WRITABLE, 'utf8'));
+	const structureMap = JSON.parse(fs.readFileSync(writableMapPath, 'utf8'));
 	const itemList = structureMap.request.messages[0].content;
 
 	console.log(`Voice command: "${voiceCommand}"`);
+	console.log(`Sitemap: "${sitemapName}"`);
 	console.log(`Structure map: ${structureMap.itemCount} writable items`);
 	console.log('');
 	console.log('Calling Haiku...');
@@ -371,7 +407,7 @@ switch (command) {
 		genStructureMap();
 		break;
 	case 'testvoice':
-		testVoice(args.slice(1).join(' '));
+		testVoice(getTestVoiceCommand());
 		break;
 	case 'help':
 	case '--help':
