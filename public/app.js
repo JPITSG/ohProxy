@@ -4044,7 +4044,7 @@ async function selectSitemapAndReload(sitemapName) {
 	if (!target || sitemapSelectSwitching) return;
 	sitemapSelectSwitching = true;
 	renderSitemapSelectOptions();
-	setSitemapSelectStatus(ohLang?.sitemapSelect?.switchingStatus || 'Switching sitemap.', false, true);
+	setSitemapSelectStatus(ohLang?.sitemapSelect?.switchingStatus || 'Switching sitemap', false, true);
 
 	try {
 		const saved = await persistSelectedSitemapName(target, { throwOnError: true });
@@ -4055,7 +4055,7 @@ async function selectSitemapAndReload(sitemapName) {
 		logJsError('selectSitemapAndReload failed', err);
 		sitemapSelectSwitching = false;
 		renderSitemapSelectOptions();
-		setSitemapSelectStatus(ohLang?.sitemapSelect?.switchFailedStatus || 'Failed to switch sitemap.', true, false);
+		setSitemapSelectStatus(ohLang?.sitemapSelect?.switchFailedStatus || 'Failed to switch sitemap', true, false);
 		shakeElement(sitemapSelectModal?.querySelector('.sitemap-select-frame'));
 	}
 }
@@ -4090,7 +4090,7 @@ async function openSitemapSelectModal() {
 	renderSitemapSelectOptions();
 	if (!refreshed.ok) {
 		setSitemapSelectStatus(
-			ohLang?.sitemapSelect?.refreshFailedStatus || 'Could not refresh sitemap list. Showing cached options.',
+			ohLang?.sitemapSelect?.refreshFailedStatus || 'Could not refresh sitemap list, showing cached options',
 			true,
 			false
 		);
