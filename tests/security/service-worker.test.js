@@ -176,6 +176,18 @@ describe('Service Worker: Cache Strategy', () => {
 
 		assert.ok(hasCleanup, 'Service worker should clean up old caches on activate');
 	});
+
+	it('falls back to cached app shell for app-shell 5xx navigations', () => {
+		const content = readFile(SW_FILE);
+		assert.match(content, /if \(isAppShell && response\.status >= 500 && response\.status < 600\) \{/);
+		assert.match(content, /return caches\.match\('\.\/index\.html'\)\.then\(\(cached\) => cached \|\| response\);/);
+	});
+
+	it('only updates cached app shell from successful navigation responses', () => {
+		const content = readFile(SW_FILE);
+		assert.match(content, /if \(isAppShell && response && response\.ok\) \{/);
+		assert.match(content, /cache\.put\('\.\/index\.html', copy\);/);
+	});
 });
 
 describe('Service Worker: Security Headers', () => {
