@@ -78,7 +78,10 @@ self.addEventListener('fetch', (event) => {
 		event.respondWith(
 			fetch(request)
 				.then((response) => {
-					if (isAppShell) {
+					if (isAppShell && response.status >= 500 && response.status < 600) {
+						return caches.match('./index.html').then((cached) => cached || response);
+					}
+					if (isAppShell && response && response.ok) {
 						const copy = response.clone();
 						caches.open(CACHE_NAME).then((cache) => {
 							cache.put('./index.html', copy);
