@@ -19,6 +19,7 @@ describe('Presence Single-Point Mode', () => {
 
 	it('allows single-point mode without trackgps while keeping history mode gated', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /const user = req\.ohProxyUserData;/);
 		assert.match(server, /if \(!singlePointMode && !user\.trackgps\) \{\s*return sendStyledError\(res, req, 403\);/);
 	});
 

@@ -514,6 +514,23 @@ function setCardWidth(widgetId, width) {
 // User Management Functions
 // ============================================
 
+/**
+ * Get a map of all usernames→passwords and the set of disabled usernames.
+ * Single-query replacement for the N+1 pattern in loadAuthUsers().
+ * @returns {{ users: Object<string, string>, disabledUsers: Set<string> }}
+ */
+function getAuthUserMap() {
+	if (!db) initDb();
+	const rows = db.prepare('SELECT username, password, disabled FROM users').all();
+	const users = {};
+	const disabledUsers = new Set();
+	for (const row of rows) {
+		users[row.username] = row.password;
+		if (row.disabled === 1) disabledUsers.add(row.username);
+	}
+	return { users, disabledUsers };
+}
+
 const VALID_ROLES = ['admin', 'normal', 'readonly'];
 const USERNAME_REGEX = /^[a-zA-Z0-9_-]{1,20}$/;
 const VALID_VOICE_PREFERENCES = new Set(['system', 'browser', 'vosk']);
@@ -750,6 +767,7 @@ module.exports = {
 	getAllCardWidths,
 	setCardWidth,
 	// User management
+	getAuthUserMap,
 	getAllUsers,
 	getUser,
 	createUser,

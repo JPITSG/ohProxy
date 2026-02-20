@@ -1501,20 +1501,7 @@ function getBasicAuthCredentials(req) {
 }
 
 function loadAuthUsers() {
-	// Return users from database: { users: {username: password}, disabledUsers: Set }
-	const allUsers = sessions.getAllUsers();
-	const users = {};
-	const disabledUsers = new Set();
-	for (const u of allUsers) {
-		const fullUser = sessions.getUser(u.username);
-		if (fullUser) {
-			users[u.username] = fullUser.password;
-			if (fullUser.disabled) {
-				disabledUsers.add(u.username);
-			}
-		}
-	}
-	return { users, disabledUsers };
+	return sessions.getAuthUserMap();
 }
 
 function getCookieValue(req, name) {
@@ -4521,7 +4508,7 @@ async function getHomepageData(req, sitemapName) {
 		const widgets = normalizeWidgets(page, { sitemapName: sitemap });
 
 		// Apply visibility filtering
-		const userRole = req.ohProxyUser ? (sessions.getUser(req.ohProxyUser)?.role || 'normal') : 'normal';
+		const userRole = req.ohProxyUserData?.role || 'normal';
 		const visibilityMap = buildVisibilityMap();
 
 		const visibleWidgets = widgets.filter((w) => isWidgetVisibleForRole(w, userRole, visibilityMap));
@@ -4560,7 +4547,7 @@ async function sendIndex(req, res) {
 				getHomepageData(req, sitemapName),
 				getFullSitemapData(sitemapName),
 			]);
-			const userRole = req.ohProxyUser ? (sessions.getUser(req.ohProxyUser)?.role || 'normal') : 'normal';
+			const userRole = req.ohProxyUserData?.role || 'normal';
 			status.homepageData = homepageData;
 			status.homepagePageTitle = safeText(homepageData?.pageTitle || '').trim();
 			status.sitemapCache = filterSitemapCacheVisibility(sitemapCache, userRole);
@@ -6002,12 +5989,10 @@ const jsonParserLarge = express.json({ limit: '64kb', strict: true, type: 'appli
 const urlencodedParserSmall = express.urlencoded({ extended: false, limit: '4kb' });
 
 function requireAdmin(req, res, next) {
-	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
-	if (user?.role !== 'admin') {
+	if (req.ohProxyUserData?.role !== 'admin') {
 		res.status(403).json({ error: 'Admin access required' });
 		return;
 	}
-	req.ohAdminUser = user;
 	next();
 }
 app.use(morgan('combined', {
@@ -6402,6 +6387,7 @@ app.use((req, res, next) => {
 		res.redirect('/');
 		return;
 	}
+	req.ohProxyUserData = user;
 	next();
 });
 // Session middleware - runs after auth, assigns/loads session for all authorized users
@@ -6456,11 +6442,10 @@ app.get('/config.js', (req, res) => {
 	let userRole = null;
 	let trackGps = false;
 	let effectiveVoiceModel = liveConfig.voiceModel;
-	if (req.ohProxyUser) {
-		const user = sessions.getUser(req.ohProxyUser);
-		userRole = user?.role || null;
-		if (user?.trackgps) trackGps = true;
-		const userVoicePreference = isValidUserVoicePreference(user?.voicePreference) ? user.voicePreference : 'system';
+	if (req.ohProxyUserData) {
+		userRole = req.ohProxyUserData.role || null;
+		if (req.ohProxyUserData.trackgps) trackGps = true;
+		const userVoicePreference = isValidUserVoicePreference(req.ohProxyUserData.voicePreference) ? req.ohProxyUserData.voicePreference : 'system';
 		if (userVoicePreference !== 'system') {
 			effectiveVoiceModel = userVoicePreference;
 		}
@@ -6674,8 +6659,7 @@ app.post('/api/gps', jsonParserMedium, (req, res) => {
 		return;
 	}
 	// Reject users who don't have GPS tracking enabled
-	const user = sessions.getUser(username);
-	if (!user || !user.trackgps) {
+	if (!req.ohProxyUserData?.trackgps) {
 		res.status(403).json({ error: 'GPS tracking not enabled' });
 		return;
 	}
@@ -6936,8 +6920,8 @@ app.get('/api/admin/config', requireAdmin, (req, res) => {
 	}
 
 	if (!isPlainObject(config.user)) config.user = {};
-	config.user.trackGps = req.ohAdminUser.trackgps === true;
-	config.user.voiceModel = isValidUserVoicePreference(req.ohAdminUser.voicePreference) ? req.ohAdminUser.voicePreference : 'system';
+	config.user.trackGps = req.ohProxyUserData.trackgps === true;
+	config.user.voiceModel = isValidUserVoicePreference(req.ohProxyUserData.voicePreference) ? req.ohProxyUserData.voicePreference : 'system';
 
 	res.json(config);
 });
@@ -6970,7 +6954,7 @@ app.get('/api/admin/config/secret', requireAdmin, (req, res) => {
 app.post('/api/admin/config', jsonParserLarge, requireAdmin, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	const user = req.ohAdminUser;
+	const user = req.ohProxyUserData;
 
 	const incoming = req.body;
 	if (!isPlainObject(incoming)) {
@@ -7088,7 +7072,7 @@ app.post('/api/admin/config', jsonParserLarge, requireAdmin, (req, res) => {
 app.post('/api/admin/restart', jsonParserSmall, requireAdmin, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	logMessage(`[Admin] Restart triggered by ${req.ohAdminUser.username || 'unknown'}`);
+	logMessage(`[Admin] Restart triggered by ${req.ohProxyUserData.username || 'unknown'}`);
 	res.json({ ok: true });
 	res.once('finish', maybeTriggerRestart);
 	res.once('close', maybeTriggerRestart);
@@ -7269,8 +7253,7 @@ app.post('/api/voice/transcribe', express.raw({ type: 'application/octet-stream'
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
 
-	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
-	const username = user?.username || 'anonymous';
+	const username = req.ohProxyUserData?.username || 'anonymous';
 
 	if (!liveConfig.voskHost) {
 		res.status(503).json({ error: 'Vosk host not configured' });
@@ -7349,8 +7332,7 @@ app.post('/api/voice', jsonParserSmall, async (req, res) => {
 		return;
 	}
 
-	const user = req.ohProxyUser ? sessions.getUser(req.ohProxyUser) : null;
-	const username = user?.username || 'anonymous';
+	const username = req.ohProxyUserData?.username || 'anonymous';
 
 	// Check if AI is configured
 	if (!liveConfig.anthropicApiKey) {
@@ -7636,11 +7618,7 @@ app.get('/search-index', async (req, res) => {
 	}
 
 	// Get user role for visibility filtering
-	let userRole = null;
-	if (req.ohProxyUser) {
-		const user = sessions.getUser(req.ohProxyUser);
-		userRole = user?.role || null;
-	}
+	const userRole = req.ohProxyUserData?.role || null;
 
 	// Filter widgets by visibility (admins see everything)
 	const visibilityMap = buildVisibilityMap();
@@ -7752,7 +7730,7 @@ app.get('/sitemap-full', async (req, res) => {
 			findLinks(page?.widgets || page?.widget);
 		}
 
-		const userRole = req.ohProxyUser ? (sessions.getUser(req.ohProxyUser)?.role || 'normal') : 'normal';
+		const userRole = req.ohProxyUserData?.role || 'normal';
 		const filtered = filterSitemapCacheVisibility({ pages, root: rootPath }, userRole);
 
 		res.setHeader('Cache-Control', 'no-store');
@@ -8374,8 +8352,7 @@ app.get('/api/presence', async (req, res) => {
 	if (!username) {
 		return res.status(401).json({ ok: false, error: 'Unauthorized' });
 	}
-	const user = sessions.getUser(username);
-	if (!user || !user.trackgps) {
+	if (!req.ohProxyUserData?.trackgps) {
 		return res.status(403).json({ ok: false, error: 'GPS tracking not enabled' });
 	}
 
@@ -8411,8 +8388,7 @@ app.get('/api/presence/nearby-days', async (req, res) => {
 	if (!username) {
 		return res.status(401).json({ ok: false, error: 'Unauthorized' });
 	}
-	const user = sessions.getUser(username);
-	if (!user || !user.trackgps) {
+	if (!req.ohProxyUserData?.trackgps) {
 		return res.status(403).json({ ok: false, error: 'GPS tracking not enabled' });
 	}
 
@@ -8491,10 +8467,10 @@ app.get('/presence', async (req, res) => {
 	if (!username) {
 		return sendStyledError(res, req, 401);
 	}
-	const user = sessions.getUser(username);
-	if (!user) {
+	if (!req.ohProxyUserData) {
 		return sendStyledError(res, req, 403);
 	}
+	const user = req.ohProxyUserData;
 
 	const rawLat = req.query?.lat;
 	const rawLon = req.query?.lon;
@@ -9775,12 +9751,10 @@ app.get('/proxy', async (req, res, next) => {
 
 // --- Gated vendor assets ---
 app.get('/vendor/OpenLayers.js', (req, res) => {
-	const username = req.ohProxyUser;
-	if (!username) {
+	if (!req.ohProxyUser) {
 		return res.status(401).send('Unauthorized');
 	}
-	const user = sessions.getUser(username);
-	if (!user || !user.trackgps) {
+	if (!req.ohProxyUserData?.trackgps) {
 		return res.status(403).send('GPS tracking not enabled');
 	}
 	res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
