@@ -4267,6 +4267,13 @@ async function saveCardConfig() {
 
 const ADMIN_CONFIG_SCHEMA = [
 	{
+		id: 'user-password', group: 'user', reloadRequired: true,
+		fields: [
+			{ key: 'user.password', type: 'password' },
+			{ key: 'user.confirm', type: 'password' },
+		],
+	},
+	{
 		id: 'user-preferences', group: 'user', reloadRequired: true,
 		fields: [
 			{ key: 'user.trackGps', type: 'toggle' },
@@ -4503,6 +4510,8 @@ let adminConfigModal = null;
 let adminConfigAbort = null;
 const adminSelectMenus = [];
 let adminConfigInitialStateJson = null;
+const ADMIN_PASSWORD_CONTROL_CHARS_RE = /[\x00-\x1F\x7F]/;
+const ADMIN_PASSWORD_MAX_LEN = 200;
 
 function adminGetNested(obj, path) {
 	return path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj);
@@ -4611,6 +4620,14 @@ function createAdminField(field, value) {
 	} else if (field.type === 'text') {
 		const input = document.createElement('input');
 		input.type = 'text';
+		input.dataset.key = field.key;
+		input.value = value !== undefined && value !== null ? String(value) : '';
+		if (fieldPlaceholder) input.placeholder = fieldPlaceholder;
+		control.appendChild(input);
+	} else if (field.type === 'password') {
+		const input = document.createElement('input');
+		input.type = 'password';
+		input.autocomplete = 'new-password';
 		input.dataset.key = field.key;
 		input.value = value !== undefined && value !== null ? String(value) : '';
 		if (fieldPlaceholder) input.placeholder = fieldPlaceholder;
@@ -4915,6 +4932,9 @@ function collectAdminConfigValues() {
 			} else if (field.type === 'text') {
 				const input = adminConfigModal.querySelector(`input[data-key="${key}"]`);
 				value = input ? input.value : '';
+			} else if (field.type === 'password') {
+				const input = adminConfigModal.querySelector(`input[data-key="${key}"]`);
+				value = input ? input.value : '';
 			} else if (field.type === 'secret') {
 				const input = adminConfigModal.querySelector(`input[data-key="${key}"]`);
 				const raw = input ? input.value : '';
@@ -4955,6 +4975,35 @@ async function saveAdminConfig() {
 	saveBtn.disabled = true;
 
 	const config = collectAdminConfigValues();
+	const password = typeof config?.user?.password === 'string' ? config.user.password : '';
+	const confirm = typeof config?.user?.confirm === 'string' ? config.user.confirm : '';
+	const wantsPasswordChange = password.length > 0 || confirm.length > 0;
+	if (wantsPasswordChange) {
+		if (!password || !confirm) {
+			statusEl.className = 'admin-config-status error';
+			statusEl.textContent = ohLang.adminConfig.passwordConfirmRequired;
+			shakeElement(adminConfigModal.querySelector('.admin-config-frame'));
+			saveBtn.disabled = false;
+			return;
+		}
+		const invalidPassword = ADMIN_PASSWORD_CONTROL_CHARS_RE.test(password) || password.length > ADMIN_PASSWORD_MAX_LEN;
+		const invalidConfirm = ADMIN_PASSWORD_CONTROL_CHARS_RE.test(confirm) || confirm.length > ADMIN_PASSWORD_MAX_LEN;
+		if (invalidPassword || invalidConfirm) {
+			statusEl.className = 'admin-config-status error';
+			statusEl.textContent = ohLang.adminConfig.passwordInvalid;
+			shakeElement(adminConfigModal.querySelector('.admin-config-frame'));
+			saveBtn.disabled = false;
+			return;
+		}
+		if (password !== confirm) {
+			statusEl.className = 'admin-config-status error';
+			statusEl.textContent = ohLang.adminConfig.passwordMismatch;
+			shakeElement(adminConfigModal.querySelector('.admin-config-frame'));
+			saveBtn.disabled = false;
+			return;
+		}
+	}
+
 	const configJson = JSON.stringify(config);
 	if (adminConfigInitialStateJson !== null && configJson === adminConfigInitialStateJson) {
 		statusEl.className = 'admin-config-status warning';
@@ -4980,7 +5029,22 @@ async function saveAdminConfig() {
 			return;
 		}
 
-		if (result.restartRequired) {
+		if (result.passwordChanged) {
+			closeAdminConfigModal({ skipHistory: true });
+			showAlert({
+				header: ohLang.adminConfig.passwordChangedHeader,
+				body: ohLang.adminConfig.passwordChangedBody,
+				bodyIsHtml: true,
+				showClose: false,
+				dismissOnBackdrop: false,
+				dismissOnEscape: false,
+				buttons: [
+					{ text: ohLang.adminConfig.passwordChangedContinueBtn, onClick: () => { void logoutAndRedirectToLogin(); } },
+				],
+			});
+			adminConfigInitialStateJson = configJson;
+			return;
+		} else if (result.restartRequired) {
 			statusEl.className = 'admin-config-status warning';
 			statusEl.textContent = ohLang.adminConfig.savedRestart;
 			closeAdminConfigModal({ skipHistory: true });
@@ -5080,6 +5144,20 @@ async function restartServer() {
 			],
 		});
 	}
+}
+
+async function logoutAndRedirectToLogin() {
+	try {
+		const res = await fetch('/api/logout', { method: 'POST' });
+		const data = await res.json();
+		if (data?.basicLogout) {
+			window.location.href = '/api/logout';
+			return;
+		}
+	} catch (err) {
+		logJsError('logoutAndRedirectToLogin failed', err);
+	}
+	window.location.href = '/';
 }
 
 function updateAdminConfigBtnVisibility() {
@@ -10565,15 +10643,7 @@ function restoreNormalPolling() {
 	if (els.logout) {
 		els.logout.addEventListener('click', async () => {
 			haptic();
-			try {
-				const res = await fetch('/api/logout', { method: 'POST' });
-				const data = await res.json();
-				if (data.basicLogout) {
-					window.location.href = '/api/logout';
-					return;
-				}
-			} catch (e) {}
-			window.location.href = '/';
+			await logoutAndRedirectToLogin();
 		});
 	}
 	updateAdminConfigBtnVisibility();
