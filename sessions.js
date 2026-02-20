@@ -4,7 +4,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const crypto = require('crypto');
 
-const DB_PATH = path.join(__dirname, 'sessions.db');
+const DB_PATH = path.join(__dirname, 'database.db');
 const DEFAULT_SETTINGS = { darkMode: true };
 
 function setDefaultTheme(theme) {

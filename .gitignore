@@ -1,8 +1,8 @@
 config.local.js
 AGENTS.md
 CLAUDE.md
-sessions.db
-sessions.db-*
+database.db
+database.db-*
 node_modules/
 cache/icon/
 cache/chart/

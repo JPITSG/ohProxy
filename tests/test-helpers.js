@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const path = require('path');
 
 // Test database path
-const TEST_DB_PATH = path.join(__dirname, 'sessions.db.test');
+const TEST_DB_PATH = path.join(__dirname, 'database.db.test');
 
 // Generate Basic Auth header
 function basicAuthHeader(username, password) {

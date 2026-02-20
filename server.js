@@ -1786,7 +1786,7 @@ if (configErrors.length) {
 }
 
 const LOCAL_CONFIG_PATH = path.join(__dirname, 'config.local.js');
-const SESSIONS_DB_PATH = path.join(__dirname, 'sessions.db');
+const SESSIONS_DB_PATH = path.join(__dirname, 'database.db');
 const SENSITIVE_FILE_MODE = 0o600;
 let lastConfigMtime = 0;
 let configRestartScheduled = false;
@@ -1811,7 +1811,7 @@ function ensureSensitiveFilePermissions(filePath, label) {
 
 function hardenSensitiveFilePermissions() {
 	ensureSensitiveFilePermissions(LOCAL_CONFIG_PATH, 'config.local.js');
-	ensureSensitiveFilePermissions(SESSIONS_DB_PATH, 'sessions.db');
+	ensureSensitiveFilePermissions(SESSIONS_DB_PATH, 'database.db');
 	ensureSensitiveFilePermissions(HTTPS_KEY_FILE, 'HTTPS key file');
 	ensureSensitiveFilePermissions(HTTPS_CERT_FILE, 'HTTPS certificate file');
 }

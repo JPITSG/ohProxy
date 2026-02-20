@@ -7,7 +7,7 @@ const fs = require('fs');
 const Database = require('better-sqlite3');
 
 // Test database path
-const TEST_DB_PATH = path.join(__dirname, '..', 'sessions.db.test');
+const TEST_DB_PATH = path.join(__dirname, '..', 'database.db.test');
 
 // We need to patch the module to use test DB
 // Since sessions.js uses a hardcoded path, we'll test the logic by recreating functions
