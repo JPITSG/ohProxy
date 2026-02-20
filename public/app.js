@@ -224,7 +224,7 @@ async function softReset() {
 
 	try {
 		// Show cached home snapshot behind the blur (if available)
-		const snapshot = loadHomeSnapshot();
+		const snapshot = loadHomeSnapshot({ sitemapName: getPreferredSnapshotSitemapName() });
 		const snapshotApplied = snapshot && applyHomeSnapshot(snapshot);
 		if (snapshotApplied) {
 			render();
@@ -611,7 +611,8 @@ const SLIDER_DEBOUNCE_MS = configNumber(CLIENT_CONFIG.sliderDebounceMs, 250);
 const IDLE_AFTER_MS = configNumber(CLIENT_CONFIG.idleAfterMs, 60000);
 const ACTIVITY_THROTTLE_MS = configNumber(CLIENT_CONFIG.activityThrottleMs, 250);
 const CHART_HASH_CHECK_MS = 30000; // Check chart hashes every 30 seconds
-const HOME_CACHE_KEY = 'ohProxyHomeSnapshot';
+const HOME_CACHE_KEY_LEGACY = 'ohProxyHomeSnapshot';
+const HOME_CACHE_KEY_PREFIX = `${HOME_CACHE_KEY_LEGACY}:`;
 const MAX_ICON_CACHE = Math.max(0, Math.round(configNumber(CLIENT_CONFIG.maxIconCache, 500)));
 const MAX_CHART_HASHES = Math.max(0, Math.round(configNumber(CLIENT_CONFIG.maxChartHashes, 500)));
 
@@ -1200,10 +1201,56 @@ function canRestoreHomeSnapshot() {
 	return state.rootPageUrl && state.pageUrl === state.rootPageUrl;
 }
 
+function normalizeSnapshotSitemapName(value) {
+	return safeText(value).trim();
+}
+
+function getPreferredSnapshotSitemapName() {
+	const active = normalizeSnapshotSitemapName(state.sitemapName);
+	if (active) return active;
+	return normalizeSnapshotSitemapName(getStoredSelectedSitemapName());
+}
+
+function getHomeSnapshotKey(sitemapName) {
+	const normalized = normalizeSnapshotSitemapName(sitemapName);
+	return normalized ? `${HOME_CACHE_KEY_PREFIX}${normalized}` : HOME_CACHE_KEY_LEGACY;
+}
+
+function getHomeSnapshotLookupOrder(preferredSitemapName, allowLegacyFallback) {
+	const requested = normalizeSnapshotSitemapName(preferredSitemapName);
+	const candidates = [];
+	const seen = new Set();
+	const addScopedCandidate = (name) => {
+		const normalized = normalizeSnapshotSitemapName(name);
+		if (!normalized || seen.has(normalized)) return;
+		seen.add(normalized);
+		candidates.push({
+			key: getHomeSnapshotKey(normalized),
+			sitemapName: normalized,
+		});
+	};
+
+	addScopedCandidate(requested);
+	addScopedCandidate(state.sitemapName);
+	addScopedCandidate(getStoredSelectedSitemapName());
+
+	if (allowLegacyFallback) {
+		candidates.push({
+			key: HOME_CACHE_KEY_LEGACY,
+			sitemapName: '',
+		});
+	}
+	return candidates;
+}
+
 function saveHomeSnapshot() {
 	if (!isHomePage()) return;
 	if (!Array.isArray(state.rawWidgets) || !state.rawWidgets.length) return;
+	const sitemapName = getPreferredSnapshotSitemapName();
+	if (!sitemapName) return;
 	const snapshot = {
+		sitemapName,
+		sitemapTitle: state.sitemapTitle || state.rootPageTitle || state.pageTitle || sitemapName,
 		pageUrl: state.pageUrl,
 		pageTitle: state.pageTitle,
 		rootPageUrl: state.rootPageUrl,
@@ -1215,29 +1262,56 @@ function saveHomeSnapshot() {
 		savedAt: Date.now(),
 	};
 	try {
-		localStorage.setItem(HOME_CACHE_KEY, JSON.stringify(snapshot));
+		localStorage.setItem(getHomeSnapshotKey(sitemapName), JSON.stringify(snapshot));
 	} catch (err) {
 		logJsError('saveHomeSnapshot failed', err);
 	}
 }
 
-function loadHomeSnapshot() {
-	try {
-		const raw = localStorage.getItem(HOME_CACHE_KEY);
-		if (!raw) return null;
-		const snapshot = JSON.parse(raw);
+function loadHomeSnapshot(options = {}) {
+	const opts = (typeof options === 'string')
+		? { sitemapName: options }
+		: (options && typeof options === 'object' ? options : {});
+	const requestedSitemap = normalizeSnapshotSitemapName(opts.sitemapName);
+	const allowLegacyFallback = opts.allowLegacyFallback !== false;
+	const candidates = getHomeSnapshotLookupOrder(requestedSitemap, allowLegacyFallback);
+
+	for (const candidate of candidates) {
+		if (!candidate?.key) continue;
+		let snapshot;
+		try {
+			const raw = localStorage.getItem(candidate.key);
+			if (!raw) continue;
+			snapshot = JSON.parse(raw);
+		} catch (err) {
+			logJsError(`loadHomeSnapshot failed for ${candidate.key}`, err);
+			continue;
+		}
 		if (!snapshot || !Array.isArray(snapshot.rawWidgets) || !snapshot.rawWidgets.length) {
-			return null;
+			continue;
+		}
+		const snapshotSitemap = normalizeSnapshotSitemapName(snapshot.sitemapName || candidate.sitemapName);
+		if (requestedSitemap && snapshotSitemap && snapshotSitemap !== requestedSitemap) {
+			continue;
+		}
+		if (requestedSitemap && !snapshotSitemap) {
+			continue;
+		}
+		if (snapshotSitemap) {
+			snapshot.sitemapName = snapshotSitemap;
 		}
 		return snapshot;
-	} catch (err) {
-		logJsError('loadHomeSnapshot failed', err);
-		return null;
 	}
+	return null;
 }
 
 function applyHomeSnapshot(snapshot) {
 	if (!snapshot || !Array.isArray(snapshot.rawWidgets) || !snapshot.rawWidgets.length) return false;
+	const snapshotSitemapName = normalizeSnapshotSitemapName(snapshot.sitemapName);
+	if (snapshotSitemapName) {
+		state.sitemapName = snapshotSitemapName;
+		state.sitemapTitle = safeText(snapshot.sitemapTitle || snapshot.rootPageTitle || snapshot.pageTitle || snapshotSitemapName);
+	}
 	state.rawWidgets = snapshot.rawWidgets;
 	state.pageUrl = snapshot.pageUrl || state.pageUrl || null;
 	state.pageTitle = snapshot.pageTitle || state.pageTitle;
@@ -1248,17 +1322,15 @@ function applyHomeSnapshot(snapshot) {
 	state.stack = [];
 	state.filter = '';
 	if (els.search) els.search.value = '';
-	// Restore icon cache from snapshot
+	// Restore icon caches for this sitemap snapshot.
+	iconCache.clear();
 	if (snapshot.iconCache && typeof snapshot.iconCache === 'object') {
 		for (const [key, url] of Object.entries(snapshot.iconCache)) {
-			if (key && url && !iconCache.has(key)) {
-				iconCache.set(key, url);
-			}
+			if (!key || !url) continue;
+			setBoundedCache(iconCache, key, url, MAX_ICON_CACHE);
 		}
 	}
-	if (snapshot.inlineIcons && typeof snapshot.inlineIcons === 'object') {
-		mergeHomeInlineIcons(snapshot.inlineIcons);
-	}
+	replaceHomeInlineIcons(snapshot.inlineIcons && typeof snapshot.inlineIcons === 'object' ? snapshot.inlineIcons : {});
 	updateNavButtons();
 	syncHistory(true);
 	return true;
@@ -3869,7 +3941,7 @@ function sitemapOptionPrimaryLabel(option) {
 	const name = safeText(option?.name || '').trim();
 	const title = safeText(option?.title || '').trim();
 	if (title && name) return `${title} (${name})`;
-	return title || name || 'Unnamed sitemap';
+	return title || name || ohLang?.sitemapSelect?.unnamedFallback || 'Unnamed sitemap';
 }
 
 function setSitemapSelectStatus(message, isError, isPending) {
@@ -3910,7 +3982,7 @@ function renderSitemapSelectOptions() {
 		badge.className = isActive
 			? 'admin-current-badge sitemap-select-option-badge'
 			: 'admin-current-badge sitemap-select-option-badge sitemap-select-option-badge-hidden';
-		badge.textContent = 'Current Sitemap';
+		badge.textContent = ohLang?.sitemapSelect?.currentBadge || 'Current Sitemap';
 		if (!isActive) badge.setAttribute('aria-hidden', 'true');
 		headerRow.appendChild(badge);
 
@@ -3948,19 +4020,19 @@ function ensureSitemapSelectModal() {
 	wrap.innerHTML = `
 		<div class="sitemap-select-frame oh-modal-frame glass">
 			<div class="sitemap-select-header oh-modal-header">
-				<h2>Select Sitemap</h2>
+				<h2>${ohLang?.sitemapSelect?.title || 'Select Sitemap'}</h2>
 				<button type="button" class="sitemap-select-close oh-modal-close">
 					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M18 6L6 18M6 6l12 12"/>
-					</svg>
-				</button>
-			</div>
-			<div class="sitemap-select-body oh-modal-body">
-				<div class="sitemap-select-options"></div>
+				</svg>
+			</button>
+		</div>
+		<div class="sitemap-select-body oh-modal-body">
+			<div class="sitemap-select-options"></div>
 			</div>
 			<div class="sitemap-select-footer oh-modal-footer">
 				<div class="sitemap-select-status"></div>
-				<button type="button" class="sitemap-select-cancel">Close</button>
+				<button type="button" class="sitemap-select-cancel">${ohLang?.sitemapSelect?.closeBtn || 'Close'}</button>
 			</div>
 		</div>
 	`;
@@ -3978,7 +4050,7 @@ async function selectSitemapAndReload(sitemapName) {
 	if (!target || sitemapSelectSwitching) return;
 	sitemapSelectSwitching = true;
 	renderSitemapSelectOptions();
-	setSitemapSelectStatus('Switching sitemap.', false, true);
+	setSitemapSelectStatus(ohLang?.sitemapSelect?.switchingStatus || 'Switching sitemap.', false, true);
 
 	try {
 		const saved = await persistSelectedSitemapName(target, { throwOnError: true });
@@ -3989,22 +4061,47 @@ async function selectSitemapAndReload(sitemapName) {
 		logJsError('selectSitemapAndReload failed', err);
 		sitemapSelectSwitching = false;
 		renderSitemapSelectOptions();
-		setSitemapSelectStatus('Failed to switch sitemap.', true, false);
+		setSitemapSelectStatus(ohLang?.sitemapSelect?.switchFailedStatus || 'Failed to switch sitemap.', true, false);
 		shakeElement(sitemapSelectModal?.querySelector('.sitemap-select-frame'));
 	}
 }
 
-function openSitemapSelectModal() {
-	if (!isSitemapSelectionEnabled()) return;
-	ensureSitemapSelectModal();
-	if (!sitemapSelectModal.classList.contains('hidden')) {
-		renderSitemapSelectOptions();
-		return;
+async function refreshSitemapOptionsForModalOpen() {
+	try {
+		const options = await loadSitemapOptions();
+		return { ok: true, options: Array.isArray(options) ? options : [] };
+	} catch (err) {
+		logJsError('openSitemapSelectModal sitemap refresh failed', err);
+		return {
+			ok: false,
+			error: err,
+			options: Array.isArray(state.sitemapOptions) ? state.sitemapOptions : [],
+		};
 	}
+}
+
+async function openSitemapSelectModal() {
+	if (!isAuthenticatedSession()) return;
+	ensureSitemapSelectModal();
+	const modalIsOpen = !sitemapSelectModal.classList.contains('hidden');
 
 	sitemapSelectSwitching = false;
 	setSitemapSelectStatus('', false, false);
+	const refreshed = await refreshSitemapOptionsForModalOpen();
+	const options = Array.isArray(refreshed.options) ? refreshed.options : [];
+	if (options.length <= 1) {
+		if (modalIsOpen) closeSitemapSelectModal();
+		return;
+	}
 	renderSitemapSelectOptions();
+	if (!refreshed.ok) {
+		setSitemapSelectStatus(
+			ohLang?.sitemapSelect?.refreshFailedStatus || 'Could not refresh sitemap list. Showing cached options.',
+			true,
+			false
+		);
+	}
+	if (modalIsOpen) return;
 	openModalBase(sitemapSelectModal, 'sitemap-select-open');
 	sitemapSelectHistoryPushed = true;
 	history.pushState(null, '', window.location.pathname + window.location.search + window.location.hash);
@@ -8635,7 +8732,7 @@ function render() {
 			siteSpan.classList.add('sitemap-title-selectable');
 			siteSpan.tabIndex = 0;
 			siteSpan.setAttribute('role', 'button');
-			siteSpan.setAttribute('aria-label', 'Select sitemap');
+			siteSpan.setAttribute('aria-label', ohLang?.sitemapSelect?.triggerAriaLabel || 'Select sitemap');
 			siteSpan.addEventListener('click', () => openSitemapSelectModal());
 			siteSpan.addEventListener('keydown', (e) => {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -9058,7 +9155,7 @@ async function refresh(showLoading) {
 		const hasContent = !!state.lastPageUrl;
 		let usedSnapshot = false;
 		if (!hasContent && canRestoreHomeSnapshot()) {
-			const snapshot = loadHomeSnapshot();
+			const snapshot = loadHomeSnapshot({ sitemapName: getPreferredSnapshotSitemapName() });
 			if (snapshot) usedSnapshot = applyHomeSnapshot(snapshot);
 		}
 		const hasFallback = hasContent || usedSnapshot;
@@ -10803,7 +10900,7 @@ function restoreNormalPolling() {
 	} catch (e) {
 		console.error(e);
 		logJsError('init bootstrap failed', e);
-		const snapshot = loadHomeSnapshot();
+		const snapshot = loadHomeSnapshot({ sitemapName: getPreferredSnapshotSitemapName() });
 		if (snapshot && applyHomeSnapshot(snapshot)) {
 			setStatus('');
 			setConnectionStatus(false, e.message);

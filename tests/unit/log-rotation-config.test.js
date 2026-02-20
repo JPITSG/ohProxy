@@ -35,6 +35,6 @@ describe('Daily log rotation wiring', () => {
 		assert.match(app, /id:\s*'logging'[\s\S]*server\.logRotationEnabled/, 'missing logging section field for logRotationEnabled');
 		assert.doesNotMatch(app, /id:\s*'sessions'[\s\S]*server\.logRotationEnabled/, 'logRotationEnabled should not be in sessions section');
 		assert.match(lang, /'server\.logRotationEnabled': 'Daily Log Rotation'/, 'missing label for logRotationEnabled');
-		assert.match(lang, /'server\.logRotationEnabled': 'Rotate configured log files daily at local midnight \(00:00\); keeps \.1 through \.9 archives'/, 'missing description for logRotationEnabled');
+		assert.match(lang, /'server\.logRotationEnabled': 'Rotate configured log files daily at local midnight'/, 'missing description for logRotationEnabled');
 	});
 });
