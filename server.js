@@ -4565,9 +4565,25 @@ function filterSitemapCacheVisibility(cache, userRole) {
 	const visibilityRules = sessions.getAllVisibilityRules();
 	const visibilityMap = new Map(visibilityRules.map((r) => [r.widgetId, r.visibility]));
 
-	const shouldHide = (w) => {
+	const withWidgetKeyContext = (widget, ctx = {}) => {
+		const clone = { ...widget };
+		const baseSectionPath = Array.isArray(ctx.sectionPath) ? ctx.sectionPath.slice() : [];
+		const label = sectionLabel(clone);
+		const isSection = clone?.__section === true || widgetType(clone) === 'Frame';
+		const keySectionPath = isSection && label ? baseSectionPath.concat([label]) : baseSectionPath.slice();
+
+		if (ctx.sitemapName) clone.__sitemapName = ctx.sitemapName;
+		if (keySectionPath.length) {
+			clone.__sectionPath = keySectionPath.slice();
+			clone.__frame = keySectionPath[keySectionPath.length - 1];
+		}
+		return { clone, keySectionPath };
+	};
+
+	const shouldHide = (w, ctx = {}) => {
 		if (!w) return false;
-		const wKey = widgetKey(w);
+		const { clone } = withWidgetKeyContext(w, ctx);
+		const wKey = widgetKey(clone);
 		const vis = visibilityMap.get(wKey) || 'all';
 		if (vis === 'admin') return true;
 		if (vis === 'normal' && userRole !== 'normal' && userRole !== 'readonly') return true;
@@ -4575,41 +4591,45 @@ function filterSitemapCacheVisibility(cache, userRole) {
 	};
 
 	// Filter an array of widgets, cloning each kept widget before recursing.
-	const filterArray = (arr) => {
-		return arr.filter((w) => !w || !shouldHide(w)).map((w) => {
+	const filterArray = (arr, ctx = {}) => {
+		return arr.filter((w) => !w || !shouldHide(w, ctx)).map((w) => {
 			if (!w) return w;
-			const clone = { ...w };
-			if (clone.widgets) clone.widgets = filterNested(clone.widgets);
-			if (clone.widget) clone.widget = filterNested(clone.widget);
+			const { clone, keySectionPath } = withWidgetKeyContext(w, ctx);
+			const nextCtx = { sitemapName: ctx.sitemapName, sectionPath: keySectionPath };
+			if (clone.widgets) clone.widgets = filterNested(clone.widgets, nextCtx);
+			if (clone.widget) clone.widget = filterNested(clone.widget, nextCtx);
 			return clone;
 		});
 	};
 
 	// Normalize any widget structure to filtered output, preserving shape.
-	const filterNested = (val) => {
+	const filterNested = (val, ctx = {}) => {
 		if (!val) return val;
-		if (Array.isArray(val)) return filterArray(val);
+		if (Array.isArray(val)) return filterArray(val, ctx);
 		// Object with .item array (XML-to-JSON wrapper)
-		if (Array.isArray(val.item)) return { ...val, item: filterArray(val.item) };
+		if (Array.isArray(val.item)) return { ...val, item: filterArray(val.item, ctx) };
 		// Object with single .item (XML-to-JSON single child)
 		if (val.item) {
-			if (shouldHide(val.item)) return null;
-			const filtered = filterArray([val.item]);
+			if (shouldHide(val.item, ctx)) return null;
+			const filtered = filterArray([val.item], ctx);
 			return filtered.length ? { ...val, item: filtered[0] } : null;
 		}
 		// Single widget object
-		if (shouldHide(val)) return null;
-		const clone = { ...val };
-		if (clone.widgets) clone.widgets = filterNested(clone.widgets);
-		if (clone.widget) clone.widget = filterNested(clone.widget);
+		if (shouldHide(val, ctx)) return null;
+		const { clone, keySectionPath } = withWidgetKeyContext(val, ctx);
+		const nextCtx = { sitemapName: ctx.sitemapName, sectionPath: keySectionPath };
+		if (clone.widgets) clone.widgets = filterNested(clone.widgets, nextCtx);
+		if (clone.widget) clone.widget = filterNested(clone.widget, nextCtx);
 		return clone;
 	};
 
 	const filtered = { pages: {}, root: cache.root };
 	for (const [url, page] of Object.entries(cache.pages)) {
 		const copy = { ...page };
-		if (copy.widgets) copy.widgets = filterNested(copy.widgets);
-		if (copy.widget) copy.widget = filterNested(copy.widget);
+		const pageSitemapName = sitemapNameFromRestSitemapPath(url);
+		const rootCtx = { sitemapName: pageSitemapName, sectionPath: [] };
+		if (copy.widgets) copy.widgets = filterNested(copy.widgets, rootCtx);
+		if (copy.widget) copy.widget = filterNested(copy.widget, rootCtx);
 		filtered.pages[url] = copy;
 	}
 	return filtered;
@@ -4628,7 +4648,7 @@ async function getHomepageData(req, sitemapName) {
 
 		const page = JSON.parse(result.body);
 		await applyGroupStateOverrides(page);
-		const widgets = normalizeWidgets(page);
+		const widgets = normalizeWidgets(page, { sitemapName: sitemap });
 
 		// Apply visibility filtering
 		const userRole = req.ohProxyUser ? (sessions.getUser(req.ohProxyUser)?.role || 'normal') : 'normal';
@@ -4722,7 +4742,7 @@ function sendImmutableSvg(res, filePath) {
 	res.sendFile(filePath);
 }
 
-function normalizeWidgets(page) {
+function normalizeWidgets(page, ctx = {}) {
 	// Support both OH 1.x 'widget' and OH 3.x+ 'widgets'
 	let w = page?.widgets || page?.widget;
 	if (!w) return [];
@@ -4732,11 +4752,19 @@ function normalizeWidgets(page) {
 	}
 
 	const out = [];
-	const walk = (list) => {
+	const sitemapName = safeText(ctx?.sitemapName || '').trim();
+	const basePath = Array.isArray(ctx?.path) ? ctx.path.slice() : null;
+	const walk = (list, sectionPath = []) => {
 		for (const item of list) {
 			if (item?.type === 'Frame') {
 				const label = safeText(item?.label || item?.item?.label || item?.item?.name || '');
-				out.push({ __section: true, label });
+				const nextSectionPath = label ? sectionPath.concat([label]) : sectionPath.slice();
+				out.push({
+					__section: true,
+					label,
+					__sectionPath: nextSectionPath.slice(),
+					__sitemapName: sitemapName,
+				});
 				// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
 				let kids = item.widgets || item.widget;
 				if (kids) {
@@ -4744,15 +4772,21 @@ function normalizeWidgets(page) {
 						if (Array.isArray(kids.item)) kids = kids.item;
 						else kids = [kids];
 					}
-					walk(kids);
+					walk(kids, nextSectionPath);
 				}
 				continue;
 			}
+			if (basePath) item.__path = basePath.slice();
+			if (sectionPath.length) {
+				item.__sectionPath = sectionPath.slice();
+				item.__frame = sectionPath[sectionPath.length - 1];
+			}
+			if (sitemapName) item.__sitemapName = sitemapName;
 			out.push(item);
 		}
 	};
 
-	walk(w);
+	walk(w, []);
 	return out;
 }
 
@@ -4815,11 +4849,20 @@ function normalizeSearchWidgets(page, ctx) {
 
 	const out = [];
 	const path = Array.isArray(ctx?.path) ? ctx.path : null;
-	const walk = (list, frameLabel) => {
+	const sitemapName = safeText(ctx?.sitemapName || '').trim();
+	const walk = (list, frameLabel, sectionPath = []) => {
 		for (const item of list) {
 			if (item?.type === 'Frame') {
 				const label = sectionLabel(item);
-				if (label) out.push({ __section: true, label });
+				const nextSectionPath = label ? sectionPath.concat([label]) : sectionPath.slice();
+				if (label) {
+					out.push({
+						__section: true,
+						label,
+						__sectionPath: nextSectionPath.slice(),
+						__sitemapName: sitemapName,
+					});
+				}
 				// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
 				let kids = item.widgets || item.widget;
 				if (kids) {
@@ -4827,17 +4870,19 @@ function normalizeSearchWidgets(page, ctx) {
 						if (Array.isArray(kids.item)) kids = kids.item;
 						else kids = [kids];
 					}
-					walk(kids, label || frameLabel);
+					walk(kids, label || frameLabel, nextSectionPath);
 				}
 				continue;
 			}
 			if (path) item.__path = path.slice();
+			if (sectionPath.length) item.__sectionPath = sectionPath.slice();
 			if (frameLabel) item.__frame = frameLabel;
+			if (sitemapName) item.__sitemapName = sitemapName;
 			out.push(item);
 		}
 	};
 
-	walk(w, '');
+	walk(w, '', []);
 	return out;
 }
 
@@ -4860,6 +4905,16 @@ function decodeSitemapName(name) {
 	} catch {
 		return raw;
 	}
+}
+
+function sitemapNameFromRestSitemapPath(pathname) {
+	const raw = safeText(pathname).trim();
+	if (!raw) return '';
+	const withoutQuery = raw.split('?')[0].replace(/\/+$/, '');
+	const parts = withoutQuery.split('/').filter(Boolean);
+	const idx = parts.indexOf('sitemaps');
+	if (idx === -1 || idx + 1 >= parts.length) return '';
+	return decodeSitemapName(parts[idx + 1]);
 }
 
 function normalizeSitemapEntry(entry, updatedAt = Date.now()) {
@@ -7703,6 +7758,7 @@ app.get('/search-index', async (req, res) => {
 
 	if (!rootPath) return res.status(400).send('Missing sitemap');
 	rootPath = ensureJsonParam(rootPath);
+	const searchSitemapName = sitemapInput || sitemapNameFromRestSitemapPath(rootPath);
 
 	const queue = [{ url: rootPath, path: [] }];
 	const seenPages = new Set();
@@ -7730,7 +7786,7 @@ app.get('/search-index', async (req, res) => {
 		}
 
 		await applyGroupStateOverrides(page);
-		const normalized = normalizeSearchWidgets(page, { path: pagePath });
+		const normalized = normalizeSearchWidgets(page, { path: pagePath, sitemapName: searchSitemapName });
 		for (const f of normalized) {
 			if (!f || !f.__section) continue;
 			const frameLabel = safeText(f.label);
@@ -7775,7 +7831,14 @@ app.get('/search-index', async (req, res) => {
 
 	const filteredFrames = frames.filter(f => {
 		if (userRole === 'admin') return true;
-		const fKey = `section:${safeText(f.label)}`;
+		const label = safeText(f.label);
+		const sectionPath = Array.isArray(f.path) ? f.path.concat([label]) : [label];
+		const fKey = widgetKey({
+			__section: true,
+			label,
+			__sectionPath: sectionPath,
+			__sitemapName: searchSitemapName,
+		});
 		const vis = visibilityMap.get(fKey) || 'all';
 		if (vis === 'all') return true;
 		if (vis === 'admin') return false;
