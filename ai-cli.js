@@ -2,11 +2,10 @@
 'use strict';
 
 const fs = require('fs');
-const http = require('http');
-const https = require('https');
 const path = require('path');
 
 const { generateStructureMap } = require('./lib/structure-map');
+const { buildOpenhabClient } = require('./lib/openhab-client');
 
 const CACHE_DIR = path.join(__dirname, 'cache');
 const AI_CACHE_DIR = path.join(CACHE_DIR, 'ai');
@@ -79,58 +78,26 @@ function getTestVoiceCommand() {
 	return parts.join(' ').trim();
 }
 
-function fetchOpenhab(pathname) {
-	return new Promise((resolve, reject) => {
-		const target = new URL(serverConfig.openhab?.target || 'http://localhost:8080');
-		const isHttps = target.protocol === 'https:';
-		const basePath = target.pathname && target.pathname !== '/' ? target.pathname.replace(/\/$/, '') : '';
-		const reqPath = `${basePath}${pathname}`;
+const openhabClient = buildOpenhabClient({
+	target: serverConfig.openhab?.target || 'http://localhost:8080',
+	user: serverConfig.openhab?.user || '',
+	pass: serverConfig.openhab?.pass || '',
+	apiToken: serverConfig.openhab?.apiToken || '',
+	userAgent: serverConfig.userAgent || 'ohProxy/1.0',
+	timeoutMs: 10000,
+});
 
-		const options = {
-			hostname: target.hostname,
-			port: target.port || (isHttps ? 443 : 80),
-			path: reqPath,
-			method: 'GET',
-			headers: {
-				'Accept': 'application/json',
-				'User-Agent': serverConfig.userAgent || 'ohProxy/1.0',
-			},
-		};
-
-		// Add basic auth if configured
-		if (serverConfig.openhab?.user && serverConfig.openhab?.pass) {
-			const auth = Buffer.from(`${serverConfig.openhab.user}:${serverConfig.openhab.pass}`).toString('base64');
-			options.headers.Authorization = `Basic ${auth}`;
-		}
-
-		const transport = isHttps ? https : http;
-		const req = transport.request(options, (res) => {
-			let data = '';
-			res.on('data', chunk => data += chunk);
-			res.on('end', () => {
-				if (res.statusCode >= 200 && res.statusCode < 300) {
-					try {
-						resolve(JSON.parse(data));
-					} catch {
-						resolve(data);
-					}
-				} else {
-					reject(new Error(`HTTP ${res.statusCode}: ${data}`));
-				}
-			});
-		});
-
-		req.on('error', reject);
-		req.setTimeout(10000, () => {
-			req.destroy();
-			reject(new Error('Request timeout'));
-		});
-		req.end();
+async function fetchOpenhabJson(pathname) {
+	const res = await openhabClient.get(pathname, {
+		parseJson: true,
+		throwOnHttpError: true,
+		timeoutLabel: 'Request',
 	});
+	return res.json;
 }
 
 async function getSitemapList() {
-	const result = await fetchOpenhab('/rest/sitemaps?type=json');
+	const result = await fetchOpenhabJson('/rest/sitemaps?type=json');
 	// Handle both array and single object formats
 	if (Array.isArray(result)) return result;
 	if (result?.sitemap) return [result.sitemap];
@@ -139,7 +106,7 @@ async function getSitemapList() {
 }
 
 async function getSitemapFull(sitemapName) {
-	return await fetchOpenhab(`/rest/sitemaps/${sitemapName}?type=json&includeHidden=true`);
+	return await fetchOpenhabJson(`/rest/sitemaps/${sitemapName}?type=json&includeHidden=true`);
 }
 
 async function genStructureMap(options = {}) {

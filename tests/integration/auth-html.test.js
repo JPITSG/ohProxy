@@ -6,7 +6,13 @@ const http = require('http');
 const express = require('express');
 const crypto = require('crypto');
 
-const { TEST_USERS, TEST_COOKIE_KEY, base64UrlEncode } = require('../test-helpers');
+const {
+	TEST_USERS,
+	TEST_COOKIE_KEY,
+	buildAuthCookieValue,
+	parseAuthCookieValue,
+	getCookieValueFromHeader,
+} = require('../test-helpers');
 
 // Create a test server with HTML auth mode
 function createHtmlAuthApp(config = {}) {
@@ -22,60 +28,14 @@ function createHtmlAuthApp(config = {}) {
 		return value === null || value === undefined ? '' : String(value);
 	}
 
-	function base64UrlDecode(value) {
-		const raw = safeText(value).replace(/-/g, '+').replace(/_/g, '/');
-		if (!raw) return null;
-		const pad = raw.length % 4;
-		const padded = pad ? raw + '='.repeat(4 - pad) : raw;
-		try {
-			return Buffer.from(padded, 'base64').toString('utf8');
-		} catch {
-			return null;
-		}
-	}
-
 	function getCookieValue(req, name) {
-		const header = safeText(req?.headers?.cookie || '').trim();
-		if (!header || !name) return '';
-		for (const part of header.split(';')) {
-			const trimmed = part.trim();
-			if (!trimmed) continue;
-			const eq = trimmed.indexOf('=');
-			if (eq === -1) continue;
-			const key = trimmed.slice(0, eq).trim();
-			if (key !== name) continue;
-			return trimmed.slice(eq + 1).trim();
-		}
-		return '';
-	}
-
-	function buildAuthCookieValue(user, pass, key, expiry) {
-		const userEncoded = base64UrlEncode(user);
-		const payload = `${userEncoded}|${expiry}`;
-		const sig = crypto.createHmac('sha256', key).update(`${payload}|${pass}`).digest('hex');
-		return base64UrlEncode(`${payload}|${sig}`);
+		return getCookieValueFromHeader(req?.headers?.cookie, name);
 	}
 
 	function getAuthCookieUser(req) {
-		if (!AUTH_COOKIE_KEY) return null;
 		const raw = getCookieValue(req, AUTH_COOKIE_NAME);
-		if (!raw) return null;
-		const decoded = base64UrlDecode(raw);
-		if (!decoded) return null;
-		const parts = decoded.split('|');
-		if (parts.length !== 3) return null;
-		const [userEncoded, expiryRaw, sig] = parts;
-		if (!/^\d+$/.test(expiryRaw)) return null;
-		const expiry = Number(expiryRaw);
-		if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
-		const user = base64UrlDecode(userEncoded);
-		if (!user || !Object.prototype.hasOwnProperty.call(USERS, user)) return null;
-		const expected = crypto.createHmac('sha256', AUTH_COOKIE_KEY).update(`${userEncoded}|${expiryRaw}|${USERS[user]}`).digest('hex');
-		const sigBuf = Buffer.from(sig, 'hex');
-		const expectedBuf = Buffer.from(expected, 'hex');
-		if (sigBuf.length !== expectedBuf.length) return null;
-		if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
-		return user;
+		const parsed = parseAuthCookieValue(raw, USERS, AUTH_COOKIE_KEY);
+		return parsed ? parsed.user : null;
 	}
 
 	function normalizeRemoteIp(value) {
@@ -132,7 +92,7 @@ function createHtmlAuthApp(config = {}) {
 
 		// Set auth cookie
 		const expiry = Math.floor(Date.now() / 1000) + Math.round(AUTH_COOKIE_DAYS * 86400);
-		const cookieValue = buildAuthCookieValue(username, password, AUTH_COOKIE_KEY, expiry);
+		const cookieValue = buildAuthCookieValue(username, `session-${username}`, password, AUTH_COOKIE_KEY, expiry);
 		const expires = new Date(expiry * 1000).toUTCString();
 		const parts = [
 			`${AUTH_COOKIE_NAME}=${cookieValue}`,

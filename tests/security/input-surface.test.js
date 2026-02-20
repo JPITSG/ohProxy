@@ -8,6 +8,7 @@ const path = require('node:path');
 const PROJECT_ROOT = path.join(__dirname, '..', '..');
 const SERVER_FILE = path.join(PROJECT_ROOT, 'server.js');
 const SESSIONS_FILE = path.join(PROJECT_ROOT, 'sessions.js');
+const AUTH_COOKIE_FILE = path.join(PROJECT_ROOT, 'lib', 'auth-cookie.js');
 
 function readFile(filePath) {
 	return fs.readFileSync(filePath, 'utf8');
@@ -150,17 +151,21 @@ describe('Input Validation Coverage', () => {
 
 describe('Cookie Parsing Coverage', () => {
 	it('centralizes cookie parsing and sanitization', () => {
-		const content = readFile(SERVER_FILE);
+		const serverContent = readFile(SERVER_FILE);
+		const authCookieContent = readFile(AUTH_COOKIE_FILE);
 
-		assert.ok(content.includes("const header = safeText(req?.headers?.cookie || '').trim();"));
+		assert.ok(serverContent.includes('getCookieValueFromHeader(req?.headers?.cookie, name);'));
+		assert.ok(authCookieContent.includes('const header = safeText(cookieHeader).trim();'));
 
-		const cookieHeaderUses = countMatches(content, /headers\??\.cookie/g);
+		const cookieHeaderUses = countMatches(serverContent, /headers\??\.cookie/g);
 		assert.strictEqual(cookieHeaderUses, 1, 'Expected cookie header read only in getCookieValue');
 	});
 
 	it('uses timing-safe comparisons for cookie values', () => {
-		const content = readFile(SERVER_FILE);
-		assert.ok(countMatches(content, /timingSafeEqual/g) >= 2);
+		const serverContent = readFile(SERVER_FILE);
+		const authCookieContent = readFile(AUTH_COOKIE_FILE);
+		const total = countMatches(serverContent, /timingSafeEqual/g) + countMatches(authCookieContent, /timingSafeEqual/g);
+		assert.ok(total >= 2);
 	});
 });
 

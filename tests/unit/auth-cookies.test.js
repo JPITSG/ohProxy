@@ -2,74 +2,25 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
-const crypto = require('crypto');
-
-// Helper functions
-function safeText(value) {
-	return value === null || value === undefined ? '' : String(value);
-}
-
-function base64UrlEncode(value) {
-	return Buffer.from(String(value), 'utf8')
-		.toString('base64')
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=+$/g, '');
-}
-
-function base64UrlDecode(value) {
-	const raw = safeText(value).replace(/-/g, '+').replace(/_/g, '/');
-	if (!raw) return null;
-	const pad = raw.length % 4;
-	const padded = pad ? raw + '='.repeat(4 - pad) : raw;
-	try {
-		return Buffer.from(padded, 'base64').toString('utf8');
-	} catch {
-		return null;
-	}
-}
+const {
+	base64UrlEncode,
+	base64UrlDecode,
+	getCookieValueFromHeader,
+	buildAuthCookieValue: buildAuthCookieValueShared,
+	parseAuthCookieValue,
+} = require('../../lib/auth-cookie');
 
 function getCookieValue(req, name) {
-	const header = safeText(req?.headers?.cookie || '').trim();
-	if (!header || !name) return '';
-	for (const part of header.split(';')) {
-		const trimmed = part.trim();
-		if (!trimmed) continue;
-		const eq = trimmed.indexOf('=');
-		if (eq === -1) continue;
-		const key = trimmed.slice(0, eq).trim();
-		if (key !== name) continue;
-		return trimmed.slice(eq + 1).trim();
-	}
-	return '';
+	return getCookieValueFromHeader(req?.headers?.cookie, name);
 }
 
 function buildAuthCookieValue(user, pass, key, expiry) {
-	const userEncoded = base64UrlEncode(user);
-	const payload = `${userEncoded}|${expiry}`;
-	const sig = crypto.createHmac('sha256', key).update(`${payload}|${pass}`).digest('hex');
-	return base64UrlEncode(`${payload}|${sig}`);
+	return buildAuthCookieValueShared(user, 'session123', pass, key, expiry);
 }
 
 function getAuthCookieUser(cookieValue, users, key) {
-	if (!key) return null;
-	if (!cookieValue) return null;
-	const decoded = base64UrlDecode(cookieValue);
-	if (!decoded) return null;
-	const parts = decoded.split('|');
-	if (parts.length !== 3) return null;
-	const [userEncoded, expiryRaw, sig] = parts;
-	if (!/^\d+$/.test(expiryRaw)) return null;
-	const expiry = Number(expiryRaw);
-	if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
-	const user = base64UrlDecode(userEncoded);
-	if (!user || !Object.prototype.hasOwnProperty.call(users, user)) return null;
-	const expected = crypto.createHmac('sha256', key).update(`${userEncoded}|${expiryRaw}|${users[user]}`).digest('hex');
-	const sigBuf = Buffer.from(sig, 'hex');
-	const expectedBuf = Buffer.from(expected, 'hex');
-	if (sigBuf.length !== expectedBuf.length) return null;
-	if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
-	return user;
+	const parsed = parseAuthCookieValue(cookieValue, users, key);
+	return parsed ? parsed.user : null;
 }
 
 function appendSetCookie(res, value) {
@@ -135,7 +86,7 @@ describe('Auth Cookie Functions', () => {
 			const expiry = Math.floor(Date.now() / 1000) + 86400;
 			// Create a tampered cookie
 			const userEncoded = base64UrlEncode('testuser');
-			const payload = `${userEncoded}|${expiry}`;
+			const payload = `${userEncoded}|session123|${expiry}`;
 			const badSig = 'a'.repeat(64); // Invalid signature
 			const tampered = base64UrlEncode(`${payload}|${badSig}`);
 			const result = getAuthCookieUser(tampered, TEST_USERS, TEST_KEY);

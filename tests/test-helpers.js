@@ -1,8 +1,13 @@
 'use strict';
 
 const fs = require('fs');
-const crypto = require('crypto');
 const path = require('path');
+const {
+	base64UrlEncode,
+	buildAuthCookieValue,
+	parseAuthCookieValue,
+	getCookieValueFromHeader,
+} = require('../lib/auth-cookie');
 
 // Test database path
 const TEST_DB_PATH = path.join(__dirname, 'database.db.test');
@@ -13,22 +18,10 @@ function basicAuthHeader(username, password) {
 	return `Basic ${credentials}`;
 }
 
-// Base64url encode helper (used internally by generateTestAuthCookie)
-function base64UrlEncode(value) {
-	return Buffer.from(String(value), 'utf8')
-		.toString('base64')
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=+$/g, '');
-}
-
 // Generate a test auth cookie
-function generateTestAuthCookie(username, password, key, days = 365) {
+function generateTestAuthCookie(username, password, key, days = 365, sessionId = 'test-session') {
 	const expiry = Math.floor(Date.now() / 1000) + Math.round(days * 86400);
-	const userEncoded = base64UrlEncode(username);
-	const payload = `${userEncoded}|${expiry}`;
-	const sig = crypto.createHmac('sha256', key).update(`${payload}|${password}`).digest('hex');
-	return base64UrlEncode(`${payload}|${sig}`);
+	return buildAuthCookieValue(username, sessionId, password, key, expiry);
 }
 
 // Clean up test database
@@ -66,6 +59,9 @@ module.exports = {
 	TEST_COOKIE_KEY,
 	basicAuthHeader,
 	base64UrlEncode,
+	buildAuthCookieValue,
+	parseAuthCookieValue,
+	getCookieValueFromHeader,
 	generateTestAuthCookie,
 	cleanupTestDb,
 	wait,

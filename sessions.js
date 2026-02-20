@@ -257,6 +257,43 @@ function getDefaultSettings() {
 	return { ...DEFAULT_SETTINGS };
 }
 
+const WIDGET_CONFIG_TARGETS = Object.freeze({
+	widget_glow_rules: 'rules',
+	widget_visibility: 'visibility',
+	widget_video_config: 'default_muted',
+	widget_iframe_config: 'height',
+	widget_proxy_cache: 'cache_seconds',
+	widget_card_width: 'width',
+});
+
+/**
+ * Upsert or delete a widget-scoped config row while keeping updated_at in sync.
+ * Table/column are allowlisted to avoid dynamic SQL injection.
+ * @param {object} options
+ * @param {string} options.table
+ * @param {string} options.column
+ * @param {string} options.widgetId
+ * @param {any} options.value
+ * @param {boolean} options.shouldDelete
+ */
+function upsertOrDeleteWidgetConfig({ table, column, widgetId, value, shouldDelete }) {
+	if (!db) initDb();
+	if (WIDGET_CONFIG_TARGETS[table] !== column) {
+		throw new Error(`Invalid widget config target: ${table}.${column}`);
+	}
+
+	if (shouldDelete) {
+		db.prepare(`DELETE FROM ${table} WHERE widget_id = ?`).run(widgetId);
+		return;
+	}
+
+	const now = Math.floor(Date.now() / 1000);
+	db.prepare(`
+		INSERT INTO ${table} (widget_id, ${column}, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT(widget_id) DO UPDATE SET ${column} = excluded.${column}, updated_at = excluded.updated_at
+	`).run(widgetId, value, now);
+}
+
 // ============================================
 // Widget Glow Rules Functions
 // ============================================
@@ -292,18 +329,14 @@ function getGlowRules(widgetId) {
  * @returns {boolean} - True if successful
  */
 function setGlowRules(widgetId, rules) {
-	if (!db) initDb();
-	const now = Math.floor(Date.now() / 1000);
-
-	if (!Array.isArray(rules) || rules.length === 0) {
-		db.prepare('DELETE FROM widget_glow_rules WHERE widget_id = ?').run(widgetId);
-	} else {
-		db.prepare(`
-			INSERT INTO widget_glow_rules (widget_id, rules, updated_at)
-			VALUES (?, ?, ?)
-			ON CONFLICT(widget_id) DO UPDATE SET rules = excluded.rules, updated_at = excluded.updated_at
-		`).run(widgetId, JSON.stringify(rules), now);
-	}
+	const shouldDelete = !Array.isArray(rules) || rules.length === 0;
+	upsertOrDeleteWidgetConfig({
+		table: 'widget_glow_rules',
+		column: 'rules',
+		widgetId,
+		value: shouldDelete ? null : JSON.stringify(rules),
+		shouldDelete,
+	});
 	return true;
 }
 
@@ -333,18 +366,14 @@ function getAllVisibilityRules() {
  * @returns {boolean} - True if successful
  */
 function setVisibility(widgetId, visibility) {
-	if (!db) initDb();
 	if (!VALID_VISIBILITIES.includes(visibility)) return false;
-	const now = Math.floor(Date.now() / 1000);
-
-	if (visibility === 'all') {
-		db.prepare('DELETE FROM widget_visibility WHERE widget_id = ?').run(widgetId);
-	} else {
-		db.prepare(`
-			INSERT INTO widget_visibility (widget_id, visibility, updated_at) VALUES (?, ?, ?)
-			ON CONFLICT(widget_id) DO UPDATE SET visibility = excluded.visibility, updated_at = excluded.updated_at
-		`).run(widgetId, visibility, now);
-	}
+	upsertOrDeleteWidgetConfig({
+		table: 'widget_visibility',
+		column: 'visibility',
+		widgetId,
+		value: visibility,
+		shouldDelete: visibility === 'all',
+	});
 	return true;
 }
 
@@ -372,18 +401,13 @@ function getAllVideoConfigs() {
  * @returns {boolean} - True if successful
  */
 function setVideoConfig(widgetId, defaultMuted) {
-	if (!db) initDb();
-	const now = Math.floor(Date.now() / 1000);
-
-	if (defaultMuted === true) {
-		// True is the default, remove the entry
-		db.prepare('DELETE FROM widget_video_config WHERE widget_id = ?').run(widgetId);
-	} else {
-		db.prepare(`
-			INSERT INTO widget_video_config (widget_id, default_muted, updated_at) VALUES (?, ?, ?)
-			ON CONFLICT(widget_id) DO UPDATE SET default_muted = excluded.default_muted, updated_at = excluded.updated_at
-		`).run(widgetId, defaultMuted ? 1 : 0, now);
-	}
+	upsertOrDeleteWidgetConfig({
+		table: 'widget_video_config',
+		column: 'default_muted',
+		widgetId,
+		value: defaultMuted ? 1 : 0,
+		shouldDelete: defaultMuted === true,
+	});
 	return true;
 }
 
@@ -411,18 +435,13 @@ function getAllIframeConfigs() {
  * @returns {boolean} - True if successful
  */
 function setIframeConfig(widgetId, height) {
-	if (!db) initDb();
-	const now = Math.floor(Date.now() / 1000);
-
-	if (!height || height <= 0) {
-		// No height means use default, remove the entry
-		db.prepare('DELETE FROM widget_iframe_config WHERE widget_id = ?').run(widgetId);
-	} else {
-		db.prepare(`
-			INSERT INTO widget_iframe_config (widget_id, height, updated_at) VALUES (?, ?, ?)
-			ON CONFLICT(widget_id) DO UPDATE SET height = excluded.height, updated_at = excluded.updated_at
-		`).run(widgetId, height, now);
-	}
+	upsertOrDeleteWidgetConfig({
+		table: 'widget_iframe_config',
+		column: 'height',
+		widgetId,
+		value: height,
+		shouldDelete: !height || height <= 0,
+	});
 	return true;
 }
 
@@ -450,18 +469,13 @@ function getAllProxyCacheConfigs() {
  * @returns {boolean} - True if successful
  */
 function setProxyCacheConfig(widgetId, cacheSeconds) {
-	if (!db) initDb();
-	const now = Math.floor(Date.now() / 1000);
-
-	if (!cacheSeconds || cacheSeconds <= 0) {
-		// No cache means disable, remove the entry
-		db.prepare('DELETE FROM widget_proxy_cache WHERE widget_id = ?').run(widgetId);
-	} else {
-		db.prepare(`
-			INSERT INTO widget_proxy_cache (widget_id, cache_seconds, updated_at) VALUES (?, ?, ?)
-			ON CONFLICT(widget_id) DO UPDATE SET cache_seconds = excluded.cache_seconds, updated_at = excluded.updated_at
-		`).run(widgetId, cacheSeconds, now);
-	}
+	upsertOrDeleteWidgetConfig({
+		table: 'widget_proxy_cache',
+		column: 'cache_seconds',
+		widgetId,
+		value: cacheSeconds,
+		shouldDelete: !cacheSeconds || cacheSeconds <= 0,
+	});
 	return true;
 }
 
@@ -486,17 +500,13 @@ function getAllCardWidths() {
  * @returns {boolean} - True if successful
  */
 function setCardWidth(widgetId, width) {
-	if (!db) initDb();
-	const now = Math.floor(Date.now() / 1000);
-
-	if (width === 'standard') {
-		db.prepare('DELETE FROM widget_card_width WHERE widget_id = ?').run(widgetId);
-	} else {
-		db.prepare(`
-			INSERT INTO widget_card_width (widget_id, width, updated_at) VALUES (?, ?, ?)
-			ON CONFLICT(widget_id) DO UPDATE SET width = excluded.width, updated_at = excluded.updated_at
-		`).run(widgetId, width, now);
-	}
+	upsertOrDeleteWidgetConfig({
+		table: 'widget_card_width',
+		column: 'width',
+		widgetId,
+		value: width,
+		shouldDelete: width === 'standard',
+	});
 	return true;
 }
 

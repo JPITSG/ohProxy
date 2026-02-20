@@ -21,6 +21,12 @@ const {
 	widgetType, widgetLink, widgetPageLink, widgetIconName,
 	deltaKey, splitLabelState, widgetKey, normalizeMapping, normalizeButtongridButtons,
 } = require('./lib/widget-normalizer');
+const {
+	getCookieValueFromHeader,
+	buildAuthCookieValue,
+	parseAuthCookieValue,
+} = require('./lib/auth-cookie');
+const { buildOpenhabClient } = require('./lib/openhab-client');
 
 // Keep-alive agents for openHAB backend connections (eliminates TIME_WAIT buildup)
 const ohHttpAgent = new http.Agent({ keepAlive: true });
@@ -1511,39 +1517,8 @@ function loadAuthUsers() {
 	return { users, disabledUsers };
 }
 
-function base64UrlEncode(value) {
-	return Buffer.from(String(value), 'utf8')
-		.toString('base64')
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=+$/g, '');
-}
-
-function base64UrlDecode(value) {
-	const raw = safeText(value).replace(/-/g, '+').replace(/_/g, '/');
-	if (!raw) return null;
-	const pad = raw.length % 4;
-	const padded = pad ? raw + '='.repeat(4 - pad) : raw;
-	try {
-		return Buffer.from(padded, 'base64').toString('utf8');
-	} catch {
-		return null;
-	}
-}
-
 function getCookieValue(req, name) {
-	const header = safeText(req?.headers?.cookie || '').trim();
-	if (!header || !name) return '';
-	for (const part of header.split(';')) {
-		const trimmed = part.trim();
-		if (!trimmed) continue;
-		const eq = trimmed.indexOf('=');
-		if (eq === -1) continue;
-		const key = trimmed.slice(0, eq).trim();
-		if (key !== name) continue;
-		return trimmed.slice(eq + 1).trim();
-	}
-	return '';
+	return getCookieValueFromHeader(req?.headers?.cookie, name);
 }
 
 function isSecureRequest(req) {
@@ -1597,35 +1572,11 @@ function appendSetCookie(res, value) {
 	res.setHeader('Set-Cookie', [existing, value]);
 }
 
-function buildAuthCookieValue(user, sessionId, pass, key, expiry) {
-	const userEncoded = base64UrlEncode(user);
-	const payload = `${userEncoded}|${sessionId}|${expiry}`;
-	const sig = crypto.createHmac('sha256', key).update(`${payload}|${pass}`).digest('hex');
-	return base64UrlEncode(`${payload}|${sig}`);
-}
-
 function getAuthCookieUser(req, users, key) {
 	if (!key) return null;
 	const raw = getCookieValue(req, liveConfig.authCookieName);
 	if (!raw) return null;
-	const decoded = base64UrlDecode(raw);
-	if (!decoded) return null;
-	const parts = decoded.split('|');
-	if (parts.length !== 4) return null;
-
-	// Format: userEncoded|sessionId|expiry|sig
-	const [userEncoded, sessionId, expiryRaw, sig] = parts;
-	if (!/^\d+$/.test(expiryRaw)) return null;
-	const expiry = Number(expiryRaw);
-	if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
-	const user = base64UrlDecode(userEncoded);
-	if (!user || !Object.prototype.hasOwnProperty.call(users, user)) return null;
-	const expected = crypto.createHmac('sha256', key).update(`${userEncoded}|${sessionId}|${expiryRaw}|${users[user]}`).digest('hex');
-	const sigBuf = Buffer.from(sig, 'hex');
-	const expectedBuf = Buffer.from(expected, 'hex');
-	if (sigBuf.length !== expectedBuf.length) return null;
-	if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
-	return { user, sessionId };
+	return parseAuthCookieValue(raw, users, key);
 }
 
 function setAuthCookie(res, user, sessionId, pass) {
@@ -4482,8 +4433,7 @@ async function getFullSitemapData(sitemapName) {
 
 function filterSitemapCacheVisibility(cache, userRole) {
 	if (!cache || !cache.pages || userRole === 'admin') return cache;
-	const visibilityRules = sessions.getAllVisibilityRules();
-	const visibilityMap = new Map(visibilityRules.map((r) => [r.widgetId, r.visibility]));
+	const visibilityMap = buildVisibilityMap();
 
 	const withWidgetKeyContext = (widget, ctx = {}) => {
 		const clone = { ...widget };
@@ -4572,8 +4522,7 @@ async function getHomepageData(req, sitemapName) {
 
 		// Apply visibility filtering
 		const userRole = req.ohProxyUser ? (sessions.getUser(req.ohProxyUser)?.role || 'normal') : 'normal';
-		const visibilityRules = sessions.getAllVisibilityRules();
-		const visibilityMap = new Map(visibilityRules.map((r) => [r.widgetId, r.visibility]));
+		const visibilityMap = buildVisibilityMap();
 
 		const visibleWidgets = widgets.filter((w) => isWidgetVisibleForRole(w, userRole, visibilityMap));
 		const inlineIcons = await buildHomepageInlineIcons(visibleWidgets);
@@ -4890,6 +4839,11 @@ function resolveRequestSitemapName(req) {
 	return safeText(sitemaps[0]?.name).trim();
 }
 
+function buildVisibilityMap() {
+	const visibilityRules = sessions.getAllVisibilityRules();
+	return new Map(visibilityRules.map((entry) => [entry.widgetId, entry.visibility]));
+}
+
 
 function isWidgetVisibleForRole(widget, userRole, visibilityMap) {
 	if (userRole === 'admin') return true;
@@ -4916,6 +4870,35 @@ function buttonsSignature(buttons) {
 	return buttons.map((b) =>
 		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}`
 	).join('|');
+}
+
+function roundPresenceCoord(value) {
+	return Math.round(Number(value) * 10000000) / 10000000;
+}
+
+function presenceMarkerTooltip(timestamp) {
+	if (!timestamp) return '';
+	const d = new Date(timestamp);
+	const date = formatDT(d, liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY');
+	const time = formatDT(d, liveConfig.clientConfig?.timeFormat || 'H:mm:ss');
+	return '<div class="tt-date">' + date + '</div><div class="tt-time">' + time + '</div>';
+}
+
+function buildPresenceMarkersFromRows(rows) {
+	const markers = [];
+	const seen = new Set();
+	let first = true;
+	for (const row of rows || []) {
+		const lat = roundPresenceCoord(row.lat);
+		const lon = roundPresenceCoord(row.lon);
+		const key = lat + ',' + lon;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		markers.push([lat, lon, first ? 'red' : 'blue', presenceMarkerTooltip(row.timestamp)]);
+		first = false;
+	}
+	markers.reverse();
+	return markers;
 }
 
 function widgetSnapshot(widget) {
@@ -5468,88 +5451,47 @@ function pipeStreamingProxy(targetUrl, expressRes, headers = {}, agent) {
 	});
 }
 
-function fetchOpenhab(pathname) {
-	return new Promise((resolve, reject) => {
-		const target = new URL(liveConfig.ohTarget);
-		const isHttps = target.protocol === 'https:';
-		const basePath = target.pathname && target.pathname !== '/' ? target.pathname.replace(/\/$/, '') : '';
-		const reqPath = `${basePath}${pathname}`;
-		const client = isHttps ? https : http;
-		const headers = { Accept: 'application/json', 'User-Agent': liveConfig.userAgent };
-		const ah = authHeader();
-		if (ah) headers.Authorization = ah;
+let cachedOpenhabClient = null;
+let cachedOpenhabClientKey = '';
 
-		const req = client.request({
-			method: 'GET',
-			hostname: target.hostname,
-			port: target.port || (isHttps ? 443 : 80),
-			path: reqPath,
-			headers,
-			agent: getOhAgent(),
-		}, (res) => {
-			let body = '';
-			res.setEncoding('utf8');
-			res.on('data', (chunk) => { body += chunk; });
-			res.on('error', reject);
-			res.on('end', () => resolve({
-				status: res.statusCode || 500,
-				ok: res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
-				body,
-			}));
+function getOpenhabClient() {
+	const clientKey = [
+		safeText(liveConfig.ohTarget),
+		safeText(liveConfig.ohUser),
+		safeText(liveConfig.ohPass),
+		safeText(liveConfig.ohApiToken),
+		safeText(liveConfig.userAgent),
+		String(configNumber(liveConfig.ohTimeoutMs, 0)),
+	].join('\n');
+	if (!cachedOpenhabClient || cachedOpenhabClientKey !== clientKey) {
+		cachedOpenhabClient = buildOpenhabClient({
+			target: liveConfig.ohTarget,
+			user: liveConfig.ohUser,
+			pass: liveConfig.ohPass,
+			apiToken: liveConfig.ohApiToken,
+			userAgent: liveConfig.userAgent,
+			timeoutMs: liveConfig.ohTimeoutMs,
+			agent: () => getOhAgent(),
 		});
+		cachedOpenhabClientKey = clientKey;
+	}
+	return cachedOpenhabClient;
+}
 
-		if (liveConfig.ohTimeoutMs > 0) {
-			req.setTimeout(liveConfig.ohTimeoutMs, () => {
-				req.destroy(new Error('openHAB request timed out'));
-			});
-		}
-		req.on('error', reject);
-		req.end();
-	});
+function fetchOpenhab(pathname) {
+	const client = getOpenhabClient();
+	return client.get(pathname, { timeoutMs: liveConfig.ohTimeoutMs, timeoutLabel: 'openHAB request' });
 }
 
 function sendItemCommand(itemName, command, { timeoutMs = 0, timeoutLabel = 'request' } = {}) {
-	return new Promise((resolve, reject) => {
-		const target = new URL(liveConfig.ohTarget);
-		const isHttps = target.protocol === 'https:';
-		const basePath = target.pathname && target.pathname !== '/' ? target.pathname.replace(/\/$/, '') : '';
-		const reqPath = `${basePath}/rest/items/${encodeURIComponent(itemName)}`;
-		const client = isHttps ? https : http;
-		const headers = {
+	const client = getOpenhabClient();
+	return client.post(`/rest/items/${encodeURIComponent(itemName)}`, String(command), {
+		timeoutMs,
+		timeoutLabel,
+		headers: {
 			'Content-Type': 'text/plain',
 			'Accept': 'application/json',
-			'User-Agent': liveConfig.userAgent,
-		};
-		const ah = authHeader();
-		if (ah) headers.Authorization = ah;
-
-		const req = client.request({
-			method: 'POST',
-			hostname: target.hostname,
-			port: target.port || (isHttps ? 443 : 80),
-			path: reqPath,
-			headers,
-			agent: getOhAgent(),
-		}, (res) => {
-			let body = '';
-			res.setEncoding('utf8');
-			res.on('data', (chunk) => { body += chunk; });
-			res.on('error', reject);
-			res.on('end', () => resolve({
-				status: res.statusCode || 500,
-				ok: res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
-				body,
-			}));
-		});
-
-		if (timeoutMs > 0) {
-			req.setTimeout(timeoutMs, () => {
-				req.destroy(new Error(`${timeoutLabel} timed out`));
-			});
-		}
-		req.on('error', reject);
-		req.write(String(command));
-		req.end();
+		},
 	});
 }
 
@@ -7701,8 +7643,7 @@ app.get('/search-index', async (req, res) => {
 	}
 
 	// Filter widgets by visibility (admins see everything)
-	const visibilityRules = sessions.getAllVisibilityRules();
-	const visibilityMap = new Map(visibilityRules.map(r => [r.widgetId, r.visibility]));
+	const visibilityMap = buildVisibilityMap();
 
 	const filteredWidgets = widgets.filter(w => isWidgetVisibleForRole(w, userRole, visibilityMap));
 
@@ -8461,31 +8402,7 @@ app.get('/api/presence', async (req, res) => {
 		return res.status(504).json({ ok: false, error: 'Query failed' });
 	}
 
-	const markers = [];
-	const seen = new Set();
-	let first = true;
-
-	for (const row of rows) {
-		const current = [
-			Math.round(row.lat * 10000000) / 10000000,
-			Math.round(row.lon * 10000000) / 10000000,
-		];
-		const key = current[0] + ',' + current[1];
-		if (seen.has(key)) {
-			continue;
-		}
-		seen.add(key);
-		const ts = row.timestamp ? (() => {
-			const d = new Date(row.timestamp);
-			const date = formatDT(d, liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY');
-			const time = formatDT(d, liveConfig.clientConfig?.timeFormat || 'H:mm:ss');
-			return '<div class="tt-date">' + date + '</div><div class="tt-time">' + time + '</div>';
-		})() : '';
-		markers.push([current[0], current[1], first ? 'red' : 'blue', ts]);
-		first = false;
-	}
-
-	markers.reverse();
+	const markers = buildPresenceMarkersFromRows(rows);
 	res.json({ ok: true, markers: markers });
 });
 
@@ -8648,33 +8565,11 @@ app.get('/presence', async (req, res) => {
 
 	const markers = [];
 	if (singlePointMode) {
-		const lat = Math.round(singlePointLat * 10000000) / 10000000;
-		const lon = Math.round(singlePointLon * 10000000) / 10000000;
+		const lat = roundPresenceCoord(singlePointLat);
+		const lon = roundPresenceCoord(singlePointLon);
 		markers.push([lat, lon, 'red', '']);
 	} else {
-		const seen = new Set();
-		let first = true;
-
-		for (const row of rows) {
-			const current = [
-				Math.round(row.lat * 10000000) / 10000000,
-				Math.round(row.lon * 10000000) / 10000000,
-			];
-			const key = current[0] + ',' + current[1];
-			if (seen.has(key)) {
-				continue;
-			}
-			seen.add(key);
-			const ts = row.timestamp ? (() => {
-				const d = new Date(row.timestamp);
-				const date = formatDT(d, liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY');
-				const time = formatDT(d, liveConfig.clientConfig?.timeFormat || 'H:mm:ss');
-				return '<div class="tt-date">' + date + '</div><div class="tt-time">' + time + '</div>';
-			})() : '';
-			markers.push([current[0], current[1], first ? 'red' : 'blue', ts]);
-			first = false;
-		}
-		markers.reverse();
+		markers.push(...buildPresenceMarkersFromRows(rows));
 	}
 
 	const markersJson = JSON.stringify(markers).replace(/</g, '\\u003c');

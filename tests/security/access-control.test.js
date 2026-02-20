@@ -4,9 +4,15 @@ const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert');
 const http = require('http');
 const express = require('express');
-const crypto = require('crypto');
 
-const { basicAuthHeader, TEST_USERS, TEST_COOKIE_KEY, base64UrlEncode, generateTestAuthCookie } = require('../test-helpers');
+const {
+	basicAuthHeader,
+	TEST_USERS,
+	TEST_COOKIE_KEY,
+	generateTestAuthCookie,
+	parseAuthCookieValue,
+	getCookieValueFromHeader,
+} = require('../test-helpers');
 
 // Create access control test app
 function createAccessControlApp(config = {}) {
@@ -82,57 +88,10 @@ function createAccessControlApp(config = {}) {
 		return [decoded.slice(0, idx), decoded.slice(idx + 1)];
 	}
 
-	function base64UrlDecode(value) {
-		const raw = safeText(value).replace(/-/g, '+').replace(/_/g, '/');
-		if (!raw) return null;
-		const pad = raw.length % 4;
-		const padded = pad ? raw + '='.repeat(4 - pad) : raw;
-		try {
-			return Buffer.from(padded, 'base64').toString('utf8');
-		} catch {
-			return null;
-		}
-	}
-
-	function getCookieValue(req, name) {
-		const header = safeText(req?.headers?.cookie || '').trim();
-		if (!header || !name) return '';
-		for (const part of header.split(';')) {
-			const trimmed = part.trim();
-			if (!trimmed) continue;
-			const eq = trimmed.indexOf('=');
-			if (eq === -1) continue;
-			const key = trimmed.slice(0, eq).trim();
-			if (key !== name) continue;
-			return trimmed.slice(eq + 1).trim();
-		}
-		return '';
-	}
-
 	function getAuthCookieUser(req) {
-		if (!AUTH_COOKIE_KEY) return null;
-		const raw = getCookieValue(req, AUTH_COOKIE_NAME);
-		if (!raw) return null;
-		const decoded = base64UrlDecode(raw);
-		if (!decoded) return null;
-		const parts = decoded.split('|');
-		if (parts.length !== 3) return null;
-		const [userEncoded, expiryRaw, sig] = parts;
-		if (!/^\d+$/.test(expiryRaw)) return null;
-		const expiry = Number(expiryRaw);
-		if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
-		const user = base64UrlDecode(userEncoded);
-		if (!user || !Object.prototype.hasOwnProperty.call(USERS, user)) return null;
-		const expected = crypto.createHmac('sha256', AUTH_COOKIE_KEY).update(`${userEncoded}|${expiryRaw}|${USERS[user]}`).digest('hex');
-		try {
-			const sigBuf = Buffer.from(sig, 'hex');
-			const expectedBuf = Buffer.from(expected, 'hex');
-			if (sigBuf.length !== expectedBuf.length) return null;
-			if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
-		} catch {
-			return null;
-		}
-		return user;
+		const raw = getCookieValueFromHeader(req?.headers?.cookie, AUTH_COOKIE_NAME);
+		const parsed = parseAuthCookieValue(raw, USERS, AUTH_COOKIE_KEY);
+		return parsed ? parsed.user : null;
 	}
 
 	function isProxyAllowed(host) {
