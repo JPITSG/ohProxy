@@ -89,7 +89,7 @@ function extractDefaultValues(content) {
 	return defaults;
 }
 
-describe('Config Defaults: Validation Compatibility', () => {
+describe('Config Defaults: Validation Consistency', () => {
 	it('default values pass validation rules', () => {
 		const serverContent = readFile(SERVER_FILE);
 		const defaultsContent = readFile(DEFAULTS_FILE);

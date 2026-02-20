@@ -194,6 +194,14 @@ describe('Service Worker: Security Headers', () => {
 	});
 });
 
+describe('Service Worker: Status Messaging', () => {
+	it('accepts only statusUpdate for status-notification control messages', () => {
+		const content = readFile(SW_FILE);
+		assert.doesNotMatch(content, /notification-heartbeat/);
+		assert.match(content, /if \(data\.type !== 'statusUpdate'\) return;/);
+	});
+});
+
 describe('Service Worker: Transport RPC Security', () => {
 	it('enforces same-origin validation for transport-http-request URLs', () => {
 		const content = readFile(SW_FILE);

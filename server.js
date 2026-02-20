@@ -320,8 +320,6 @@ const AUTH_FAIL_NOTIFY_CMD = safeText(SERVER_AUTH.authFailNotifyCmd || '');
 const AUTH_MODE = safeText(SERVER_AUTH.mode || 'basic');
 const AUTH_FAIL_NOTIFY_INTERVAL_MINS = configNumber(SERVER_AUTH.authFailNotifyIntervalMins, 15);
 const AUTH_LOCKOUT_THRESHOLD = 3;
-const SESSION_COOKIE_NAME = 'ohSession';
-const SESSION_COOKIE_DAYS = 3650; // 10 years
 const SESSION_MAX_AGE_DAYS = (() => {
 	const val = configNumber(SERVER_CONFIG.sessionMaxAgeDays, 14);
 	if (val < 1) {
@@ -341,8 +339,7 @@ const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(TASK_CONFIG.sitemapRefreshMs);
 const STRUCTURE_MAP_REFRESH_MS = configNumber(TASK_CONFIG.structureMapRefreshMs);
 const NPM_UPDATE_CHECK_MS = configNumber(TASK_CONFIG.npmUpdateCheckMs);
-const LOG_ROTATION_ENABLED = SERVER_CONFIG.logRotationEnabled === true
-	|| (SERVER_CONFIG.logRotationEnabled === undefined && TASK_CONFIG.logRotationEnabled === true);
+const LOG_ROTATION_ENABLED = SERVER_CONFIG.logRotationEnabled === true;
 const WEBSOCKET_CONFIG = SERVER_CONFIG.websocket || {};
 const WS_MODE = ['atmosphere', 'sse'].includes(WEBSOCKET_CONFIG.mode) ? WEBSOCKET_CONFIG.mode : 'polling';
 const WS_POLLING_INTERVAL_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalMs) || 500;
@@ -915,9 +912,6 @@ function validateConfig() {
 		ensureNumber(SITEMAP_REFRESH_MS, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
 		ensureNumber(STRUCTURE_MAP_REFRESH_MS, 'server.backgroundTasks.structureMapRefreshMs', { min: 0 }, errors);
 		ensureNumber(NPM_UPDATE_CHECK_MS, 'server.backgroundTasks.npmUpdateCheckMs', { min: 0 }, errors);
-		if (TASK_CONFIG.logRotationEnabled !== undefined) {
-			ensureBoolean(TASK_CONFIG.logRotationEnabled, 'server.backgroundTasks.logRotationEnabled', errors);
-		}
 	}
 	if (SERVER_CONFIG.logRotationEnabled !== undefined) {
 		ensureBoolean(SERVER_CONFIG.logRotationEnabled, 'server.logRotationEnabled', errors);
@@ -1195,10 +1189,6 @@ function validateAdminConfig(config) {
 		}
 		if (s.backgroundTasks.npmUpdateCheckMs !== undefined) {
 			ensureNumber(s.backgroundTasks.npmUpdateCheckMs, 'server.backgroundTasks.npmUpdateCheckMs', { min: 0 }, errors);
-		}
-		// Backward compatibility for older configs.
-		if (s.backgroundTasks.logRotationEnabled !== undefined) {
-			ensureBoolean(s.backgroundTasks.logRotationEnabled, 'server.backgroundTasks.logRotationEnabled', errors);
 		}
 	}
 
@@ -1621,39 +1611,21 @@ function getAuthCookieUser(req, users, key) {
 	const decoded = base64UrlDecode(raw);
 	if (!decoded) return null;
 	const parts = decoded.split('|');
+	if (parts.length !== 4) return null;
 
-	// Handle both legacy (3-part) and new (4-part) formats
-	if (parts.length === 3) {
-		// Legacy format: userEncoded|expiry|sig
-		const [userEncoded, expiryRaw, sig] = parts;
-		if (!/^\d+$/.test(expiryRaw)) return null;
-		const expiry = Number(expiryRaw);
-		if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
-		const user = base64UrlDecode(userEncoded);
-		if (!user || !Object.prototype.hasOwnProperty.call(users, user)) return null;
-		const expected = crypto.createHmac('sha256', key).update(`${userEncoded}|${expiryRaw}|${users[user]}`).digest('hex');
-		const sigBuf = Buffer.from(sig, 'hex');
-		const expectedBuf = Buffer.from(expected, 'hex');
-		if (sigBuf.length !== expectedBuf.length) return null;
-		if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
-		return { user, sessionId: null, isLegacy: true };
-	} else if (parts.length === 4) {
-		// New format: userEncoded|sessionId|expiry|sig
-		const [userEncoded, sessionId, expiryRaw, sig] = parts;
-		if (!/^\d+$/.test(expiryRaw)) return null;
-		const expiry = Number(expiryRaw);
-		if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
-		const user = base64UrlDecode(userEncoded);
-		if (!user || !Object.prototype.hasOwnProperty.call(users, user)) return null;
-		const expected = crypto.createHmac('sha256', key).update(`${userEncoded}|${sessionId}|${expiryRaw}|${users[user]}`).digest('hex');
-		const sigBuf = Buffer.from(sig, 'hex');
-		const expectedBuf = Buffer.from(expected, 'hex');
-		if (sigBuf.length !== expectedBuf.length) return null;
-		if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
-		return { user, sessionId, isLegacy: false };
-	}
-
-	return null;
+	// Format: userEncoded|sessionId|expiry|sig
+	const [userEncoded, sessionId, expiryRaw, sig] = parts;
+	if (!/^\d+$/.test(expiryRaw)) return null;
+	const expiry = Number(expiryRaw);
+	if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
+	const user = base64UrlDecode(userEncoded);
+	if (!user || !Object.prototype.hasOwnProperty.call(users, user)) return null;
+	const expected = crypto.createHmac('sha256', key).update(`${userEncoded}|${sessionId}|${expiryRaw}|${users[user]}`).digest('hex');
+	const sigBuf = Buffer.from(sig, 'hex');
+	const expectedBuf = Buffer.from(expected, 'hex');
+	if (sigBuf.length !== expectedBuf.length) return null;
+	if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
+	return { user, sessionId };
 }
 
 function setAuthCookie(res, user, sessionId, pass) {
@@ -1680,24 +1652,6 @@ function clearAuthCookie(res) {
 	const secure = isSecureRequest(res.req);
 	const parts = [
 		`${liveConfig.authCookieName}=`,
-		'Path=/',
-		'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
-		'Max-Age=0',
-		'HttpOnly',
-		'SameSite=Lax',
-	];
-	if (secure) parts.push('Secure');
-	appendSetCookie(res, parts.join('; '));
-}
-
-function getSessionCookie(req) {
-	return getCookieValue(req, SESSION_COOKIE_NAME);
-}
-
-function clearSessionCookie(res) {
-	const secure = isSecureRequest(res.req);
-	const parts = [
-		`${SESSION_COOKIE_NAME}=`,
 		'Path=/',
 		'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
 		'Max-Age=0',
@@ -1934,36 +1888,6 @@ const liveConfig = {
 
 logMessage('[Startup] Starting ohProxy instance...');
 
-// Widget glow rules - migrate from JSON to SQLite on first run
-const GLOW_RULES_LOCAL_PATH = path.join(__dirname, 'widgetGlowRules.local.json');
-const GLOW_RULES_MIGRATED_PATH = GLOW_RULES_LOCAL_PATH + '.migrated';
-
-function migrateGlowRulesToDb() {
-	// Skip if already migrated or no file exists
-	if (fs.existsSync(GLOW_RULES_MIGRATED_PATH) || !fs.existsSync(GLOW_RULES_LOCAL_PATH)) return;
-
-	try {
-		const raw = fs.readFileSync(GLOW_RULES_LOCAL_PATH, 'utf8');
-		const rules = JSON.parse(raw);
-		if (!Array.isArray(rules)) return;
-
-		let count = 0;
-		for (const entry of rules) {
-			if (entry && entry.widgetId && Array.isArray(entry.rules) && entry.rules.length > 0) {
-				sessions.setGlowRules(entry.widgetId, entry.rules);
-				count++;
-			}
-		}
-		fs.renameSync(GLOW_RULES_LOCAL_PATH, GLOW_RULES_MIGRATED_PATH);
-		logMessage(`Migrated ${count} widget glow rules to database`);
-	} catch (err) {
-		logMessage(`Failed to migrate glow rules: ${err.message || err}`, 'error');
-	}
-}
-
-// Run migration on startup
-migrateGlowRulesToDb();
-
 // Values that require restart if changed
 const restartRequiredKeys = [
 	'http.enabled', 'http.host', 'http.port',
@@ -2092,9 +2016,7 @@ function reloadLiveConfig() {
 	const prevNpmUpdateCheckMs = liveConfig.npmUpdateCheckMs;
 	liveConfig.npmUpdateCheckMs = configNumber(newTasks.npmUpdateCheckMs);
 	const prevLogRotationEnabled = liveConfig.logRotationEnabled;
-	const legacyLogRotationEnabled = newTasks.logRotationEnabled === true;
-	liveConfig.logRotationEnabled = newServer.logRotationEnabled === true
-		|| (newServer.logRotationEnabled === undefined && legacyLogRotationEnabled);
+	liveConfig.logRotationEnabled = newServer.logRotationEnabled === true;
 	liveConfig.clientConfig = newConfig.client || {};
 	sessions.setDefaultTheme(liveConfig.clientConfig.defaultTheme || 'light');
 
@@ -2500,13 +2422,6 @@ function syncLogRotationSchedule() {
 }
 
 const backgroundState = {
-	sitemap: {
-		name: '',
-		title: '',
-		homepage: '',
-		updatedAt: 0,
-		ok: false,
-	},
 	sitemaps: [],
 };
 
@@ -4954,12 +4869,8 @@ function sitemapCatalogSignature(sitemaps) {
 }
 
 function getBackgroundSitemaps() {
-	if (Array.isArray(backgroundState.sitemaps) && backgroundState.sitemaps.length) {
-		return backgroundState.sitemaps.filter((entry) => !!safeText(entry?.name).trim());
-	}
-	const fallbackName = safeText(backgroundState.sitemap?.name).trim();
-	if (!fallbackName) return [];
-	return [{ ...backgroundState.sitemap, name: fallbackName }];
+	if (!Array.isArray(backgroundState.sitemaps) || !backgroundState.sitemaps.length) return [];
+	return backgroundState.sitemaps.filter((entry) => !!safeText(entry?.name).trim());
 }
 
 function getPrimaryBackgroundSitemap() {
@@ -6020,7 +5931,6 @@ async function refreshSitemapCache(options = {}) {
 	if (!nextCatalog.length) return false;
 
 	backgroundState.sitemaps = nextCatalog;
-	backgroundState.sitemap = { ...nextCatalog[0] };
 
 	if (!options.skipAtmosphereResubscribe) {
 		const newSignature = sitemapCatalogSignature(nextCatalog);
@@ -6376,16 +6286,9 @@ app.post('/api/auth/login', jsonParserSmall, (req, res) => {
 
 	// Success - clear failed attempts and set auth cookie
 	clearAuthFailures(lockKey);
-	// Create or reuse session
-	let sessionId = getSessionCookie(req);
-	if (!sessionId || !sessions.getSession(sessionId)) {
-		sessionId = sessions.generateSessionId();
-		sessions.createSession(sessionId, username, sessions.getDefaultSettings(), clientIp);
-	} else {
-		sessions.updateUsername(sessionId, username);
-	}
+	const sessionId = sessions.generateSessionId();
+	sessions.createSession(sessionId, username, sessions.getDefaultSettings(), clientIp);
 	setAuthCookie(res, username, sessionId, users[username]);
-	clearSessionCookie(res); // Remove legacy ohSession cookie
 	logMessage(`[Auth] Login success for user: ${username} from ${clientIp || 'unknown'}`);
 	res.json({ success: true });
 });
@@ -6421,21 +6324,6 @@ app.use((req, res, next) => {
 				req.ohProxyAuth = 'authenticated';
 				req.ohProxyUser = cookieResult.user;
 				req._cookieResult = cookieResult; // Store for session middleware
-				// Handle legacy cookie upgrade
-				if (cookieResult.isLegacy) {
-					const clientIp = req.ohProxyClientIp || null;
-					const oldSessionId = getSessionCookie(req);
-					let sessionId;
-					if (oldSessionId && sessions.getSession(oldSessionId)) {
-						sessionId = oldSessionId;
-						sessions.updateUsername(sessionId, cookieResult.user);
-					} else {
-						sessionId = sessions.generateSessionId();
-						sessions.createSession(sessionId, cookieResult.user, sessions.getDefaultSettings(), clientIp);
-					}
-					setAuthCookie(res, cookieResult.user, sessionId, users[cookieResult.user]);
-					clearSessionCookie(res);
-				}
 				return next();
 			}
 			// Clear invalid cookie if present
@@ -6515,7 +6403,6 @@ app.use((req, res, next) => {
 			return;
 		}
 		authenticatedUser = user;
-		req._basicAuthUsed = true;
 	} else if (liveConfig.authCookieKey && liveConfig.authCookieName) {
 		const cookieResult = getAuthCookieUser(req, users, liveConfig.authCookieKey);
 		if (cookieResult) {
@@ -6537,24 +6424,16 @@ app.use((req, res, next) => {
 	clearAuthFailures(lockKey);
 	// Create or reuse session
 	const cookieResult = req._cookieResult;
-	const oldSessionId = getSessionCookie(req);
 	let sessionId;
-	if (cookieResult && !cookieResult.isLegacy) {
+	if (cookieResult && cookieResult.sessionId) {
 		// Already has new format cookie with embedded sessionId
 		sessionId = cookieResult.sessionId;
-	} else if (oldSessionId && sessions.getSession(oldSessionId)) {
-		// Reuse existing session
-		sessionId = oldSessionId;
-		sessions.updateUsername(sessionId, authenticatedUser);
 	} else {
 		// Create new session
 		sessionId = sessions.generateSessionId();
 		sessions.createSession(sessionId, authenticatedUser, sessions.getDefaultSettings(), clientIp);
 	}
 	setAuthCookie(res, authenticatedUser, sessionId, users[authenticatedUser]);
-	if (req._basicAuthUsed || (cookieResult && cookieResult.isLegacy)) {
-		clearSessionCookie(res);
-	}
 	req.ohProxyAuth = 'authenticated';
 	req.ohProxyUser = authenticatedUser;
 	next();
@@ -6587,9 +6466,8 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
 	try {
 		const clientIp = req.ohProxyClientIp || null;
-		// Get sessionId from consolidated cookie (new format) or legacy ohSession cookie
 		const cookieResult = req._cookieResult;
-		let sessionId = (cookieResult && !cookieResult.isLegacy) ? cookieResult.sessionId : getSessionCookie(req);
+		const sessionId = cookieResult ? cookieResult.sessionId : null;
 
 		if (sessionId) {
 			let session = sessions.getSession(sessionId);
@@ -7978,8 +7856,13 @@ app.get('/weather', (req, res) => {
 		return;
 	}
 
-	// Handle both old format (forecast only) and new format (forecast + current)
-	const forecast = weatherData.forecast || weatherData;
+	const forecast = weatherData && typeof weatherData === 'object' && !Array.isArray(weatherData)
+		? weatherData.forecast
+		: null;
+	if (!forecast || typeof forecast !== 'object' || Array.isArray(forecast)) {
+		sendStyledError(res, req, 503, 'Weather data not available');
+		return;
+	}
 
 	res.setHeader('Content-Type', 'text/html; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
@@ -8023,7 +7906,6 @@ app.get('/logout', (req, res) => {
 		return;
 	}
 	clearAuthCookie(res);
-	clearSessionCookie(res);
 	res.redirect('/');
 });
 
@@ -8033,13 +7915,11 @@ app.post('/logout', urlencodedParserSmall, (req, res) => {
 		return;
 	}
 	clearAuthCookie(res);
-	clearSessionCookie(res);
 	res.redirect('/');
 });
 
 app.post('/api/logout', (req, res) => {
 	clearAuthCookie(res);
-	clearSessionCookie(res);
 	if (liveConfig.authMode === 'basic') {
 		res.json({ ok: true, basicLogout: true });
 	} else {
@@ -8049,7 +7929,6 @@ app.post('/api/logout', (req, res) => {
 
 app.get('/api/logout', (req, res) => {
 	clearAuthCookie(res);
-	clearSessionCookie(res);
 	res.setHeader('WWW-Authenticate', `Basic realm="${liveConfig.authRealm}"`);
 	res.status(401).type('text/html').send(
 		'<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Logged out</title>' +
@@ -10055,11 +9934,6 @@ app.use(express.static(PUBLIC_DIR, {
 		res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
 	},
 }));
-
-// Convenience: legacy UI still available
-app.get('/classic', (req, res) => {
-	res.redirect('/openhab.app');
-});
 
 // Redirect unknown routes to homepage
 app.use((req, res) => {

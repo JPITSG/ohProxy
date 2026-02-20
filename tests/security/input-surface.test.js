@@ -160,7 +160,7 @@ describe('Cookie Parsing Coverage', () => {
 
 	it('uses timing-safe comparisons for cookie values', () => {
 		const content = readFile(SERVER_FILE);
-		assert.ok(countMatches(content, /timingSafeEqual/g) >= 3);
+		assert.ok(countMatches(content, /timingSafeEqual/g) >= 2);
 	});
 });
 

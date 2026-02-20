@@ -611,8 +611,8 @@ const SLIDER_DEBOUNCE_MS = configNumber(CLIENT_CONFIG.sliderDebounceMs, 250);
 const IDLE_AFTER_MS = configNumber(CLIENT_CONFIG.idleAfterMs, 60000);
 const ACTIVITY_THROTTLE_MS = configNumber(CLIENT_CONFIG.activityThrottleMs, 250);
 const CHART_HASH_CHECK_MS = 30000; // Check chart hashes every 30 seconds
-const HOME_CACHE_KEY_LEGACY = 'ohProxyHomeSnapshot';
-const HOME_CACHE_KEY_PREFIX = `${HOME_CACHE_KEY_LEGACY}:`;
+const HOME_CACHE_KEY_BASE = 'ohProxyHomeSnapshot';
+const HOME_CACHE_KEY_PREFIX = `${HOME_CACHE_KEY_BASE}:`;
 const MAX_ICON_CACHE = Math.max(0, Math.round(configNumber(CLIENT_CONFIG.maxIconCache, 500)));
 const MAX_CHART_HASHES = Math.max(0, Math.round(configNumber(CLIENT_CONFIG.maxChartHashes, 500)));
 
@@ -1213,10 +1213,10 @@ function getPreferredSnapshotSitemapName() {
 
 function getHomeSnapshotKey(sitemapName) {
 	const normalized = normalizeSnapshotSitemapName(sitemapName);
-	return normalized ? `${HOME_CACHE_KEY_PREFIX}${normalized}` : HOME_CACHE_KEY_LEGACY;
+	return normalized ? `${HOME_CACHE_KEY_PREFIX}${normalized}` : '';
 }
 
-function getHomeSnapshotLookupOrder(preferredSitemapName, allowLegacyFallback) {
+function getHomeSnapshotLookupOrder(preferredSitemapName) {
 	const requested = normalizeSnapshotSitemapName(preferredSitemapName);
 	const candidates = [];
 	const seen = new Set();
@@ -1224,8 +1224,10 @@ function getHomeSnapshotLookupOrder(preferredSitemapName, allowLegacyFallback) {
 		const normalized = normalizeSnapshotSitemapName(name);
 		if (!normalized || seen.has(normalized)) return;
 		seen.add(normalized);
+		const key = getHomeSnapshotKey(normalized);
+		if (!key) return;
 		candidates.push({
-			key: getHomeSnapshotKey(normalized),
+			key,
 			sitemapName: normalized,
 		});
 	};
@@ -1233,13 +1235,6 @@ function getHomeSnapshotLookupOrder(preferredSitemapName, allowLegacyFallback) {
 	addScopedCandidate(requested);
 	addScopedCandidate(state.sitemapName);
 	addScopedCandidate(getStoredSelectedSitemapName());
-
-	if (allowLegacyFallback) {
-		candidates.push({
-			key: HOME_CACHE_KEY_LEGACY,
-			sitemapName: '',
-		});
-	}
 	return candidates;
 }
 
@@ -1273,8 +1268,7 @@ function loadHomeSnapshot(options = {}) {
 		? { sitemapName: options }
 		: (options && typeof options === 'object' ? options : {});
 	const requestedSitemap = normalizeSnapshotSitemapName(opts.sitemapName);
-	const allowLegacyFallback = opts.allowLegacyFallback !== false;
-	const candidates = getHomeSnapshotLookupOrder(requestedSitemap, allowLegacyFallback);
+	const candidates = getHomeSnapshotLookupOrder(requestedSitemap);
 
 	for (const candidate of candidates) {
 		if (!candidate?.key) continue;
