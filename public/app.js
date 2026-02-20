@@ -9897,6 +9897,86 @@ function handleWsChartHashResponse(data) {
 	}
 }
 
+// --- Screen Wake Lock (touch PWA only) ---
+let wakeLockSentinel = null;
+let wakeLockSupported = false;
+let wakeLockRequestPending = false;
+let wakeLockListenersInitialized = false;
+
+function isPwaDisplayMode() {
+	const standalone = !!navigator.standalone;
+	const matchDisplayMode = (mode) => {
+		try {
+			return typeof window.matchMedia === 'function'
+				&& !!window.matchMedia(`(display-mode: ${mode})`).matches;
+		} catch {
+			return false;
+		}
+	};
+	return standalone || matchDisplayMode('standalone') || matchDisplayMode('fullscreen');
+}
+
+function isWakeLockEligible() {
+	if (!wakeLockSupported) return false;
+	if (!isTouchDevice()) return false;
+	if (!isPwaDisplayMode()) return false;
+	if (document.visibilityState !== 'visible') return false;
+	if (!isClientFocused()) return false;
+	if (externalFocusOverride === null && typeof document.hasFocus === 'function' && !document.hasFocus()) return false;
+	return true;
+}
+
+async function acquireWakeLockIfEligible() {
+	if (!isWakeLockEligible()) return;
+	if (wakeLockSentinel || wakeLockRequestPending) return;
+	wakeLockRequestPending = true;
+	try {
+		const sentinel = await navigator.wakeLock.request('screen');
+		wakeLockSentinel = sentinel;
+		sentinel.addEventListener('release', () => {
+			if (wakeLockSentinel === sentinel) wakeLockSentinel = null;
+			if (isWakeLockEligible()) void acquireWakeLockIfEligible();
+		});
+	} catch {
+		// Best effort only: unsupported/denied/revoked should stay silent.
+	} finally {
+		wakeLockRequestPending = false;
+	}
+}
+
+async function releaseWakeLockIfHeld() {
+	const sentinel = wakeLockSentinel;
+	wakeLockSentinel = null;
+	if (!sentinel) return;
+	try {
+		await sentinel.release();
+	} catch {
+		// Best effort only: keep silent on release failures.
+	}
+}
+
+function syncWakeLock() {
+	if (!wakeLockSupported) return;
+	if (isWakeLockEligible()) {
+		void acquireWakeLockIfEligible();
+	} else {
+		void releaseWakeLockIfHeld();
+	}
+}
+
+function initWakeLockManager() {
+	if (wakeLockListenersInitialized) return;
+	wakeLockSupported = !!(navigator.wakeLock && typeof navigator.wakeLock.request === 'function');
+	if (!wakeLockSupported || !isTouchDevice()) return;
+	wakeLockListenersInitialized = true;
+	document.addEventListener('visibilitychange', syncWakeLock);
+	window.addEventListener('focus', syncWakeLock, { passive: true });
+	window.addEventListener('blur', syncWakeLock, { passive: true });
+	window.addEventListener('pagehide', () => { void releaseWakeLockIfHeld(); }, { passive: true });
+	window.addEventListener('pageshow', syncWakeLock, { passive: true });
+	syncWakeLock();
+}
+
 // --- Client Focus Tracking ---
 let lastFocusState = null;
 let focusListenersInitialized = false;
@@ -9930,6 +10010,7 @@ function sendFocusState() {
 			}
 		}
 	}
+	syncWakeLock();
 }
 
 function initFocusTracking() {
@@ -10159,6 +10240,7 @@ function restoreNormalPolling() {
 	} catch (err) {
 		logJsError('init failed', err);
 	}
+	initWakeLockManager();
 	// Show voice button if Speech Recognition API and microphone permission available
 	var voiceModel = (window.__OH_CONFIG__?.voiceModel || 'browser').toLowerCase();
 	var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
