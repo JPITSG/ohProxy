@@ -5630,11 +5630,21 @@ function sectionLabel(widget) {
 
 function flattenWidgets(list, out, ctx) {
 	const frameLabel = safeText(ctx?.frame || '');
-	const path = ctx?.path;
+	const path = Array.isArray(ctx?.path) ? ctx.path.slice() : null;
+	const sitemapName = safeText(ctx?.sitemapName || '').trim();
+	const sectionPath = Array.isArray(ctx?.sectionPath) ? ctx.sectionPath.slice() : [];
 	for (const w of list) {
 		if (w?.type === 'Frame') {
 			const label = sectionLabel(w);
-			if (label) out.push({ __section: true, label });
+			const nextSectionPath = label ? sectionPath.concat([label]) : sectionPath.slice();
+			if (label) {
+				out.push({
+					__section: true,
+					label,
+					__sectionPath: nextSectionPath.slice(),
+					__sitemapName: sitemapName,
+				});
+			}
 			// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
 			let kids = w.widgets || w.widget;
 			if (kids) {
@@ -5645,12 +5655,19 @@ function flattenWidgets(list, out, ctx) {
 				} else {
 					kids = [kids];
 				}
-				flattenWidgets(kids, out, { frame: label || frameLabel, path });
+				flattenWidgets(kids, out, {
+					frame: label || frameLabel,
+					path,
+					sitemapName,
+					sectionPath: nextSectionPath,
+				});
 			}
 			continue;
 		}
-		if (path) w.__path = path;
+		if (path) w.__path = path.slice();
 		if (frameLabel) w.__frame = frameLabel;
+		if (sectionPath.length) w.__sectionPath = sectionPath.slice();
+		if (sitemapName) w.__sitemapName = sitemapName;
 		out.push(w);
 	}
 }
@@ -5670,7 +5687,12 @@ function normalizeWidgets(page, ctx) {
 	}
 
 	const out = [];
-	flattenWidgets(w, out, ctx);
+	flattenWidgets(w, out, {
+		frame: safeText(ctx?.frame || ''),
+		path: Array.isArray(ctx?.path) ? ctx.path.slice() : null,
+		sitemapName: safeText(ctx?.sitemapName || '').trim(),
+		sectionPath: Array.isArray(ctx?.sectionPath) ? ctx.sectionPath.slice() : [],
+	});
 	return out;
 }
 
@@ -9028,7 +9050,7 @@ async function buildSearchIndex() {
 			continue;
 		}
 
-		const normalized = normalizeWidgets(page, { path: pagePath });
+		const normalized = normalizeWidgets(page, { path: pagePath, sitemapName: state.sitemapName || '' });
 		for (const f of normalized) {
 			if (!f || !f.__section) continue;
 			const frameLabel = safeText(f.label);
@@ -9063,7 +9085,7 @@ async function buildSearchIndex() {
 
 async function applyPageData(page, fade, shouldScroll) {
 	state.pageTitle = page?.title || state.pageTitle;
-	state.rawWidgets = normalizeWidgets(page);
+	state.rawWidgets = normalizeWidgets(page, { sitemapName: state.sitemapName || '' });
 	state.lastPageUrl = state.pageUrl;
 	if (fade) await fade.promise;
 	if (shouldScroll) scrollToTop();
