@@ -341,7 +341,8 @@ const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(TASK_CONFIG.sitemapRefreshMs);
 const STRUCTURE_MAP_REFRESH_MS = configNumber(TASK_CONFIG.structureMapRefreshMs);
 const NPM_UPDATE_CHECK_MS = configNumber(TASK_CONFIG.npmUpdateCheckMs);
-const LOG_ROTATION_ENABLED = TASK_CONFIG.logRotationEnabled === true;
+const LOG_ROTATION_ENABLED = SERVER_CONFIG.logRotationEnabled === true
+	|| (SERVER_CONFIG.logRotationEnabled === undefined && TASK_CONFIG.logRotationEnabled === true);
 const WEBSOCKET_CONFIG = SERVER_CONFIG.websocket || {};
 const WS_MODE = ['atmosphere', 'sse'].includes(WEBSOCKET_CONFIG.mode) ? WEBSOCKET_CONFIG.mode : 'polling';
 const WS_POLLING_INTERVAL_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalMs) || 500;
@@ -913,7 +914,12 @@ function validateConfig() {
 		ensureNumber(SITEMAP_REFRESH_MS, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
 		ensureNumber(STRUCTURE_MAP_REFRESH_MS, 'server.backgroundTasks.structureMapRefreshMs', { min: 0 }, errors);
 		ensureNumber(NPM_UPDATE_CHECK_MS, 'server.backgroundTasks.npmUpdateCheckMs', { min: 0 }, errors);
-		ensureBoolean(TASK_CONFIG.logRotationEnabled, 'server.backgroundTasks.logRotationEnabled', errors);
+		if (TASK_CONFIG.logRotationEnabled !== undefined) {
+			ensureBoolean(TASK_CONFIG.logRotationEnabled, 'server.backgroundTasks.logRotationEnabled', errors);
+		}
+	}
+	if (SERVER_CONFIG.logRotationEnabled !== undefined) {
+		ensureBoolean(SERVER_CONFIG.logRotationEnabled, 'server.logRotationEnabled', errors);
 	}
 
 	if (ensureObject(SERVER_CONFIG.videoPreview, 'server.videoPreview', errors)) {
@@ -1177,6 +1183,7 @@ function validateAdminConfig(config) {
 		}
 	}
 	if (s.slowQueryMs !== undefined) ensureNumber(s.slowQueryMs, 'server.slowQueryMs', { min: 0 }, errors);
+	if (s.logRotationEnabled !== undefined) ensureBoolean(s.logRotationEnabled, 'server.logRotationEnabled', errors);
 	if (s.sessionMaxAgeDays !== undefined) ensureNumber(s.sessionMaxAgeDays, 'server.sessionMaxAgeDays', { min: 1 }, errors);
 
 	// Background tasks
@@ -1188,6 +1195,7 @@ function validateAdminConfig(config) {
 		if (s.backgroundTasks.npmUpdateCheckMs !== undefined) {
 			ensureNumber(s.backgroundTasks.npmUpdateCheckMs, 'server.backgroundTasks.npmUpdateCheckMs', { min: 0 }, errors);
 		}
+		// Backward compatibility for older configs.
 		if (s.backgroundTasks.logRotationEnabled !== undefined) {
 			ensureBoolean(s.backgroundTasks.logRotationEnabled, 'server.backgroundTasks.logRotationEnabled', errors);
 		}
@@ -2083,7 +2091,9 @@ function reloadLiveConfig() {
 	const prevNpmUpdateCheckMs = liveConfig.npmUpdateCheckMs;
 	liveConfig.npmUpdateCheckMs = configNumber(newTasks.npmUpdateCheckMs);
 	const prevLogRotationEnabled = liveConfig.logRotationEnabled;
-	liveConfig.logRotationEnabled = newTasks.logRotationEnabled === true;
+	const legacyLogRotationEnabled = newTasks.logRotationEnabled === true;
+	liveConfig.logRotationEnabled = newServer.logRotationEnabled === true
+		|| (newServer.logRotationEnabled === undefined && legacyLogRotationEnabled);
 	liveConfig.clientConfig = newConfig.client || {};
 	sessions.setDefaultTheme(liveConfig.clientConfig.defaultTheme || 'light');
 
