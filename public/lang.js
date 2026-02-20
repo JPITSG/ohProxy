@@ -30,8 +30,15 @@ window.ohLang = {
 		noChanges: 'No changes were made.',
 		saveFailed: 'Save failed: ',
 		saveFailedGeneric: 'Save failed',
+		passwordConfirmRequired: 'Enter both Password and Confirm to change your password.',
+		passwordInvalid: 'Password must be 1 to 200 characters and cannot contain control characters.',
+		passwordMismatch: 'Password and Confirm must match.',
+		passwordChangedHeader: 'Password Changed',
+		passwordChangedBody: 'Your password has been changed.<br/><br/>You will now be logged out and must log in using your new password.',
+		passwordChangedContinueBtn: 'Continue',
 
 		sectionTitles: {
+			'user-password': 'PASSWORD',
 			'user-preferences': 'PREFERENCES',
 			'listeners': 'LISTENERS',
 			'openhab': 'OPENHAB CONNECTION',
@@ -57,6 +64,8 @@ window.ohLang = {
 		},
 
 		fieldLabels: {
+			'user.password': 'Password',
+			'user.confirm': 'Confirm',
 			'user.trackGps': 'GPS Tracking',
 			'user.voiceModel': 'Voice STT Engine',
 			'server.http.enabled': 'HTTP Enabled',
@@ -174,6 +183,8 @@ window.ohLang = {
 		},
 
 		fieldDescs: {
+			'user.password': 'Enter new password here',
+			'user.confirm': 'Re-enter the new password to confirm',
 			'user.trackGps': 'Allow this account to send location updates',
 			'user.voiceModel': 'Speech-to-text engine for this account (system uses System Settings value)',
 			'server.http.enabled': 'Enable HTTP listener',
@@ -291,6 +302,8 @@ window.ohLang = {
 		},
 
 		fieldPlaceholders: {
+			'user.password': 'New password',
+			'user.confirm': 'Confirm password',
 			'server.http.host': '0.0.0.0',
 			'server.https.host': '0.0.0.0',
 			'server.https.certFile': '/path/to/fullchain.pem',

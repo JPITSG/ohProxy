@@ -1406,7 +1406,7 @@ function validateAdminUserConfig(userConfig) {
 		return errors;
 	}
 
-	const allowedUserKeys = new Set(['trackGps', 'voiceModel']);
+	const allowedUserKeys = new Set(['trackGps', 'voiceModel', 'password', 'confirm']);
 	for (const key of Object.keys(userConfig)) {
 		if (!allowedUserKeys.has(key)) {
 			errors.push(`user.${key} is not supported`);
@@ -1418,6 +1418,28 @@ function validateAdminUserConfig(userConfig) {
 	if (Object.prototype.hasOwnProperty.call(userConfig, 'voiceModel')) {
 		if (userConfig.voiceModel !== 'system' && userConfig.voiceModel !== 'browser' && userConfig.voiceModel !== 'vosk') {
 			errors.push('user.voiceModel must be "system", "browser", or "vosk"');
+		}
+	}
+	if (Object.prototype.hasOwnProperty.call(userConfig, 'password') && typeof userConfig.password !== 'string') {
+		errors.push('user.password must be a string');
+	}
+	if (Object.prototype.hasOwnProperty.call(userConfig, 'confirm') && typeof userConfig.confirm !== 'string') {
+		errors.push('user.confirm must be a string');
+	}
+
+	const password = typeof userConfig.password === 'string' ? userConfig.password : '';
+	const confirm = typeof userConfig.confirm === 'string' ? userConfig.confirm : '';
+	const wantsPasswordChange = password.length > 0 || confirm.length > 0;
+
+	if (wantsPasswordChange) {
+		if (!password || !confirm) {
+			errors.push('user.password and user.confirm are required to change password');
+		}
+		if (!password || !confirm || hasAnyControlChars(password) || hasAnyControlChars(confirm) || password.length > 200 || confirm.length > 200) {
+			errors.push('user.password and user.confirm must match login password format');
+		}
+		if (password !== confirm) {
+			errors.push('user.password and user.confirm must match');
 		}
 	}
 
@@ -6259,8 +6281,12 @@ app.use((req, res, next) => {
 			}
 		}
 
-		// Allow login.js (versioned) and fonts to load (needed by login page)
-		if (/^\/login\.v[\w.-]+\.js$/i.test(req.path) || req.path.startsWith('/fonts/')) {
+		// Allow login page assets (versioned) and fonts to load before authentication.
+		if (
+			/^\/login\.v[\w.-]+\.js$/i.test(req.path)
+			|| /^\/oh-utils\.v[\w.-]+\.js$/i.test(req.path)
+			|| req.path.startsWith('/fonts/')
+		) {
 			req.ohProxyAuth = 'unauthenticated';
 			req.ohProxyUser = '';
 			return next();
@@ -7014,17 +7040,38 @@ app.post('/api/admin/config', jsonParserLarge, requireAdmin, (req, res) => {
 
 	const previousTrackGps = user.trackgps === true;
 	const previousVoicePreference = isValidUserVoicePreference(user.voicePreference) ? user.voicePreference : 'system';
+	const previousPassword = typeof user.password === 'string' ? user.password : '';
 	const nextTrackGps = isPlainObject(incoming.user) && Object.prototype.hasOwnProperty.call(incoming.user, 'trackGps')
 		? incoming.user.trackGps
 		: previousTrackGps;
 	const nextVoicePreference = isPlainObject(incoming.user) && Object.prototype.hasOwnProperty.call(incoming.user, 'voiceModel')
 		? incoming.user.voiceModel
 		: previousVoicePreference;
+	const nextPassword = isPlainObject(incoming.user) && typeof incoming.user.password === 'string'
+		? incoming.user.password
+		: '';
+	const nextConfirm = isPlainObject(incoming.user) && typeof incoming.user.confirm === 'string'
+		? incoming.user.confirm
+		: '';
 	const updateTrackGps = nextTrackGps !== previousTrackGps;
 	const updateVoiceModel = nextVoicePreference !== previousVoicePreference;
+	const updatePassword = nextPassword.length > 0 || nextConfirm.length > 0;
 
 	let userTrackUpdated = false;
 	let userVoiceUpdated = false;
+	let userPasswordUpdated = false;
+
+	const rollbackUserUpdates = () => {
+		if (userTrackUpdated && !sessions.updateUserTrackGps(user.username, previousTrackGps)) {
+			logMessage(`[Admin] Failed to roll back user GPS setting for ${user.username || 'unknown'}`, 'error');
+		}
+		if (userVoiceUpdated && !sessions.updateUserVoicePreference(user.username, previousVoicePreference)) {
+			logMessage(`[Admin] Failed to roll back user voice setting for ${user.username || 'unknown'}`, 'error');
+		}
+		if (userPasswordUpdated && !sessions.updateUserPassword(user.username, previousPassword)) {
+			logMessage(`[Admin] Failed to roll back user password for ${user.username || 'unknown'}`, 'error');
+		}
+	};
 
 	if (updateTrackGps) {
 		if (!sessions.updateUserTrackGps(user.username, nextTrackGps)) {
@@ -7035,13 +7082,24 @@ app.post('/api/admin/config', jsonParserLarge, requireAdmin, (req, res) => {
 	}
 	if (updateVoiceModel) {
 		if (!sessions.updateUserVoicePreference(user.username, nextVoicePreference)) {
-			if (userTrackUpdated && !sessions.updateUserTrackGps(user.username, previousTrackGps)) {
-				logMessage(`[Admin] Failed to roll back user GPS setting for ${user.username || 'unknown'}`, 'error');
-			}
+			rollbackUserUpdates();
 			res.status(500).json({ error: 'Failed to update user voice setting' });
 			return;
 		}
 		userVoiceUpdated = true;
+	}
+	if (updatePassword) {
+		if (nextPassword !== nextConfirm) {
+			rollbackUserUpdates();
+			res.status(400).json({ errors: ['user.password and user.confirm must match'] });
+			return;
+		}
+		if (!sessions.updateUserPassword(user.username, nextPassword)) {
+			rollbackUserUpdates();
+			res.status(500).json({ error: 'Failed to update user password' });
+			return;
+		}
+		userPasswordUpdated = true;
 	}
 
 	// Write config.local.js atomically
@@ -7052,21 +7110,25 @@ app.post('/api/admin/config', jsonParserLarge, requireAdmin, (req, res) => {
 		fs.renameSync(tmpPath, LOCAL_CONFIG_PATH);
 		ensureSensitiveFilePermissions(LOCAL_CONFIG_PATH, 'config.local.js');
 	} catch (err) {
-		if (userTrackUpdated && !sessions.updateUserTrackGps(user.username, previousTrackGps)) {
-			logMessage(`[Admin] Failed to roll back user GPS setting for ${user.username || 'unknown'}`, 'error');
-		}
-		if (userVoiceUpdated && !sessions.updateUserVoicePreference(user.username, previousVoicePreference)) {
-			logMessage(`[Admin] Failed to roll back user voice setting for ${user.username || 'unknown'}`, 'error');
-		}
+		rollbackUserUpdates();
 		logMessage(`Failed to write admin config: ${err.message || err}`);
 		res.status(500).json({ error: 'Failed to write config: ' + err.message });
 		return;
 	}
 
 	const needsReload = needsClientReload || userTrackUpdated || userVoiceUpdated;
+	if (userPasswordUpdated) {
+		clearAuthCookie(res);
+	}
 
 	logMessage(`[Admin] Config updated by ${user.username || 'unknown'}`);
-	res.json({ ok: true, restartRequired: needsRestart, reloadRequired: needsReload });
+	res.json({
+		ok: true,
+		restartRequired: needsRestart,
+		reloadRequired: needsReload,
+		passwordChanged: userPasswordUpdated,
+		logoutRequired: userPasswordUpdated,
+	});
 });
 
 app.post('/api/admin/restart', jsonParserSmall, requireAdmin, (req, res) => {

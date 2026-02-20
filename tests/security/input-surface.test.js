@@ -120,9 +120,15 @@ describe('Input Validation Coverage', () => {
 		assert.ok(content.includes("const FORBIDDEN_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);"));
 		assert.ok(content.includes('const forbiddenKeyPath = findForbiddenObjectKeyPath(incoming);'));
 		assert.ok(content.includes('const userErrors = validateAdminUserConfig(incoming.user);'));
-		assert.ok(content.includes("const allowedUserKeys = new Set(['trackGps', 'voiceModel']);"));
+		assert.ok(content.includes("/^\\/oh-utils\\.v[\\w.-]+\\.js$/i.test(req.path)"));
+		assert.ok(content.includes("const allowedUserKeys = new Set(['trackGps', 'voiceModel', 'password', 'confirm']);"));
 		assert.ok(content.includes("errors.push('user.trackGps must be true/false');"));
 		assert.ok(content.includes("errors.push('user.voiceModel must be \"system\", \"browser\", or \"vosk\"');"));
+		assert.ok(content.includes("errors.push('user.password must be a string');"));
+		assert.ok(content.includes("errors.push('user.confirm must be a string');"));
+		assert.ok(content.includes("errors.push('user.password and user.confirm are required to change password');"));
+		assert.ok(content.includes("errors.push('user.password and user.confirm must match login password format');"));
+		assert.ok(content.includes("errors.push('user.password and user.confirm must match');"));
 	});
 
 	it('validates GET query keys and values', () => {
