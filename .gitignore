@@ -1,7 +1,6 @@
 config.local.js
 AGENTS.md
 CLAUDE.md
-widgetGlowRules.local.json
 sessions.db
 sessions.db-*
 node_modules/

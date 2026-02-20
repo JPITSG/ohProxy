@@ -24,6 +24,8 @@ describe('Daily log rotation wiring', () => {
 		assert.match(server, /ensureBoolean\(s\.logRotationEnabled, 'server\.logRotationEnabled', errors\);/, 'missing admin validation for server.logRotationEnabled');
 		assert.match(server, /logRotationEnabled:\s*LOG_ROTATION_ENABLED,/, 'missing liveConfig.logRotationEnabled initialization');
 		assert.match(server, /liveConfig\.logRotationEnabled = newServer\.logRotationEnabled === true/, 'missing hot-reload update for logRotationEnabled');
+		assert.doesNotMatch(server, /backgroundTasks\.logRotationEnabled/, 'legacy backgroundTasks logRotationEnabled bridge should be removed');
+		assert.doesNotMatch(server, /legacyLogRotationEnabled/, 'legacy hot-reload logRotationEnabled fallback should be removed');
 		assert.match(server, /function scheduleLogRotation\(\)/, 'missing scheduleLogRotation helper');
 		assert.match(server, /function rotateConfiguredLogFiles\(\)/, 'missing rotateConfiguredLogFiles helper');
 		assert.match(server, /startBackgroundTasks\(\);\s*syncLogRotationSchedule\(\);/, 'missing startup sync for log rotation schedule');

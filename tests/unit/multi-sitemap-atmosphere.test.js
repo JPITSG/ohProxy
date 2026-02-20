@@ -44,11 +44,11 @@ describe('Multi-Sitemap Atmosphere and Bootstrap Wiring', () => {
 		assert.match(server, /connectAtmospherePage\(target\.sitemapName, target\.pageId\);/);
 	});
 
-	it('refreshSitemapCache stores a sitemap catalog and keeps first sitemap alias for compatibility', () => {
+	it('refreshSitemapCache stores only the sitemap catalog state', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /const oldSignature = sitemapCatalogSignature\(getBackgroundSitemaps\(\)\);/);
 		assert.match(server, /backgroundState\.sitemaps = nextCatalog;/);
-		assert.match(server, /backgroundState\.sitemap = \{ \.\.\.nextCatalog\[0\] \};/);
+		assert.doesNotMatch(server, /backgroundState\.sitemap\s*=/);
 		assert.match(server, /const catalogChanged = !!oldSignature && !!newSignature && oldSignature !== newSignature;/);
 	});
 

@@ -441,12 +441,6 @@ self.addEventListener('message', (event) => {
 			await handleTransportHttpRequest(event, data);
 			return;
 		}
-		// Backward compatibility for older page scripts still sending heartbeat.
-		if (data.type === 'notification-heartbeat') {
-			statusHeartbeatAt = Date.now();
-			if (statusDesired.enabled === true) armStatusTimers();
-			return;
-		}
 		if (data.type !== 'statusUpdate') return;
 		if (data.enabled !== true) {
 			statusHeartbeatAt = 0;

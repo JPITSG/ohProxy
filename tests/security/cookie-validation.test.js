@@ -55,19 +55,11 @@ function buildAuthCookieValue(user, sessionId, pass, key, expiry) {
 	return base64UrlEncode(`${payload}|${sig}`);
 }
 
-function buildLegacyAuthCookieValue(user, pass, key, expiry) {
-	const userEncoded = base64UrlEncode(user);
-	const payload = `${userEncoded}|${expiry}`;
-	const sig = crypto.createHmac('sha256', key).update(`${payload}|${pass}`).digest('hex');
-	return base64UrlEncode(`${payload}|${sig}`);
-}
-
 function createCookieValidationTestApp() {
 	const app = express();
 	const USERS = TEST_USERS;
 	const AUTH_COOKIE_NAME = 'AuthStore';
 	const AUTH_COOKIE_KEY = TEST_COOKIE_KEY;
-	const SESSION_COOKIE_NAME = 'ohSession';
 
 	function getAuthCookieUser(req) {
 		const raw = getCookieValue(req, AUTH_COOKIE_NAME);
@@ -75,39 +67,21 @@ function createCookieValidationTestApp() {
 		const decoded = base64UrlDecode(raw);
 		if (!decoded) return null;
 		const parts = decoded.split('|');
+		if (parts.length !== 4) return null;
 
-		// Handle both legacy (3-part) and new (4-part) formats
-		if (parts.length === 3) {
-			// Legacy format: userEncoded|expiry|sig
-			const [userEncoded, expiryRaw, sig] = parts;
-			if (!/^\d+$/.test(expiryRaw)) return null;
-			const expiry = Number(expiryRaw);
-			if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
-			const user = base64UrlDecode(userEncoded);
-			if (!user || !Object.prototype.hasOwnProperty.call(USERS, user)) return null;
-			const expected = crypto.createHmac('sha256', AUTH_COOKIE_KEY).update(`${userEncoded}|${expiryRaw}|${USERS[user]}`).digest('hex');
-			const sigBuf = Buffer.from(sig, 'hex');
-			const expectedBuf = Buffer.from(expected, 'hex');
-			if (sigBuf.length !== expectedBuf.length) return null;
-			if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
-			return { user, sessionId: null, isLegacy: true };
-		} else if (parts.length === 4) {
-			// New format: userEncoded|sessionId|expiry|sig
-			const [userEncoded, sessionId, expiryRaw, sig] = parts;
-			if (!/^\d+$/.test(expiryRaw)) return null;
-			const expiry = Number(expiryRaw);
-			if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
-			const user = base64UrlDecode(userEncoded);
-			if (!user || !Object.prototype.hasOwnProperty.call(USERS, user)) return null;
-			const expected = crypto.createHmac('sha256', AUTH_COOKIE_KEY).update(`${userEncoded}|${sessionId}|${expiryRaw}|${USERS[user]}`).digest('hex');
-			const sigBuf = Buffer.from(sig, 'hex');
-			const expectedBuf = Buffer.from(expected, 'hex');
-			if (sigBuf.length !== expectedBuf.length) return null;
-			if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
-			return { user, sessionId, isLegacy: false };
-		}
-
-		return null;
+		// Format: userEncoded|sessionId|expiry|sig
+		const [userEncoded, sessionId, expiryRaw, sig] = parts;
+		if (!/^\d+$/.test(expiryRaw)) return null;
+		const expiry = Number(expiryRaw);
+		if (!Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000)) return null;
+		const user = base64UrlDecode(userEncoded);
+		if (!user || !Object.prototype.hasOwnProperty.call(USERS, user)) return null;
+		const expected = crypto.createHmac('sha256', AUTH_COOKIE_KEY).update(`${userEncoded}|${sessionId}|${expiryRaw}|${USERS[user]}`).digest('hex');
+		const sigBuf = Buffer.from(sig, 'hex');
+		const expectedBuf = Buffer.from(expected, 'hex');
+		if (sigBuf.length !== expectedBuf.length) return null;
+		if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
+		return { user, sessionId };
 	}
 
 	// Protected endpoint using cookie auth
@@ -116,20 +90,7 @@ function createCookieValidationTestApp() {
 		if (!authResult) {
 			return res.status(401).json({ error: 'Authentication required' });
 		}
-		res.json({ user: authResult.user, sessionId: authResult.sessionId, isLegacy: authResult.isLegacy });
-	});
-
-	// Session cookie endpoint (legacy)
-	app.get('/api/session', (req, res) => {
-		const sessionId = getCookieValue(req, SESSION_COOKIE_NAME);
-		if (!sessionId) {
-			return res.status(400).json({ error: 'No session cookie' });
-		}
-		// Session ID should be alphanumeric
-		if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
-			return res.status(400).json({ error: 'Invalid session ID format' });
-		}
-		res.json({ sessionId });
+		res.json({ user: authResult.user, sessionId: authResult.sessionId });
 	});
 
 	return app;
@@ -165,7 +126,6 @@ describe('Cookie Validation Security Tests', () => {
 			assert.strictEqual(res.status, 200);
 			assert.strictEqual(data.user, 'testuser');
 			assert.strictEqual(data.sessionId, 'session123');
-			assert.strictEqual(data.isLegacy, false);
 		});
 
 		it('rejects expired cookie', async () => {
@@ -236,6 +196,19 @@ describe('Cookie Validation Security Tests', () => {
 			assert.strictEqual(res.status, 401);
 		});
 
+		it('rejects unsupported 3-part cookie format', async () => {
+			const expiry = Math.floor(Date.now() / 1000) + 3600;
+			const userEncoded = base64UrlEncode('testuser');
+			const payload = `${userEncoded}|${expiry}`;
+			const sig = crypto.createHmac('sha256', TEST_COOKIE_KEY).update(`${payload}|testpassword`).digest('hex');
+			const cookie = base64UrlEncode(`${payload}|${sig}`);
+
+			const res = await fetch(`${baseUrl}/api/protected`, {
+				headers: { 'Cookie': `AuthStore=${cookie}` },
+			});
+			assert.strictEqual(res.status, 401);
+		});
+
 		it('rejects cookie with non-numeric expiry', async () => {
 			const userEncoded = base64UrlEncode('testuser');
 			const payload = `${userEncoded}|session123|notanumber`;
@@ -246,78 +219,6 @@ describe('Cookie Validation Security Tests', () => {
 				headers: { 'Cookie': `AuthStore=${cookie}` },
 			});
 			assert.strictEqual(res.status, 401);
-		});
-	});
-
-	describe('Auth Cookie - Legacy Format (3-part)', () => {
-		it('accepts valid legacy auth cookie', async () => {
-			const expiry = Math.floor(Date.now() / 1000) + 3600;
-			const cookie = buildLegacyAuthCookieValue('testuser', 'testpassword', TEST_COOKIE_KEY, expiry);
-
-			const res = await fetch(`${baseUrl}/api/protected`, {
-				headers: { 'Cookie': `AuthStore=${cookie}` },
-			});
-			const data = await res.json();
-			assert.strictEqual(res.status, 200);
-			assert.strictEqual(data.user, 'testuser');
-			assert.strictEqual(data.isLegacy, true);
-		});
-
-		it('rejects expired legacy cookie', async () => {
-			const expiry = Math.floor(Date.now() / 1000) - 3600;
-			const cookie = buildLegacyAuthCookieValue('testuser', 'testpassword', TEST_COOKIE_KEY, expiry);
-
-			const res = await fetch(`${baseUrl}/api/protected`, {
-				headers: { 'Cookie': `AuthStore=${cookie}` },
-			});
-			assert.strictEqual(res.status, 401);
-		});
-
-		it('rejects legacy cookie with wrong signature', async () => {
-			const expiry = Math.floor(Date.now() / 1000) + 3600;
-			const cookie = buildLegacyAuthCookieValue('testuser', 'wrongpassword', TEST_COOKIE_KEY, expiry);
-
-			const res = await fetch(`${baseUrl}/api/protected`, {
-				headers: { 'Cookie': `AuthStore=${cookie}` },
-			});
-			assert.strictEqual(res.status, 401);
-		});
-	});
-
-	describe('Session Cookie Validation', () => {
-		it('accepts valid session ID format', async () => {
-			const res = await fetch(`${baseUrl}/api/session`, {
-				headers: { 'Cookie': 'ohSession=abc123_XYZ-789' },
-			});
-			const data = await res.json();
-			assert.strictEqual(res.status, 200);
-			assert.strictEqual(data.sessionId, 'abc123_XYZ-789');
-		});
-
-		it('rejects missing session cookie', async () => {
-			const res = await fetch(`${baseUrl}/api/session`);
-			assert.strictEqual(res.status, 400);
-		});
-
-		it('rejects session ID with special chars', async () => {
-			const res = await fetch(`${baseUrl}/api/session`, {
-				headers: { 'Cookie': 'ohSession=../../../etc/passwd' },
-			});
-			assert.strictEqual(res.status, 400);
-		});
-
-		it('rejects session ID with spaces', async () => {
-			const res = await fetch(`${baseUrl}/api/session`, {
-				headers: { 'Cookie': 'ohSession=session with spaces' },
-			});
-			assert.strictEqual(res.status, 400);
-		});
-
-		it('rejects session ID with XSS attempt', async () => {
-			const res = await fetch(`${baseUrl}/api/session`, {
-				headers: { 'Cookie': 'ohSession=<script>alert(1)</script>' },
-			});
-			assert.strictEqual(res.status, 400);
 		});
 	});
 

@@ -254,27 +254,6 @@ describe('Sessions Module', () => {
 		});
 	});
 
-	describe('updateUsername', () => {
-		it('updates username', () => {
-			const clientId = 'username-session';
-			const now = Math.floor(Date.now() / 1000);
-			db.prepare(`
-				INSERT INTO sessions (client_id, username, settings, created_at, last_seen, created_ip, last_ip)
-				VALUES (?, ?, ?, ?, ?, ?, ?)
-			`).run(clientId, null, '{}', now, now, null, null);
-
-			const newUsername = 'newuser';
-			const result = db.prepare(`
-				UPDATE sessions SET username = ?, last_seen = ? WHERE client_id = ?
-			`).run(newUsername, now, clientId);
-
-			assert.strictEqual(result.changes, 1);
-
-			const row = db.prepare('SELECT username FROM sessions WHERE client_id = ?').get(clientId);
-			assert.strictEqual(row.username, newUsername);
-		});
-	});
-
 	describe('touchSession', () => {
 		it('updates last_seen timestamp', () => {
 			const clientId = 'touch-session';

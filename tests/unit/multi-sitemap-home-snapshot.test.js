@@ -11,10 +11,11 @@ const APP_FILE = path.join(PROJECT_ROOT, 'public', 'app.js');
 describe('Multi-Sitemap Home Snapshot Wiring', () => {
 	it('uses sitemap-scoped home snapshot storage keys', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
-		assert.match(app, /const HOME_CACHE_KEY_LEGACY = 'ohProxyHomeSnapshot';/);
-		assert.match(app, /const HOME_CACHE_KEY_PREFIX = `\$\{HOME_CACHE_KEY_LEGACY\}:`;/);
+		assert.match(app, /const HOME_CACHE_KEY_BASE = 'ohProxyHomeSnapshot';/);
+		assert.match(app, /const HOME_CACHE_KEY_PREFIX = `\$\{HOME_CACHE_KEY_BASE\}:`;/);
 		assert.match(app, /function getHomeSnapshotKey\(sitemapName\) \{/);
-		assert.match(app, /return normalized \? `\$\{HOME_CACHE_KEY_PREFIX\}\$\{normalized\}` : HOME_CACHE_KEY_LEGACY;/);
+		assert.match(app, /return normalized \? `\$\{HOME_CACHE_KEY_PREFIX\}\$\{normalized\}` : '';/);
+		assert.doesNotMatch(app, /HOME_CACHE_KEY_LEGACY/);
 	});
 
 	it('saves snapshot payload with sitemap identity and icon caches', () => {
@@ -31,9 +32,10 @@ describe('Multi-Sitemap Home Snapshot Wiring', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /function loadHomeSnapshot\(options = \{\}\) \{/);
 		assert.match(app, /const requestedSitemap = normalizeSnapshotSitemapName\(opts\.sitemapName\);/);
-		assert.match(app, /const candidates = getHomeSnapshotLookupOrder\(requestedSitemap, allowLegacyFallback\);/);
+		assert.match(app, /const candidates = getHomeSnapshotLookupOrder\(requestedSitemap\);/);
 		assert.match(app, /const snapshotSitemap = normalizeSnapshotSitemapName\(snapshot\.sitemapName \|\| candidate\.sitemapName\);/);
 		assert.match(app, /if \(requestedSitemap && snapshotSitemap && snapshotSitemap !== requestedSitemap\) \{/);
+		assert.doesNotMatch(app, /allowLegacyFallback/);
 	});
 
 	it('restores sitemap identity and sitemap-associated icon caches from snapshot', () => {

@@ -248,10 +248,6 @@ function createAuthTestApp(config = {}) {
 		res.send('LOGIN_PAGE');
 	});
 
-	app.get('/classic', (req, res) => {
-		res.redirect('http://example.com/');
-	});
-
 	// Versioned assets
 	app.get(/^\/app\.v[\w.-]+\.js$/i, (req, res) => {
 		res.type('application/javascript').send('// App JS');
@@ -361,15 +357,6 @@ describe('Authentication Required Tests - HTML Mode', () => {
 			assert.ok(res.status === 302 || res.status === 200);
 		});
 
-		it('GET /classic redirects to / for login (HTML page request)', async () => {
-			const res = await fetch(`${baseUrl}/classic`, {
-				redirect: 'manual',
-				headers: { 'Accept': 'text/html' },
-			});
-			assert.strictEqual(res.status, 302);
-			const location = res.headers.get('Location');
-			assert.ok(location === '/' || location === `${baseUrl}/`, 'Should redirect to / for login');
-		});
 	});
 
 	describe('Auth-Exempt Paths', () => {

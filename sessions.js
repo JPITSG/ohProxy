@@ -54,7 +54,10 @@ function initDb() {
 			username TEXT PRIMARY KEY,
 			password TEXT NOT NULL,
 			role TEXT NOT NULL DEFAULT 'normal',
-			created_at INTEGER DEFAULT (strftime('%s','now'))
+			created_at INTEGER DEFAULT (strftime('%s','now')),
+			disabled INTEGER DEFAULT 0,
+			trackgps INTEGER DEFAULT 0,
+			voice_preference TEXT DEFAULT 'system'
 		);
 	`);
 
@@ -110,29 +113,6 @@ function initDb() {
 			value TEXT NOT NULL
 		);
 	`);
-
-	// Migration: add IP columns if they don't exist
-	try {
-		db.exec(`ALTER TABLE sessions ADD COLUMN created_ip TEXT DEFAULT NULL`);
-	} catch (e) { /* column already exists */ }
-	try {
-		db.exec(`ALTER TABLE sessions ADD COLUMN last_ip TEXT DEFAULT NULL`);
-	} catch (e) { /* column already exists */ }
-
-	// Migration: add disabled column to users table
-	try {
-		db.exec(`ALTER TABLE users ADD COLUMN disabled INTEGER DEFAULT 0`);
-	} catch (e) { /* column already exists */ }
-
-	// Migration: add trackgps column to users table
-	try {
-		db.exec(`ALTER TABLE users ADD COLUMN trackgps INTEGER DEFAULT 0`);
-	} catch (e) { /* column already exists */ }
-
-	// Migration: add voice_preference column to users table
-	try {
-		db.exec(`ALTER TABLE users ADD COLUMN voice_preference TEXT DEFAULT 'system'`);
-	} catch (e) { /* column already exists */ }
 
 	// Run cleanup on startup
 	cleanupSessions();
@@ -210,23 +190,6 @@ function updateSettings(clientId, settings) {
 	const result = db.prepare(`
 		UPDATE sessions SET settings = ?, last_seen = ? WHERE client_id = ?
 	`).run(settingsJson, now, clientId);
-
-	return result.changes > 0;
-}
-
-/**
- * Update session username.
- * @param {string} clientId - The session ID
- * @param {string} username - The username to set
- * @returns {boolean} - True if updated, false if session not found
- */
-function updateUsername(clientId, username) {
-	if (!db) initDb();
-	const now = Math.floor(Date.now() / 1000);
-
-	const result = db.prepare(`
-		UPDATE sessions SET username = ?, last_seen = ? WHERE client_id = ?
-	`).run(username, now, clientId);
 
 	return result.changes > 0;
 }
@@ -751,7 +714,6 @@ module.exports = {
 	getSession,
 	createSession,
 	updateSettings,
-	updateUsername,
 	touchSession,
 	cleanupSessions,
 	closeDb,

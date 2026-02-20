@@ -151,11 +151,6 @@ function createApiTestApp(config = {}) {
 		res.type('text/css').send('/* styles.css */');
 	});
 
-	// Classic redirect
-	app.get('/classic', (req, res) => {
-		res.redirect('/basicui/app');
-	});
-
 	return app;
 }
 
@@ -365,17 +360,6 @@ describe('API Endpoints Integration', () => {
 			});
 			const cacheControl = res.headers.get('cache-control');
 			assert.ok(cacheControl.includes('immutable'));
-		});
-	});
-
-	describe('GET /classic', () => {
-		it('redirects to basicui', async () => {
-			const res = await fetch(`${baseUrl}/classic`, {
-				headers: { 'Authorization': basicAuthHeader('testuser', 'testpassword') },
-				redirect: 'manual',
-			});
-			assert.strictEqual(res.status, 302);
-			assert.ok(res.headers.get('location').includes('basicui'));
 		});
 	});
 
