@@ -43,11 +43,11 @@ describe('Homepage Inline Icons', () => {
 	it('client persists and restores inline icon map in home snapshot', () => {
 		const app = read(APP_FILE);
 		assert.match(app, /inlineIcons:\s*Object\.fromEntries\(homeInlineIcons\),/);
-		assert.match(app, /mergeHomeInlineIcons\(snapshot\.inlineIcons\);/);
+		assert.match(app, /replaceHomeInlineIcons\(snapshot\.inlineIcons && typeof snapshot\.inlineIcons === 'object' \? snapshot\.inlineIcons : \{\}\);/);
 	});
 
 	it('client loads inline icons from embedded homepage bootstrap payload', () => {
 		const app = read(APP_FILE);
-		assert.match(app, /replaceHomeInlineIcons\(hp\.inlineIcons\);/);
+		assert.match(app, /replaceHomeInlineIcons\(embeddedHome\.inlineIcons\);/);
 	});
 });

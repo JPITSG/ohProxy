@@ -376,4 +376,15 @@ window.ohLang = {
 			{ value: 'red', label: 'Red' },
 		],
 	},
+
+	sitemapSelect: {
+		title: 'Select Sitemap',
+		closeBtn: 'Close',
+		currentBadge: 'Current Sitemap',
+		switchingStatus: 'Switching sitemap.',
+		switchFailedStatus: 'Failed to switch sitemap.',
+		refreshFailedStatus: 'Could not refresh sitemap list. Showing cached options.',
+		unnamedFallback: 'Unnamed sitemap',
+		triggerAriaLabel: 'Select sitemap',
+	},
 };

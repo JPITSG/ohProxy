@@ -462,7 +462,11 @@ function chartShowCurStat(durationSec) {
 	return durationSec <= 14400;
 }
 const AI_CACHE_DIR = path.join(__dirname, 'cache', 'ai');
+const AI_STRUCTURE_MAP_ALL = path.join(AI_CACHE_DIR, 'structuremap-all.json');
 const AI_STRUCTURE_MAP_WRITABLE = path.join(AI_CACHE_DIR, 'structuremap-writable.json');
+const AI_STRUCTURE_MAP_READABLE = path.join(AI_CACHE_DIR, 'structuremap-readable.json');
+const STRUCTURE_MAP_ON_DEMAND_TIMEOUT_MS = 20000;
+const STRUCTURE_MAP_ON_DEMAND_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const ANTHROPIC_API_KEY = safeText(SERVER_CONFIG.apiKeys?.anthropic) || '';
 const VOICE_CONFIG = SERVER_CONFIG.voice || {};
 const VOICE_MODEL = (['browser', 'vosk'].includes((safeText(VOICE_CONFIG.model) || '').toLowerCase()))
@@ -2506,6 +2510,7 @@ const backgroundState = {
 		updatedAt: 0,
 		ok: false,
 	},
+	sitemaps: [],
 };
 
 const DEFAULT_PAGE_TITLE = 'openHAB';
@@ -2798,12 +2803,11 @@ function scheduleAtmosphereResubscribe(reason) {
 }
 
 // Track multiple page subscriptions
-const atmospherePages = new Map(); // pageId -> { connection, trackingId, reconnectTimer }
+const atmospherePages = new Map(); // sitemap|pageId -> { connection, trackingId, reconnectTimer }
 let atmosphereConnectInFlight = false;
 let atmosphereResubscribeTimer = null;
 let atmosphereResubscribeRequested = false;
 let atmosphereNeedsSitemapRefresh = false;
-let lastAtmosphereSitemapName = '';
 let atmosphereNoUpdateTimer = null;
 let atmosphereNoUpdateWarned = false;
 let atmosphereLastItemUpdateAt = 0;
@@ -2859,8 +2863,17 @@ function filterChangedItems(changes) {
 	return actualChanges;
 }
 
-function connectAtmospherePage(pageId) {
-	const existing = atmospherePages.get(pageId);
+function atmospherePageKey(sitemapName, pageId) {
+	const sitemap = safeText(sitemapName).trim();
+	const page = safeText(pageId).trim();
+	return `${sitemap}|${page}`;
+}
+
+function connectAtmospherePage(sitemapName, pageId) {
+	const sitemap = safeText(sitemapName).trim() || 'default';
+	const page = safeText(pageId).trim() || sitemap;
+	const key = atmospherePageKey(sitemap, page);
+	const existing = atmospherePages.get(key);
 	if (existing) {
 		if (existing.connection) {
 			try { existing.connection.destroy(); } catch {}
@@ -2870,14 +2883,13 @@ function connectAtmospherePage(pageId) {
 		}
 	}
 
-	const sitemapName = backgroundState.sitemap.name || 'default';
 	const target = new URL(liveConfig.ohTarget);
 	const isHttps = target.protocol === 'https:';
 	const client = isHttps ? https : http;
 	const basePath = target.pathname && target.pathname !== '/' ? target.pathname.replace(/\/$/, '') : '';
-	const reqPath = `${basePath}/rest/sitemaps/${sitemapName}/${pageId}?type=json`;
+	const reqPath = `${basePath}/rest/sitemaps/${encodeURIComponent(sitemap)}/${encodeURIComponent(page)}?type=json`;
 
-	const pageState = atmospherePages.get(pageId) || { connection: null, trackingId: null, reconnectTimer: null };
+	const pageState = atmospherePages.get(key) || { connection: null, trackingId: null, reconnectTimer: null };
 
 	const headers = {
 		Accept: 'application/json',
@@ -2948,7 +2960,7 @@ function connectAtmospherePage(pageId) {
 			}
 			// Reconnect for next update
 			if (wss.clients.size > 0) {
-				scheduleAtmospherePageReconnect(pageId, 100);
+				scheduleAtmospherePageReconnect(sitemap, page, 100);
 			}
 		});
 	});
@@ -2959,31 +2971,32 @@ function connectAtmospherePage(pageId) {
 		const msg = err.message || err;
 		const isExpectedClose = msg === 'socket hang up' || err.code === 'ECONNRESET';
 		if (!isExpectedClose) {
-			logMessage(`[Atmosphere:${pageId}] Error: ${msg}`);
+			logMessage(`[Atmosphere:${sitemap}/${page}] Error: ${msg}`);
 			setBackendStatus(false, msg);
 		}
-		scheduleAtmospherePageReconnect(pageId, ATMOSPHERE_RECONNECT_MS);
+		scheduleAtmospherePageReconnect(sitemap, page, ATMOSPHERE_RECONNECT_MS);
 	});
 
 	req.on('timeout', () => {
 		req.destroy();
 		pageState.connection = null;
-		scheduleAtmospherePageReconnect(pageId, 0);
+		scheduleAtmospherePageReconnect(sitemap, page, 0);
 	});
 
 	req.end();
 	pageState.connection = req;
-	atmospherePages.set(pageId, pageState);
+	atmospherePages.set(key, pageState);
 }
 
-function scheduleAtmospherePageReconnect(pageId, delay) {
-	const pageState = atmospherePages.get(pageId);
+function scheduleAtmospherePageReconnect(sitemapName, pageId, delay) {
+	const key = atmospherePageKey(sitemapName, pageId);
+	const pageState = atmospherePages.get(key);
 	if (!pageState) return;
 	if (pageState.reconnectTimer) clearTimeout(pageState.reconnectTimer);
 	pageState.reconnectTimer = setTimeout(() => {
 		pageState.reconnectTimer = null;
 		if (wss.clients.size > 0) {
-			connectAtmospherePage(pageId);
+			connectAtmospherePage(sitemapName, pageId);
 		}
 	}, delay);
 }
@@ -3516,39 +3529,52 @@ function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, d
 	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern, durSec, interpolation);
 }
 
-async function fetchAllPages() {
-	let sitemapName = backgroundState.sitemap.name || '';
+async function fetchAllPagesAcrossSitemaps() {
+	let sitemaps = getBackgroundSitemaps();
 	let needsSitemapRefresh = false;
 
-	if (!sitemapName) {
+	if (!sitemaps.length) {
 		await refreshSitemapCache({ skipAtmosphereResubscribe: true });
-		sitemapName = backgroundState.sitemap.name || '';
+		sitemaps = getBackgroundSitemaps();
 	}
 
-	if (!sitemapName) {
-		sitemapName = 'default';
+	if (!sitemaps.length) {
+		sitemaps = [{ name: 'default' }];
 		needsSitemapRefresh = true;
 	}
-	try {
-		const result = await fetchOpenhab(`/rest/sitemaps/${sitemapName}?type=json`);
-		if (!result.ok) {
-			throw new Error(`HTTP ${result.status}`);
+
+	const targets = [];
+	for (const entry of sitemaps) {
+		const sitemapName = safeText(entry?.name).trim();
+		if (!sitemapName) continue;
+		try {
+			const result = await fetchOpenhab(`/rest/sitemaps/${encodeURIComponent(sitemapName)}?type=json`);
+			if (!result.ok) {
+				throw new Error(`HTTP ${result.status}`);
+			}
+			const data = JSON.parse(result.body);
+			const pages = Array.from(extractPageIds(data));
+			if (!pages.length) {
+				needsSitemapRefresh = true;
+				targets.push({ sitemapName, pageId: sitemapName });
+				continue;
+			}
+			for (const pageId of pages) {
+				const normalizedPageId = safeText(pageId).trim();
+				if (!normalizedPageId) continue;
+				targets.push({ sitemapName, pageId: normalizedPageId });
+			}
+		} catch (e) {
+			logMessage(`[Atmosphere] Failed to fetch pages for sitemap "${sitemapName}": ${e.message}`);
+			needsSitemapRefresh = true;
+			targets.push({ sitemapName, pageId: sitemapName });
 		}
-		const data = JSON.parse(result.body);
-		const pages = extractPageIds(data);
-		return {
-			pages: Array.from(pages),
-			sitemapName,
-			needsSitemapRefresh,
-		};
-	} catch (e) {
-		logMessage(`[Atmosphere] Failed to fetch pages: ${e.message}`);
-		return {
-			pages: [sitemapName], // fallback to just the sitemap name
-			sitemapName,
-			needsSitemapRefresh: true,
-		};
 	}
+
+	return {
+		targets,
+		needsSitemapRefresh,
+	};
 }
 
 async function connectAtmosphere() {
@@ -3562,22 +3588,31 @@ async function connectAtmosphere() {
 		stopAllAtmosphereConnections();
 		resetAtmosphereNoUpdateMonitor();
 
-		// Fetch all pages and subscribe to each
-		const { pages, sitemapName, needsSitemapRefresh } = await fetchAllPages();
+		// Fetch all pages across all sitemaps and subscribe to each
+		const { targets, needsSitemapRefresh } = await fetchAllPagesAcrossSitemaps();
 
 		// If no pages found, OpenHAB may still be starting - retry later
-		if (pages.length === 0) {
-			logMessage(`[Atmosphere] No pages found in sitemap, will retry in ${ATMOSPHERE_RECONNECT_MS}ms`);
+		if (targets.length === 0) {
+			logMessage(`[Atmosphere] No sitemap pages found, will retry in ${ATMOSPHERE_RECONNECT_MS}ms`);
 			setTimeout(() => connectAtmosphere(), ATMOSPHERE_RECONNECT_MS);
 			return;
 		}
 
 		atmosphereNeedsSitemapRefresh = needsSitemapRefresh;
-		lastAtmosphereSitemapName = sitemapName || '';
 
-		logMessage(`[Atmosphere] Subscribing to ${pages.length} pages: ${pages.join(', ')}`);
-		for (const pageId of pages) {
-			connectAtmospherePage(pageId);
+		const perSitemapCounts = new Map();
+		for (const target of targets) {
+			perSitemapCounts.set(
+				target.sitemapName,
+				(perSitemapCounts.get(target.sitemapName) || 0) + 1
+			);
+		}
+		const summary = Array.from(perSitemapCounts.entries())
+			.map(([name, count]) => `${name}:${count}`)
+			.join(', ');
+		logMessage(`[Atmosphere] Subscribing to ${targets.length} pages across ${perSitemapCounts.size} sitemap(s): ${summary}`);
+		for (const target of targets) {
+			connectAtmospherePage(target.sitemapName, target.pageId);
 		}
 	} finally {
 		atmosphereConnectInFlight = false;
@@ -3604,7 +3639,6 @@ function stopAllAtmosphereConnections() {
 	}
 	atmosphereResubscribeRequested = false;
 	atmosphereNeedsSitemapRefresh = false;
-	lastAtmosphereSitemapName = '';
 	stopAtmosphereNoUpdateMonitor();
 }
 
@@ -4115,7 +4149,7 @@ function handleWsUpgrade(req, socket, head) {
 function getInitialPageTitle() {
 	const clientSiteName = safeText(liveConfig.clientConfig?.siteName || '').trim();
 	if (clientSiteName) return clientSiteName;
-	const cached = safeText(backgroundState.sitemap.title);
+	const cached = safeText(getPrimaryBackgroundSitemap()?.title);
 	return cached || DEFAULT_PAGE_TITLE;
 }
 
@@ -4581,13 +4615,13 @@ function filterSitemapCacheVisibility(cache, userRole) {
 	return filtered;
 }
 
-async function getHomepageData(req) {
-	const sitemapName = backgroundState.sitemap.name;
-	if (!sitemapName || !backgroundState.sitemap.ok) return null;
+async function getHomepageData(req, sitemapName) {
+	const sitemap = safeText(sitemapName).trim();
+	if (!sitemap) return null;
 
 	try {
 		const result = await Promise.race([
-			fetchOpenhab(`/rest/sitemaps/${encodeURIComponent(sitemapName)}/${encodeURIComponent(sitemapName)}?type=json`),
+			fetchOpenhab(`/rest/sitemaps/${encodeURIComponent(sitemap)}/${encodeURIComponent(sitemap)}?type=json`),
 			new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), HOMEPAGE_DATA_TIMEOUT_MS)),
 		]);
 		if (!result.ok) return null;
@@ -4605,9 +4639,9 @@ async function getHomepageData(req) {
 		const inlineIcons = await buildHomepageInlineIcons(visibleWidgets);
 
 		return {
-			sitemapName,
-			pageUrl: `/rest/sitemaps/${encodeURIComponent(sitemapName)}/${encodeURIComponent(sitemapName)}?type=json`,
-			pageTitle: page.title || sitemapName,
+			sitemapName: sitemap,
+			pageUrl: `/rest/sitemaps/${encodeURIComponent(sitemap)}/${encodeURIComponent(sitemap)}?type=json`,
+			pageTitle: page.title || sitemap,
 			widgets: visibleWidgets,
 			inlineIcons,
 		};
@@ -4626,13 +4660,13 @@ async function sendIndex(req, res) {
 	// Embed homepage and sitemap data for authenticated users
 	if (req.ohProxyAuth === 'authenticated') {
 		// Ensure sitemap cache is populated (may not be ready on cold start)
-		if (!backgroundState.sitemap.name || !backgroundState.sitemap.ok) {
+		if (!getBackgroundSitemaps().length) {
 			await refreshSitemapCache({ skipAtmosphereResubscribe: true });
 		}
-		const sitemapName = backgroundState.sitemap.name;
+		const sitemapName = resolveRequestSitemapName(req);
 		if (sitemapName) {
 			const [homepageData, sitemapCache] = await Promise.all([
-				getHomepageData(req),
+				getHomepageData(req, sitemapName),
 				getFullSitemapData(sitemapName),
 			]);
 			const userRole = req.ohProxyUser ? (sessions.getUser(req.ohProxyUser)?.role || 'normal') : 'normal';
@@ -4816,6 +4850,70 @@ function extractSitemaps(data) {
 	if (data?.sitemap && typeof data.sitemap === 'object') return [data.sitemap];
 	if (data?.sitemaps && typeof data.sitemaps === 'object') return [data.sitemaps];
 	return [];
+}
+
+function decodeSitemapName(name) {
+	const raw = safeText(name).trim();
+	if (!raw) return '';
+	try {
+		return decodeURIComponent(raw).trim();
+	} catch {
+		return raw;
+	}
+}
+
+function normalizeSitemapEntry(entry, updatedAt = Date.now()) {
+	if (!entry || typeof entry !== 'object') return null;
+	let name = safeText(entry?.name || entry?.id).trim();
+	if (!name) {
+		const homepage = safeText(entry?.homepage?.link || entry?.link || '').trim();
+		if (homepage) {
+			const withoutQuery = homepage.split('?')[0].replace(/\/+$/, '');
+			const parts = withoutQuery.split('/');
+			name = decodeSitemapName(parts[parts.length - 1] || '');
+		}
+	}
+	if (!name) return null;
+	const title = safeText(entry?.label || entry?.title || name);
+	const homepage = safeText(entry?.homepage?.link || entry?.link || '');
+	return {
+		name,
+		title,
+		homepage,
+		updatedAt,
+		ok: true,
+	};
+}
+
+function sitemapCatalogSignature(sitemaps) {
+	if (!Array.isArray(sitemaps) || !sitemaps.length) return '';
+	return sitemaps.map((entry) => safeText(entry?.name).trim()).filter(Boolean).join('|');
+}
+
+function getBackgroundSitemaps() {
+	if (Array.isArray(backgroundState.sitemaps) && backgroundState.sitemaps.length) {
+		return backgroundState.sitemaps.filter((entry) => !!safeText(entry?.name).trim());
+	}
+	const fallbackName = safeText(backgroundState.sitemap?.name).trim();
+	if (!fallbackName) return [];
+	return [{ ...backgroundState.sitemap, name: fallbackName }];
+}
+
+function getPrimaryBackgroundSitemap() {
+	const sitemaps = getBackgroundSitemaps();
+	return sitemaps[0] || null;
+}
+
+function resolveRequestSitemapName(req) {
+	const sitemaps = getBackgroundSitemaps();
+	if (!sitemaps.length) return '';
+
+	const selected = safeText(req?.ohProxySession?.settings?.selectedSitemap).trim();
+	if (selected) {
+		const found = sitemaps.find((entry) => entry?.name === selected);
+		if (found) return found.name;
+	}
+	return safeText(sitemaps[0]?.name).trim();
 }
 
 
@@ -5570,66 +5668,275 @@ function getVoiceErrorMessage(err) {
 	return 'Voice command processing failed. Please try again.';
 }
 
-let aiStructureMapCache = null;
-let aiStructureMapMtime = 0;
+const STRUCTURE_MAP_TYPES = ['all', 'writable', 'readable'];
+const STRUCTURE_MAP_LEGACY_PATHS = {
+	all: AI_STRUCTURE_MAP_ALL,
+	writable: AI_STRUCTURE_MAP_WRITABLE,
+	readable: AI_STRUCTURE_MAP_READABLE,
+};
+const aiStructureMapCache = new Map();
+const structureMapOnDemandCooldownUntil = new Map();
+const structureMapOnDemandInflight = new Map();
 
-function getAiStructureMap() {
+function structureMapSitemapToken(sitemapName) {
+	const normalized = safeText(sitemapName).trim();
+	if (!normalized) return '';
+	return encodeURIComponent(normalized);
+}
+
+function structureMapPathForSitemap(sitemapName, type = 'writable') {
+	const normalizedType = safeText(type).trim().toLowerCase();
+	if (!STRUCTURE_MAP_TYPES.includes(normalizedType)) return '';
+	const token = structureMapSitemapToken(sitemapName);
+	if (!token) return '';
+	return path.join(AI_CACHE_DIR, `structuremap-${token}-${normalizedType}.json`);
+}
+
+function clearAiStructureMapCache(filePath = '') {
+	const normalizedPath = safeText(filePath).trim();
+	if (normalizedPath) {
+		aiStructureMapCache.delete(normalizedPath);
+		return;
+	}
+	aiStructureMapCache.clear();
+}
+
+function readAiStructureMapFile(filePath) {
+	const normalizedPath = safeText(filePath).trim();
+	if (!normalizedPath) return null;
 	try {
-		if (!fs.existsSync(AI_STRUCTURE_MAP_WRITABLE)) return null;
-		const stat = fs.statSync(AI_STRUCTURE_MAP_WRITABLE);
-		if (aiStructureMapCache && stat.mtimeMs === aiStructureMapMtime) {
-			return aiStructureMapCache;
+		if (!fs.existsSync(normalizedPath)) return null;
+		const stat = fs.statSync(normalizedPath);
+		const cached = aiStructureMapCache.get(normalizedPath);
+		if (cached && cached.mtimeMs === stat.mtimeMs) {
+			return cached.data;
 		}
-		const data = JSON.parse(fs.readFileSync(AI_STRUCTURE_MAP_WRITABLE, 'utf8'));
-		aiStructureMapCache = data;
-		aiStructureMapMtime = stat.mtimeMs;
+		const data = JSON.parse(fs.readFileSync(normalizedPath, 'utf8'));
+		aiStructureMapCache.set(normalizedPath, { mtimeMs: stat.mtimeMs, data });
 		return data;
 	} catch {
 		return null;
 	}
 }
 
-async function refreshStructureMapCache() {
-	const fetchList = async () => {
-		const res = await fetchOpenhab('/rest/sitemaps?type=json');
-		if (!res?.ok) throw new Error('Failed to fetch sitemap list');
-		const data = JSON.parse(res.body);
-		if (Array.isArray(data)) return data;
-		if (data?.sitemap) return [data.sitemap];
-		if (data?.name) return [data];
-		return [];
-	};
+function getAiStructureMap(sitemapName = '', { allowLegacyFallback = true } = {}) {
+	const normalizedName = safeText(sitemapName).trim();
+	if (normalizedName) {
+		const scopedPath = structureMapPathForSitemap(normalizedName, 'writable');
+		const scoped = readAiStructureMapFile(scopedPath);
+		if (scoped) return scoped;
+		if (!allowLegacyFallback) return null;
+	}
+	return readAiStructureMapFile(AI_STRUCTURE_MAP_WRITABLE);
+}
 
-	const fetchFull = async (name) => {
-		const res = await fetchOpenhab(`/rest/sitemaps/${name}?type=json&includeHidden=true`);
-		if (!res?.ok) throw new Error(`Failed to fetch sitemap ${name}`);
+function writeStructureMapCacheFile(filePath, type, sitemapName, result, generatedAt) {
+	const normalizedType = safeText(type).trim().toLowerCase();
+	const payload = result?.[normalizedType];
+	if (!payload) {
+		throw new Error(`Missing structure map payload for type "${normalizedType}"`);
+	}
+	fs.writeFileSync(filePath, JSON.stringify({
+		generatedAt,
+		sitemap: sitemapName,
+		type: normalizedType,
+		itemCount: payload.itemCount,
+		request: payload.request,
+	}, null, 2));
+	clearAiStructureMapCache(filePath);
+}
+
+function writeStructureMapResultFiles(result, generatedAt, options = {}) {
+	const sitemapName = safeText(result?.sitemapName).trim();
+	if (!sitemapName) throw new Error('Structure map generation returned an empty sitemap name');
+	ensureDir(AI_CACHE_DIR);
+	for (const type of STRUCTURE_MAP_TYPES) {
+		const scopedPath = structureMapPathForSitemap(sitemapName, type);
+		if (!scopedPath) continue;
+		writeStructureMapCacheFile(scopedPath, type, sitemapName, result, generatedAt);
+	}
+	if (options.writeLegacy === true) {
+		for (const type of STRUCTURE_MAP_TYPES) {
+			const legacyPath = STRUCTURE_MAP_LEGACY_PATHS[type];
+			if (!legacyPath) continue;
+			writeStructureMapCacheFile(legacyPath, type, sitemapName, result, generatedAt);
+		}
+	}
+}
+
+function getStructureMapOnDemandCooldownMs(sitemapName) {
+	const normalizedName = safeText(sitemapName).trim();
+	if (!normalizedName) return 0;
+	const cooldownUntil = structureMapOnDemandCooldownUntil.get(normalizedName);
+	if (!cooldownUntil) return 0;
+	const remaining = cooldownUntil - Date.now();
+	if (remaining <= 0) {
+		structureMapOnDemandCooldownUntil.delete(normalizedName);
+		return 0;
+	}
+	return remaining;
+}
+
+function withTimeout(promise, timeoutMs, timeoutMessage) {
+	let timer = null;
+	const timeout = new Promise((_, reject) => {
+		timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+	});
+	return Promise.race([promise, timeout]).finally(() => {
+		if (timer) clearTimeout(timer);
+	});
+}
+
+async function fetchStructureMapSitemapNames() {
+	const res = await fetchOpenhab('/rest/sitemaps?type=json');
+	if (!res?.ok) throw new Error('Failed to fetch sitemap list');
+	let data;
+	try {
+		data = JSON.parse(res.body);
+	} catch {
+		throw new Error('Failed to parse sitemap list response');
+	}
+	const sitemaps = extractSitemaps(data);
+	const now = Date.now();
+	const names = [];
+	const seen = new Set();
+	for (const entry of sitemaps) {
+		const normalized = normalizeSitemapEntry(entry, now);
+		if (!normalized) continue;
+		if (seen.has(normalized.name)) continue;
+		seen.add(normalized.name);
+		names.push(normalized.name);
+	}
+	if (!names.length) throw new Error('No sitemaps found');
+	return names;
+}
+
+async function fetchStructureMapSitemapFull(name) {
+	const sitemapName = safeText(name).trim();
+	if (!sitemapName) throw new Error('Missing sitemap name');
+	const encoded = encodeURIComponent(sitemapName);
+	const res = await fetchOpenhab(`/rest/sitemaps/${encoded}?type=json&includeHidden=true`);
+	if (!res?.ok) throw new Error(`Failed to fetch sitemap ${sitemapName}`);
+	try {
 		return JSON.parse(res.body);
+	} catch {
+		throw new Error(`Failed to parse sitemap ${sitemapName}`);
+	}
+}
+
+async function generateStructureMapForSitemap(sitemapName, sitemapNames = null) {
+	const targetSitemap = safeText(sitemapName).trim();
+	if (!targetSitemap) throw new Error('Missing sitemap name');
+	const names = Array.isArray(sitemapNames) && sitemapNames.length
+		? sitemapNames
+		: await fetchStructureMapSitemapNames();
+	return generateStructureMap(
+		async () => names.map((name) => ({ name })),
+		(name) => fetchStructureMapSitemapFull(name),
+		{ sitemapName: targetSitemap }
+	);
+}
+
+async function getOrGenerateAiStructureMapForSitemap(sitemapName) {
+	const targetSitemap = safeText(sitemapName).trim();
+	if (!targetSitemap) {
+		return { map: getAiStructureMap('', { allowLegacyFallback: true }), generated: false, cooldownMs: 0 };
+	}
+
+	const existing = getAiStructureMap(targetSitemap, { allowLegacyFallback: false });
+	if (existing) return { map: existing, generated: false, cooldownMs: 0 };
+
+	const cooldownMs = getStructureMapOnDemandCooldownMs(targetSitemap);
+	if (cooldownMs > 0) {
+		return { map: null, generated: false, cooldownMs, error: new Error('Structure map generation cooldown active') };
+	}
+
+	let inflight = structureMapOnDemandInflight.get(targetSitemap);
+	if (!inflight) {
+		inflight = (async () => {
+			try {
+				const generatedAt = new Date().toISOString();
+				const result = await withTimeout(
+					(async () => {
+						const sitemapNames = await fetchStructureMapSitemapNames();
+						return generateStructureMapForSitemap(targetSitemap, sitemapNames);
+					})(),
+					STRUCTURE_MAP_ON_DEMAND_TIMEOUT_MS,
+					`Timed out generating structure map for sitemap "${targetSitemap}"`
+				);
+				writeStructureMapResultFiles(result, generatedAt);
+				structureMapOnDemandCooldownUntil.delete(targetSitemap);
+				logMessage(`[StructureMap] On-demand generated sitemap "${targetSitemap}" (${result.stats.total} items)`);
+				return { ok: true };
+			} catch (err) {
+				structureMapOnDemandCooldownUntil.set(
+					targetSitemap,
+					Date.now() + STRUCTURE_MAP_ON_DEMAND_FAILURE_COOLDOWN_MS
+				);
+				logMessage(
+					`[StructureMap] On-demand generation failed for sitemap "${targetSitemap}": ${err.message || err} ` +
+					`(cooldown ${formatInterval(STRUCTURE_MAP_ON_DEMAND_FAILURE_COOLDOWN_MS)})`
+				);
+				return { ok: false, error: err };
+			} finally {
+				structureMapOnDemandInflight.delete(targetSitemap);
+			}
+		})();
+		structureMapOnDemandInflight.set(targetSitemap, inflight);
+	}
+
+	const generationResult = await inflight;
+	const refreshed = getAiStructureMap(targetSitemap, { allowLegacyFallback: false });
+	if (refreshed) {
+		return { map: refreshed, generated: generationResult.ok === true, cooldownMs: 0 };
+	}
+	return {
+		map: null,
+		generated: false,
+		cooldownMs: getStructureMapOnDemandCooldownMs(targetSitemap),
+		error: generationResult.error || new Error('Failed to load generated structure map'),
 	};
+}
 
-	const result = await generateStructureMap(fetchList, fetchFull);
-
-	// Write cache files
-	if (!fs.existsSync(AI_CACHE_DIR)) {
-		fs.mkdirSync(AI_CACHE_DIR, { recursive: true });
-	}
-
+async function refreshStructureMapCache() {
+	const sitemapNames = await fetchStructureMapSitemapNames();
 	const generatedAt = new Date().toISOString();
-	for (const type of ['all', 'writable', 'readable']) {
-		const filePath = path.join(AI_CACHE_DIR, `structuremap-${type}.json`);
-		fs.writeFileSync(filePath, JSON.stringify({
-			generatedAt,
-			sitemap: result.sitemapName,
-			type,
-			itemCount: result[type].itemCount,
-			request: result[type].request
-		}, null, 2));
+	let generatedCount = 0;
+	let failedCount = 0;
+	let totalItems = 0;
+	let totalWritable = 0;
+	let totalReadable = 0;
+	let primaryResult = null;
+
+	for (const sitemapName of sitemapNames) {
+		try {
+			const result = await generateStructureMapForSitemap(sitemapName, sitemapNames);
+			writeStructureMapResultFiles(result, generatedAt);
+			if (!primaryResult) primaryResult = result;
+			generatedCount += 1;
+			totalItems += result.stats.total;
+			totalWritable += result.stats.writable;
+			totalReadable += result.stats.readable;
+		} catch (err) {
+			failedCount += 1;
+			logMessage(`[StructureMap] Failed for sitemap "${sitemapName}": ${err.message || err}`);
+		}
 	}
 
-	// Invalidate cache
-	aiStructureMapCache = null;
-	aiStructureMapMtime = 0;
+	if (primaryResult) {
+		writeStructureMapResultFiles(primaryResult, generatedAt, { writeLegacy: true });
+	}
+	clearAiStructureMapCache();
 
-	logMessage(`[StructureMap] Generated: ${result.stats.total} items (${result.stats.writable} writable, ${result.stats.readable} readable)`);
+	if (generatedCount === 0) {
+		throw new Error('Failed to generate structure maps for all sitemaps');
+	}
+
+	logMessage(
+		`[StructureMap] Generated ${generatedCount}/${sitemapNames.length} sitemap map(s): ` +
+		`${totalItems} items (${totalWritable} writable, ${totalReadable} readable)` +
+		(failedCount ? `, ${failedCount} failed` : '')
+	);
 }
 
 async function refreshSitemapCache(options = {}) {
@@ -5655,29 +5962,30 @@ async function refreshSitemapCache(options = {}) {
 	}
 
 	const sitemaps = extractSitemaps(data);
-	const first = Array.isArray(sitemaps) ? sitemaps[0] : null;
-	if (!first) return false;
+	if (!Array.isArray(sitemaps) || !sitemaps.length) return false;
 
-	const name = safeText(first?.name || first?.id || first?.homepage?.link?.split('/').pop() || '');
-	if (!name) return false;
-	const title = safeText(first?.label || first?.title || name);
-	const homepage = safeText(first?.homepage?.link || first?.link || '');
+	const oldSignature = sitemapCatalogSignature(getBackgroundSitemaps());
+	const now = Date.now();
+	const nextCatalog = [];
+	const seenNames = new Set();
+	for (const entry of sitemaps) {
+		const normalized = normalizeSitemapEntry(entry, now);
+		if (!normalized) continue;
+		if (seenNames.has(normalized.name)) continue;
+		seenNames.add(normalized.name);
+		nextCatalog.push(normalized);
+	}
+	if (!nextCatalog.length) return false;
 
-	backgroundState.sitemap = {
-		name,
-		title,
-		homepage,
-		updatedAt: Date.now(),
-		ok: true,
-	};
+	backgroundState.sitemaps = nextCatalog;
+	backgroundState.sitemap = { ...nextCatalog[0] };
 
 	if (!options.skipAtmosphereResubscribe) {
-		const nameChanged = lastAtmosphereSitemapName
-			&& backgroundState.sitemap.name
-			&& lastAtmosphereSitemapName !== backgroundState.sitemap.name;
+		const newSignature = sitemapCatalogSignature(nextCatalog);
+		const catalogChanged = !!oldSignature && !!newSignature && oldSignature !== newSignature;
 		if (liveConfig.wsMode === 'atmosphere' && wss.clients.size > 0) {
-			if (atmosphereNeedsSitemapRefresh || nameChanged) {
-				const reason = nameChanged ? 'sitemap changed' : 'sitemap cache refreshed';
+			if (atmosphereNeedsSitemapRefresh || catalogChanged) {
+				const reason = catalogChanged ? 'sitemap catalog changed' : 'sitemap cache refreshed';
 				atmosphereNeedsSitemapRefresh = false;
 				scheduleAtmosphereResubscribe(reason);
 			}
@@ -7189,11 +7497,30 @@ app.post('/api/voice', jsonParserSmall, async (req, res) => {
 		return;
 	}
 
-	// Load structure map
-	const structureMap = getAiStructureMap();
+	const requestSitemapName = resolveRequestSitemapName(req);
+	const structureMapResult = await getOrGenerateAiStructureMapForSitemap(requestSitemapName);
+	const structureMap = structureMapResult.map;
 	if (!structureMap) {
-		logMessage(`[Voice] [${username}] "${trimmed}" - structure map not found`);
-		res.status(503).json({ error: 'Voice AI structure map not found. Run ai-cli.js genstructuremap first.', voiceError: 'Voice commands are not ready. The system structure map needs to be generated.' });
+		const cooldownMs = Math.max(0, Number(structureMapResult.cooldownMs) || 0);
+		if (cooldownMs > 0) {
+			logMessage(
+				`[Voice] [${username}] "${trimmed}" - structure map unavailable for sitemap "${requestSitemapName}" ` +
+				`(cooldown ${formatInterval(cooldownMs)})`
+			);
+			res.status(503).json({
+				error: 'Voice AI structure map is cooling down after a generation failure.',
+				voiceError: 'Voice commands are temporarily unavailable while the system retries structure map generation.',
+			});
+			return;
+		}
+		logMessage(
+			`[Voice] [${username}] "${trimmed}" - structure map not found for sitemap "${requestSitemapName}": ` +
+			`${structureMapResult.error?.message || 'missing structure map'}`
+		);
+		res.status(503).json({
+			error: 'Voice AI structure map not found for the selected sitemap.',
+			voiceError: 'Voice commands are not ready for this sitemap. The system structure map needs to be generated.',
+		});
 		return;
 	}
 
@@ -9826,23 +10153,32 @@ function pruneVideoPreviews() {
 
 // Video preview capture background task
 async function captureVideoPreviewsTask() {
-	const sitemapName = backgroundState.sitemap?.name;
-	if (!sitemapName) return;
+	const sitemaps = getBackgroundSitemaps();
+	if (!sitemaps.length) return;
 
-	let sitemapData;
-	try {
-		const response = await fetchOpenhab(`/rest/sitemaps/${sitemapName}?type=json`);
-		if (!response || !response.ok) {
-			logMessage(`[Video] Preview sitemap fetch failed (HTTP ${response?.status || 'unknown'})`);
-			return;
+	const videoUrls = new Map();
+	for (const entry of sitemaps) {
+		const sitemapName = safeText(entry?.name).trim();
+		if (!sitemapName) continue;
+		try {
+			const response = await fetchOpenhab(`/rest/sitemaps/${encodeURIComponent(sitemapName)}?type=json`);
+			if (!response || !response.ok) {
+				logMessage(
+					`[Video] Preview sitemap fetch failed for "${sitemapName}" ` +
+					`(HTTP ${response?.status || 'unknown'})`
+				);
+				continue;
+			}
+			const sitemapData = JSON.parse(response.body);
+			const sitemapVideoUrls = extractVideoUrls(sitemapData);
+			for (const [url, rawEnc] of sitemapVideoUrls) {
+				if (videoUrls.has(url)) continue;
+				videoUrls.set(url, rawEnc);
+			}
+		} catch (err) {
+			logMessage(`[Video] Preview failed to fetch/parse sitemap "${sitemapName}": ${err.message || err}`);
 		}
-		sitemapData = JSON.parse(response.body);
-	} catch (err) {
-		logMessage(`[Video] Preview failed to fetch/parse sitemap: ${err.message || err}`);
-		return;
 	}
-
-	const videoUrls = extractVideoUrls(sitemapData);
 	if (videoUrls.size === 0) return;
 
 	// Capture screenshots sequentially
