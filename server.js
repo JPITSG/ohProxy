@@ -341,6 +341,7 @@ const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(TASK_CONFIG.sitemapRefreshMs);
 const STRUCTURE_MAP_REFRESH_MS = configNumber(TASK_CONFIG.structureMapRefreshMs);
 const NPM_UPDATE_CHECK_MS = configNumber(TASK_CONFIG.npmUpdateCheckMs);
+const LOG_ROTATION_ENABLED = TASK_CONFIG.logRotationEnabled === true;
 const WEBSOCKET_CONFIG = SERVER_CONFIG.websocket || {};
 const WS_MODE = ['atmosphere', 'sse'].includes(WEBSOCKET_CONFIG.mode) ? WEBSOCKET_CONFIG.mode : 'polling';
 const WS_POLLING_INTERVAL_MS = configNumber(WEBSOCKET_CONFIG.pollingIntervalMs) || 500;
@@ -912,6 +913,7 @@ function validateConfig() {
 		ensureNumber(SITEMAP_REFRESH_MS, 'server.backgroundTasks.sitemapRefreshMs', { min: 1000 }, errors);
 		ensureNumber(STRUCTURE_MAP_REFRESH_MS, 'server.backgroundTasks.structureMapRefreshMs', { min: 0 }, errors);
 		ensureNumber(NPM_UPDATE_CHECK_MS, 'server.backgroundTasks.npmUpdateCheckMs', { min: 0 }, errors);
+		ensureBoolean(TASK_CONFIG.logRotationEnabled, 'server.backgroundTasks.logRotationEnabled', errors);
 	}
 
 	if (ensureObject(SERVER_CONFIG.videoPreview, 'server.videoPreview', errors)) {
@@ -1185,6 +1187,9 @@ function validateAdminConfig(config) {
 		}
 		if (s.backgroundTasks.npmUpdateCheckMs !== undefined) {
 			ensureNumber(s.backgroundTasks.npmUpdateCheckMs, 'server.backgroundTasks.npmUpdateCheckMs', { min: 0 }, errors);
+		}
+		if (s.backgroundTasks.logRotationEnabled !== undefined) {
+			ensureBoolean(s.backgroundTasks.logRotationEnabled, 'server.backgroundTasks.logRotationEnabled', errors);
 		}
 	}
 
@@ -1884,6 +1889,7 @@ const liveConfig = {
 	sitemapRefreshMs: SITEMAP_REFRESH_MS,
 	structureMapRefreshMs: STRUCTURE_MAP_REFRESH_MS,
 	npmUpdateCheckMs: NPM_UPDATE_CHECK_MS,
+	logRotationEnabled: LOG_ROTATION_ENABLED,
 	clientConfig: CLIENT_CONFIG,
 	wsMode: WS_MODE,
 	wsPollingIntervalMs: WS_POLLING_INTERVAL_MS,
@@ -2076,6 +2082,8 @@ function reloadLiveConfig() {
 	liveConfig.structureMapRefreshMs = configNumber(newTasks.structureMapRefreshMs);
 	const prevNpmUpdateCheckMs = liveConfig.npmUpdateCheckMs;
 	liveConfig.npmUpdateCheckMs = configNumber(newTasks.npmUpdateCheckMs);
+	const prevLogRotationEnabled = liveConfig.logRotationEnabled;
+	liveConfig.logRotationEnabled = newTasks.logRotationEnabled === true;
 	liveConfig.clientConfig = newConfig.client || {};
 	sessions.setDefaultTheme(liveConfig.clientConfig.defaultTheme || 'light');
 
@@ -2182,6 +2190,10 @@ function reloadLiveConfig() {
 		updateBackgroundTaskInterval('npm-update-check', liveConfig.npmUpdateCheckMs);
 	}
 
+	if (liveConfig.logRotationEnabled !== prevLogRotationEnabled) {
+		syncLogRotationSchedule();
+	}
+
 	// If mode changed and clients are connected, switch modes
 	if (oldWsMode !== liveConfig.wsMode && wss.clients.size > 0) {
 		logMessage(`[WS] Mode changed from ${oldWsMode} to ${liveConfig.wsMode}, switching...`);
@@ -2253,6 +2265,8 @@ let serviceWorkerTemplate = null;
 let loginTemplate = null;
 const backgroundTasks = [];
 const TASK_LAST_RUN_KEY = 'task_last_run_times';
+const LOG_ROTATION_MAX_FILES = 9;
+let logRotationTimer = null;
 
 function loadTaskLastRunTimes() {
 	try {
@@ -2379,6 +2393,99 @@ function startBackgroundTasks() {
 			runBackgroundTask(task);
 		}
 	}
+}
+
+function msUntilNextLocalMidnight(now = new Date()) {
+	const next = new Date(now);
+	next.setHours(24, 0, 0, 0);
+	return Math.max(0, next.getTime() - now.getTime());
+}
+
+function getConfiguredLogFilePaths() {
+	const uniquePaths = new Set();
+	for (const filePath of [liveConfig.logFile, liveConfig.accessLog, liveConfig.jsLogFile]) {
+		const target = safeText(filePath).trim();
+		if (target) uniquePaths.add(target);
+	}
+	return Array.from(uniquePaths);
+}
+
+function unlinkIfExists(filePath) {
+	try {
+		fs.unlinkSync(filePath);
+		return true;
+	} catch (err) {
+		if (err && err.code === 'ENOENT') return false;
+		throw err;
+	}
+}
+
+function renameIfExists(fromPath, toPath) {
+	try {
+		fs.renameSync(fromPath, toPath);
+		return true;
+	} catch (err) {
+		if (err && err.code === 'ENOENT') return false;
+		throw err;
+	}
+}
+
+function ensureFileExists(filePath) {
+	const fd = fs.openSync(filePath, 'a');
+	fs.closeSync(fd);
+}
+
+function rotateLogFile(filePath) {
+	const target = safeText(filePath).trim();
+	if (!target) return false;
+	unlinkIfExists(`${target}.${LOG_ROTATION_MAX_FILES}`);
+	for (let index = LOG_ROTATION_MAX_FILES - 1; index >= 1; index--) {
+		renameIfExists(`${target}.${index}`, `${target}.${index + 1}`);
+	}
+	const rotated = renameIfExists(target, `${target}.1`);
+	ensureFileExists(target);
+	return rotated;
+}
+
+function rotateConfiguredLogFiles() {
+	const logFiles = getConfiguredLogFilePaths();
+	if (logFiles.length === 0) return;
+	let rotatedCount = 0;
+	for (const filePath of logFiles) {
+		try {
+			if (rotateLogFile(filePath)) rotatedCount += 1;
+		} catch (err) {
+			logMessage(`[LogRotate] Failed to rotate ${filePath}: ${err.message || err}`);
+		}
+	}
+	logMessage(`[LogRotate] Completed rotation for ${logFiles.length} configured log file(s); archived ${rotatedCount} active file(s)`);
+}
+
+function scheduleLogRotation() {
+	if (logRotationTimer) {
+		clearTimeout(logRotationTimer);
+		logRotationTimer = null;
+	}
+	if (!liveConfig.logRotationEnabled) return;
+	const delayMs = Math.max(1000, msUntilNextLocalMidnight());
+	logRotationTimer = setTimeout(() => {
+		logRotationTimer = null;
+		rotateConfiguredLogFiles();
+		scheduleLogRotation();
+	}, delayMs);
+	logMessage(`[LogRotate] Next rotation in ${formatInterval(delayMs)}`);
+}
+
+function syncLogRotationSchedule() {
+	if (!liveConfig.logRotationEnabled) {
+		if (logRotationTimer) {
+			clearTimeout(logRotationTimer);
+			logRotationTimer = null;
+			logMessage('[LogRotate] Disabled');
+		}
+		return;
+	}
+	scheduleLogRotation();
 }
 
 const backgroundState = {
@@ -10118,6 +10225,7 @@ if (isMysqlConfigured()) {
 }
 
 startBackgroundTasks();
+syncLogRotationSchedule();
 
 function startHttpServer() {
 	const server = http.createServer(app);

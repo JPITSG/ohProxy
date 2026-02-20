@@ -170,6 +170,8 @@ module.exports = {
 			structureMapRefreshMs: 24 * 60 * 60 * 1000, // 24 hours
 			// NPM module update check interval (ms; 0 = disabled).
 			npmUpdateCheckMs: 24 * 60 * 60 * 1000, // 24 hours
+			// Rotate configured log files daily at local midnight (00:00).
+			logRotationEnabled: false,
 		},
 
 		// === WebSocket ===
