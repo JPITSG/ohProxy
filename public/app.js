@@ -3971,6 +3971,7 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'server.accessLogLevel', type: 'select', options: ['all', '400+'] },
 			{ key: 'server.proxyMiddlewareLogLevel', type: 'select', options: ['silent', 'error', 'warn', 'info', 'debug'] },
 			{ key: 'server.slowQueryMs', type: 'number', min: 0 },
+			{ key: 'server.logRotationEnabled', type: 'toggle' },
 		],
 	},
 	{
@@ -3980,7 +3981,6 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'server.backgroundTasks.sitemapRefreshMs', type: 'number', min: 1000 },
 			{ key: 'server.backgroundTasks.structureMapRefreshMs', type: 'number', min: 0 },
 			{ key: 'server.backgroundTasks.npmUpdateCheckMs', type: 'number', min: 0 },
-			{ key: 'server.backgroundTasks.logRotationEnabled', type: 'toggle' },
 		],
 	},
 	{

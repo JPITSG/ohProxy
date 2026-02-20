@@ -157,6 +157,8 @@ module.exports = {
 		proxyMiddlewareLogLevel: 'warn',
 		// Slow query threshold (ms; 0 disables; logs requests exceeding this duration).
 		slowQueryMs: 0,
+		// Rotate configured log files daily at local midnight (00:00).
+		logRotationEnabled: false,
 
 		// === Sessions ===
 		// Session max age in days before cleanup (integer; >=1).
@@ -170,8 +172,6 @@ module.exports = {
 			structureMapRefreshMs: 24 * 60 * 60 * 1000, // 24 hours
 			// NPM module update check interval (ms; 0 = disabled).
 			npmUpdateCheckMs: 24 * 60 * 60 * 1000, // 24 hours
-			// Rotate configured log files daily at local midnight (00:00).
-			logRotationEnabled: false,
 		},
 
 		// === WebSocket ===
