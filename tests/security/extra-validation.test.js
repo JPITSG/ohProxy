@@ -139,7 +139,7 @@ function createExtraValidationTestApp() {
 		if (!isPlainObject(newSettings)) {
 			return res.status(400).json({ error: 'Invalid settings' });
 		}
-		const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode'];
+		const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode', 'selectedSitemap'];
 		const allowedKeySet = new Set(allowedKeys);
 		const incomingKeys = Object.keys(newSettings);
 		if (incomingKeys.some((key) => !allowedKeySet.has(key))) {
@@ -174,6 +174,18 @@ function createExtraValidationTestApp() {
 					return res.status(400).json({ error: 'Invalid fontSize value' });
 				}
 				sanitized[key] = size;
+				continue;
+			}
+			if (key === 'selectedSitemap') {
+				if (typeof val !== 'string' || hasAnyControlChars(val)) {
+					return res.status(400).json({ error: 'Invalid selectedSitemap value' });
+				}
+				const selected = val.trim();
+				if (!selected || selected.length > 120) {
+					return res.status(400).json({ error: 'Invalid selectedSitemap value' });
+				}
+				sanitized[key] = selected;
+				continue;
 			}
 		}
 		return res.json({ settings: sanitized });
@@ -644,6 +656,7 @@ describe('Extra Validation Coverage', () => {
 			{ name: 'rejects fontSize non-digit string', body: { fontSize: '12px' }, status: 400 },
 			{ name: 'rejects fontSize too small', body: { fontSize: 7 }, status: 400 },
 			{ name: 'rejects fontSize too large', body: { fontSize: 33 }, status: 400 },
+			{ name: 'rejects selectedSitemap non-string', body: { selectedSitemap: 123 }, status: 400 },
 		];
 
 		for (const testCase of cases) {
@@ -665,6 +678,13 @@ describe('Extra Validation Coverage', () => {
 			assert.strictEqual(res.status, 200);
 			const data = await res.json();
 			assert.strictEqual(data.settings.fontSize, 8);
+		});
+
+		it('accepts selectedSitemap and trims whitespace', async () => {
+			const res = await postJson('/api/settings', { selectedSitemap: ' default ' });
+			assert.strictEqual(res.status, 200);
+			const data = await res.json();
+			assert.strictEqual(data.settings.selectedSitemap, 'default');
 		});
 	});
 

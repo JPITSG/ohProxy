@@ -230,7 +230,7 @@ window.ohLang = {
 			'server.accessLogLevel': 'Requests that recieve these HTTP status codes will be logged',
 			'server.proxyMiddlewareLogLevel': 'Proxy middleware logging level',
 			'server.slowQueryMs': 'Log requests exceeding this duration (ms)',
-			'server.logRotationEnabled': 'Rotate configured log files daily at local midnight (00:00); keeps .1 through .9 archives',
+			'server.logRotationEnabled': 'Rotate configured log files daily at local midnight',
 			'server.sessionMaxAgeDays': 'Session max age in days before cleanup',
 			'server.backgroundTasks.sitemapRefreshMs': 'Sitemap refresh interval (ms)',
 			'server.backgroundTasks.structureMapRefreshMs': 'AI structure map regeneration interval (ms; 0 = disabled)',

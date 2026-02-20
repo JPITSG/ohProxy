@@ -6341,7 +6341,7 @@ app.post('/api/settings', jsonParserSmall, (req, res) => {
 		return;
 	}
 	// Whitelist allowed settings keys
-	const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode'];
+	const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode', 'selectedSitemap'];
 	const allowedKeySet = new Set(allowedKeys);
 	const incomingKeys = Object.keys(newSettings);
 	if (incomingKeys.some((key) => !allowedKeySet.has(key))) {
@@ -6380,6 +6380,20 @@ app.post('/api/settings', jsonParserSmall, (req, res) => {
 				return;
 			}
 			sanitized[key] = size;
+			continue;
+		}
+		if (key === 'selectedSitemap') {
+			if (typeof val !== 'string' || hasAnyControlChars(val)) {
+				res.status(400).json({ error: 'Invalid selectedSitemap value' });
+				return;
+			}
+			const selected = val.trim();
+			if (!selected || selected.length > 120) {
+				res.status(400).json({ error: 'Invalid selectedSitemap value' });
+				return;
+			}
+			sanitized[key] = selected;
+			continue;
 		}
 	}
 	// Merge with existing settings

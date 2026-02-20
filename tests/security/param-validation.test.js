@@ -156,7 +156,7 @@ function createValidationTestApp() {
 			return res.status(400).json({ error: 'Invalid settings' });
 		}
 
-		const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode'];
+		const allowedKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode', 'selectedSitemap'];
 		const allowedKeySet = new Set(allowedKeys);
 		const incomingKeys = Object.keys(newSettings);
 		if (incomingKeys.some((key) => !allowedKeySet.has(key))) {
@@ -190,6 +190,18 @@ function createValidationTestApp() {
 					return res.status(400).json({ error: 'Invalid fontSize value' });
 				}
 				sanitized[key] = size;
+				continue;
+			}
+			if (key === 'selectedSitemap') {
+				if (typeof val !== 'string' || hasAnyControlChars(val)) {
+					return res.status(400).json({ error: 'Invalid selectedSitemap value' });
+				}
+				const selected = val.trim();
+				if (!selected || selected.length > 120) {
+					return res.status(400).json({ error: 'Invalid selectedSitemap value' });
+				}
+				sanitized[key] = selected;
+				continue;
 			}
 		}
 
@@ -487,6 +499,15 @@ describe('Parameter Validation Security Tests', () => {
 				body: JSON.stringify([{ slimMode: true }]),
 			});
 			assert.strictEqual(res.status, 400);
+		});
+
+		it('accepts selectedSitemap string values', async () => {
+			const res = await fetch(`${baseUrl}/api/settings`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+				body: JSON.stringify({ selectedSitemap: 'default' }),
+			});
+			assert.strictEqual(res.status, 200);
 		});
 	});
 
