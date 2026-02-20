@@ -97,7 +97,7 @@ describe('Input Validation Coverage', () => {
 		assert.ok(content.includes("!password || typeof password !== 'string' || hasAnyControlChars(password) || password.length > 200"));
 
 		assert.ok(content.includes('const allowedKeys = ['));
-		const requiredKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode'];
+		const requiredKeys = ['slimMode', 'theme', 'fontSize', 'compactView', 'showLabels', 'darkMode', 'selectedSitemap'];
 		for (const key of requiredKeys) {
 			assert.ok(content.includes(`'${key}'`), `Missing settings whitelist key: ${key}`);
 		}

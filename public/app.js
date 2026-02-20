@@ -218,6 +218,7 @@ async function softReset() {
 	exitIframeFullscreen();
 	closeCardConfigModal();
 	closeAdminConfigModal();
+	closeSitemapSelectModal({ skipHistory: true });
 	hideStatusTooltip();
 	reportGps();
 
@@ -271,36 +272,26 @@ async function softReset() {
 				if (!res.ok) throw new Error(`HTTP ${res.status}`);
 				const data = await res.json();
 
-				// Parse sitemap (same logic as loadDefaultSitemap)
-				let sitemaps = [];
-				if (Array.isArray(data)) sitemaps = data;
-				else if (Array.isArray(data?.sitemaps)) sitemaps = data.sitemaps;
-				else if (Array.isArray(data?.sitemaps?.sitemap)) sitemaps = data.sitemaps.sitemap;
-				else if (Array.isArray(data?.sitemap)) sitemaps = data.sitemap;
-				else if (data?.sitemap && typeof data.sitemap === 'object') sitemaps = [data.sitemap];
-				else if (data?.sitemaps && typeof data.sitemaps === 'object') sitemaps = [data.sitemaps];
-
-				const first = Array.isArray(sitemaps) ? sitemaps[0] : null;
-				const name = first?.name || first?.id || first?.homepage?.link?.split('/').pop();
-				if (!name) throw new Error('No sitemap name');
-
-				state.sitemapName = name;
-				const nameEnc = encodeURIComponent(name);
-				let pageLink = first?.homepage?.link;
-				if (!pageLink && typeof first?.link === 'string') {
-					const rel = toRelativeRestLink(first.link);
-					if (rel.includes('/rest/sitemaps/')) {
-						pageLink = rel.endsWith(`/${nameEnc}`) ? rel : `${rel.replace(/\/$/, '')}/${nameEnc}`;
-					} else {
-						pageLink = rel;
-					}
+				const rawSitemaps = extractSitemapPayloadList(data);
+				const options = [];
+				for (const entry of rawSitemaps) {
+					const option = buildSitemapOption(entry);
+					if (option) options.push(option);
 				}
-				if (!pageLink) pageLink = `rest/sitemaps/${nameEnc}/${nameEnc}`;
+				if (!options.length) throw new Error('No sitemap name');
+				state.sitemapOptions = options;
 
-				state.pageUrl = ensureJsonParam(toRelativeRestLink(pageLink));
-				state.pageTitle = first?.label || first?.title || name;
-				state.rootPageUrl = state.pageUrl;
-				state.rootPageTitle = state.pageTitle;
+				const preferred = getStoredSelectedSitemapName();
+				let selected = preferred ? options.find((entry) => entry.name === preferred) : null;
+				const hadInvalidStoredValue = !!preferred && !selected;
+				if (!selected) selected = options[0];
+				if (hadInvalidStoredValue) {
+					await persistSelectedSitemapName(selected.name).catch((err) => {
+						logJsError('softReset persist selected sitemap fallback failed', err);
+					});
+				}
+
+				applySitemapOption(selected);
 
 				// Success - now refresh to get widgets
 				setConnectionStatus(true);
@@ -349,6 +340,8 @@ const els = {
 
 const state = {
 	sitemapName: null,
+	sitemapTitle: '',
+	sitemapOptions: [],
 	pageUrl: null,		// full REST link to current page (relative)
 	pageTitle: 'openHAB',
 	stack: [],			// navigation stack of {pageUrl, pageTitle}
@@ -1864,15 +1857,26 @@ function initTheme(forcedMode) {
 	serverSettingsLoaded = true; // Settings already loaded from server via injection
 }
 
-async function saveSettingsToServer(settings) {
+async function saveSettingsToServer(settings, options = {}) {
 	try {
-		await fetch('/api/settings', {
+		const resp = await fetch('/api/settings', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(settings),
 		});
+		if (!resp.ok) {
+			const body = await resp.text().catch(() => '');
+			throw new Error(body || `HTTP ${resp.status}`);
+		}
+		const data = await resp.json().catch(() => null);
+		if (data?.settings && window.__OH_SESSION__ && typeof window.__OH_SESSION__ === 'object') {
+			Object.assign(window.__OH_SESSION__, data.settings);
+		}
+		return { ok: true, settings: data?.settings || null };
 	} catch (err) {
 		logJsError('saveSettingsToServer failed', err);
+		if (options.throwOnError) throw err;
+		return { ok: false, error: err };
 	}
 }
 
@@ -2278,6 +2282,152 @@ function toRelativeRestLink(link) {
 		logJsError(`toRelativeRestLink failed for ${link}`, err);
 		return stripLeadingSlash(link);
 	}
+}
+
+function isAuthenticatedSession() {
+	return state.proxyAuth === 'authenticated';
+}
+
+function isSitemapSelectionEnabled() {
+	return isAuthenticatedSession() && Array.isArray(state.sitemapOptions) && state.sitemapOptions.length > 1;
+}
+
+function getStoredSelectedSitemapName() {
+	if (!window.__OH_SESSION__ || typeof window.__OH_SESSION__ !== 'object') return '';
+	const value = safeText(window.__OH_SESSION__.selectedSitemap).trim();
+	return value || '';
+}
+
+function setStoredSelectedSitemapName(name) {
+	const trimmed = safeText(name).trim();
+	if (!trimmed) return;
+	if (!window.__OH_SESSION__ || typeof window.__OH_SESSION__ !== 'object') return;
+	window.__OH_SESSION__.selectedSitemap = trimmed;
+}
+
+function extractSitemapPayloadList(data) {
+	if (Array.isArray(data)) return data;
+	if (Array.isArray(data?.sitemaps)) return data.sitemaps;
+	if (Array.isArray(data?.sitemaps?.sitemap)) return data.sitemaps.sitemap;
+	if (Array.isArray(data?.sitemap)) return data.sitemap;
+	if (data?.sitemap && typeof data.sitemap === 'object') return [data.sitemap];
+	if (data?.sitemaps && typeof data.sitemaps === 'object') return [data.sitemaps];
+	return [];
+}
+
+function buildSitemapOption(entry) {
+	if (!entry || typeof entry !== 'object') return null;
+
+	let name = safeText(entry?.name || entry?.id).trim();
+	if (!name) {
+		const homepageRel = toRelativeRestLink(entry?.homepage?.link || '');
+		if (homepageRel) {
+			const clean = homepageRel.split('?')[0].replace(/\/+$/, '');
+			const parts = clean.split('/');
+			name = decodeURIComponent(parts[parts.length - 1] || '').trim();
+		}
+	}
+	if (!name) return null;
+
+	const title = safeText(entry?.label || entry?.title || name).trim() || name;
+	let origin = null;
+	try {
+		const originSource = entry?.link || entry?.homepage?.link;
+		if (originSource) origin = new URL(originSource).origin;
+	} catch (err) {
+		logJsError('buildSitemapOption origin parse failed', err);
+		origin = null;
+	}
+
+	const nameEnc = encodeURIComponent(name);
+	let pageLink = entry?.homepage?.link;
+	if (!pageLink && typeof entry?.link === 'string') {
+		const rel = toRelativeRestLink(entry.link);
+		if (rel.includes('/rest/sitemaps/')) {
+			pageLink = rel.endsWith(`/${nameEnc}`) ? rel : `${rel.replace(/\/$/, '')}/${nameEnc}`;
+		} else {
+			pageLink = rel;
+		}
+	}
+	if (!pageLink) pageLink = `rest/sitemaps/${nameEnc}/${nameEnc}`;
+	const pageUrl = ensureJsonParam(toRelativeRestLink(pageLink));
+
+	return {
+		name,
+		title,
+		pageUrl,
+		origin,
+	};
+}
+
+function getSitemapOptionByName(name) {
+	const target = safeText(name).trim();
+	if (!target || !Array.isArray(state.sitemapOptions)) return null;
+	return state.sitemapOptions.find((entry) => entry?.name === target) || null;
+}
+
+function getActiveSitemapTitle() {
+	const fromOption = getSitemapOptionByName(state.sitemapName)?.title;
+	return safeText(fromOption || state.sitemapTitle || state.rootPageTitle || state.pageTitle || 'openHAB');
+}
+
+function applySitemapOption(option) {
+	if (!option || !option.name || !option.pageUrl) {
+		throw new Error('Invalid sitemap option');
+	}
+	state.sitemapName = option.name;
+	state.sitemapTitle = option.title || option.name;
+	state.ohOrigin = option.origin || null;
+	state.pageUrl = option.pageUrl;
+	state.pageTitle = option.title || option.name;
+	state.rootPageUrl = option.pageUrl;
+	state.rootPageTitle = option.title || option.name;
+}
+
+async function loadSitemapOptions() {
+	const data = await fetchJson('rest/sitemaps?type=json');
+	const rawList = extractSitemapPayloadList(data);
+	const options = [];
+	for (const entry of rawList) {
+		const option = buildSitemapOption(entry);
+		if (option) options.push(option);
+	}
+	state.sitemapOptions = options;
+	return options;
+}
+
+async function persistSelectedSitemapName(name, options = {}) {
+	const normalized = safeText(name).trim();
+	if (!normalized) return false;
+	if (!isAuthenticatedSession()) {
+		setStoredSelectedSitemapName(normalized);
+		return true;
+	}
+	const result = await saveSettingsToServer({ selectedSitemap: normalized }, options);
+	if (result?.ok) {
+		setStoredSelectedSitemapName(normalized);
+		return true;
+	}
+	return false;
+}
+
+async function resolvePreferredSitemapOption(opts = {}) {
+	const options = await loadSitemapOptions();
+	if (!options.length) {
+		throw new Error('Could not determine sitemap name. Check /rest/sitemaps?type=json output.');
+	}
+	const preferred = getStoredSelectedSitemapName();
+	let selected = preferred ? options.find((entry) => entry.name === preferred) : null;
+	const hadInvalidStoredValue = !!preferred && !selected;
+	if (!selected) selected = options[0];
+
+	if (hadInvalidStoredValue && opts.persistFallback !== false) {
+		await persistSelectedSitemapName(selected.name).catch((err) => {
+			logJsError('persistSelectedSitemapName fallback failed', err);
+		});
+	}
+
+	return selected;
 }
 
 function toRelativeUrl(link) {
@@ -2765,6 +2915,11 @@ let alertCurrentOptions = null;
 let alertDismissListener = null;
 let alertHistoryPushed = false;
 let alertClosePending = false;
+
+let sitemapSelectModal = null;
+let sitemapSelectHistoryPushed = false;
+let sitemapSelectClosePending = false;
+let sitemapSelectSwitching = false;
 
 function makeFrameDraggable(frame, handle) {
 	let dragging = false;
@@ -3708,6 +3863,165 @@ function clearAlertQueue() {
 function dismissAllAlerts() {
 	alertQueue = [];
 	closeAlert();
+}
+
+function sitemapOptionPrimaryLabel(option) {
+	const name = safeText(option?.name || '').trim();
+	const title = safeText(option?.title || '').trim();
+	if (title && name) return `${title} (${name})`;
+	return title || name || 'Unnamed sitemap';
+}
+
+function setSitemapSelectStatus(message, isError, isPending) {
+	if (!sitemapSelectModal) return;
+	const statusEl = sitemapSelectModal.querySelector('.sitemap-select-status');
+	if (!statusEl) return;
+	statusEl.textContent = safeText(message);
+	statusEl.className = isError
+		? 'sitemap-select-status error'
+		: isPending
+			? 'sitemap-select-status pending'
+			: 'sitemap-select-status';
+}
+
+function renderSitemapSelectOptions() {
+	if (!sitemapSelectModal) return;
+	const listEl = sitemapSelectModal.querySelector('.sitemap-select-options');
+	if (!listEl) return;
+	listEl.innerHTML = '';
+
+	const options = Array.isArray(state.sitemapOptions) ? state.sitemapOptions : [];
+	for (const option of options) {
+		const isActive = option?.name === state.sitemapName;
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = `sitemap-select-option${isActive ? ' active' : ''}`;
+		button.disabled = sitemapSelectSwitching;
+
+		const headerRow = document.createElement('div');
+		headerRow.className = 'sitemap-select-option-header';
+
+		const primary = document.createElement('span');
+		primary.className = 'sitemap-select-option-title';
+		primary.textContent = sitemapOptionPrimaryLabel(option);
+		headerRow.appendChild(primary);
+
+		const badge = document.createElement('span');
+		badge.className = isActive
+			? 'admin-current-badge sitemap-select-option-badge'
+			: 'admin-current-badge sitemap-select-option-badge sitemap-select-option-badge-hidden';
+		badge.textContent = 'Current Sitemap';
+		if (!isActive) badge.setAttribute('aria-hidden', 'true');
+		headerRow.appendChild(badge);
+
+		const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		chevron.setAttribute('viewBox', '0 0 24 24');
+		chevron.setAttribute('fill', 'none');
+		chevron.setAttribute('stroke', 'currentColor');
+		chevron.setAttribute('stroke-width', '2');
+		chevron.classList.add('sitemap-select-chevron');
+		const chevPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+		chevPath.setAttribute('d', 'M9 6l6 6-6 6');
+		chevron.appendChild(chevPath);
+		headerRow.appendChild(chevron);
+
+		button.appendChild(headerRow);
+
+		button.addEventListener('click', () => {
+			haptic();
+			if (isActive) {
+				closeSitemapSelectModal();
+				return;
+			}
+			selectSitemapAndReload(option.name);
+		});
+
+		listEl.appendChild(button);
+	}
+}
+
+function ensureSitemapSelectModal() {
+	if (sitemapSelectModal) return;
+	const wrap = document.createElement('div');
+	wrap.id = 'sitemapSelectModal';
+	wrap.className = 'sitemap-select-modal oh-modal hidden';
+	wrap.innerHTML = `
+		<div class="sitemap-select-frame oh-modal-frame glass">
+			<div class="sitemap-select-header oh-modal-header">
+				<h2>Select Sitemap</h2>
+				<button type="button" class="sitemap-select-close oh-modal-close">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M18 6L6 18M6 6l12 12"/>
+					</svg>
+				</button>
+			</div>
+			<div class="sitemap-select-body oh-modal-body">
+				<div class="sitemap-select-options"></div>
+			</div>
+			<div class="sitemap-select-footer oh-modal-footer">
+				<div class="sitemap-select-status"></div>
+				<button type="button" class="sitemap-select-cancel">Close</button>
+			</div>
+		</div>
+	`;
+	document.body.appendChild(wrap);
+	sitemapSelectModal = wrap;
+
+	wrap.querySelector('.sitemap-select-close').addEventListener('click', () => { haptic(); closeSitemapSelectModal(); });
+	wrap.querySelector('.sitemap-select-cancel').addEventListener('click', () => { haptic(); closeSitemapSelectModal(); });
+	attachModalDismissListeners(wrap, sitemapSelectModal, closeSitemapSelectModal);
+	makeFrameDraggable(wrap.querySelector('.sitemap-select-frame'), wrap.querySelector('.sitemap-select-header h2'));
+}
+
+async function selectSitemapAndReload(sitemapName) {
+	const target = safeText(sitemapName).trim();
+	if (!target || sitemapSelectSwitching) return;
+	sitemapSelectSwitching = true;
+	renderSitemapSelectOptions();
+	setSitemapSelectStatus('Switching sitemap.', false, true);
+
+	try {
+		const saved = await persistSelectedSitemapName(target, { throwOnError: true });
+		if (!saved) throw new Error('Failed to save selected sitemap');
+		const reloadUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+		window.location.assign(reloadUrl);
+	} catch (err) {
+		logJsError('selectSitemapAndReload failed', err);
+		sitemapSelectSwitching = false;
+		renderSitemapSelectOptions();
+		setSitemapSelectStatus('Failed to switch sitemap.', true, false);
+		shakeElement(sitemapSelectModal?.querySelector('.sitemap-select-frame'));
+	}
+}
+
+function openSitemapSelectModal() {
+	if (!isSitemapSelectionEnabled()) return;
+	ensureSitemapSelectModal();
+	if (!sitemapSelectModal.classList.contains('hidden')) {
+		renderSitemapSelectOptions();
+		return;
+	}
+
+	sitemapSelectSwitching = false;
+	setSitemapSelectStatus('', false, false);
+	renderSitemapSelectOptions();
+	openModalBase(sitemapSelectModal, 'sitemap-select-open');
+	sitemapSelectHistoryPushed = true;
+	history.pushState(null, '', window.location.pathname + window.location.search + window.location.hash);
+}
+
+function closeSitemapSelectModal({ skipHistory } = {}) {
+	if (!sitemapSelectModal || sitemapSelectModal.classList.contains('hidden')) return;
+	if (sitemapSelectHistoryPushed) {
+		sitemapSelectHistoryPushed = false;
+		if (!skipHistory) {
+			sitemapSelectClosePending = true;
+			history.back();
+		}
+	}
+	sitemapSelectSwitching = false;
+	setSitemapSelectStatus('', false, false);
+	closeModalBase(sitemapSelectModal, '.sitemap-select-frame', 'sitemap-select-open');
 }
 
 function closeCardConfigModal() {
@@ -8306,16 +8620,30 @@ function render() {
 		widgets._matchCount = combined.length;
 	}
 
-	const siteName = CLIENT_CONFIG.siteName || state.rootPageTitle || state.pageTitle || 'openHAB';
+	const sitemapTitle = getActiveSitemapTitle();
+	const siteName = CLIENT_CONFIG.siteName || sitemapTitle || state.rootPageTitle || state.pageTitle || 'openHAB';
 	const isRoot = state.rootPageUrl && state.pageUrl && state.rootPageUrl === state.pageUrl;
-	const pageLabel = isRoot ? 'Home' : (state.pageTitle || siteName);
+	const pageLabel = isRoot ? 'Home' : (state.pageTitle || sitemapTitle || siteName);
 	const pageParts = splitLabelState(pageLabel);
 	const pageTitleText = `${siteName} · ${pageParts.title || pageLabel}`;
 	if (els.title) {
 		els.title.innerHTML = '';
 		const siteSpan = document.createElement('span');
 		siteSpan.className = 'font-semibold';
-		siteSpan.textContent = siteName;
+		siteSpan.textContent = sitemapTitle || siteName;
+		if (isSitemapSelectionEnabled()) {
+			siteSpan.classList.add('sitemap-title-selectable');
+			siteSpan.tabIndex = 0;
+			siteSpan.setAttribute('role', 'button');
+			siteSpan.setAttribute('aria-label', 'Select sitemap');
+			siteSpan.addEventListener('click', () => openSitemapSelectModal());
+			siteSpan.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					openSitemapSelectModal();
+				}
+			});
+		}
 		els.title.appendChild(siteSpan);
 
 		const pageSpan = document.createElement('span');
@@ -8460,51 +8788,25 @@ function popPage() {
 	history.back();
 }
 
-async function loadDefaultSitemap() {
-	// Get list of sitemaps in JSON mode
-	const data = await fetchJson('rest/sitemaps?type=json');
-
-	// Try common shapes
-	let sitemaps = [];
-	if (Array.isArray(data)) sitemaps = data;
-	else if (Array.isArray(data?.sitemaps)) sitemaps = data.sitemaps;
-	else if (Array.isArray(data?.sitemaps?.sitemap)) sitemaps = data.sitemaps.sitemap;
-	else if (Array.isArray(data?.sitemap)) sitemaps = data.sitemap;
-	else if (data?.sitemap && typeof data.sitemap === 'object') sitemaps = [data.sitemap];
-	else if (data?.sitemaps && typeof data.sitemaps === 'object') sitemaps = [data.sitemaps];
-
-	const first = Array.isArray(sitemaps) ? sitemaps[0] : null;
-	const name = first?.name || first?.id || first?.homepage?.link?.split('/').pop();
-
-	if (!name) {
-		throw new Error('Could not determine sitemap name. Check /rest/sitemaps?type=json output.');
-	}
-	state.sitemapName = name;
-	state.ohOrigin = null;
+async function loadPreferredSitemap() {
 	try {
-		const originSource = first?.link || first?.homepage?.link;
-		if (originSource) state.ohOrigin = new URL(originSource).origin;
+		const selected = await resolvePreferredSitemapOption({ persistFallback: true });
+		applySitemapOption(selected);
+		return selected;
 	} catch (err) {
-		logJsError('loadDefaultSitemap origin parse failed', err);
-		state.ohOrigin = null;
+		const embeddedHome = window.__OH_HOMEPAGE__;
+		if (!embeddedHome?.sitemapName || !embeddedHome?.pageUrl) throw err;
+		const fallback = {
+			name: safeText(embeddedHome.sitemapName).trim(),
+			title: safeText(embeddedHome.pageTitle || embeddedHome.sitemapName).trim() || safeText(embeddedHome.sitemapName).trim(),
+			pageUrl: ensureJsonParam(toRelativeRestLink(embeddedHome.pageUrl)),
+			origin: null,
+		};
+		if (!fallback.name || !fallback.pageUrl) throw err;
+		state.sitemapOptions = [fallback];
+		applySitemapOption(fallback);
+		return fallback;
 	}
-
-	const nameEnc = encodeURIComponent(name);
-	let pageLink = first?.homepage?.link;
-	if (!pageLink && typeof first?.link === 'string') {
-		const rel = toRelativeRestLink(first.link);
-		if (rel.includes('/rest/sitemaps/')) {
-			pageLink = rel.endsWith(`/${nameEnc}`) ? rel : `${rel.replace(/\/$/, '')}/${nameEnc}`;
-		} else {
-			pageLink = rel;
-		}
-	}
-	if (!pageLink) pageLink = `rest/sitemaps/${nameEnc}/${nameEnc}`;
-
-	state.pageUrl = ensureJsonParam(toRelativeRestLink(pageLink));
-	state.pageTitle = first?.label || first?.title || name;
-	state.rootPageUrl = state.pageUrl;
-	state.rootPageTitle = state.pageTitle;
 }
 
 async function fetchSearchIndexAggregate() {
@@ -9949,6 +10251,16 @@ function restoreNormalPolling() {
 			closeAlert();
 			return;
 		}
+		// Absorb popstate fired by sitemap modal closing via UI.
+		if (sitemapSelectClosePending) {
+			sitemapSelectClosePending = false;
+			return;
+		}
+		// Back button pressed while sitemap selector is open — close it.
+		if (sitemapSelectHistoryPushed) {
+			closeSitemapSelectModal({ skipHistory: true });
+			return;
+		}
 		// Absorb popstate fired by iframe fullscreen exiting via UI/ESC.
 		if (iframeFsClosePending) {
 			iframeFsClosePending = false;
@@ -10446,22 +10758,27 @@ function restoreNormalPolling() {
 	updateNavButtons();
 
 	try {
-		if (window.__OH_HOMEPAGE__) {
-			// Use embedded homepage data - no fetch needed
-			const hp = window.__OH_HOMEPAGE__;
-			replaceHomeInlineIcons(hp.inlineIcons);
-			state.sitemapName = hp.sitemapName;
-			state.pageUrl = hp.pageUrl;
-			state.rootPageUrl = hp.pageUrl;
-			state.pageTitle = hp.pageTitle;
-			state.rootPageTitle = hp.pageTitle;
-			state.rawWidgets = hp.widgets;
+		const selectedSitemap = await loadPreferredSitemap();
+		const embeddedHome = window.__OH_HOMEPAGE__;
+		const canUseEmbeddedHome = embeddedHome
+			&& embeddedHome.sitemapName
+			&& embeddedHome.sitemapName === selectedSitemap.name;
+
+		if (canUseEmbeddedHome) {
+			replaceHomeInlineIcons(embeddedHome.inlineIcons);
+			state.sitemapName = selectedSitemap.name;
+			state.sitemapTitle = selectedSitemap.title || selectedSitemap.name;
+			state.ohOrigin = selectedSitemap.origin || state.ohOrigin;
+			state.pageUrl = ensureJsonParam(toRelativeRestLink(embeddedHome.pageUrl || selectedSitemap.pageUrl));
+			state.rootPageUrl = state.pageUrl;
+			state.pageTitle = embeddedHome.pageTitle || selectedSitemap.title || selectedSitemap.name;
+			state.rootPageTitle = state.pageTitle;
+			state.rawWidgets = Array.isArray(embeddedHome.widgets) ? embeddedHome.widgets : [];
 
 			syncHistory(true);
 			setConnectionStatus(true);
 			render();
 
-			// Use embedded sitemap cache if available, otherwise fetch
 			if (window.__OH_SITEMAP_CACHE__?.pages) {
 				const cache = window.__OH_SITEMAP_CACHE__;
 				state.sitemapCache.clear();
@@ -10473,8 +10790,6 @@ function restoreNormalPolling() {
 				fetchFullSitemap().catch(() => {});
 			}
 		} else {
-			// Fallback: fetch sitemap data
-			await loadDefaultSitemap();
 			syncHistory(true);
 			fetchFullSitemap().catch(() => {});
 			await refresh(true);
