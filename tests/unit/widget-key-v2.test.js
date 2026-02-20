@@ -53,8 +53,8 @@ describe('Widget Key Strategy', () => {
 		);
 	});
 
-	it('falls back to default sitemap when sitemap metadata is absent', () => {
+	it('uses a missing-sitemap sentinel when sitemap metadata is absent', () => {
 		const key = widgetKey({ item: { name: 'AnyItem' } });
-		assert.strictEqual(key, 'widget:default|item:AnyItem');
+		assert.strictEqual(key, 'widget:__missing_sitemap__|item:AnyItem');
 	});
 });

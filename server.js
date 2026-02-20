@@ -462,9 +462,6 @@ function chartShowCurStat(durationSec) {
 	return durationSec <= 14400;
 }
 const AI_CACHE_DIR = path.join(__dirname, 'cache', 'ai');
-const AI_STRUCTURE_MAP_ALL = path.join(AI_CACHE_DIR, 'structuremap-all.json');
-const AI_STRUCTURE_MAP_WRITABLE = path.join(AI_CACHE_DIR, 'structuremap-writable.json');
-const AI_STRUCTURE_MAP_READABLE = path.join(AI_CACHE_DIR, 'structuremap-readable.json');
 const STRUCTURE_MAP_ON_DEMAND_TIMEOUT_MS = 20000;
 const STRUCTURE_MAP_ON_DEMAND_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const ANTHROPIC_API_KEY = safeText(SERVER_CONFIG.apiKeys?.anthropic) || '';
@@ -2870,7 +2867,8 @@ function atmospherePageKey(sitemapName, pageId) {
 }
 
 function connectAtmospherePage(sitemapName, pageId) {
-	const sitemap = safeText(sitemapName).trim() || 'default';
+	const sitemap = safeText(sitemapName).trim();
+	if (!sitemap) return;
 	const page = safeText(pageId).trim() || sitemap;
 	const key = atmospherePageKey(sitemap, page);
 	const existing = atmospherePages.get(key);
@@ -3539,8 +3537,11 @@ async function fetchAllPagesAcrossSitemaps() {
 	}
 
 	if (!sitemaps.length) {
-		sitemaps = [{ name: 'default' }];
 		needsSitemapRefresh = true;
+		return {
+			targets: [],
+			needsSitemapRefresh,
+		};
 	}
 
 	const targets = [];
@@ -4146,23 +4147,27 @@ function handleWsUpgrade(req, socket, head) {
 	});
 }
 
-function getInitialPageTitle() {
+function getInitialPageTitle(context = {}) {
 	const clientSiteName = safeText(liveConfig.clientConfig?.siteName || '').trim();
 	if (clientSiteName) return clientSiteName;
+	const selectedSitemapTitle = safeText(context?.selectedSitemapTitle || '').trim();
+	if (selectedSitemapTitle) return selectedSitemapTitle;
+	const homepagePageTitle = safeText(context?.homepagePageTitle || '').trim();
+	if (homepagePageTitle) return homepagePageTitle;
 	const cached = safeText(getPrimaryBackgroundSitemap()?.title);
 	return cached || DEFAULT_PAGE_TITLE;
 }
 
-function getInitialDocumentTitle() {
-	const site = getInitialPageTitle();
+function getInitialDocumentTitle(context = {}) {
+	const site = getInitialPageTitle(context);
 	if (!site || site.toLowerCase() === DEFAULT_PAGE_TITLE.toLowerCase()) {
 		return `${DEFAULT_PAGE_TITLE} · Home`;
 	}
 	return `${DEFAULT_PAGE_TITLE} · ${site} · Home`;
 }
 
-function getInitialPageTitleHtml() {
-	const site = escapeHtml(getInitialPageTitle());
+function getInitialPageTitleHtml(context = {}) {
+	const site = escapeHtml(getInitialPageTitle(context));
 	const home = 'Home';
 	return `<span class="font-semibold">${site}</span>` +
 		`<span class="font-light text-slate-300"> · ${escapeHtml(home)}</span>`;
@@ -4191,8 +4196,8 @@ function renderIndexHtml(options) {
 	html = html.replace(/__JS_VERSION__/g, liveConfig.assetVersion);
 	html = html.replace(/__SW_VERSION__/g, liveConfig.assetVersion);
 	html = html.replace(/__APPLE_TOUCH_VERSION__/g, liveConfig.appleTouchVersion);
-	html = html.replace(/__PAGE_TITLE__/g, getInitialPageTitleHtml());
-	html = html.replace(/__DOC_TITLE__/g, escapeHtml(getInitialDocumentTitle()));
+	html = html.replace(/__PAGE_TITLE__/g, getInitialPageTitleHtml(opts));
+	html = html.replace(/__DOC_TITLE__/g, escapeHtml(getInitialDocumentTitle(opts)));
 	html = html.replace(/__STATUS_TEXT__/g, escapeHtml(opts.statusText || 'Connected'));
 	html = html.replace(/__STATUS_CLASS__/g, escapeHtml(opts.statusClass || 'status-pending'));
 	html = html.replace(/__AUTH_INFO__/g, inlineJson(opts.authInfo || {}));
@@ -4685,12 +4690,15 @@ async function sendIndex(req, res) {
 		}
 		const sitemapName = resolveRequestSitemapName(req);
 		if (sitemapName) {
+			const selectedSitemap = getBackgroundSitemaps().find((entry) => entry?.name === sitemapName);
+			status.selectedSitemapTitle = safeText(selectedSitemap?.title || selectedSitemap?.name || '').trim();
 			const [homepageData, sitemapCache] = await Promise.all([
 				getHomepageData(req, sitemapName),
 				getFullSitemapData(sitemapName),
 			]);
 			const userRole = req.ohProxyUser ? (sessions.getUser(req.ohProxyUser)?.role || 'normal') : 'normal';
 			status.homepageData = homepageData;
+			status.homepagePageTitle = safeText(homepageData?.pageTitle || '').trim();
 			status.sitemapCache = filterSitemapCacheVisibility(sitemapCache, userRole);
 		}
 	}
@@ -5724,11 +5732,6 @@ function getVoiceErrorMessage(err) {
 }
 
 const STRUCTURE_MAP_TYPES = ['all', 'writable', 'readable'];
-const STRUCTURE_MAP_LEGACY_PATHS = {
-	all: AI_STRUCTURE_MAP_ALL,
-	writable: AI_STRUCTURE_MAP_WRITABLE,
-	readable: AI_STRUCTURE_MAP_READABLE,
-};
 const aiStructureMapCache = new Map();
 const structureMapOnDemandCooldownUntil = new Map();
 const structureMapOnDemandInflight = new Map();
@@ -5774,15 +5777,11 @@ function readAiStructureMapFile(filePath) {
 	}
 }
 
-function getAiStructureMap(sitemapName = '', { allowLegacyFallback = true } = {}) {
+function getAiStructureMap(sitemapName = '') {
 	const normalizedName = safeText(sitemapName).trim();
-	if (normalizedName) {
-		const scopedPath = structureMapPathForSitemap(normalizedName, 'writable');
-		const scoped = readAiStructureMapFile(scopedPath);
-		if (scoped) return scoped;
-		if (!allowLegacyFallback) return null;
-	}
-	return readAiStructureMapFile(AI_STRUCTURE_MAP_WRITABLE);
+	if (!normalizedName) return null;
+	const scopedPath = structureMapPathForSitemap(normalizedName, 'writable');
+	return readAiStructureMapFile(scopedPath);
 }
 
 function writeStructureMapCacheFile(filePath, type, sitemapName, result, generatedAt) {
@@ -5801,7 +5800,7 @@ function writeStructureMapCacheFile(filePath, type, sitemapName, result, generat
 	clearAiStructureMapCache(filePath);
 }
 
-function writeStructureMapResultFiles(result, generatedAt, options = {}) {
+function writeStructureMapResultFiles(result, generatedAt) {
 	const sitemapName = safeText(result?.sitemapName).trim();
 	if (!sitemapName) throw new Error('Structure map generation returned an empty sitemap name');
 	ensureDir(AI_CACHE_DIR);
@@ -5809,13 +5808,6 @@ function writeStructureMapResultFiles(result, generatedAt, options = {}) {
 		const scopedPath = structureMapPathForSitemap(sitemapName, type);
 		if (!scopedPath) continue;
 		writeStructureMapCacheFile(scopedPath, type, sitemapName, result, generatedAt);
-	}
-	if (options.writeLegacy === true) {
-		for (const type of STRUCTURE_MAP_TYPES) {
-			const legacyPath = STRUCTURE_MAP_LEGACY_PATHS[type];
-			if (!legacyPath) continue;
-			writeStructureMapCacheFile(legacyPath, type, sitemapName, result, generatedAt);
-		}
 	}
 }
 
@@ -5895,10 +5887,10 @@ async function generateStructureMapForSitemap(sitemapName, sitemapNames = null) 
 async function getOrGenerateAiStructureMapForSitemap(sitemapName) {
 	const targetSitemap = safeText(sitemapName).trim();
 	if (!targetSitemap) {
-		return { map: getAiStructureMap('', { allowLegacyFallback: true }), generated: false, cooldownMs: 0 };
+		return { map: null, generated: false, cooldownMs: 0, error: new Error('Sitemap not resolved') };
 	}
 
-	const existing = getAiStructureMap(targetSitemap, { allowLegacyFallback: false });
+	const existing = getAiStructureMap(targetSitemap);
 	if (existing) return { map: existing, generated: false, cooldownMs: 0 };
 
 	const cooldownMs = getStructureMapOnDemandCooldownMs(targetSitemap);
@@ -5941,7 +5933,7 @@ async function getOrGenerateAiStructureMapForSitemap(sitemapName) {
 	}
 
 	const generationResult = await inflight;
-	const refreshed = getAiStructureMap(targetSitemap, { allowLegacyFallback: false });
+	const refreshed = getAiStructureMap(targetSitemap);
 	if (refreshed) {
 		return { map: refreshed, generated: generationResult.ok === true, cooldownMs: 0 };
 	}
@@ -5961,13 +5953,11 @@ async function refreshStructureMapCache() {
 	let totalItems = 0;
 	let totalWritable = 0;
 	let totalReadable = 0;
-	let primaryResult = null;
 
 	for (const sitemapName of sitemapNames) {
 		try {
 			const result = await generateStructureMapForSitemap(sitemapName, sitemapNames);
 			writeStructureMapResultFiles(result, generatedAt);
-			if (!primaryResult) primaryResult = result;
 			generatedCount += 1;
 			totalItems += result.stats.total;
 			totalWritable += result.stats.writable;
@@ -5978,9 +5968,6 @@ async function refreshStructureMapCache() {
 		}
 	}
 
-	if (primaryResult) {
-		writeStructureMapResultFiles(primaryResult, generatedAt, { writeLegacy: true });
-	}
 	clearAiStructureMapCache();
 
 	if (generatedCount === 0) {
@@ -7552,7 +7539,19 @@ app.post('/api/voice', jsonParserSmall, async (req, res) => {
 		return;
 	}
 
-	const requestSitemapName = resolveRequestSitemapName(req);
+	let requestSitemapName = resolveRequestSitemapName(req);
+	if (!requestSitemapName) {
+		await refreshSitemapCache({ skipAtmosphereResubscribe: true });
+		requestSitemapName = resolveRequestSitemapName(req);
+	}
+	if (!requestSitemapName) {
+		logMessage(`[Voice] [${username}] "${trimmed}" - sitemap not resolved`);
+		res.status(503).json({
+			error: 'Voice AI sitemap is not resolved yet.',
+			voiceError: 'Voice commands are temporarily unavailable while sitemap data loads.',
+		});
+		return;
+	}
 	const structureMapResult = await getOrGenerateAiStructureMapForSitemap(requestSitemapName);
 	const structureMap = structureMapResult.map;
 	if (!structureMap) {
