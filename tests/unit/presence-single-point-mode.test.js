@@ -24,7 +24,7 @@ describe('Presence Single-Point Mode', () => {
 
 	it('builds a single red marker with no tooltip content in single-point mode', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(server, /if \(singlePointMode\) \{\s*const lat = Math\.round\(singlePointLat \* 10000000\) \/ 10000000;\s*const lon = Math\.round\(singlePointLon \* 10000000\) \/ 10000000;\s*markers\.push\(\[lat, lon, 'red', ''\]\);/);
+		assert.match(server, /if \(singlePointMode\) \{\s*const lat = roundPresenceCoord\(singlePointLat\);\s*const lon = roundPresenceCoord\(singlePointLon\);\s*markers\.push\(\[lat, lon, 'red', ''\]\);/);
 	});
 
 	it('conditionally removes search and context UI in single-point mode', () => {
