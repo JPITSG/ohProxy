@@ -17,8 +17,10 @@ describe('Selection Dropdown Arrow Style', () => {
 		assert.match(css, /\.selection-card \.inline-controls \.fake-select::after \{[\s\S]*?-webkit-mask-image: url\("data:image\/svg\+xml,/);
 		assert.match(css, /\.selection-card \.inline-controls \.fake-select::after \{[\s\S]*?mask-image: url\("data:image\/svg\+xml,/);
 		assert.match(css, /\.selection-card \.inline-controls \.fake-select::after \{[\s\S]*?right: 12px;/);
-		assert.match(css, /\.selection-card \.inline-controls \.fake-select::after \{[\s\S]*?top: 50%;[\s\S]*?transform: translateY\(-50%\);/);
+		assert.match(css, /\.selection-card \.inline-controls \.fake-select::after \{[\s\S]*?top: 50%;[\s\S]*?transform: translateY\(-50%\) rotate\(0deg\);/);
 		assert.match(css, /\.selection-card \.inline-controls \.fake-select::after \{[\s\S]*?pointer-events: none;/);
+		assert.match(css, /\.selection-card \.inline-controls \.fake-select::after \{[\s\S]*?transition: transform \.2s ease;/);
+		assert.match(css, /\.selection-card\.menu-open \.inline-controls \.fake-select::after \{[\s\S]*?transform: translateY\(-50%\) rotate\(180deg\);/);
 	});
 
 	it('keeps selection trigger text centered in the middle', () => {
