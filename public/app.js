@@ -6071,6 +6071,60 @@ function parseSwitchMappingCommand(rawMapping) {
 	return { mode: 'dual', press, release };
 }
 
+function normalizeSwitchCommandToken(command) {
+	return safeText(command).trim().toUpperCase();
+}
+
+function isOnOffCommandToken(command) {
+	const token = normalizeSwitchCommandToken(command);
+	return token === 'ON' || token === 'OFF';
+}
+
+function isExplicitOnOffSwitchMapping(parsed) {
+	if (!parsed) return false;
+	if (parsed.mode === 'dual') {
+		const press = normalizeSwitchCommandToken(parsed.press);
+		const release = normalizeSwitchCommandToken(parsed.release);
+		if (!isOnOffCommandToken(press) || !isOnOffCommandToken(release)) return false;
+		return press !== release;
+	}
+	return isOnOffCommandToken(parsed.press);
+}
+
+function switchToggleAriaLabel(command) {
+	const token = normalizeSwitchCommandToken(command);
+	if (token === 'ON') return 'Turn ON';
+	if (token === 'OFF') return 'Turn OFF';
+	return '';
+}
+
+function switchToggleDualAriaLabel(parsed) {
+	if (!parsed || parsed.mode !== 'dual') return '';
+	const press = normalizeSwitchCommandToken(parsed.press);
+	const release = normalizeSwitchCommandToken(parsed.release);
+	if (!isOnOffCommandToken(press) || !isOnOffCommandToken(release) || press === release) return '';
+	return `Hold for ${press}, release for ${release}`;
+}
+
+function setSwitchToggleLabel(btn, label) {
+	const text = safeText(label).trim();
+	if (!text) {
+		btn.removeAttribute('aria-label');
+		btn.removeAttribute('title');
+		return;
+	}
+	btn.setAttribute('aria-label', text);
+	btn.setAttribute('title', text);
+}
+
+function applySwitchToggleClass(btn, enabled) {
+	btn.classList.toggle('switch-toggle', !!enabled);
+	if (!enabled) return;
+	btn.classList.remove('mapping-icon-ready');
+	if ('mappingIconRenderToken' in btn.dataset) delete btn.dataset.mappingIconRenderToken;
+	btn.textContent = '';
+}
+
 function switchSupportToggleCommand({ isDimmer, sliderMin, sliderMax, currentValue, liveState }) {
 	const min = Number(sliderMin);
 	const max = Number(sliderMax);
@@ -7847,7 +7901,9 @@ function updateCard(card, w, info) {
 		card.classList.add('switch-card');
 		const currentState = safeText(st);
 		const switchButtonCount = mapping.length ? mapping.length : 1;
-		const singleDualMapping = mapping.length === 1 && parseSwitchMappingCommand(mapping[0]).mode === 'dual';
+		const parsedSingleMapping = mapping.length === 1 ? parseSwitchMappingCommand(mapping[0]) : null;
+		const singleDualMapping = !!parsedSingleMapping && parsedSingleMapping.mode === 'dual';
+		const singleOnOffToggle = mapping.length === 1 && isExplicitOnOffSwitchMapping(parsedSingleMapping);
 		if (switchButtonCount >= 3) card.classList.add('switch-many');
 		if (switchButtonCount === 1) card.classList.add('switch-single');
 
@@ -7864,7 +7920,16 @@ function updateCard(card, w, info) {
 					const m = mapping[i++];
 					if (!m) continue;
 					const parsed = parseSwitchMappingCommand(m);
-					setMappingControlContent(btn, m);
+					if (singleOnOffToggle) {
+						applySwitchToggleClass(btn, true);
+						const label = parsed.mode === 'dual'
+							? switchToggleDualAriaLabel(parsed)
+							: switchToggleAriaLabel(parsed.press);
+						setSwitchToggleLabel(btn, label);
+					} else {
+						applySwitchToggleClass(btn, false);
+						setMappingControlContent(btn, m);
+					}
 					btn.dataset.command = m.command;
 					const hasPressCommand = !!safeText(parsed.press).trim();
 					if (!hasPressCommand) {
@@ -7906,9 +7971,11 @@ function updateCard(card, w, info) {
 				// Single ON/OFF switch - update class, text, and click handler
 				const isOn = st.toUpperCase() === 'ON';
 				const btn = existingButtons[0];
+				const actionCommand = isOn ? 'OFF' : 'ON';
 				btn.classList.toggle('is-active', isOn);
-				btn.textContent = isOn ? 'Turn OFF' : 'Turn ON';
-				bindSwitchSingleCommand(btn, itemName, isOn ? 'OFF' : 'ON');
+				applySwitchToggleClass(btn, true);
+				setSwitchToggleLabel(btn, switchToggleAriaLabel(actionCommand));
+				bindSwitchSingleCommand(btn, itemName, actionCommand);
 				// Ensure card click handler is set for single switch
 				card.classList.add('cursor-pointer');
 				card.onclick = (e) => {
@@ -7932,7 +7999,15 @@ function updateCard(card, w, info) {
 				const parsed = parseSwitchMappingCommand(m);
 				const b = document.createElement('button');
 				b.className = btnClass;
-				setMappingControlContent(b, m);
+				if (singleOnOffToggle) {
+					applySwitchToggleClass(b, true);
+					const label = parsed.mode === 'dual'
+						? switchToggleDualAriaLabel(parsed)
+						: switchToggleAriaLabel(parsed.press);
+					setSwitchToggleLabel(b, label);
+				} else {
+					setMappingControlContent(b, m);
+				}
 				b.dataset.command = m.command;
 				const hasPressCommand = !!safeText(parsed.press).trim();
 				if (!hasPressCommand) {
@@ -7956,10 +8031,12 @@ function updateCard(card, w, info) {
 		} else {
 			const isOn = st.toUpperCase() === 'ON';
 			const btn = document.createElement('button');
+			const actionCommand = isOn ? 'OFF' : 'ON';
 			btn.className = 'switch-btn';
-			btn.textContent = isOn ? 'Turn OFF' : 'Turn ON';
+			applySwitchToggleClass(btn, true);
+			setSwitchToggleLabel(btn, switchToggleAriaLabel(actionCommand));
 			if (isOn) btn.classList.add('is-active');
-			bindSwitchSingleCommand(btn, itemName, isOn ? 'OFF' : 'ON');
+			bindSwitchSingleCommand(btn, itemName, actionCommand);
 			inlineControls.appendChild(btn);
 		}
 
