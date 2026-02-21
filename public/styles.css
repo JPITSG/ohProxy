@@ -604,10 +604,15 @@ html:not(.slim) .has-meta .labelStack {
 	border-radius: 14px;
 	padding: .25rem;
 	box-shadow: var(--glass-box-shadow), var(--glass-inset-shadow);
-	display: none;
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	transition: opacity 0.4s ease, visibility 0.4s ease;
 }
 .selection-card.menu-open .select-menu {
-	display: block;
+	opacity: 1;
+	visibility: visible;
+	pointer-events: auto;
 }
 .selection-card.menu-above .select-menu {
 	top: auto;
