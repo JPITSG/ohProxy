@@ -6919,6 +6919,51 @@ function crossfadeText(element, newText, fadeOutMs = 200, fadeInMs = 200) {
 	});
 }
 
+function crossfadeTextOverlap(element, oldText, newText, durationMs = 400) {
+	if (!element) return;
+	const fromText = safeText(oldText);
+	const toText = safeText(newText);
+	if (fromText === toText) return;
+
+	// If empty, just set directly (no animation needed for initial render)
+	if (!fromText) {
+		element.textContent = toText;
+		return;
+	}
+
+	// Increment token to invalidate any pending animation
+	const token = (element.__crossfadeToken || 0) + 1;
+	element.__crossfadeToken = token;
+
+	const oldSpan = document.createElement('span');
+	oldSpan.textContent = fromText;
+	oldSpan.style.cssText = 'grid-area:1/1;opacity:1;transition:opacity ' + durationMs + 'ms ease;';
+
+	const newSpan = document.createElement('span');
+	newSpan.textContent = toText;
+	newSpan.style.cssText = 'grid-area:1/1;opacity:0;transition:opacity ' + durationMs + 'ms ease;';
+
+	const originalDisplay = element.style.display;
+	const originalPlaceItems = element.style.placeItems;
+	element.textContent = '';
+	element.style.display = 'inline-grid';
+	element.style.placeItems = 'center';
+	element.appendChild(oldSpan);
+	element.appendChild(newSpan);
+
+	requestAnimationFrame(() => {
+		if (element.__crossfadeToken !== token) return;
+		oldSpan.style.opacity = '0';
+		newSpan.style.opacity = '1';
+		setTimeout(() => {
+			if (element.__crossfadeToken !== token) return;
+			element.textContent = toText;
+			element.style.display = originalDisplay;
+			element.style.placeItems = originalPlaceItems;
+		}, durationMs);
+	});
+}
+
 function removeOverlaySelects(card) {
 	for (const el of card.querySelectorAll('select.select-overlay')) {
 		el.remove();
@@ -6963,13 +7008,14 @@ function buildMapviewUrl(coords) {
 	return `/presence?lat=${encodeURIComponent(normalizedLat)}&lon=${encodeURIComponent(normalizedLon)}`;
 }
 
-function createSetpointButton(text, isDisabled, computeNext, itemName) {
+function createSetpointButton(text, isDisabled, computeNext, itemName, onBeforeSend) {
 	const btn = document.createElement('button');
 	btn.className = 'setpoint-btn';
 	btn.textContent = text;
 	btn.disabled = isDisabled;
 	btn.onclick = async () => {
 		haptic();
+		if (typeof onBeforeSend === 'function') onBeforeSend();
 		const next = computeNext();
 		btn.disabled = true;
 		try { await sendCommand(itemName, String(next)); await refresh(false); }
@@ -7261,6 +7307,7 @@ function updateCard(card, w, info) {
 	const isSetpoint = t === 'setpoint';
 	const isColorTemperaturePicker = t === 'colortemperaturepicker';
 	const isInput = t === 'input';
+	if (!isSetpoint) card.__setpointCrossfadePending = null;
 	const existingSwitchControls = isSwitchType ? labelRow.querySelector('.inline-controls') : null;
 	// Determine what to preserve
 	let preserveElement = null;
@@ -8058,16 +8105,37 @@ function updateCard(card, w, info) {
 		const spStep = Number.isFinite(Number(w?.step)) && Number(w.step) > 0 ? Number(w.step) : 1;
 		const val = parseFloat(st);
 		const current = Number.isFinite(val) ? val : spMin;
+		const setpointDisplayText = labelParts.state || (Number.isFinite(val) ? String(val) : '\u2014');
+		const pendingSetpointCrossfade = card.__setpointCrossfadePending;
+		const pendingStartedAt = Number(pendingSetpointCrossfade?.startedAt || 0);
+		if (pendingSetpointCrossfade && (Date.now() - pendingStartedAt) > 5000) {
+			card.__setpointCrossfadePending = null;
+		}
 
 		const inlineControls = createInlineControls(labelRow, navHint);
+		const markSetpointCrossfadePending = () => {
+			const currentDisplay = card.querySelector('.setpoint-value');
+			if (!currentDisplay) return;
+			card.__setpointCrossfadePending = {
+				fromText: safeText(currentDisplay.textContent),
+				startedAt: Date.now(),
+			};
+		};
 
-		const minus = createSetpointButton('\u2212', current <= spMin, () => Math.max(spMin, current - spStep), itemName);
+		const minus = createSetpointButton('\u2212', current <= spMin, () => Math.max(spMin, current - spStep), itemName, markSetpointCrossfadePending);
 
 		const display = document.createElement('span');
 		display.className = 'setpoint-value';
-		display.textContent = labelParts.state || (Number.isFinite(val) ? String(val) : '\u2014');
+		const activeSetpointCrossfade = card.__setpointCrossfadePending;
+		const oldSetpointText = safeText(activeSetpointCrossfade?.fromText);
+		if (activeSetpointCrossfade && oldSetpointText && oldSetpointText !== safeText(setpointDisplayText)) {
+			crossfadeTextOverlap(display, oldSetpointText, setpointDisplayText, 400);
+			card.__setpointCrossfadePending = null;
+		} else {
+			display.textContent = setpointDisplayText;
+		}
 
-		const plus = createSetpointButton('+', current >= spMax, () => Math.min(spMax, current + spStep), itemName);
+		const plus = createSetpointButton('+', current >= spMax, () => Math.min(spMax, current + spStep), itemName, markSetpointCrossfadePending);
 
 		inlineControls.appendChild(minus);
 		inlineControls.appendChild(display);
