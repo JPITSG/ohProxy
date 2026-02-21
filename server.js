@@ -2696,6 +2696,7 @@ let atmosphereMonitorStartedAt = 0;
 let sseConnection = null;
 let sseReconnectTimer = null;
 const SSE_RECONNECT_MS = 5000;
+let sseReconnectAttempt = 0;
 
 // Track item states to detect actual changes (not just openHAB reporting unchanged items)
 const itemStates = new Map(); // itemName -> state
@@ -3598,6 +3599,7 @@ function connectSSE() {
 		}
 
 		logMessage('[SSE] Connected to event stream');
+		sseReconnectAttempt = 0;
 		setBackendStatus(true);
 		groupMemberBackoffLevel = 0;
 		groupMemberLastFingerprint = null;
@@ -3695,13 +3697,15 @@ function connectSSE() {
 function scheduleSSEReconnect() {
 	if (sseReconnectTimer) return;
 	if (liveConfig.wsMode !== 'sse' || wss.clients.size === 0) return;
+	const delayMs = sseReconnectAttempt === 0 ? 0 : SSE_RECONNECT_MS;
+	sseReconnectAttempt++;
 
 	sseReconnectTimer = setTimeout(() => {
 		sseReconnectTimer = null;
 		if (liveConfig.wsMode === 'sse' && wss.clients.size > 0) {
 			connectSSE();
 		}
-	}, SSE_RECONNECT_MS);
+	}, delayMs);
 }
 
 function stopSSE() {
@@ -3713,6 +3717,7 @@ function stopSSE() {
 		try { sseConnection.destroy(); } catch {}
 		sseConnection = null;
 	}
+	sseReconnectAttempt = 0;
 }
 
 // --- Polling Mode ---
