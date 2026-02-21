@@ -1510,6 +1510,17 @@ body.theme-light .input-card .input-field::-webkit-calendar-picker-indicator {
 	color: var(--color-control-off-text) !important;
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
 }
+.input-send-btn polyline {
+	stroke-dasharray: 1;
+	stroke-dashoffset: 0;
+}
+.input-send-btn.check-animate polyline {
+	animation: draw-check 0.4s ease forwards;
+}
+@keyframes draw-check {
+	from { stroke-dashoffset: 1; }
+	to   { stroke-dashoffset: 0; }
+}
 /* Colortemperaturepicker styles */
 .colortemperaturepicker-card {
 	position: relative;
