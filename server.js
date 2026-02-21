@@ -1847,6 +1847,7 @@ const liveConfig = {
 	gpsHomeLon: Number.isFinite(parseFloat(SERVER_CONFIG.gps?.homeLon)) ? parseFloat(SERVER_CONFIG.gps?.homeLon) : NaN,
 };
 
+logMessage('-----');
 logMessage('[Startup] Starting ohProxy instance...');
 
 // Values that require restart if changed
