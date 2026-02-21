@@ -1468,7 +1468,7 @@ body.theme-light .input-card .input-field:focus {
 	width: 16px;
 	height: 16px;
 	pointer-events: none;
-	color: #000;
+	color: var(--color-text-primary);
 	opacity: 0.85;
 }
 .input-card .input-field[type="date"],
