@@ -455,8 +455,12 @@ html:not(.slim) .has-meta .labelStack {
 	text-overflow: ellipsis;
 	text-wrap: nowrap;
 }
+.selection-card .labelStack {
+	flex: 1 1 0;
+}
 .selection-card .inline-controls {
-	flex: 0 1 60%;
+	flex: 0 0 60%;
+	max-width: 60%;
 	min-width: 0;
 	display: flex;
 	justify-content: flex-end;
@@ -1669,8 +1673,8 @@ body.theme-light .colorpicker-card.colorpicker-above .colorpicker-overlay {
 }
 .slider-card .inline-slider {
 	position: relative;
-	flex: 0 0 50%;
-	max-width: 50%;
+	flex: 0 0 60%;
+	max-width: 60%;
 	min-width: 0;
 }
 
