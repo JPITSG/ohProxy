@@ -94,6 +94,16 @@ body {
 	flex-direction: column;
 }
 
+body.chart-fs-rotated .chart-card {
+	position: fixed;
+	top: 50%;
+	left: 50%;
+	width: 100vh;
+	height: 100vw;
+	transform: translate(-50%, -50%) rotate(90deg);
+	transform-origin: center center;
+}
+
 .chart-header {
 	display: flex;
 	justify-content: space-between;

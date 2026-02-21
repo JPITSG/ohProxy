@@ -3329,7 +3329,7 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 <div class="chart-card">
 <div class="chart-header">
 <div class="chart-title-group"><h2 class="chart-title" id="chartTitle">${safeTitle}</h2></div>
-<div class="chart-header-right" id="chartStats">${statsHtml}${legendHtml}<span class="chart-fs-divider" id="fsDivider"></span><button class="chart-fs-btn" id="chartFullscreen" type="button"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg></button></div>
+<div class="chart-header-right" id="chartStats">${statsHtml}${legendHtml}<span class="chart-fs-divider" id="fsDivider"></span><button class="chart-fs-btn" id="chartRotate" type="button"><svg viewBox="0 0 24 24"><path d="M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.96-.7 2.8l1.46 1.46A7.944 7.944 0 0 0 20 13c0-4.42-3.58-8-8-8zM6.7 9.2 5.24 7.74A7.944 7.944 0 0 0 4 13c0 4.42 3.58 8 8 8v3l4-4-4-4v3c-3.31 0-6-2.69-6-6 0-1.01.25-1.96.7-2.8z"/></svg></button><button class="chart-fs-btn" id="chartFullscreen" type="button"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg></button></div>
 </div>
 <div class="chart-container" id="chartContainer">
 <svg class="chart-svg" id="chartSvg"></svg>
