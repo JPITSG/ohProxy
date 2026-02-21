@@ -1454,8 +1454,6 @@ body.theme-light .input-card .input-field:focus {
 .input-card .input-field[type="date"],
 .input-card .input-field[type="time"],
 .input-card .input-field[type="datetime-local"] {
-	flex: 0 1 auto;
-	max-width: fit-content;
 	padding-left: 8px;
 	padding-right: 6px;
 }
@@ -1547,12 +1545,13 @@ body.theme-light .input-card .input-field::-webkit-calendar-picker-indicator {
 	position: relative;
 }
 .colorpicker-card .labelStack {
-	flex: 0 1 auto;
+	flex: 1 1 0;
 	min-width: 0;
 }
 .colorpicker-card .inline-controls {
-	flex: 0 0 auto;
-	justify-content: flex-end;
+	flex: 0 0 60%;
+	max-width: 60%;
+	justify-content: space-between;
 	gap: .375rem;
 }
 .colorpicker-swatch {
