@@ -1451,6 +1451,26 @@ body.theme-light .input-card .input-field:focus {
 	border-color: rgba(78, 183, 128, 0.45);
 	box-shadow: inset 0 1px 3px rgba(0, 0, 0, .08), 0 0 10px rgba(78, 183, 128, 0.35);
 }
+.input-card .input-field-wrap {
+	position: relative;
+	flex: 1 1 0;
+	min-width: 0;
+	display: flex;
+}
+.input-card .input-field-wrap .input-field {
+	padding-right: 36px;
+}
+.input-card .input-kbd-icon {
+	position: absolute;
+	right: 10px;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 16px;
+	height: 16px;
+	pointer-events: none;
+	color: #000;
+	opacity: 0.85;
+}
 .input-card .input-field[type="date"],
 .input-card .input-field[type="time"],
 .input-card .input-field[type="datetime-local"] {

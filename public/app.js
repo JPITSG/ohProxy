@@ -8181,7 +8181,19 @@ function updateCard(card, w, info) {
 			inputEl.removeEventListener('blur', onInputBlur);
 		});
 
-		inlineControls.appendChild(inputEl);
+		if (inputHint === 'text' || inputHint === 'number') {
+			const wrap = document.createElement('span');
+			wrap.className = 'input-field-wrap';
+			wrap.appendChild(inputEl);
+			const kbdSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+			kbdSvg.setAttribute('viewBox', '0 0 24 24');
+			kbdSvg.setAttribute('class', 'input-kbd-icon');
+			kbdSvg.innerHTML = '<rect x="2.5" y="5.5" width="19" height="13" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M5 8h1.7v1.7H5zm3.15 0h1.7v1.7H8.15zm3 0h1.7v1.7h-1.7zm3 0h1.7v1.7h-1.7zm3.15 0h1.7v1.7h-1.7zM5 11.15h1.7v1.7H5zm3.15 0h1.7v1.7H8.15zm3 0h1.7v1.7h-1.7zm3 0h1.7v1.7h-1.7zm3.15 0h1.7v1.7h-1.7zM8 15h8v1.5H8z" fill="currentColor"/>';
+			wrap.appendChild(kbdSvg);
+			inlineControls.appendChild(wrap);
+		} else {
+			inlineControls.appendChild(inputEl);
+		}
 		inlineControls.appendChild(sendBtn);
 	} else if (t === 'colortemperaturepicker') {
 		let ctMin = Number.isFinite(Number(w?.minValue)) ? Number(w.minValue) : 0;
