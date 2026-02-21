@@ -1165,6 +1165,10 @@ body.theme-dark #themeToggleBtn svg {
 	max-width: 60%;
 	justify-content: flex-end;
 }
+.switch-card.switch-single:has(.switch-toggle) .inline-controls {
+	flex: 0 0 auto;
+	max-width: none;
+}
 .switch-card .inline-controls > * + * {
 	margin-left: .5rem;
 }
