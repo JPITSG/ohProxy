@@ -8117,7 +8117,7 @@ function updateCard(card, w, info) {
 		// Send button
 		const sendBtn = document.createElement('button');
 		sendBtn.className = 'input-send-btn';
-		sendBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path fill-rule="evenodd" clip-rule="evenodd" d="M21.2287 6.60355C21.6193 6.99407 21.6193 7.62723 21.2287 8.01776L10.2559 18.9906C9.86788 19.3786 9.23962 19.3814 8.84811 18.9969L2.66257 12.9218C2.26855 12.5349 2.26284 11.9017 2.64983 11.5077L3.35054 10.7942C3.73753 10.4002 4.37067 10.3945 4.7647 10.7815L9.53613 15.4677L19.1074 5.89644C19.4979 5.50592 20.1311 5.50591 20.5216 5.89644L21.2287 6.60355Z"/></svg>';
+		sendBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline pathLength="1" points="4,12.5 9.5,18 20,7"/></svg>';
 
 		// doSend handler
 		const doSend = async () => {
@@ -8151,9 +8151,14 @@ function updateCard(card, w, info) {
 			}
 		};
 
-		sendBtn.onclick = doSend;
+		const animateCheck = () => {
+			sendBtn.classList.remove('check-animate');
+			void sendBtn.offsetWidth;
+			sendBtn.classList.add('check-animate');
+		};
+		sendBtn.onclick = () => { animateCheck(); doSend(); };
 		inputEl.addEventListener('keydown', (e) => {
-			if (e.key === 'Enter') { e.preventDefault(); doSend(); }
+			if (e.key === 'Enter') { e.preventDefault(); animateCheck(); doSend(); }
 		});
 
 		// Refresh suppression during focus
