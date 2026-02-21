@@ -323,7 +323,7 @@ header {
 
 /* Button hover effect when hovering anywhere on click-anywhere cards */
 @media (hover: hover) and (pointer: fine) {
-	.switch-card.switch-single:hover .switch-btn {
+	.switch-card.switch-single:hover .switch-btn:not(.switch-toggle) {
 		background-color: var(--color-switch-active-bg) !important;
 		border-color: var(--color-switch-active-border) !important;
 		box-shadow: 0 0 10px var(--color-switch-active-shadow);
@@ -442,6 +442,18 @@ html:not(.slim) .has-meta .labelStack {
 .switch-card .labelStack {
 	flex: 0 1 40%;
 	min-width: 0;
+}
+.switch-card.switch-single .labelStack {
+	flex: 1 1 auto;
+	max-width: 100%;
+}
+.switch-card.switch-single .title {
+	display: block;
+	-webkit-line-clamp: unset;
+	-webkit-box-orient: initial;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	text-wrap: nowrap;
 }
 .selection-card .inline-controls {
 	flex: 0 1 60%;
@@ -1117,6 +1129,12 @@ body.theme-dark #themeToggleBtn svg {
 	align-items: center;
 	gap: 0;
 }
+.switch-card.switch-single .inline-controls {
+	flex: 0 0 auto;
+	width: auto;
+	min-width: 52px;
+	justify-content: flex-end;
+}
 .switch-card .inline-controls > * + * {
 	margin-left: .5rem;
 }
@@ -1145,6 +1163,47 @@ body.theme-dark #themeToggleBtn svg {
 	border-color: var(--color-control-off-border) !important;
 	color: var(--color-control-off-text) !important;
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
+}
+.switch-card .inline-controls .switch-btn.switch-toggle {
+	position: relative;
+	flex: 0 0 auto;
+	width: 52px;
+	min-width: 52px;
+	height: 28px;
+	margin-left: auto;
+	padding: 0;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.1) !important;
+	border-color: var(--glass-border-color) !important;
+	box-shadow: 0 0 8px var(--color-control-off-shadow);
+	color: transparent !important;
+	font-size: 0;
+	font-weight: 400;
+	line-height: 1;
+	overflow: hidden;
+}
+.switch-card .inline-controls .switch-btn.switch-toggle .mapping-content {
+	display: none;
+}
+.switch-card .inline-controls .switch-btn.switch-toggle::after {
+	content: '';
+	position: absolute;
+	top: 4px;
+	left: 4px;
+	width: 18px;
+	height: 18px;
+	border-radius: 999px;
+	background: var(--color-text-muted);
+	transition: transform .4s ease, background-color .4s ease;
+}
+.switch-card .inline-controls .switch-btn.switch-toggle.is-active {
+	background: rgba(118, 214, 152, 0.3) !important;
+	border-color: rgba(118, 214, 152, 0.5) !important;
+	box-shadow: 0 0 8px var(--color-switch-active-shadow);
+}
+.switch-card .inline-controls .switch-btn.switch-toggle.is-active::after {
+	transform: translateX(24px);
+	background: rgb(118, 214, 152);
 }
 @media (hover: hover) and (pointer: fine) {
 	.switch-card .inline-controls .switch-btn:hover,
@@ -1180,6 +1239,20 @@ body.theme-dark #themeToggleBtn svg {
 		background-color: var(--color-switch-active-bg-hover) !important;
 		box-shadow: 0 0 10px var(--color-switch-active-shadow-hover);
 	}
+}
+body.theme-light .switch-card .inline-controls .switch-btn.switch-toggle {
+	background: rgba(0, 0, 0, 0.08) !important;
+	border-color: rgba(19, 21, 54, 0.2) !important;
+}
+body.theme-light .switch-card .inline-controls .switch-btn.switch-toggle.is-active {
+	background: rgba(78, 183, 128, 0.2) !important;
+	border-color: rgba(78, 183, 128, 0.45) !important;
+}
+body.theme-light .switch-card .inline-controls .switch-btn.switch-toggle::after {
+	background: rgba(100, 105, 120, 0.6);
+}
+body.theme-light .switch-card .inline-controls .switch-btn.switch-toggle.is-active::after {
+	background: rgb(78, 183, 128);
 }
 .switch-card.switch-many .labelStack {
 	flex: 1 1 15%;
