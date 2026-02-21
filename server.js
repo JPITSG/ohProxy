@@ -27,6 +27,7 @@ const {
 	parseAuthCookieValue,
 } = require('./lib/auth-cookie');
 const { buildOpenhabClient } = require('./lib/openhab-client');
+const { getBackendRecoveryDelayMs } = require('./lib/backend-recovery-delay');
 
 // Keep-alive agents for openHAB backend connections (eliminates TIME_WAIT buildup)
 const ohHttpAgent = new http.Agent({ keepAlive: true });
@@ -2512,6 +2513,7 @@ function wsBroadcast(event, data) {
 }
 
 let backendRecoveryTimer = null;
+let backendRecoveryAttemptInOutage = 0;
 
 function setBackendStatus(ok, errorMessage) {
 	// If going to failed state, cancel any pending recovery and set immediately
@@ -2525,6 +2527,7 @@ function setBackendStatus(ok, errorMessage) {
 		backendStatus.ok = false;
 		backendStatus.lastError = errorMessage || 'OpenHAB unreachable';
 		backendStatus.lastChange = Date.now();
+		backendRecoveryAttemptInOutage = 0;
 		logMessage(`[Backend] Status: FAILED - ${backendStatus.lastError}`);
 		wsBroadcast('backendStatus', {
 			ok: backendStatus.ok,
@@ -2533,13 +2536,16 @@ function setBackendStatus(ok, errorMessage) {
 		return;
 	}
 
-	// Going to OK state - apply recovery delay if configured
+	// Going to OK state - apply fixed recovery policy
 	if (backendStatus.ok === true) return; // Already OK
 	if (backendRecoveryTimer) return; // Recovery already pending
 
-	const delayMs = liveConfig.backendRecoveryDelayMs || 0;
+	const recoveryReason = safeText(backendStatus.lastError).trim() || 'unknown';
+	const delayMs = getBackendRecoveryDelayMs(recoveryReason, backendRecoveryAttemptInOutage);
+	const recoveryAttempt = backendRecoveryAttemptInOutage + 1;
+	backendRecoveryAttemptInOutage = recoveryAttempt;
 	if (delayMs > 0) {
-		logMessage(`[Backend] Recovery detected, waiting ${delayMs}ms before marking OK...`);
+		logMessage(`[Backend] Recovery detected (reason: ${recoveryReason}, attempt: ${recoveryAttempt}), waiting ${delayMs}ms before marking OK...`);
 		backendRecoveryTimer = setTimeout(() => {
 			backendRecoveryTimer = null;
 			backendStatus.ok = true;
@@ -2552,7 +2558,8 @@ function setBackendStatus(ok, errorMessage) {
 			});
 		}, delayMs);
 	} else {
-		// No delay configured - set immediately
+		// Policy selected immediate recovery
+		logMessage(`[Backend] Recovery detected (reason: ${recoveryReason}, attempt: ${recoveryAttempt}), marking OK immediately`);
 		backendStatus.ok = true;
 		backendStatus.lastError = '';
 		backendStatus.lastChange = Date.now();
