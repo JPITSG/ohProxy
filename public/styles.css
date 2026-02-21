@@ -1586,14 +1586,11 @@ body.theme-light .input-card .input-field::-webkit-calendar-picker-indicator {
 	border-color: var(--color-control-off-border) !important;
 	cursor: pointer;
 	flex-shrink: 0;
-	transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease;
+	transition: border-color .2s ease, box-shadow .2s ease;
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
-}
-.colorpicker-swatch-off {
-	background: repeating-conic-gradient(
-		rgba(128, 128, 128, .3) 0% 25%,
-		rgba(128, 128, 128, .1) 0% 50%
-	) 0 0 / 12px 12px !important;
+	background:
+		linear-gradient(var(--cp-color, transparent), var(--cp-color, transparent)),
+		repeating-conic-gradient(rgba(128, 128, 128, .3) 0% 25%, rgba(128, 128, 128, .1) 0% 50%) 0 0 / 12px 12px;
 }
 .colorpicker-overlay {
 	display: none;
@@ -1637,7 +1634,18 @@ body.theme-light .input-card .input-field::-webkit-calendar-picker-indicator {
 	touch-action: none;
 	flex-shrink: 0;
 }
+.colorpicker-wheel-wrap::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	border-radius: 50%;
+	background: repeating-conic-gradient(
+		rgba(128, 128, 128, .3) 0% 25%,
+		rgba(128, 128, 128, .1) 0% 50%
+	) 0 0 / 12px 12px;
+}
 .colorpicker-wheel {
+	position: relative;
 	width: 200px;
 	height: 200px;
 	border-radius: 50%;
@@ -1683,6 +1691,9 @@ body.theme-light .colorpicker-wheel {
 	border-color: var(--color-control-off-border);
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
 	flex-shrink: 0;
+	background:
+		linear-gradient(var(--cp-color, transparent), var(--cp-color, transparent)),
+		repeating-conic-gradient(rgba(128, 128, 128, .3) 0% 25%, rgba(128, 128, 128, .1) 0% 50%) 0 0 / 12px 12px;
 }
 body.theme-light .colorpicker-card.colorpicker-above .colorpicker-overlay {
 	box-shadow: 0 -12px 20px rgba(0, 0, 0, 0.15), var(--glass-inset-shadow);

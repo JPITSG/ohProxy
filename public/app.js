@@ -8280,28 +8280,48 @@ function updateCard(card, w, info) {
 	} else if (isColorpicker) {
 		card.classList.add('colorpicker-card');
 		const hsb = parseHsbState(st);
-		const rgb = hsbToRgb(hsb.h, hsb.s, hsb.b);
+		const rgb = hsbToRgb(hsb.h, hsb.s, 100);
 		const inlineControls = createInlineControls(labelRow, navHint);
 
 		// Minus button (OFF - brightness to 0)
-		const minusBtn = createSetpointButton('\u2212', false, () => 'OFF', itemName);
+		const minusBtn = document.createElement('button');
+		minusBtn.className = 'setpoint-btn';
+		minusBtn.textContent = '\u2212';
+		minusBtn.onclick = async () => {
+			haptic();
+			liveB = 0;
+			brightnessSlider.value = '0';
+			drawWheel(liveB);
+			updatePreview();
+			minusBtn.disabled = true;
+			try { await sendCommand(itemName, 'OFF', { optimistic: false }); await refresh(false); }
+			catch (e) { logJsError(`sendSetpoint failed for ${itemName}`, e); alert(e.message); }
+			finally { minusBtn.disabled = false; }
+		};
 
 		// Color swatch
 		const swatch = document.createElement('button');
 		swatch.className = 'colorpicker-swatch';
-		const updateSwatchColor = (r, g, b, brightness) => {
-			if (brightness === 0) {
-				swatch.style.background = '';
-				swatch.classList.add('colorpicker-swatch-off');
-			} else {
-				swatch.style.background = `rgb(${r}, ${g}, ${b})`;
-				swatch.classList.remove('colorpicker-swatch-off');
-			}
+		const updateSwatchColor = (r, g, b, alpha) => {
+			swatch.style.setProperty('--cp-color', `rgba(${r}, ${g}, ${b}, ${alpha})`);
 		};
-		updateSwatchColor(rgb.r, rgb.g, rgb.b, hsb.b);
+		updateSwatchColor(rgb.r, rgb.g, rgb.b, hsb.b / 100);
 
 		// Plus button (ON - brightness to 100)
-		const plusBtn = createSetpointButton('+', false, () => 'ON', itemName);
+		const plusBtn = document.createElement('button');
+		plusBtn.className = 'setpoint-btn';
+		plusBtn.textContent = '+';
+		plusBtn.onclick = async () => {
+			haptic();
+			liveB = 100;
+			brightnessSlider.value = '100';
+			drawWheel(liveB);
+			updatePreview();
+			plusBtn.disabled = true;
+			try { await sendCommand(itemName, 'ON', { optimistic: false }); await refresh(false); }
+			catch (e) { logJsError(`sendSetpoint failed for ${itemName}`, e); alert(e.message); }
+			finally { plusBtn.disabled = false; }
+		};
 
 		// Overlay
 		const overlay = document.createElement('div');
@@ -8331,7 +8351,7 @@ function updateCard(card, w, info) {
 		// Preview swatch
 		const preview = document.createElement('div');
 		preview.className = 'colorpicker-preview';
-		preview.style.background = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+		preview.style.setProperty('--cp-color', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${hsb.b / 100})`);
 
 		const overlayBody = document.createElement('div');
 		overlayBody.className = 'colorpicker-overlay-body';
@@ -8390,6 +8410,7 @@ function updateCard(card, w, info) {
 			const cx = pxSize / 2, cy = pxSize / 2, radius = pxSize / 2;
 			const imgData = ctx.createImageData(pxSize, pxSize);
 			const data = imgData.data;
+			const bAlpha = brightness / 100;
 			for (let y = 0; y < pxSize; y++) {
 				for (let x = 0; x < pxSize; x++) {
 					const dx = x - cx;
@@ -8399,13 +8420,14 @@ function updateCard(card, w, info) {
 					if (dist <= radius + 1) {
 						const angle = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
 						const sat = Math.min((dist / radius) * 100, 100);
-						const c = hsbToRgb(angle, sat, brightness);
+						const c = hsbToRgb(angle, sat, 100);
 						data[idx] = c.r;
 						data[idx + 1] = c.g;
 						data[idx + 2] = c.b;
-						// Anti-alias the edge: fade alpha over the last 1.5px
+						// Anti-alias the edge, then multiply by brightness alpha
 						const edge = radius - dist;
-						data[idx + 3] = edge < 0 ? 0 : edge < 1.5 ? Math.round((edge / 1.5) * 255) : 255;
+						const edgeAlpha = edge < 0 ? 0 : edge < 1.5 ? edge / 1.5 : 1;
+						data[idx + 3] = Math.round(edgeAlpha * bAlpha * 255);
 					} else {
 						data[idx + 3] = 0;
 					}
@@ -8425,9 +8447,10 @@ function updateCard(card, w, info) {
 		};
 
 		const updatePreview = () => {
-			const c = hsbToRgb(liveH, liveS, liveB);
-			preview.style.background = `rgb(${c.r}, ${c.g}, ${c.b})`;
-			updateSwatchColor(c.r, c.g, c.b, liveB);
+			const c = hsbToRgb(liveH, liveS, 100);
+			const alpha = liveB / 100;
+			preview.style.setProperty('--cp-color', `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha})`);
+			updateSwatchColor(c.r, c.g, c.b, alpha);
 		};
 
 		drawWheel(liveB);
