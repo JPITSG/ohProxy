@@ -129,6 +129,9 @@
 	--color-status-ok: rgb(118, 214, 152);
 	--color-status-error: rgb(234, 114, 135);
 	--color-status-pending: rgb(255, 219, 117);
+	/* Modal footer pending/warning status text (can diverge by theme for readability). */
+	--color-modal-status-pending: var(--color-status-pending);
+	--color-modal-status-pending-rgb: 255, 219, 117;
 	--color-switch-active-bg: rgba(118, 214, 152, 0.15);
 	--color-switch-active-border: rgba(118, 214, 152, 0.5);
 	--color-switch-active-shadow: rgba(118, 214, 152, 0.4);
@@ -237,6 +240,9 @@ body.theme-light {
 	--color-status-ok: rgb(78, 183, 128);
 	--color-status-error: rgb(234, 114, 135);
 	--color-status-pending: rgb(255, 193, 7);
+	/* Keep orange tone, but darken for better contrast on light modal backgrounds. */
+	--color-modal-status-pending: rgb(201, 99, 0);
+	--color-modal-status-pending-rgb: 201, 99, 0;
 	--color-switch-active-bg: rgba(78, 183, 128, 0.12);
 	--color-switch-active-border: rgba(78, 183, 128, 0.45);
 	--color-switch-active-shadow: rgba(78, 183, 128, 0.35);
@@ -1004,9 +1010,6 @@ body.theme-dark #themeToggleBtn svg {
 	text-overflow: ellipsis;
 }
 #pageTitle .sitemap-title-selectable {
-	text-decoration: underline;
-	text-decoration-thickness: 1px;
-	text-underline-offset: 2px;
 	cursor: pointer;
 }
 #pageTitle .sitemap-title-selectable:focus-visible {
@@ -2084,7 +2087,7 @@ body.alert-open { overflow: hidden; position: fixed; width: 100%; }
 	color: var(--color-text-muted);
 }
 .sitemap-select-status.pending {
-	color: var(--color-status-pending);
+	color: var(--color-modal-status-pending);
 }
 .sitemap-select-status.error {
 	color: var(--color-status-error);
@@ -2771,9 +2774,9 @@ body.theme-light .admin-config-sections {
 	white-space: nowrap;
 }
 .admin-restart-badge {
-	background: rgba(245, 158, 11, 0.15);
-	color: rgb(245, 158, 11);
-	border: 1px solid rgba(245, 158, 11, 0.3);
+	background: rgba(var(--color-modal-status-pending-rgb), 0.15);
+	color: var(--color-modal-status-pending);
+	border: 1px solid rgba(var(--color-modal-status-pending-rgb), 0.3);
 }
 .admin-reload-badge {
 	background: rgba(59, 130, 246, 0.15);
@@ -3004,8 +3007,9 @@ body.theme-light .admin-toggle input:checked ~ .admin-toggle-dot {
 	border-top: 1px solid var(--glass-border-color);
 	flex-shrink: 0;
 }
+.card-config-status.warning,
 .admin-config-status.warning {
-	color: var(--color-status-pending);
+	color: var(--color-modal-status-pending);
 }
 .admin-config-footer button {
 	padding: 11px 12px;
