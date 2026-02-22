@@ -18,7 +18,7 @@ describe('Setpoint Crossfade', () => {
 	it('crossfades setpoint center value with a 0.4s old\/new transition', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /function crossfadeTextOverlap\(element, oldText, newText, durationMs = 400\)/);
-		assert.match(app, /card\.__setpointCrossfadePending = \{\s*fromText: safeText\(currentDisplay\.textContent\),\s*startedAt: Date\.now\(\),\s*\};/);
+		assert.match(app, /card\.__setpointCrossfadePending = \{\s*fromText: safeText\(currentDisplay\.__crossfadeCurrentText \|\| currentDisplay\.textContent\),\s*startedAt: Date\.now\(\),\s*\};/);
 		assert.match(app, /crossfadeTextOverlap\(display, oldSetpointText, setpointDisplayText, 400\);/);
 	});
 
