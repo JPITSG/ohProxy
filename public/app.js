@@ -6657,9 +6657,9 @@ function resetLabelRow(labelRow, labelStack, navHint, preserve = null) {
 	}
 }
 
-function animateSliderValue(input, targetValue, valueBubble = null, positionCallback = null, durationMs = 400) {
+function animateSliderValue(input, targetValue, valueBubble = null, positionCallback = null, durationMs = 400, fromValue = null) {
 	if (!input) return;
-	const startValue = Number(input.value);
+	const startValue = fromValue !== null ? Number(fromValue) : Number(input.value);
 	const endValue = Number(targetValue);
 	if (startValue === endValue || !Number.isFinite(startValue) || !Number.isFinite(endValue)) {
 		input.value = targetValue;
@@ -6667,23 +6667,36 @@ function animateSliderValue(input, targetValue, valueBubble = null, positionCall
 		if (positionCallback) positionCallback();
 		return;
 	}
+	const animId = (input.__sliderAnimId || 0) + 1;
+	input.__sliderAnimId = animId;
 	const step = Number(input.step) || 1;
 	const snap = (v) => Math.round(v / step) * step;
 	const startTime = performance.now();
 	const animate = (now) => {
+		if (input.__sliderAnimId !== animId) return;
 		const elapsed = now - startTime;
 		const progress = Math.min(elapsed / durationMs, 1);
 		// Ease-out cubic for smooth deceleration
 		const eased = 1 - Math.pow(1 - progress, 3);
 		const currentValue = progress >= 1 ? endValue : snap(startValue + (endValue - startValue) * eased);
 		input.value = currentValue;
+		input.__lastAnimValue = currentValue;
 		if (valueBubble) valueBubble.textContent = currentValue;
 		if (positionCallback) positionCallback();
 		if (progress < 1) {
 			requestAnimationFrame(animate);
+		} else {
+			delete input.__sliderAnimId;
+			delete input.__lastAnimValue;
 		}
 	};
 	requestAnimationFrame(animate);
+}
+
+function cancelSliderAnimation(input) {
+	if (!input) return;
+	input.__sliderAnimId = (input.__sliderAnimId || 0) + 1;
+	delete input.__lastAnimValue;
 }
 
 function createInlineSliderContainer(card, labelRow, navHint, ...extraClasses) {
@@ -6778,6 +6791,11 @@ function createSliderDragKit(input, inlineSlider, card, config) {
 		void sendValue(next, opts);
 	};
 
+	let lastKnownValue = Number(input.value);
+	let trackClickInfo = null;
+	let clickAnimateActive = false;
+	let onClickAnimate = null;
+
 	let dragReleaseController = null;
 	let activePointerId = null;
 	const detachGlobalDragListeners = () => {
@@ -6796,6 +6814,32 @@ function createSliderDragKit(input, inlineSlider, card, config) {
 		window.addEventListener('blur', endDrag, { signal: dragReleaseController.signal });
 	};
 	const endDrag = (e) => {
+		const clickInfo = trackClickInfo;
+		trackClickInfo = null;
+		awaitingFirstInput = false;
+		if (clickInfo) {
+			clickAnimateActive = true;
+			const target = clickInfo.targetValue;
+			const oldVal = clickInfo.oldValue;
+			if (onClickAnimate) {
+				onClickAnimate(target);
+			} else {
+				void sendValue(target, { force: true });
+			}
+			lastKnownValue = target;
+			animateSliderValue(input, target, null, updateVisuals, 400, oldVal);
+			setTimeout(() => {
+				clickAnimateActive = false;
+				releaseSliderRefresh();
+				setTimeout(() => refresh(false), 150);
+			}, 420);
+			delete inlineSlider.dataset.dragging;
+			const pointerId = (e && typeof e.pointerId === 'number') ? e.pointerId : activePointerId;
+			tryReleasePointerCapture(input, pointerId);
+			activePointerId = null;
+			detachGlobalDragListeners();
+			return;
+		}
 		releaseSliderRefresh();
 		delete inlineSlider.dataset.dragging;
 		const pointerId = (e && typeof e.pointerId === 'number') ? e.pointerId : activePointerId;
@@ -6803,7 +6847,16 @@ function createSliderDragKit(input, inlineSlider, card, config) {
 		activePointerId = null;
 		detachGlobalDragListeners();
 	};
+	let awaitingFirstInput = false;
+	let valueOnDown = 0;
 	const startDrag = (e) => {
+		cancelSliderAnimation(input);
+		if (clickAnimateActive) {
+			clickAnimateActive = false;
+			releaseSliderRefresh();
+		}
+		awaitingFirstInput = true;
+		valueOnDown = input.__lastAnimValue != null ? input.__lastAnimValue : lastKnownValue;
 		holdSliderRefresh();
 		inlineSlider.dataset.dragging = 'true';
 		const pointerId = e && typeof e.pointerId === 'number' ? e.pointerId : null;
@@ -6846,6 +6899,28 @@ function createSliderDragKit(input, inlineSlider, card, config) {
 	};
 	requestAnimationFrame(updateVisuals);
 	input.addEventListener('input', updateVisuals);
+	input.addEventListener('input', () => {
+		if (awaitingFirstInput) {
+			awaitingFirstInput = false;
+			const currentValue = Number(input.value);
+			const step = Number(input.step) || 1;
+			if (Math.abs(currentValue - valueOnDown) > step * 0.5) {
+				trackClickInfo = { oldValue: valueOnDown, targetValue: currentValue };
+				input.value = valueOnDown;
+				updateVisuals();
+				return;
+			}
+		}
+		if (trackClickInfo) {
+			trackClickInfo = null;
+		}
+		if (clickAnimateActive) {
+			cancelSliderAnimation(input);
+			clickAnimateActive = false;
+			releaseSliderRefresh();
+		}
+		lastKnownValue = Number(input.value);
+	});
 	const resizeController = new AbortController();
 	window.addEventListener('resize', updateVisuals, { signal: resizeController.signal });
 	let resizeObserver = null;
@@ -6864,7 +6939,11 @@ function createSliderDragKit(input, inlineSlider, card, config) {
 		startDrag, endDrag,
 		valueBubble, positionBubble, updateVisuals,
 		get lastSentValue() { return lastSentValue; },
-		set lastSentValue(v) { lastSentValue = v; }
+		set lastSentValue(v) { lastSentValue = v; },
+		get lastKnownValue() { return lastKnownValue; },
+		set lastKnownValue(v) { lastKnownValue = v; },
+		get isTrackClick() { return trackClickInfo !== null || clickAnimateActive; },
+		set onClickAnimate(fn) { onClickAnimate = fn; }
 	};
 }
 
@@ -8341,17 +8420,20 @@ function updateCard(card, w, info) {
 		kit.lastSentValue = current;
 
 		input.addEventListener('input', () => {
+			if (kit.isTrackClick) return;
 			const value = Number(input.value);
 			if (!Number.isFinite(value)) return;
 			kit.queueSend(value, false);
 		});
 		input.addEventListener('change', () => {
+			if (kit.isTrackClick) return;
 			kit.flushSend({ force: true });
 			kit.releaseSliderRefresh();
 			setTimeout(() => refresh(false), 150);
 		});
 		if (startValue !== current) {
 			animateSliderValue(input, current, null, kit.updateVisuals);
+			kit.lastKnownValue = current;
 		}
 	} else if (isColorpicker) {
 		card.classList.add('colorpicker-card');
@@ -8733,7 +8815,24 @@ function updateCard(card, w, info) {
 			if (!activationTimer) activationTimer = setTimeout(checkActivation, ACTIVATION_CHECK_MS);
 		};
 
+		kit.onClickAnimate = (targetValue) => {
+			if (isDimmer && !releaseOnly) {
+				const live = parseFloat(widgetState(w));
+				const isOff = Number.isFinite(live) ? live <= 0 : startedOff;
+				if (isOff && targetValue > 0) {
+					beginActivation(targetValue);
+					return;
+				}
+			}
+			if (releaseOnly) {
+				void kit.sendValue(targetValue, { force: true });
+			} else {
+				kit.queueSend(targetValue, true);
+			}
+		};
+
 		input.addEventListener('input', () => {
+			if (kit.isTrackClick) return;
 			const value = Number(input.value);
 			if (!Number.isFinite(value)) return;
 			if (activationPending) {
@@ -8752,6 +8851,7 @@ function updateCard(card, w, info) {
 			if (!releaseOnly) kit.queueSend(value, false);
 		});
 		input.addEventListener('change', () => {
+			if (kit.isTrackClick) return;
 			if (releaseOnly) {
 				const value = Number(input.value);
 				if (Number.isFinite(value)) void kit.sendValue(value, { force: true });
@@ -8764,6 +8864,7 @@ function updateCard(card, w, info) {
 
 		if (startValue !== current) {
 			animateSliderValue(input, current, kit.valueBubble, kit.positionBubble);
+			kit.lastKnownValue = current;
 		}
 
 		if (switchSupport) {
