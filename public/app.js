@@ -7117,6 +7117,66 @@ function createInlineControls(labelRow, navHint) {
 	return el;
 }
 
+/**
+ * Ensures card labels shrink to zero before inline-control buttons truncate.
+ * Measures button natural widths, sets a responsive min-width on the controls,
+ * and uses a ResizeObserver to hide the label (with right-aligned buttons)
+ * when there isn't enough room for both.
+ */
+function applyInlineControlsOverflow(inlineControls) {
+	const labelRow = inlineControls.parentElement;
+	if (!labelRow) return;
+	const labelStack = labelRow.querySelector('.labelStack');
+	if (!labelStack) return;
+	const buttons = inlineControls.querySelectorAll('.switch-btn');
+	if (!buttons.length) return;
+
+	// Defer to next frame so buttons are laid out and measurable
+	requestAnimationFrame(() => {
+		// Measure each button's natural width (flex: 0 0 auto)
+		const origStyles = [...buttons].map(b => b.style.cssText);
+		buttons.forEach(b => { b.style.flex = '0 0 auto'; b.style.width = 'max-content'; });
+		const maxNatural = Math.max(...[...buttons].map(b => b.getBoundingClientRect().width));
+		buttons.forEach((b, i) => { b.style.cssText = origStyles[i]; });
+
+		if (!maxNatural) return; // not measurable yet
+
+		// Sum margins between buttons (not flex gap)
+		let totalMargins = 0;
+		buttons.forEach(b => {
+			const ms = getComputedStyle(b);
+			totalMargins += parseFloat(ms.marginLeft) + parseFloat(ms.marginRight);
+		});
+
+		const neededWidth = Math.ceil(maxNatural) * buttons.length + totalMargins;
+		const lrGap = parseFloat(getComputedStyle(labelRow).gap) || 0;
+		const bufferedWidth = Math.ceil(neededWidth) + lrGap * 2;
+
+		// Set responsive min-width: firm at wide viewports, yields at narrow
+		inlineControls.style.minWidth = `min(${bufferedWidth}px, calc(100% - ${lrGap}px))`;
+		inlineControls.style.flexShrink = '0';
+		labelStack.style.minWidth = '0';
+
+		const threshold = 15;
+		const check = () => {
+			const available = labelRow.getBoundingClientRect().width - lrGap - bufferedWidth;
+			if (available < threshold) {
+				labelStack.style.display = 'none';
+				inlineControls.style.marginLeft = 'auto';
+			} else {
+				labelStack.style.display = '';
+				inlineControls.style.marginLeft = '';
+			}
+		};
+
+		if (inlineControls.__labelRO) inlineControls.__labelRO.disconnect();
+		const ro = new ResizeObserver(check);
+		ro.observe(labelRow);
+		inlineControls.__labelRO = ro;
+		check();
+	});
+}
+
 function getWidgetRenderInfo(w) {
 	const type = widgetType(w);
 	const t = type.toLowerCase();
@@ -8178,6 +8238,10 @@ function updateCard(card, w, info) {
 				if (e.target.closest('button, a, input, select, textarea')) return;
 				clickButton();
 			};
+		}
+
+		if (inlineControls.children.length > 1) {
+			applyInlineControlsOverflow(inlineControls);
 		}
 	} else if (t === 'setpoint') {
 		card.classList.add('setpoint-card');

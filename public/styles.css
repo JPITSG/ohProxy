@@ -320,6 +320,10 @@ header {
 	border-radius: var(--glass-border-radius);
 	box-shadow: var(--glass-box-shadow), var(--glass-inset-shadow);
 }
+/* Prevent grid items from stretching the viewport beyond their column */
+.grid > .glass {
+	min-width: 0;
+}
 
 /* Button hover effect when hovering anywhere on click-anywhere cards */
 @media (hover: hover) and (pointer: fine) {
