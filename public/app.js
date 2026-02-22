@@ -6951,6 +6951,8 @@ function crossfadeTextOverlap(element, oldText, newText, durationMs = 400) {
 	element.appendChild(oldSpan);
 	element.appendChild(newSpan);
 
+	element.__crossfadeCurrentText = toText;
+
 	requestAnimationFrame(() => {
 		if (element.__crossfadeToken !== token) return;
 		oldSpan.style.opacity = '0';
@@ -8117,7 +8119,7 @@ function updateCard(card, w, info) {
 			const currentDisplay = card.querySelector('.setpoint-value');
 			if (!currentDisplay) return;
 			card.__setpointCrossfadePending = {
-				fromText: safeText(currentDisplay.textContent),
+				fromText: safeText(currentDisplay.__crossfadeCurrentText || currentDisplay.textContent),
 				startedAt: Date.now(),
 			};
 		};
@@ -8133,6 +8135,7 @@ function updateCard(card, w, info) {
 			card.__setpointCrossfadePending = null;
 		} else {
 			display.textContent = setpointDisplayText;
+			display.__crossfadeCurrentText = setpointDisplayText;
 		}
 
 		const plus = createSetpointButton('+', current >= spMax, () => Math.min(spMax, current + spStep), itemName, markSetpointCrossfadePending);
