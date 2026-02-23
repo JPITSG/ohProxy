@@ -2164,10 +2164,6 @@ body.theme-light .oh-modal-footer {
 	border: var(--glass-border-width) solid var(--color-control-off-border);
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
 	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
-	margin-left: 8px;
-}
-.oh-modal-footer button:first-child {
-	margin-left: 0;
 }
 .oh-modal-footer button:disabled {
 	opacity: .4;
@@ -2657,10 +2653,6 @@ body.theme-light .admin-config-footer {
 	border: var(--glass-border-width) solid var(--color-control-off-border);
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
 	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
-	margin-left: 8px;
-}
-.card-config-footer button:first-child {
-	margin-left: 0;
 }
 .card-config-footer button:disabled,
 .admin-config-footer button:disabled {
@@ -3215,10 +3207,6 @@ body.theme-light .admin-toggle input:checked ~ .admin-toggle-dot {
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
 	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
 	flex-shrink: 0;
-	margin-left: 8px;
-}
-.admin-config-footer button:first-child {
-	margin-left: 0;
 }
 /* Admin field description */
 .admin-field-desc {
