@@ -5171,16 +5171,6 @@ function updateAdminConfigBtnVisibility() {
 	scheduleSearchPlaceholderUpdate();
 }
 
-function updateLogoutBtnVisibility() {
-	if (!els.logout) return;
-	if (getUserRole() === 'admin') {
-		els.logout.classList.remove('hidden');
-	} else {
-		els.logout.classList.add('hidden');
-	}
-	scheduleSearchPlaceholderUpdate();
-}
-
 // ========== End Admin Config Modal ==========
 
 function ensureImageViewer() {
@@ -11076,15 +11066,20 @@ function restoreNormalPolling() {
 		});
 	}
 	if (els.logout) {
-		els.logout.addEventListener('click', async () => {
+		els.logout.addEventListener('click', () => {
 			haptic();
-			await logoutAndRedirectToLogin();
+			showAlert({
+				header: ohLang.logoutConfirmHeader,
+				body: ohLang.logoutConfirmBody,
+				buttons: [
+					{ text: ohLang.logoutConfirmCancel, className: 'alert-btn-secondary', onClick: () => {} },
+					{ text: ohLang.logoutConfirmBtn, onClick: () => { void logoutAndRedirectToLogin(); } },
+				],
+			});
 		});
 	}
 	updateAdminConfigBtnVisibility();
-	updateLogoutBtnVisibility();
 	window.addEventListener('resize', updateAdminConfigBtnVisibility);
-	window.addEventListener('resize', updateLogoutBtnVisibility);
 	if (els.voice) {
 		var useVosk = voiceModel === 'vosk';
 		if (useVosk || SpeechRecognition) {

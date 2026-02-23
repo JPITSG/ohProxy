@@ -400,4 +400,8 @@ window.ohLang = {
 		unnamedFallback: 'Unnamed sitemap',
 		triggerAriaLabel: 'Select sitemap',
 	},
+	logoutConfirmHeader: 'Log Out',
+	logoutConfirmBody: 'Are you sure you wish to log out?',
+	logoutConfirmBtn: 'Log Out',
+	logoutConfirmCancel: 'Cancel',
 };
