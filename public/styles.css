@@ -799,7 +799,10 @@ body.theme-light .admin-config-sections::-webkit-scrollbar-thumb:hover {
 }
 .image-viewer {
 	position: fixed;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	z-index: 90;
 	display: flex;
 	align-items: center;
@@ -1657,7 +1660,10 @@ body.theme-light .input-card .input-field::-webkit-calendar-picker-indicator {
 .colorpicker-wheel-wrap::before {
 	content: '';
 	position: absolute;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	border-radius: 50%;
 	background: repeating-conic-gradient(
 		rgba(128, 128, 128, .3) 0% 25%,
@@ -2036,7 +2042,10 @@ body.theme-light #grid .navHint svg path {
 /* Shared Modal Base */
 .oh-modal {
 	position: fixed;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	z-index: 100;
 	display: flex;
 	align-items: center;
@@ -2269,7 +2278,10 @@ body.alert-open { overflow: hidden; position: fixed; width: 100%; }
 .card-config-modal,
 .admin-config-modal {
 	position: fixed;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	z-index: 100;
 	display: flex;
 	align-items: center;
@@ -3082,7 +3094,10 @@ body.theme-light .admin-list-input::placeholder {
 }
 .admin-toggle-track {
 	position: absolute;
-	inset: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	background: rgba(255, 255, 255, 0.1);
 	border: var(--glass-border-width) solid var(--glass-border-color);
 	border-radius: 999px;
