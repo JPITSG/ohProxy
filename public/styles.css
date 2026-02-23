@@ -2165,6 +2165,9 @@ body.theme-light .oh-modal-footer {
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
 	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
 }
+.oh-modal-footer button + button {
+	margin-left: 8px;
+}
 .oh-modal-footer button:disabled {
 	opacity: .4;
 	cursor: default;
@@ -2653,6 +2656,10 @@ body.theme-light .admin-config-footer {
 	border: var(--glass-border-width) solid var(--color-control-off-border);
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
 	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
+}
+.card-config-footer button + button,
+.admin-config-footer button + button {
+	margin-left: 8px;
 }
 .card-config-footer button:disabled,
 .admin-config-footer button:disabled {
