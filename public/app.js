@@ -722,6 +722,19 @@ function isTouchDevice() {
 	return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
 
+function buildNativeSelectOverlay(items, getValue, getLabel, initialValue) {
+	const select = document.createElement('select');
+	select.className = 'select-overlay';
+	for (const item of items) {
+		const opt = document.createElement('option');
+		opt.value = getValue(item);
+		opt.textContent = getLabel(item);
+		select.appendChild(opt);
+	}
+	select.value = initialValue;
+	return select;
+}
+
 var haptic = ohUtils.haptic;
 
 function trySetPointerCapture(el, pointerId) {
@@ -3182,6 +3195,22 @@ function createSelect(options, initialValue, config) {
 	fakeSelect.className = btnClass;
 	fakeSelect.textContent = getLabel(current);
 	if (colorMode) fakeSelect.dataset.color = getValue(current);
+
+	if (isTouchDevice()) {
+		const nativeSelect = buildNativeSelectOverlay(options, getValue, getLabel, getValue(current));
+		nativeSelect.onchange = () => {
+			haptic();
+			const val = nativeSelect.value;
+			const selectedOpt = options.find(o => getValue(o) === val) || options[0];
+			wrap.dataset.value = val;
+			fakeSelect.textContent = getLabel(selectedOpt);
+			if (colorMode) fakeSelect.dataset.color = val;
+		};
+		wrap.style.position = 'relative';
+		wrap.appendChild(fakeSelect);
+		wrap.appendChild(nativeSelect);
+		return wrap;
+	}
 
 	const menu = document.createElement('div');
 	menu.className = 'glow-select-menu';
@@ -7880,10 +7909,8 @@ function updateCard(card, w, info) {
 		if (!mapping.length) {
 			showUnavailableMessage(controls, 'No selection options available');
 		} else {
-			// Slim/small-header/small-touch use native overlay; all others use custom dropdown
-			const isSmallTouch = window.matchMedia('(max-width: 768px)').matches &&
-				('ontouchstart' in window || navigator.maxTouchPoints > 0);
-			const useOverlay = state.isSlim || state.headerMode === 'small' || isSmallTouch;
+			// Slim/small-header/touch use native overlay; all others use custom dropdown
+			const useOverlay = state.isSlim || state.headerMode === 'small' || isTouchDevice();
 			card.classList.add('selection-card');
 			const inlineControls = createInlineControls(labelRow, navHint);
 
@@ -7891,18 +7918,9 @@ function updateCard(card, w, info) {
 			selectWrap.className = 'select-wrap';
 			inlineControls.appendChild(selectWrap);
 
-			const select = document.createElement('select');
-			select.className = 'oh-select';
-
-			for (const m of mapping) {
-				const opt = document.createElement('option');
-				opt.value = m.command;
-				opt.textContent = m.label || m.command;
-				select.appendChild(opt);
-			}
-
 			const current = findMappingByCommand(mapping, st);
-			select.value = current ? current.command : '';
+			const select = buildNativeSelectOverlay(mapping, m => m.command, m => m.label || m.command, current ? current.command : '');
+			select.classList.add('oh-select');
 			const fallbackSelectionMapping = () => {
 				const fallbackValue = safeText(select.value || st);
 				return { command: fallbackValue, releaseCommand: '', label: fallbackValue, icon: '' };
@@ -7956,7 +7974,6 @@ function updateCard(card, w, info) {
 					}
 				};
 				selectWrap.appendChild(fakeSelect);
-				select.classList.add('select-overlay');
 				card.appendChild(select);
 			} else {
 				const fakeSelect = document.createElement('button');
