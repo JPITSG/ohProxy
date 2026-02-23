@@ -6935,10 +6935,27 @@ app.post('/api/card-config', jsonParserLarge, requireAdmin, (req, res) => {
 	}
 });
 
-// Admin config endpoints
-app.get('/api/admin/config', requireAdmin, (req, res) => {
+// System settings endpoints
+app.get('/api/admin/config', (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
+	const user = req.ohProxyUserData;
+	if (!user) {
+		res.status(401).json({ error: 'Authentication required' });
+		return;
+	}
+
+	const userConfig = {
+		trackGps: user.trackgps === true,
+		voiceModel: isValidUserVoicePreference(user.voicePreference) ? user.voicePreference : 'system',
+		password: '',
+		confirm: '',
+	};
+
+	if (user.role !== 'admin') {
+		res.json({ user: userConfig });
+		return;
+	}
 
 	let config;
 	try {
@@ -6959,8 +6976,7 @@ app.get('/api/admin/config', requireAdmin, (req, res) => {
 	}
 
 	if (!isPlainObject(config.user)) config.user = {};
-	config.user.trackGps = req.ohProxyUserData.trackgps === true;
-	config.user.voiceModel = isValidUserVoicePreference(req.ohProxyUserData.voicePreference) ? req.ohProxyUserData.voicePreference : 'system';
+	Object.assign(config.user, userConfig);
 
 	res.json(config);
 });
@@ -6990,10 +7006,15 @@ app.get('/api/admin/config/secret', requireAdmin, (req, res) => {
 	res.json({ value: val !== undefined ? String(val) : '' });
 });
 
-app.post('/api/admin/config', jsonParserLarge, requireAdmin, (req, res) => {
+app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
 	const user = req.ohProxyUserData;
+	if (!user) {
+		res.status(401).json({ error: 'Authentication required' });
+		return;
+	}
+	const isAdminUser = user.role === 'admin';
 
 	const incoming = req.body;
 	if (!isPlainObject(incoming)) {
@@ -7011,45 +7032,59 @@ app.post('/api/admin/config', jsonParserLarge, requireAdmin, (req, res) => {
 		return;
 	}
 
-	const incomingConfig = JSON.parse(JSON.stringify(incoming));
-	delete incomingConfig.user;
-
-	// Restore masked sensitive values from current config
-	let currentLocal;
-	try {
-		delete require.cache[require.resolve('./config.local.js')];
-		currentLocal = require('./config.local.js');
-	} catch { currentLocal = {}; }
-
-	for (const keyPath of SENSITIVE_CONFIG_KEYS) {
-		const val = getNestedValue(incomingConfig, keyPath);
-		if (val === SENSITIVE_MASK) {
-			const currentVal = getNestedValue(currentLocal, keyPath);
-			if (currentVal !== undefined) {
-				setNestedValue(incomingConfig, keyPath, currentVal);
-			} else {
-				setNestedValue(incomingConfig, keyPath, '');
-			}
+	if (!isAdminUser) {
+		const topKeys = Object.keys(incoming);
+		const disallowedTopKey = topKeys.find((key) => key !== 'user');
+		if (disallowedTopKey) {
+			res.status(403).json({ error: 'Admin access required for non-user settings' });
+			return;
 		}
 	}
 
-	// Validate
-	const errors = validateAdminConfig(incomingConfig);
-	if (errors.length > 0) {
-		res.status(400).json({ errors });
-		return;
+	let incomingConfig = null;
+	let needsRestart = false;
+	let needsClientReload = false;
+	if (isAdminUser) {
+		incomingConfig = JSON.parse(JSON.stringify(incoming));
+		delete incomingConfig.user;
+
+		// Restore masked sensitive values from current config
+		let currentLocal;
+		try {
+			delete require.cache[require.resolve('./config.local.js')];
+			currentLocal = require('./config.local.js');
+		} catch { currentLocal = {}; }
+
+		for (const keyPath of SENSITIVE_CONFIG_KEYS) {
+			const val = getNestedValue(incomingConfig, keyPath);
+			if (val === SENSITIVE_MASK) {
+				const currentVal = getNestedValue(currentLocal, keyPath);
+				if (currentVal !== undefined) {
+					setNestedValue(incomingConfig, keyPath, currentVal);
+				} else {
+					setNestedValue(incomingConfig, keyPath, '');
+				}
+			}
+		}
+
+		// Validate
+		const errors = validateAdminConfig(incomingConfig);
+		if (errors.length > 0) {
+			res.status(400).json({ errors });
+			return;
+		}
+
+		// Check if restart will be required (compare against merged boot config, not raw config.local.js,
+		// because config.local.js may omit keys that have default values)
+		needsRestart = restartRequiredKeys.some(key => {
+			const oldVal = getNestedValue(SERVER_CONFIG, key);
+			const newVal = getNestedValue(incomingConfig.server || {}, key);
+			return JSON.stringify(oldVal) !== JSON.stringify(newVal);
+		});
+
+		// Check if client config changed (requires browser reload)
+		needsClientReload = JSON.stringify(CLIENT_CONFIG) !== JSON.stringify(incomingConfig.client || {});
 	}
-
-	// Check if restart will be required (compare against merged boot config, not raw config.local.js,
-	// because config.local.js may omit keys that have default values)
-	const needsRestart = restartRequiredKeys.some(key => {
-		const oldVal = getNestedValue(SERVER_CONFIG, key);
-		const newVal = getNestedValue(incomingConfig.server || {}, key);
-		return JSON.stringify(oldVal) !== JSON.stringify(newVal);
-	});
-
-	// Check if client config changed (requires browser reload)
-	const needsClientReload = JSON.stringify(CLIENT_CONFIG) !== JSON.stringify(incomingConfig.client || {});
 
 	const previousTrackGps = user.trackgps === true;
 	const previousVoicePreference = isValidUserVoicePreference(user.voicePreference) ? user.voicePreference : 'system';
@@ -7076,13 +7111,13 @@ app.post('/api/admin/config', jsonParserLarge, requireAdmin, (req, res) => {
 
 	const rollbackUserUpdates = () => {
 		if (userTrackUpdated && !sessions.updateUserTrackGps(user.username, previousTrackGps)) {
-			logMessage(`[Admin] Failed to roll back user GPS setting for ${user.username || 'unknown'}`, 'error');
+			logMessage(`[Settings] Failed to roll back user GPS setting for ${user.username || 'unknown'}`, 'error');
 		}
 		if (userVoiceUpdated && !sessions.updateUserVoicePreference(user.username, previousVoicePreference)) {
-			logMessage(`[Admin] Failed to roll back user voice setting for ${user.username || 'unknown'}`, 'error');
+			logMessage(`[Settings] Failed to roll back user voice setting for ${user.username || 'unknown'}`, 'error');
 		}
 		if (userPasswordUpdated && !sessions.updateUserPassword(user.username, previousPassword)) {
-			logMessage(`[Admin] Failed to roll back user password for ${user.username || 'unknown'}`, 'error');
+			logMessage(`[Settings] Failed to roll back user password for ${user.username || 'unknown'}`, 'error');
 		}
 	};
 
@@ -7115,18 +7150,20 @@ app.post('/api/admin/config', jsonParserLarge, requireAdmin, (req, res) => {
 		userPasswordUpdated = true;
 	}
 
-	// Write config.local.js atomically
-	const content = '\'use strict\';\n\nmodule.exports = ' + JSON.stringify(incomingConfig, null, '\t') + ';\n';
-	const tmpPath = LOCAL_CONFIG_PATH + '.tmp';
-	try {
-		fs.writeFileSync(tmpPath, content, { encoding: 'utf8', mode: SENSITIVE_FILE_MODE });
-		fs.renameSync(tmpPath, LOCAL_CONFIG_PATH);
-		ensureSensitiveFilePermissions(LOCAL_CONFIG_PATH, 'config.local.js');
-	} catch (err) {
-		rollbackUserUpdates();
-		logMessage(`Failed to write admin config: ${err.message || err}`);
-		res.status(500).json({ error: 'Failed to write config: ' + err.message });
-		return;
+	if (isAdminUser) {
+		// Write config.local.js atomically
+		const content = '\'use strict\';\n\nmodule.exports = ' + JSON.stringify(incomingConfig, null, '\t') + ';\n';
+		const tmpPath = LOCAL_CONFIG_PATH + '.tmp';
+		try {
+			fs.writeFileSync(tmpPath, content, { encoding: 'utf8', mode: SENSITIVE_FILE_MODE });
+			fs.renameSync(tmpPath, LOCAL_CONFIG_PATH);
+			ensureSensitiveFilePermissions(LOCAL_CONFIG_PATH, 'config.local.js');
+		} catch (err) {
+			rollbackUserUpdates();
+			logMessage(`Failed to write admin config: ${err.message || err}`);
+			res.status(500).json({ error: 'Failed to write config: ' + err.message });
+			return;
+		}
 	}
 
 	const needsReload = needsClientReload || userTrackUpdated || userVoiceUpdated;
@@ -7134,7 +7171,8 @@ app.post('/api/admin/config', jsonParserLarge, requireAdmin, (req, res) => {
 		clearAuthCookie(res);
 	}
 
-	logMessage(`[Admin] Config updated by ${user.username || 'unknown'}`);
+	const actorLabel = isAdminUser ? 'Admin' : 'User';
+	logMessage(`[${actorLabel}] Config updated by ${user.username || 'unknown'}`);
 	res.json({
 		ok: true,
 		restartRequired: needsRestart,
