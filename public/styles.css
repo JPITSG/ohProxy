@@ -285,6 +285,11 @@ body {
 	cursor: default;
 }
 
+button:focus,
+select:focus {
+	outline: none;
+}
+
 #search {
 	-webkit-user-select: text;
 	user-select: text;
@@ -549,7 +554,7 @@ html:not(.slim) .has-meta .labelStack {
 		color: var(--color-text-primary);
 	}
 }
-.selection-card .select-overlay {
+.select-overlay {
 	position: absolute;
 	top: 0;
 	right: 0;
@@ -564,7 +569,7 @@ html:not(.slim) .has-meta .labelStack {
 	background: transparent !important;
 	z-index: 2;
 }
-.selection-card .select-overlay:focus {
+.select-overlay:focus {
 	outline: none;
 	box-shadow: none !important;
 }
@@ -2145,7 +2150,6 @@ body.theme-light .oh-modal-body::-webkit-scrollbar-thumb:hover {
 	display: flex;
 	justify-content: flex-end;
 	align-items: center;
-	gap: 8px;
 	padding: 12px 20px;
 	border-top: 1px solid var(--glass-border-color);
 	flex-shrink: 0;
@@ -2621,7 +2625,6 @@ body.theme-light .admin-list-input:focus {
 	display: flex;
 	justify-content: flex-end;
 	align-items: center;
-	gap: 8px;
 	padding: 12px 20px;
 	border-top: 1px solid var(--glass-border-color);
 	flex-shrink: 0;
@@ -3193,7 +3196,6 @@ body.theme-light .admin-toggle input:checked ~ .admin-toggle-dot {
 .admin-config-footer {
 	display: flex;
 	align-items: center;
-	gap: 8px;
 	padding: 12px 20px;
 	border-top: 1px solid var(--glass-border-color);
 	flex-shrink: 0;
