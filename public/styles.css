@@ -2114,7 +2114,6 @@ body.theme-light .oh-modal-header {
 .oh-modal-body {
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
 	flex: 1;
 	overflow-y: auto;
 	overflow-x: hidden;
@@ -2123,6 +2122,9 @@ body.theme-light .oh-modal-header {
 	scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 	overscroll-behavior: contain;
 	-webkit-overflow-scrolling: touch;
+}
+.oh-modal-body > * + * {
+	margin-top: 12px;
 }
 body.theme-light .oh-modal-body {
 	scrollbar-color: rgba(150, 150, 150, 0.35) transparent;
@@ -2369,7 +2371,6 @@ body.theme-light .admin-config-section:not(.collapsed) .admin-config-section-bod
 .card-config-body {
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
 	flex: 1;
 	overflow-y: auto;
 	overflow-x: hidden;
@@ -2378,6 +2379,9 @@ body.theme-light .admin-config-section:not(.collapsed) .admin-config-section-bod
 	scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 	overscroll-behavior: contain;
 	-webkit-overflow-scrolling: touch;
+}
+.card-config-body > * + * {
+	margin-top: 12px;
 }
 body.theme-light .card-config-body {
 	scrollbar-color: rgba(150, 150, 150, 0.35) transparent;
@@ -2399,7 +2403,11 @@ body.theme-light .card-config-body {
 .proxy-cache-section {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
+}
+.glow-rules-section > * + *,
+.iframe-height-section > * + *,
+.proxy-cache-section > * + * {
+	margin-top: 8px;
 }
 .history-entries { display: flex; flex-direction: column; margin-top: -6px; }
 .history-entry {
@@ -2443,7 +2451,8 @@ body.theme-light .card-config-body {
 	color: var(--color-text-muted);
 	padding: 6px 0;
 }
-.history-nav { display: flex; gap: 6px; }
+.history-nav { display: flex; }
+.history-nav > * + * { margin-left: 6px; }
 .history-older, .history-newer {
 	flex: 1;
 	padding: 11px 12px;
@@ -2461,7 +2470,10 @@ body.theme-light .card-config-body {
 .admin-list-row {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+}
+.glow-rule-row > * + *,
+.admin-list-row > * + * {
+	margin-left: 6px;
 }
 .glow-rule-row input {
 	box-sizing: border-box;
@@ -2724,7 +2736,9 @@ body.theme-light .proxy-cache-input::placeholder {
 /* Visibility Radio Buttons */
 .item-config-visibility {
 	display: flex;
-	gap: 8px;
+}
+.item-config-visibility > * + * {
+	margin-left: 8px;
 }
 .item-config-radio {
 	flex: 1;
@@ -2944,10 +2958,12 @@ body.theme-light .admin-config-sections {
 .admin-config-section-header {
 	display: flex;
 	align-items: center;
-	gap: 8px;
 	padding: 12px 20px;
 	cursor: pointer;
 	user-select: none;
+}
+.admin-config-section-header > * + * {
+	margin-left: 8px;
 }
 .admin-config-section-title {
 	font-size: .75rem;
@@ -2993,7 +3009,9 @@ body.theme-light .admin-config-sections {
 	padding: 10px 20px 10px;
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
+}
+.admin-config-section-body > * + * {
+	margin-top: 12px;
 }
 .admin-config-section.collapsed .admin-config-section-body {
 	display: none;
@@ -3001,12 +3019,17 @@ body.theme-light .admin-config-sections {
 .admin-config-field {
 	display: flex;
 	align-items: center;
-	gap: 12px;
+}
+.admin-config-field > * + * {
+	margin-left: 12px;
 }
 .admin-config-field.stacked {
 	flex-direction: column;
 	align-items: stretch;
-	gap: 4px;
+}
+.admin-config-field.stacked > * + * {
+	margin-top: 4px;
+	margin-left: 0;
 }
 .admin-config-field.stacked > label {
 	flex: 0 0 auto;
@@ -3062,7 +3085,9 @@ body.theme-light .admin-config-field textarea::placeholder {
 .admin-list-wrap {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+}
+.admin-list-wrap > * + * {
+	margin-top: 6px;
 }
 .admin-list-input {
 	flex: 1;
