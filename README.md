@@ -149,4 +149,4 @@ See the [Wiki](https://github.com/JPITSG/ohProxy/wiki) for detailed documentatio
 
 ## License
 
-MIT License - See LICENSE file for details.
+[MIT](LICENSE)
