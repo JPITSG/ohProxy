@@ -4506,6 +4506,16 @@ const ADMIN_CONFIG_GROUP_LABELS = {
 	client: 'groupClient',
 };
 
+function getAdminConfigSchemaForRole(role) {
+	if (role === 'admin') return ADMIN_CONFIG_SCHEMA;
+	return ADMIN_CONFIG_SCHEMA.filter(section => section.group === 'user');
+}
+
+function getAdminConfigModalTitleForRole(role) {
+	if (role === 'admin') return ohLang.adminConfig.title || 'System Settings';
+	return ohLang.adminConfig.userTitle || 'User Settings';
+}
+
 let adminConfigModal = null;
 let adminConfigAbort = null;
 const adminSelectMenus = [];
@@ -4804,7 +4814,7 @@ function ensureAdminConfigModal() {
 	wrap.innerHTML = `
 		<div class="admin-config-frame oh-modal-frame glass">
 			<div class="admin-config-header oh-modal-header">
-				<h2>${ohLang.adminConfig.title}</h2>
+				<h2>${getAdminConfigModalTitleForRole(getUserRole())}</h2>
 				<button type="button" class="admin-config-close oh-modal-close">
 					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M18 6L6 18M6 6l12 12"/>
@@ -4831,9 +4841,11 @@ function ensureAdminConfigModal() {
 
 async function openAdminConfigModal() {
 	ensureAdminConfigModal();
+	const titleEl = adminConfigModal.querySelector('.admin-config-header h2');
 	const statusEl = adminConfigModal.querySelector('.admin-config-status');
 	const sectionsEl = adminConfigModal.querySelector('.admin-config-sections');
 	const saveBtn = adminConfigModal.querySelector('.admin-config-save');
+	if (titleEl) titleEl.textContent = getAdminConfigModalTitleForRole(getUserRole());
 
 	statusEl.className = 'admin-config-status';
 	statusEl.textContent = '';
@@ -4876,9 +4888,12 @@ async function openAdminConfigModal() {
 	}
 
 	// Render sections grouped by user/server/client
+	const schema = getAdminConfigSchemaForRole(getUserRole());
+	const sectionGroups = Array.from(new Set(schema.map(section => section.group).filter(Boolean)));
+	const showGroupHeaders = sectionGroups.length > 1;
 	let currentGroup = '';
-	for (const section of ADMIN_CONFIG_SCHEMA) {
-		if (section.group && section.group !== currentGroup) {
+	for (const section of schema) {
+		if (showGroupHeaders && section.group && section.group !== currentGroup) {
 			currentGroup = section.group;
 			const groupHeader = document.createElement('div');
 			groupHeader.className = 'admin-config-group-header';
@@ -4917,7 +4932,8 @@ function closeAdminConfigModal({ skipHistory } = {}) {
 
 function collectAdminConfigValues() {
 	const config = {};
-	for (const section of ADMIN_CONFIG_SCHEMA) {
+	const schema = getAdminConfigSchemaForRole(getUserRole());
+	for (const section of schema) {
 		for (const field of section.fields) {
 			const key = field.key;
 			let value;
@@ -5163,7 +5179,8 @@ async function logoutAndRedirectToLogin() {
 function updateAdminConfigBtnVisibility() {
 	const btn = document.getElementById('adminConfigBtn');
 	if (!btn) return;
-	if (getUserRole() === 'admin') {
+	const userRole = getUserRole();
+	if (userRole) {
 		btn.classList.remove('hidden');
 	} else {
 		btn.classList.add('hidden');

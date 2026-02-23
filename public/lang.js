@@ -4,6 +4,7 @@
 window.ohLang = {
 	adminConfig: {
 		title: 'System Settings',
+		userTitle: 'User Settings',
 		closeBtn: 'Close',
 		saveBtn: 'Save',
 		groupUser: 'User',
