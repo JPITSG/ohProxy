@@ -53,11 +53,12 @@
 				var parts = raw.split('-');
 				var past = parts[0];
 				var future = parts[1];
-				if (!past) return 0;
-				var pastSec = parseBasePeriodSeconds(past);
-				if (!pastSec) return 0;
-				if (future && !parseBasePeriodSeconds(future)) return 0;
-				return pastSec;
+				var pastSec = past ? parseBasePeriodSeconds(past) : 0;
+				var futureSec = future ? parseBasePeriodSeconds(future) : 0;
+				if (past && !pastSec) return 0;
+				if (future && !futureSec) return 0;
+				if (!pastSec && !futureSec) return 0;
+				return pastSec + futureSec;
 			}
 			return parseBasePeriodSeconds(raw);
 		}

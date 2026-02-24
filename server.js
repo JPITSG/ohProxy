@@ -371,8 +371,8 @@ const BIN_SHELL = safeText(BINARIES_CONFIG.shell) || '/bin/sh';
 const CHART_CACHE_DIR = path.join(__dirname, 'cache', 'chart');
 // Parse any openHAB chart period string to seconds.
 // Supports simple (h, D, W, M, Y), multiplied (4h, 2D, 3W),
-// ISO 8601 (P1Y6M, PT1H30M, P2W, P1DT12H), and past-future (2h-1h, D-1D, D-, PT1H-PT30M).
-// Returns 0 for invalid/unrecognised input. Capped at 10 years.
+// ISO 8601 (P1Y6M, PT1H30M, P2W, P1DT12H), and past-future (2h-1h, D-1D, D-, -1h, PT1H-PT30M).
+// Returns 0 for invalid/unrecognised input. Each period component is capped at 10 years.
 const MAX_PERIOD_SEC = 10 * 365.25 * 86400; // ~10 years
 const CHART_PERIOD_MAX_LEN = 64;
 const CHART_SERVICE_RE = /^[A-Za-z0-9._-]{1,64}$/;
@@ -404,27 +404,98 @@ function parseBasePeriodToSeconds(period) {
 	return 0;
 }
 
-function parsePeriodToSeconds(period) {
-	if (typeof period !== 'string') return 0;
+function parsePeriodWindow(period) {
+	if (typeof period !== 'string') return null;
 	const raw = period.trim();
-	if (!raw) return 0;
+	if (!raw) return null;
 
-	// Past-future format: <past>-<future>, where future may be empty (e.g. D-).
+	// Past-future format: <past>-<future>, where either side may be empty (e.g. D-, -1h).
 	const dashCount = (raw.match(/-/g) || []).length;
-	if (dashCount > 1) return 0;
+	if (dashCount > 1) return null;
 	if (dashCount === 1) {
 		const [past, future] = raw.split('-');
-		if (!past) return 0;
-		const pastSec = parseBasePeriodToSeconds(past);
-		if (!pastSec) return 0;
-		if (future) {
-			const futureSec = parseBasePeriodToSeconds(future);
-			if (!futureSec) return 0;
-		}
-		return pastSec;
+		const pastSec = past ? parseBasePeriodToSeconds(past) : 0;
+		const futureSec = future ? parseBasePeriodToSeconds(future) : 0;
+		if (past && !pastSec) return null;
+		if (future && !futureSec) return null;
+		if (!pastSec && !futureSec) return null;
+		return {
+			pastSec,
+			futureSec,
+			totalSec: pastSec + futureSec,
+		};
 	}
 
-	return parseBasePeriodToSeconds(raw);
+	const baseSec = parseBasePeriodToSeconds(raw);
+	if (!baseSec) return null;
+	return {
+		pastSec: baseSec,
+		futureSec: 0,
+		totalSec: baseSec,
+	};
+}
+
+function parsePeriodToSeconds(period) {
+	const parsed = parsePeriodWindow(period);
+	return parsed ? parsed.totalSec : 0;
+}
+
+function normalizePeriodWindow(periodWindow) {
+	if (Number.isFinite(periodWindow) && periodWindow > 0) {
+		const sec = Math.floor(periodWindow);
+		return {
+			pastSec: sec,
+			futureSec: 0,
+			totalSec: sec,
+		};
+	}
+	if (!periodWindow || typeof periodWindow !== 'object') return null;
+	const pastSec = Number.isFinite(periodWindow.pastSec) && periodWindow.pastSec >= 0
+		? Math.floor(periodWindow.pastSec)
+		: 0;
+	const futureSec = Number.isFinite(periodWindow.futureSec) && periodWindow.futureSec >= 0
+		? Math.floor(periodWindow.futureSec)
+		: 0;
+	if (!pastSec && !futureSec) return null;
+	const totalSec = Number.isFinite(periodWindow.totalSec) && periodWindow.totalSec > 0
+		? Math.floor(periodWindow.totalSec)
+		: (pastSec + futureSec);
+	if (!totalSec) return null;
+	return {
+		pastSec,
+		futureSec,
+		totalSec,
+	};
+}
+
+function periodWindowFromPeriodString(period, fallbackSec = 86400) {
+	const parsed = parsePeriodWindow(period);
+	if (parsed) return parsed;
+	const fallback = normalizePeriodWindow(fallbackSec);
+	if (fallback) return fallback;
+	return {
+		pastSec: 86400,
+		futureSec: 0,
+		totalSec: 86400,
+	};
+}
+
+function periodWindowBounds(periodWindow) {
+	const window = normalizePeriodWindow(periodWindow) || periodWindowFromPeriodString('D');
+	const nowSec = Date.now() / 1000;
+	return {
+		startSec: nowSec - window.pastSec,
+		endSec: nowSec + window.futureSec,
+		window,
+	};
+}
+
+function periodWindowDates(periodWindow) {
+	const { startSec, endSec } = periodWindowBounds(periodWindow);
+	return {
+		start: new Date(startSec * 1000),
+		end: new Date(endSec * 1000),
+	};
 }
 
 function parseChartLegendMode(rawLegend) {
@@ -448,11 +519,6 @@ function chartCacheTtl(durationSec) {
 	if (durationSec <= 86400) return 10 * 60 * 1000;     // <=1d  → 10 min
 	if (durationSec <= 30 * 86400) return 60 * 60 * 1000; // <=30d → 1 hour
 	return 24 * 60 * 60 * 1000;                           // >30d  → 1 day
-}
-
-// Fallback data-point count when no data falls in period window
-function chartFallbackN(durationSec) {
-	return Math.min(Math.max(Math.round(durationSec / 60), 60), 8760);
 }
 
 // Snap to a "nice" x-label interval targeting ~7 labels
@@ -3202,10 +3268,9 @@ function extractPersistencePoints(payload) {
 	return deduped;
 }
 
-async function fetchPersistenceSeries(item, durationSec = 86400, service = '') {
-	const durSec = Math.max(1, Math.floor(durationSec || 0));
-	const end = new Date();
-	const start = new Date(end.getTime() - (durSec * 1000));
+async function fetchPersistenceSeries(item, periodWindow = 86400, service = '') {
+	const window = normalizePeriodWindow(periodWindow) || periodWindowFromPeriodString('D');
+	const { start, end } = periodWindowDates(window);
 	const params = new URLSearchParams();
 	params.set('starttime', start.toISOString());
 	params.set('endtime', end.toISOString());
@@ -3227,12 +3292,10 @@ async function fetchPersistenceSeries(item, durationSec = 86400, service = '') {
 	return points.length ? points : null;
 }
 
-function processChartData(data, durationSec, maxPoints = 500) {
+function processChartData(data, periodWindow, maxPoints = 500) {
 	if (!data || data.length === 0) return { data: [], yMin: 0, yMax: 100 };
 
-	const now = Date.now() / 1000;
-	const duration = durationSec || 86400;
-	const cutoff = now - duration;
+	const { startSec, endSec, window } = periodWindowBounds(periodWindow);
 
 	// Filter and track min/max (and their indices for extreme-preserving downsample)
 	let filtered = [];
@@ -3240,23 +3303,10 @@ function processChartData(data, durationSec, maxPoints = 500) {
 	let dataMinIdx = -1, dataMaxIdx = -1;
 
 	for (const [ts, val] of data) {
-		if (ts >= cutoff) {
+		if (ts >= startSec && ts <= endSec) {
 			if (val < dataMin) { dataMin = val; dataMinIdx = filtered.length; }
 			if (val > dataMax) { dataMax = val; dataMaxIdx = filtered.length; }
 			filtered.push([ts, val]);
-		}
-	}
-
-	// Fallback if no data in period
-	if (filtered.length === 0 && data.length > 0) {
-		const n = chartFallbackN(duration);
-		filtered = data.slice(-n);
-		dataMin = Infinity; dataMax = -Infinity;
-		dataMinIdx = -1; dataMaxIdx = -1;
-		for (let i = 0; i < filtered.length; i++) {
-			const val = filtered[i][1];
-			if (val < dataMin) { dataMin = val; dataMinIdx = i; }
-			if (val > dataMax) { dataMax = val; dataMaxIdx = i; }
 		}
 	}
 
@@ -3343,18 +3393,16 @@ function generateChartPoints(data) {
 	}));
 }
 
-function computeChartDataHash(rawData, durationSec) {
+function computeChartDataHash(rawData, periodWindow) {
 	if (!rawData || rawData.length === 0) return null;
 
-	// Filter to requested period window (same cutoff as processChartData)
-	const duration = durationSec || 86400;
-	const now = Date.now() / 1000;
-	const cutoff = now - duration;
-	const periodData = rawData.filter(([ts]) => ts >= cutoff);
+	// Filter to requested period window (same bounds as processChartData)
+	const { startSec, endSec, window } = periodWindowBounds(periodWindow);
+	const periodData = rawData.filter(([ts]) => ts >= startSec && ts <= endSec);
 	if (periodData.length === 0) return null;
 
 	// Sample rate and rounding based on duration for stable hashing
-	const cfg = chartHashConfig(duration);
+	const cfg = chartHashConfig(window.totalSec);
 
 	const sampled = periodData.filter((_, i) => i % cfg.sample === 0);
 	const dataStr = sampled.map(([ts, val]) => {
@@ -3450,9 +3498,10 @@ window._chartInterpolation=${inlineJson(interpolation || 'linear')};
 </html>`;
 }
 
-function renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecimalPattern, durationSec, interpolation, precomputedDataHash = '') {
-	const durSec = durationSec || parsePeriodToSeconds(period) || 86400;
-	const { data, yMin, yMax, dataMin, dataMax, dataAvg } = processChartData(rawData, durSec, 500);
+function renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, precomputedDataHash = '') {
+	const window = normalizePeriodWindow(periodWindow) || periodWindowFromPeriodString(period, 86400);
+	const durSec = window.totalSec;
+	const { data, yMin, yMax, dataMin, dataMax, dataAvg } = processChartData(rawData, window, 500);
 	if (!data || data.length === 0) return null;
 
 	// Deduce unit from title
@@ -3487,7 +3536,7 @@ function renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecim
 	// Reuse precomputed hash when available (e.g. /api/chart-hash path) to avoid duplicate hashing.
 	const dataHash = (typeof precomputedDataHash === 'string' && precomputedDataHash)
 		? precomputedDataHash
-		: computeChartDataHash(rawData, durSec);
+		: computeChartDataHash(rawData, window);
 	if (!dataHash) return null;
 
 	// Generate HTML
@@ -3498,11 +3547,11 @@ function renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecim
 	};
 }
 
-async function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, durationSec, interpolation, service = '') {
-	const durSec = durationSec || parsePeriodToSeconds(period) || 86400;
-	const rawData = await fetchPersistenceSeries(item, durSec, service);
+async function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, service = '') {
+	const window = normalizePeriodWindow(periodWindow) || periodWindowFromPeriodString(period, 86400);
+	const rawData = await fetchPersistenceSeries(item, window, service);
 	if (!rawData) return null;
-	const rendered = renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecimalPattern, durSec, interpolation);
+	const rendered = renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecimalPattern, window, interpolation);
 	return rendered?.html || null;
 }
 
@@ -8522,10 +8571,11 @@ app.get('/chart', async (req, res) => {
 		if (period.length > CHART_PERIOD_MAX_LEN || !/^[0-9A-Za-z-]+$/.test(period)) {
 			return sendStyledError(res, req, 400, 'Invalid period parameter');
 		}
-	const durationSec = parsePeriodToSeconds(period);
-	if (!durationSec) {
+	const periodWindow = parsePeriodWindow(period);
+	if (!periodWindow) {
 		return sendStyledError(res, req, 400, 'Invalid period parameter');
 	}
+	const durationSec = periodWindow.totalSec;
 
 	// Validate mode: light or dark
 	if (!['light', 'dark'].includes(mode)) {
@@ -8550,7 +8600,7 @@ app.get('/chart', async (req, res) => {
 	}
 
 	try {
-		const html = await generateChart(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern, durationSec, interpolation, service);
+		const html = await generateChart(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern, periodWindow, interpolation, service);
 		if (!html) {
 			return sendStyledError(res, req, 404, 'Chart data not available');
 		}
@@ -8637,8 +8687,8 @@ app.get('/api/chart-hash', async (req, res) => {
 		if (period.length > CHART_PERIOD_MAX_LEN || !/^[0-9A-Za-z-]+$/.test(period)) {
 			return res.status(400).json({ error: 'Invalid period' });
 		}
-	const durationSec = parsePeriodToSeconds(period);
-	if (!durationSec) {
+	const periodWindow = parsePeriodWindow(period);
+	if (!periodWindow) {
 		return res.status(400).json({ error: 'Invalid period' });
 	}
 	if (!['light', 'dark'].includes(mode)) {
@@ -8648,13 +8698,13 @@ app.get('/api/chart-hash', async (req, res) => {
 	const cachePath = getChartCachePath(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service);
 
 	try {
-		const rawData = await fetchPersistenceSeries(item, durationSec, service);
+		const rawData = await fetchPersistenceSeries(item, periodWindow, service);
 		if (!rawData || rawData.length === 0) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'No data' });
 		}
 
-		const dataHash = computeChartDataHash(rawData, durationSec);
+		const dataHash = computeChartDataHash(rawData, periodWindow);
 		if (!dataHash) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Hash computation failed' });
@@ -8675,7 +8725,7 @@ app.get('/api/chart-hash', async (req, res) => {
 			return res.json({ hash: dataHash });
 		}
 
-		const rendered = renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecimalPattern, durationSec, interpolation, dataHash);
+		const rendered = renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, dataHash);
 		if (!rendered?.html) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Generation failed' });

@@ -82,11 +82,12 @@ function parsePeriodToSeconds(period) {
 	if (dashCount > 1) return 0;
 	if (dashCount === 1) {
 		const [past, future] = raw.split('-');
-		if (!past) return 0;
-		const pastSec = parseBasePeriodToSeconds(past);
-		if (!pastSec) return 0;
-		if (future && !parseBasePeriodToSeconds(future)) return 0;
-		return pastSec;
+		const pastSec = past ? parseBasePeriodToSeconds(past) : 0;
+		const futureSec = future ? parseBasePeriodToSeconds(future) : 0;
+		if (past && !pastSec) return 0;
+		if (future && !futureSec) return 0;
+		if (!pastSec && !futureSec) return 0;
+		return pastSec + futureSec;
 	}
 	return parseBasePeriodToSeconds(raw);
 }
@@ -720,6 +721,13 @@ describe('Parameter Validation Security Tests', () => {
 
 		it('accepts ISO past-future period PT1H30M-PT30M', async () => {
 			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=PT1H30M-PT30M&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts future-only period -1h', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=-1h&mode=dark`, {
 				headers: { 'Authorization': authHeader },
 			});
 			assert.strictEqual(res.status, 200);
