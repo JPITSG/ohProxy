@@ -7388,7 +7388,7 @@ function getWidgetRenderInfo(w) {
 	const mappingSig = mapping.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}:${m.icon || ''}`).join('|');
 	const buttons = isButtongrid ? normalizeButtongridButtons(w) : [];
 	const buttonsSig = buttons.map((b) =>
-		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}:${safeText(b?.labelcolor || '')}:${safeText(b?.iconcolor || '')}:${isButtongridButtonVisible(b) ? '1' : '0'}`
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}:${safeText(b?.source || '')}:${safeText(b?.labelcolor || '')}:${safeText(b?.iconcolor || '')}:${isButtongridButtonVisible(b) ? '1' : '0'}`
 	).join('|');
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
@@ -9175,6 +9175,11 @@ function updateCard(card, w, info) {
 			const buttonState = safeText(
 				b?.state ?? b?.item?.state ?? (btnItemName === parentItemName ? w?.item?.state : '')
 			);
+			const shouldBeActive = safeText(b?.source).trim().toLowerCase() === 'child'
+				&& b?.stateless !== true
+				&& !!pressCommand
+				&& safeText(buttonState).trim() === pressCommand;
+			btn.classList.toggle('is-active', shouldBeActive);
 			const buttonColorCtx = {
 				itemState: buttonState,
 				themeMode: buttonThemeMode,
