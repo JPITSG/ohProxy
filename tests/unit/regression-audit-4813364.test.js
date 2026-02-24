@@ -167,9 +167,9 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		assert.match(server, /maybePruneChartCache\(\);/);
 	});
 
-	it('buttongrid render signature includes per-button state', () => {
+	it('buttongrid render signature includes per-button state, colors, and visibility', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
-		assert.match(app, /\$\{b\.row\}:\$\{b\.column\}:\$\{b\.command\}:\$\{b\.releaseCommand\}:\$\{b\.label\}:\$\{b\.icon\}:\$\{b\.itemName\}:\$\{b\.state \|\| ''\}:\$\{b\.stateless\}/);
+		assert.match(app, /\$\{b\.row\}:\$\{b\.column\}:\$\{b\.command\}:\$\{b\.releaseCommand\}:\$\{b\.label\}:\$\{b\.icon\}:\$\{b\.itemName\}:\$\{b\.state \|\| ''\}:\$\{b\.stateless\}:\$\{safeText\(b\?\.labelcolor \|\| ''\)\}:\$\{safeText\(b\?\.iconcolor \|\| ''\)\}:\$\{isButtongridButtonVisible\(b\) \? '1' : '0'\}/);
 	});
 
 	it('switch dual-command refresh suppression tracks overlapping press cycles', () => {

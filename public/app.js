@@ -6125,6 +6125,13 @@ function searchWidgetKey(widget) {
 	return `${base}|${path}|${frame}`;
 }
 
+function isButtongridButtonVisible(button) {
+	if (button?.visibility === false || button?.visibility === 0) return false;
+	const raw = safeText(button?.visibility).trim().toLowerCase();
+	if (raw === 'false' || raw === '0') return false;
+	return true;
+}
+
 function parseSwitchMappingCommand(rawMapping) {
 	let command = '';
 	let releaseCommand = '';
@@ -7305,7 +7312,7 @@ function getWidgetRenderInfo(w) {
 	const mappingSig = mapping.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}:${m.icon || ''}`).join('|');
 	const buttons = isButtongrid ? normalizeButtongridButtons(w) : [];
 	const buttonsSig = buttons.map((b) =>
-		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}`
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}:${safeText(b?.labelcolor || '')}:${safeText(b?.iconcolor || '')}:${isButtongridButtonVisible(b) ? '1' : '0'}`
 	).join('|');
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
@@ -9071,7 +9078,9 @@ function updateCard(card, w, info) {
 		grid.style.gridTemplateColumns = `repeat(${maxCol}, 1fr)`;
 
 		const parentItemName = itemName;
+		const buttonThemeMode = getThemeMode();
 		for (const b of buttons) {
+			if (!isButtongridButtonVisible(b)) continue;
 			const btn = document.createElement('button');
 			btn.className = 'grid-btn';
 			btn.style.gridRow = String(b.row);
@@ -9087,6 +9096,29 @@ function updateCard(card, w, info) {
 				label: safeText(b.label || pressCommand),
 				icon: b.icon,
 			});
+			const buttonState = safeText(
+				b?.state ?? b?.item?.state ?? (btnItemName === parentItemName ? w?.item?.state : '')
+			);
+			const buttonColorCtx = {
+				itemState: buttonState,
+				themeMode: buttonThemeMode,
+			};
+			const buttonLabelColor = safeText(b?.labelcolor || '').trim();
+			if (buttonLabelColor) {
+				const labelRgb = resolveColorToRgb(buttonLabelColor, buttonColorCtx);
+				if (labelRgb) {
+					const textEl = btn.querySelector('.mapping-text');
+					if (textEl) textEl.style.color = `rgb(${labelRgb.r},${labelRgb.g},${labelRgb.b})`;
+				}
+			}
+			const buttonIconColor = safeText(b?.iconcolor || '').trim();
+			if (buttonIconColor) {
+				const iconRgb = resolveColorToRgb(buttonIconColor, buttonColorCtx);
+				if (iconRgb) {
+					const iconEl = btn.querySelector('.mapping-icon');
+					if (iconEl) iconEl.style.backgroundColor = `rgb(${iconRgb.r},${iconRgb.g},${iconRgb.b})`;
+				}
+			}
 
 			if (!btnItemName || !pressCommand) {
 				btn.disabled = true;
@@ -9097,10 +9129,7 @@ function updateCard(card, w, info) {
 			}
 
 			if (!b.stateless) {
-				const currentState = safeText(
-					b?.state ?? b?.item?.state ?? (btnItemName === parentItemName ? w?.item?.state : '')
-				);
-				if (pressCommand === currentState) {
+				if (pressCommand === buttonState) {
 					btn.classList.add('is-active');
 				}
 			}

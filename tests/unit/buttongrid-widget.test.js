@@ -9,6 +9,13 @@ function safeText(value) {
 	return value === null || value === undefined ? '' : String(value);
 }
 
+function isButtongridButtonVisible(button) {
+	if (button?.visibility === false || button?.visibility === 0) return false;
+	const raw = safeText(button?.visibility).trim().toLowerCase();
+	if (raw === 'false' || raw === '0') return false;
+	return true;
+}
+
 function normalizeButtongridButtons(widget) {
 	const buttons = [];
 	if (Array.isArray(widget?.buttons)) {
@@ -25,6 +32,9 @@ function normalizeButtongridButtons(widget) {
 				itemName,
 				state: safeText(b?.state ?? b?.item?.state ?? ''),
 				stateless: !!b?.stateless,
+				labelcolor: safeText(b?.labelcolor || ''),
+				iconcolor: safeText(b?.iconcolor || ''),
+				visibility: isButtongridButtonVisible(b),
 			});
 		}
 		return buttons;
@@ -44,6 +54,9 @@ function normalizeButtongridButtons(widget) {
 				itemName,
 				state: safeText(b?.state ?? b?.item?.state ?? ''),
 				stateless: !!b?.stateless,
+				labelcolor: safeText(b?.labelcolor || ''),
+				iconcolor: safeText(b?.iconcolor || ''),
+				visibility: isButtongridButtonVisible(b),
 			});
 		}
 	}
@@ -62,6 +75,9 @@ function normalizeButtongridButtons(widget) {
 				itemName,
 				state: safeText(c?.state ?? c?.item?.state ?? ''),
 				stateless: !!c?.stateless,
+				labelcolor: safeText(c?.labelcolor || ''),
+				iconcolor: safeText(c?.iconcolor || ''),
+				visibility: isButtongridButtonVisible(c),
 			});
 		}
 	}
@@ -71,7 +87,7 @@ function normalizeButtongridButtons(widget) {
 function buttonsSignature(buttons) {
 	if (!buttons || !buttons.length) return '';
 	return buttons.map((b) =>
-		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}`
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}:${safeText(b?.labelcolor || '')}:${safeText(b?.iconcolor || '')}:${isButtongridButtonVisible(b) ? '1' : '0'}`
 	).join('|');
 }
 
@@ -112,6 +128,24 @@ describe('Buttongrid Widget', () => {
 			assert.strictEqual(buttons[0].stateless, true);
 			assert.strictEqual(buttons[1].command, 'PAUSE');
 			assert.strictEqual(buttons[1].icon, 'material:pause');
+		});
+
+		it('normalizes child Button labelcolor/iconcolor/visibility', () => {
+			const widget = {
+				type: 'Buttongrid',
+				widgets: [
+					{ type: 'Button', row: 1, column: 1, command: 'ONE', label: 'One', labelcolor: 'red', iconcolor: 'blue', visibility: true },
+					{ type: 'Button', row: 1, column: 2, command: 'TWO', label: 'Two', labelcolor: 'green', iconcolor: 'yellow', visibility: 'false' },
+				],
+			};
+			const buttons = normalizeButtongridButtons(widget);
+			assert.strictEqual(buttons.length, 2);
+			assert.strictEqual(buttons[0].labelcolor, 'red');
+			assert.strictEqual(buttons[0].iconcolor, 'blue');
+			assert.strictEqual(buttons[0].visibility, true);
+			assert.strictEqual(buttons[1].labelcolor, 'green');
+			assert.strictEqual(buttons[1].iconcolor, 'yellow');
+			assert.strictEqual(buttons[1].visibility, false);
 		});
 
 		it('prefers normalized buttons payload when provided', () => {
@@ -222,13 +256,21 @@ describe('Buttongrid Widget', () => {
 				{ row: 1, column: 2, command: 'UP', releaseCommand: '', label: 'Up', icon: '', itemName: '', state: '', stateless: false },
 			];
 			const sig = buttonsSignature(buttons);
-			assert.strictEqual(sig, '1:1:POWER::Power:material:power::POWER:true|1:2:UP::Up::::false');
+			assert.strictEqual(sig, '1:1:POWER::Power:material:power::POWER:true:::1|1:2:UP::Up::::false:::1');
 		});
 
 		it('changes when button properties change', () => {
 			const buttons1 = [{ row: 1, column: 1, command: 'A', releaseCommand: '', label: 'A', icon: '', itemName: '', stateless: false }];
 			const buttons2 = [{ row: 1, column: 1, command: 'B', releaseCommand: '', label: 'B', icon: '', itemName: '', stateless: false }];
 			assert.notStrictEqual(buttonsSignature(buttons1), buttonsSignature(buttons2));
+		});
+
+		it('changes when button visibility or colors change', () => {
+			const buttons1 = [{ row: 1, column: 1, command: 'A', releaseCommand: '', label: 'A', icon: '', itemName: '', stateless: false, labelcolor: 'red', iconcolor: 'blue', visibility: true }];
+			const buttons2 = [{ row: 1, column: 1, command: 'A', releaseCommand: '', label: 'A', icon: '', itemName: '', stateless: false, labelcolor: 'green', iconcolor: 'blue', visibility: true }];
+			const buttons3 = [{ row: 1, column: 1, command: 'A', releaseCommand: '', label: 'A', icon: '', itemName: '', stateless: false, labelcolor: 'red', iconcolor: 'blue', visibility: false }];
+			assert.notStrictEqual(buttonsSignature(buttons1), buttonsSignature(buttons2));
+			assert.notStrictEqual(buttonsSignature(buttons1), buttonsSignature(buttons3));
 		});
 	});
 });
