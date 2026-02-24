@@ -57,9 +57,14 @@ function initDb() {
 			created_at INTEGER DEFAULT (strftime('%s','now')),
 			disabled INTEGER DEFAULT 0,
 			trackgps INTEGER DEFAULT 0,
-			voice_preference TEXT DEFAULT 'system'
+			voice_preference TEXT DEFAULT 'system',
+			mapview_rendering TEXT DEFAULT 'ohproxy'
 		);
 	`);
+	const userColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map((row) => row.name));
+	if (!userColumns.has('mapview_rendering')) {
+		db.exec("ALTER TABLE users ADD COLUMN mapview_rendering TEXT DEFAULT 'ohproxy'");
+	}
 
 	// Create widget visibility table
 	db.exec(`
@@ -534,6 +539,12 @@ function getAuthUserMap() {
 const VALID_ROLES = ['admin', 'normal', 'readonly'];
 const USERNAME_REGEX = /^[a-zA-Z0-9_-]{1,20}$/;
 const VALID_VOICE_PREFERENCES = new Set(['system', 'browser', 'vosk']);
+const VALID_MAPVIEW_RENDERINGS = new Set(['ohproxy', 'openhab']);
+
+function normalizeUserMapviewRendering(value) {
+	const normalized = String(value || '').trim().toLowerCase();
+	return VALID_MAPVIEW_RENDERINGS.has(normalized) ? normalized : 'ohproxy';
+}
 
 /**
  * Get all users.
@@ -542,7 +553,7 @@ const VALID_VOICE_PREFERENCES = new Set(['system', 'browser', 'vosk']);
 function getAllUsers() {
 	if (!db) initDb();
 	const rows = db.prepare(`
-		SELECT u.username, u.role, u.created_at, u.disabled, u.trackgps, u.voice_preference, MAX(s.last_seen) as last_active
+		SELECT u.username, u.role, u.created_at, u.disabled, u.trackgps, u.voice_preference, u.mapview_rendering, MAX(s.last_seen) as last_active
 		FROM users u
 		LEFT JOIN sessions s ON u.username = s.username
 		GROUP BY u.username
@@ -554,6 +565,7 @@ function getAllUsers() {
 		disabled: row.disabled === 1,
 		trackgps: row.trackgps === 1,
 		voicePreference: VALID_VOICE_PREFERENCES.has(row.voice_preference) ? row.voice_preference : 'system',
+		mapviewRendering: normalizeUserMapviewRendering(row.mapview_rendering),
 		lastActive: row.last_active
 	}));
 }
@@ -574,7 +586,8 @@ function getUser(username) {
 		createdAt: row.created_at,
 		disabled: row.disabled === 1,
 		trackgps: row.trackgps === 1,
-		voicePreference: VALID_VOICE_PREFERENCES.has(row.voice_preference) ? row.voice_preference : 'system'
+		voicePreference: VALID_VOICE_PREFERENCES.has(row.voice_preference) ? row.voice_preference : 'system',
+		mapviewRendering: normalizeUserMapviewRendering(row.mapview_rendering)
 	};
 }
 
@@ -592,8 +605,8 @@ function createUser(username, password, role = 'normal') {
 
 	const now = Math.floor(Date.now() / 1000);
 	try {
-		db.prepare('INSERT INTO users (username, password, role, created_at, voice_preference) VALUES (?, ?, ?, ?, ?)')
-			.run(username, password, role, now, 'system');
+		db.prepare('INSERT INTO users (username, password, role, created_at, voice_preference, mapview_rendering) VALUES (?, ?, ?, ?, ?, ?)')
+			.run(username, password, role, now, 'system', 'ohproxy');
 		return true;
 	} catch (err) {
 		return false; // Duplicate username
@@ -710,6 +723,20 @@ function updateUserVoicePreference(username, preference) {
 	return result.changes > 0;
 }
 
+/**
+ * Update mapview rendering preference for a user.
+ * @param {string} username
+ * @param {string} rendering - 'ohproxy' or 'openhab'
+ * @returns {boolean} - True if user was found and updated
+ */
+function updateUserMapviewRendering(username, rendering) {
+	if (!db) initDb();
+	if (!VALID_MAPVIEW_RENDERINGS.has(rendering)) return false;
+	const result = db.prepare('UPDATE users SET mapview_rendering = ? WHERE username = ?')
+		.run(rendering, username);
+	return result.changes > 0;
+}
+
 // ============================================
 // Server Settings Functions (Key-Value Store)
 // ============================================
@@ -780,6 +807,7 @@ module.exports = {
 	enableAllUsers,
 	updateUserTrackGps,
 	updateUserVoicePreference,
+	updateUserMapviewRendering,
 	// Server settings
 	getServerSetting,
 	setServerSetting,

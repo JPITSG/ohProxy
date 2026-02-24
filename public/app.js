@@ -439,6 +439,15 @@ const AUTH_INFO = (window.__OH_AUTH__ && typeof window.__OH_AUTH__ === 'object')
 	? window.__OH_AUTH__
 	: {};
 
+function normalizeMapviewRenderingMode(value) {
+	const mode = safeText(value).trim().toLowerCase();
+	return mode === 'openhab' ? 'openhab' : 'ohproxy';
+}
+
+function getMapviewRenderingMode() {
+	return normalizeMapviewRenderingMode(OH_CONFIG.mapviewRendering);
+}
+
 state.proxyAuth = typeof AUTH_INFO.auth === 'string' ? AUTH_INFO.auth.toLowerCase() : '';
 state.proxyUser = typeof AUTH_INFO.user === 'string' ? AUTH_INFO.user : '';
 
@@ -646,7 +655,7 @@ let imageLoadQueue = [];
 let imageLoadProcessing = false;
 let searchDebounceTimer = null;
 let chartHashTimer = null;
-const chartHashes = new Map(); // item|period|mode|assetVersion|title|legend|pattern|interpolation|service -> hash
+const chartHashes = new Map(); // item|period|mode|assetVersion|title|legendMode|pattern|interpolation|service -> hash
 let searchStateAbort = null;
 let searchStateActiveToken = 0;
 let resumeReloadArmed = false;
@@ -2619,6 +2628,13 @@ function appendModeParam(url, mode) {
 	return base + (base.includes('?') ? '&' : '?') + `mode=${mode}` + frag;
 }
 
+function normalizeChartLegendMode(value) {
+	const raw = safeText(value).trim().toLowerCase();
+	if (raw === 'true') return 'true';
+	if (raw === 'false') return 'false';
+	return 'auto';
+}
+
 function chartWidgetUrl(widget) {
 	// Chart items use /chart?item=NAME&period=PERIOD&mode=light|dark&title=TITLE&service=SERVICE
 	const itemName = safeText(widget?.item?.name || '').trim();
@@ -2631,8 +2647,8 @@ function chartWidgetUrl(widget) {
 	if (title) url += `&title=${encodeURIComponent(title)}`;
 	const service = safeText(widget?.service || '').trim();
 	if (service) url += `&service=${encodeURIComponent(service)}`;
-	const legend = widget?.legend;
-	if (legend === false || legend === 'false') url += '&legend=false';
+	const legend = normalizeChartLegendMode(widget?.legend);
+	if (legend !== 'auto') url += `&legend=${legend}`;
 	const yAxisDecimalPattern = safeText(widget?.yAxisDecimalPattern || '').trim();
 	if (yAxisDecimalPattern) url += `&yAxisDecimalPattern=${encodeURIComponent(yAxisDecimalPattern)}`;
 	const itemType = safeText(widget?.item?.type || '').toLowerCase();
@@ -4323,6 +4339,11 @@ async function saveCardConfig() {
 
 // ========== Admin Config Modal ==========
 
+const ADMIN_MAPVIEW_RENDERING_OPTIONS = [
+	{ value: 'ohproxy', label: 'ohProxy' },
+	{ value: 'openhab', label: 'openHAB' },
+];
+
 const ADMIN_CONFIG_SCHEMA = [
 	{
 		id: 'user-password', group: 'user', reloadRequired: true,
@@ -4336,6 +4357,7 @@ const ADMIN_CONFIG_SCHEMA = [
 		fields: [
 			{ key: 'user.trackGps', type: 'toggle' },
 			{ key: 'user.voiceModel', type: 'select', options: ['system', 'browser', 'vosk'] },
+			{ key: 'user.mapviewRendering', type: 'select', options: ADMIN_MAPVIEW_RENDERING_OPTIONS },
 		],
 	},
 	{
@@ -4594,12 +4616,36 @@ function adminSetNested(obj, path, value) {
 	cur[keys[keys.length - 1]] = value;
 }
 
+function adminSelectOptionValue(option) {
+	if (option && typeof option === 'object' && !Array.isArray(option)) {
+		return safeText(option.value);
+	}
+	return safeText(option);
+}
+
+function adminSelectOptionLabel(option) {
+	if (option && typeof option === 'object' && !Array.isArray(option)) {
+		const label = safeText(option.label).trim();
+		if (label) return label;
+		const value = safeText(option.value).trim();
+		return value || '(none)';
+	}
+	const value = safeText(option).trim();
+	return value || '(none)';
+}
+
+function adminSelectDefaultValue(options) {
+	const list = Array.isArray(options) ? options : [];
+	if (!list.length) return '';
+	return adminSelectOptionValue(list[0]);
+}
+
 function createAdminSelect(options, initialValue) {
 	return createSelect(options, initialValue, {
 		wrapClass: 'admin-select-wrap',
 		btnClass: 'admin-fake-select',
-		getValue: o => o,
-		getLabel: o => o || '(none)',
+		getValue: adminSelectOptionValue,
+		getLabel: adminSelectOptionLabel,
 		onMenuCreated: menu => adminSelectMenus.push(menu)
 	});
 }
@@ -4755,7 +4801,10 @@ function createAdminField(field, value) {
 		wrap.appendChild(eyeBtn);
 		control.appendChild(wrap);
 	} else if (field.type === 'select') {
-		const selectWrap = createAdminSelect(field.options, value !== undefined && value !== null ? String(value) : field.options[0]);
+		const selectWrap = createAdminSelect(
+			field.options,
+			value !== undefined && value !== null ? String(value) : adminSelectDefaultValue(field.options)
+		);
 		selectWrap.dataset.key = field.key;
 		control.appendChild(selectWrap);
 	} else if (field.type === 'textarea') {
@@ -5018,7 +5067,7 @@ function collectAdminConfigValues() {
 				}
 			} else if (field.type === 'select') {
 				const selectWrap = adminConfigModal.querySelector(`.admin-select-wrap[data-key="${key}"]`);
-				value = selectWrap ? selectWrap.dataset.value : field.options[0];
+				value = selectWrap ? selectWrap.dataset.value : adminSelectDefaultValue(field.options);
 			} else if (field.type === 'textarea') {
 				const textarea = adminConfigModal.querySelector(`textarea[data-key="${key}"]`);
 				value = textarea ? textarea.value : '';
@@ -7172,6 +7221,34 @@ function buildMapviewUrl(coords) {
 	return `/presence?lat=${encodeURIComponent(normalizedLat)}&lon=${encodeURIComponent(normalizedLon)}`;
 }
 
+function buildOpenhabMapviewUrl(coords) {
+	if (!coords) return '';
+	const lat = Number(coords.lat);
+	const lon = Number(coords.lon);
+	if (!Number.isFinite(lat) || !Number.isFinite(lon)) return '';
+
+	const clampedLat = Math.max(-90, Math.min(90, lat));
+	const clampedLon = Math.max(-180, Math.min(180, lon));
+	const normalizedLat = Math.round(clampedLat * 10000000) / 10000000;
+	const normalizedLon = Math.round(clampedLon * 10000000) / 10000000;
+
+	const bboxLatMin = Math.round((Math.max(-90, normalizedLat - 0.01)) * 10000000) / 10000000;
+	const bboxLonMin = Math.round((Math.max(-180, normalizedLon - 0.01)) * 10000000) / 10000000;
+	const bboxLatMax = Math.round((Math.min(90, normalizedLat + 0.01)) * 10000000) / 10000000;
+	const bboxLonMax = Math.round((Math.min(180, normalizedLon + 0.01)) * 10000000) / 10000000;
+
+	return `https://www.openstreetmap.org/export/embed.html?bbox=${bboxLonMin},${bboxLatMin},${bboxLonMax},${bboxLatMax}&marker=${normalizedLat},${normalizedLon}`;
+}
+
+function resolveMapviewUrl(widget, stateValue) {
+	const coords = parseMapviewCoordinates(stateValue);
+	const mode = getMapviewRenderingMode();
+	if (mode === 'openhab') {
+		return buildOpenhabMapviewUrl(coords);
+	}
+	return buildMapviewUrl(coords);
+}
+
 function createSetpointButton(text, isDisabled, computeNext, itemName, onBeforeSend) {
 	const btn = document.createElement('button');
 	btn.className = 'setpoint-btn';
@@ -7300,8 +7377,7 @@ function getWidgetRenderInfo(w) {
 	const iframeConfig = widgetIframeConfigMap.get(wKey);
 	const iframeHeightOverride = iframeConfig?.height || 0;
 	const webviewHeight = isWebview ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
-	const mapviewCoordinates = isMapview ? parseMapviewCoordinates(st) : null;
-	const mapviewUrl = isMapview ? buildMapviewUrl(mapviewCoordinates) : '';
+	const mapviewUrl = isMapview ? resolveMapviewUrl(w, st) : '';
 	const mapviewHeight = isMapview ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const rawVideoUrl = isVideo ? mediaWidgetSourceUrl(w) : '';
 	const videoEncoding = isVideo ? safeText(w?.encoding || '').toLowerCase() : '';
@@ -9989,7 +10065,7 @@ async function checkChartHashes() {
 			const item = urlObj.searchParams.get('item') || '';
 			const period = urlObj.searchParams.get('period') || '';
 			const title = urlObj.searchParams.get('title') || '';
-			const legend = urlObj.searchParams.get('legend') === 'false' ? 'false' : 'true';
+			const legend = normalizeChartLegendMode(urlObj.searchParams.get('legend'));
 			const yAxisDecimalPattern = urlObj.searchParams.get('yAxisDecimalPattern') || '';
 			const interpolation = (urlObj.searchParams.get('interpolation') || 'linear').toLowerCase();
 			const service = urlObj.searchParams.get('service') || '';
@@ -9999,13 +10075,13 @@ async function checkChartHashes() {
 			const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${yAxisDecimalPattern}|${interpolation}|${service}`;
 			const prevHash = chartHashes.get(cacheKey) || null;
 
-				try {
-						const hashUrl = `/api/chart-hash?item=${encodeURIComponent(item)}&period=${encodeURIComponent(period)}&mode=${mode}` +
-							(title ? `&title=${encodeURIComponent(title)}` : '') +
-							(legend === 'false' ? '&legend=false' : '') +
-							(yAxisDecimalPattern ? `&yAxisDecimalPattern=${encodeURIComponent(yAxisDecimalPattern)}` : '') +
-						(interpolation === 'step' ? '&interpolation=step' : '') +
-						(service ? `&service=${encodeURIComponent(service)}` : '');
+					try {
+							const hashUrl = `/api/chart-hash?item=${encodeURIComponent(item)}&period=${encodeURIComponent(period)}&mode=${mode}` +
+								(title ? `&title=${encodeURIComponent(title)}` : '') +
+								(legend !== 'auto' ? `&legend=${legend}` : '') +
+								(yAxisDecimalPattern ? `&yAxisDecimalPattern=${encodeURIComponent(yAxisDecimalPattern)}` : '') +
+							(interpolation === 'step' ? '&interpolation=step' : '') +
+							(service ? `&service=${encodeURIComponent(service)}` : '');
 				const res = await fetch(hashUrl, { cache: 'no-store' });
 				if (!res.ok) continue;
 				const data = await res.json();
@@ -10389,7 +10465,7 @@ function handleWsChartHashResponse(data) {
 	const mode = safeText(data.mode || getThemeMode() || 'dark').toLowerCase();
 	const assetVersion = OH_CONFIG.assetVersion || 'v1';
 	const title = safeText(data.title || '');
-	const legend = data.legend === false || data.legend === 'false' ? 'false' : 'true';
+	const legend = normalizeChartLegendMode(data.legend);
 	const yAxisDecimalPattern = safeText(data.yAxisDecimalPattern || '');
 	const interpolation = safeText(data.interpolation || 'linear').toLowerCase() === 'step' ? 'step' : 'linear';
 	const service = safeText(data.service || '');

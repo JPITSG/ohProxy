@@ -376,6 +376,7 @@ const CHART_CACHE_DIR = path.join(__dirname, 'cache', 'chart');
 const MAX_PERIOD_SEC = 10 * 365.25 * 86400; // ~10 years
 const CHART_PERIOD_MAX_LEN = 64;
 const CHART_SERVICE_RE = /^[A-Za-z0-9._-]{1,64}$/;
+const CHART_LEGEND_MODES = new Set(['true', 'false']);
 function parseBasePeriodToSeconds(period) {
 	// Simple / multiplied: e.g. h, D, 4h, 2W, 12M
 	const simpleMatch = period.match(/^(\d*)([hDWMY])$/);
@@ -424,6 +425,21 @@ function parsePeriodToSeconds(period) {
 	}
 
 	return parseBasePeriodToSeconds(raw);
+}
+
+function parseChartLegendMode(rawLegend) {
+	if (rawLegend === undefined) return 'auto';
+	if (typeof rawLegend !== 'string') return null;
+	const normalized = rawLegend.trim().toLowerCase();
+	if (!normalized) return null;
+	if (CHART_LEGEND_MODES.has(normalized)) return normalized;
+	return null;
+}
+
+function shouldShowChartLegend(legendMode, seriesCount = 1) {
+	if (legendMode === 'true' || legendMode === true) return true;
+	if (legendMode === 'false' || legendMode === false) return false;
+	return Number.isFinite(seriesCount) ? seriesCount > 1 : false;
 }
 
 // Tiered cache TTL (ms) matching original h/D/W/M/Y behaviour
@@ -1396,6 +1412,10 @@ function isValidUserVoicePreference(value) {
 	return value === 'system' || value === 'browser' || value === 'vosk';
 }
 
+function isValidUserMapviewRendering(value) {
+	return value === 'ohproxy' || value === 'openhab';
+}
+
 function validateAdminUserConfig(userConfig) {
 	const errors = [];
 	if (userConfig === undefined) return errors;
@@ -1404,7 +1424,7 @@ function validateAdminUserConfig(userConfig) {
 		return errors;
 	}
 
-	const allowedUserKeys = new Set(['trackGps', 'voiceModel', 'password', 'confirm']);
+	const allowedUserKeys = new Set(['trackGps', 'voiceModel', 'mapviewRendering', 'password', 'confirm']);
 	for (const key of Object.keys(userConfig)) {
 		if (!allowedUserKeys.has(key)) {
 			errors.push(`user.${key} is not supported`);
@@ -1416,6 +1436,16 @@ function validateAdminUserConfig(userConfig) {
 	if (Object.prototype.hasOwnProperty.call(userConfig, 'voiceModel')) {
 		if (userConfig.voiceModel !== 'system' && userConfig.voiceModel !== 'browser' && userConfig.voiceModel !== 'vosk') {
 			errors.push('user.voiceModel must be "system", "browser", or "vosk"');
+		}
+	}
+	if (Object.prototype.hasOwnProperty.call(userConfig, 'mapviewRendering')) {
+		if (typeof userConfig.mapviewRendering !== 'string') {
+			errors.push('user.mapviewRendering must be "ohproxy" or "openhab"');
+		} else {
+			const mapviewRendering = userConfig.mapviewRendering.trim().toLowerCase();
+			if (!isValidUserMapviewRendering(mapviewRendering)) {
+				errors.push('user.mapviewRendering must be "ohproxy" or "openhab"');
+			}
 		}
 	}
 	if (Object.prototype.hasOwnProperty.call(userConfig, 'password') && typeof userConfig.password !== 'string') {
@@ -3363,10 +3393,11 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 	const unitDisplay = unit !== '?' ? escapeHtml(unit) : '';
 	const assetVersion = liveConfig.assetVersion || 'v1';
 	const dataHashAttr = dataHash ? ` data-hash="${dataHash}"` : '';
+	const showLegend = shouldShowChartLegend(legend, 1);
 
 	let legendHtml = '';
 	let statsHtml = '';
-	if (legend !== false) {
+	if (showLegend) {
 		legendHtml = unitDisplay ? `<span class="chart-legend"><span class="legend-line"></span><span>${unitDisplay}</span></span>` : '';
 		// Format stats values with unit
 		const statUnit = unitDisplay ? ' ' + unitDisplay : '';
@@ -6639,10 +6670,11 @@ app.get('/config.js', (req, res) => {
 	res.setHeader('Cache-Control', 'no-cache');
 	const clientConfig = liveConfig.clientConfig && typeof liveConfig.clientConfig === 'object' ? liveConfig.clientConfig : {};
 
-	// Get user role, GPS tracking flag, and voice preference if authenticated
+	// Get user role, GPS tracking flag, and user preferences if authenticated
 	let userRole = null;
 	let trackGps = false;
 	let effectiveVoiceModel = liveConfig.voiceModel;
+	let mapviewRendering = 'ohproxy';
 	if (req.ohProxyUserData) {
 		userRole = req.ohProxyUserData.role || null;
 		if (req.ohProxyUserData.trackgps) trackGps = true;
@@ -6650,6 +6682,10 @@ app.get('/config.js', (req, res) => {
 		if (userVoicePreference !== 'system') {
 			effectiveVoiceModel = userVoicePreference;
 		}
+		const userMapviewRendering = isValidUserMapviewRendering(req.ohProxyUserData.mapviewRendering)
+			? req.ohProxyUserData.mapviewRendering
+			: 'ohproxy';
+		mapviewRendering = userMapviewRendering;
 	}
 
 	res.send(`window.__OH_CONFIG__=${JSON.stringify({
@@ -6668,6 +6704,7 @@ app.get('/config.js', (req, res) => {
 		trackGps: trackGps,
 		groupItems: liveConfig.groupItems || [],
 		voiceModel: effectiveVoiceModel,
+		mapviewRendering: mapviewRendering,
 	})};`);
 });
 
@@ -7110,6 +7147,7 @@ app.get('/api/admin/config', (req, res) => {
 	const userConfig = {
 		trackGps: user.trackgps === true,
 		voiceModel: isValidUserVoicePreference(user.voicePreference) ? user.voicePreference : 'system',
+		mapviewRendering: isValidUserMapviewRendering(user.mapviewRendering) ? user.mapviewRendering : 'ohproxy',
 		password: '',
 		confirm: '',
 	};
@@ -7250,6 +7288,7 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 
 	const previousTrackGps = user.trackgps === true;
 	const previousVoicePreference = isValidUserVoicePreference(user.voicePreference) ? user.voicePreference : 'system';
+	const previousMapviewRendering = isValidUserMapviewRendering(user.mapviewRendering) ? user.mapviewRendering : 'ohproxy';
 	const previousPassword = typeof user.password === 'string' ? user.password : '';
 	const nextTrackGps = isPlainObject(incoming.user) && Object.prototype.hasOwnProperty.call(incoming.user, 'trackGps')
 		? incoming.user.trackGps
@@ -7257,6 +7296,9 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 	const nextVoicePreference = isPlainObject(incoming.user) && Object.prototype.hasOwnProperty.call(incoming.user, 'voiceModel')
 		? incoming.user.voiceModel
 		: previousVoicePreference;
+	const nextMapviewRendering = isPlainObject(incoming.user) && Object.prototype.hasOwnProperty.call(incoming.user, 'mapviewRendering')
+		? safeText(incoming.user.mapviewRendering).trim().toLowerCase()
+		: previousMapviewRendering;
 	const nextPassword = isPlainObject(incoming.user) && typeof incoming.user.password === 'string'
 		? incoming.user.password
 		: '';
@@ -7265,10 +7307,12 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 		: '';
 	const updateTrackGps = nextTrackGps !== previousTrackGps;
 	const updateVoiceModel = nextVoicePreference !== previousVoicePreference;
+	const updateMapviewRendering = nextMapviewRendering !== previousMapviewRendering;
 	const updatePassword = nextPassword.length > 0 || nextConfirm.length > 0;
 
 	let userTrackUpdated = false;
 	let userVoiceUpdated = false;
+	let userMapviewRenderingUpdated = false;
 	let userPasswordUpdated = false;
 
 	const rollbackUserUpdates = () => {
@@ -7277,6 +7321,9 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 		}
 		if (userVoiceUpdated && !sessions.updateUserVoicePreference(user.username, previousVoicePreference)) {
 			logMessage(`[Settings] Failed to roll back user voice setting for ${user.username || 'unknown'}`, 'error');
+		}
+		if (userMapviewRenderingUpdated && !sessions.updateUserMapviewRendering(user.username, previousMapviewRendering)) {
+			logMessage(`[Settings] Failed to roll back user mapview rendering setting for ${user.username || 'unknown'}`, 'error');
 		}
 		if (userPasswordUpdated && !sessions.updateUserPassword(user.username, previousPassword)) {
 			logMessage(`[Settings] Failed to roll back user password for ${user.username || 'unknown'}`, 'error');
@@ -7297,6 +7344,14 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 			return;
 		}
 		userVoiceUpdated = true;
+	}
+	if (updateMapviewRendering) {
+		if (!sessions.updateUserMapviewRendering(user.username, nextMapviewRendering)) {
+			rollbackUserUpdates();
+			res.status(500).json({ error: 'Failed to update user mapview rendering setting' });
+			return;
+		}
+		userMapviewRenderingUpdated = true;
 	}
 	if (updatePassword) {
 		if (nextPassword !== nextConfirm) {
@@ -7328,7 +7383,7 @@ app.post('/api/admin/config', jsonParserLarge, (req, res) => {
 		}
 	}
 
-	const needsReload = needsClientReload || userTrackUpdated || userVoiceUpdated;
+	const needsReload = needsClientReload || userTrackUpdated || userVoiceUpdated || userMapviewRenderingUpdated;
 	if (userPasswordUpdated) {
 		clearAuthCookie(res);
 	}
@@ -8410,7 +8465,6 @@ app.get('/chart', async (req, res) => {
 	const rawYAxisDecimalPattern = req.query?.yAxisDecimalPattern;
 	const rawInterpolation = req.query?.interpolation;
 	const rawService = req.query?.service;
-	const legend = rawLegend === 'false' ? false : true;
 	if (typeof rawItem !== 'string') {
 		return sendStyledError(res, req, 400, 'Invalid item parameter');
 	}
@@ -8426,6 +8480,9 @@ app.get('/chart', async (req, res) => {
 	if (rawInterpolation !== undefined && typeof rawInterpolation !== 'string') {
 		return sendStyledError(res, req, 400, 'Invalid interpolation parameter');
 	}
+	if (rawLegend !== undefined && typeof rawLegend !== 'string') {
+		return sendStyledError(res, req, 400, 'Invalid legend parameter');
+	}
 	if (rawService !== undefined && typeof rawService !== 'string') {
 		return sendStyledError(res, req, 400, 'Invalid service parameter');
 	}
@@ -8436,6 +8493,10 @@ app.get('/chart', async (req, res) => {
 	const yAxisDecimalPattern = typeof rawYAxisDecimalPattern === 'string' ? rawYAxisDecimalPattern.trim() : '';
 	const interpolation = typeof rawInterpolation === 'string' ? rawInterpolation.trim().toLowerCase() : 'linear';
 	const service = typeof rawService === 'string' ? rawService.trim() : '';
+	const legend = parseChartLegendMode(rawLegend);
+	if (legend === null) {
+		return sendStyledError(res, req, 400, 'Invalid legend parameter');
+	}
 	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 		return sendStyledError(res, req, 400, 'Invalid parameters');
 	}
@@ -8521,7 +8582,6 @@ app.get('/api/chart-hash', async (req, res) => {
 	const rawYAxisDecimalPattern = req.query?.yAxisDecimalPattern;
 	const rawInterpolation = req.query?.interpolation;
 	const rawService = req.query?.service;
-	const legend = rawLegend === 'false' ? false : true;
 	if (typeof rawItem !== 'string') {
 		return res.status(400).json({ error: 'Invalid item' });
 	}
@@ -8537,6 +8597,9 @@ app.get('/api/chart-hash', async (req, res) => {
 	if (rawInterpolation !== undefined && typeof rawInterpolation !== 'string') {
 		return res.status(400).json({ error: 'Invalid interpolation' });
 	}
+	if (rawLegend !== undefined && typeof rawLegend !== 'string') {
+		return res.status(400).json({ error: 'Invalid legend' });
+	}
 	if (rawService !== undefined && typeof rawService !== 'string') {
 		return res.status(400).json({ error: 'Invalid service' });
 	}
@@ -8547,6 +8610,10 @@ app.get('/api/chart-hash', async (req, res) => {
 	const yAxisDecimalPattern = typeof rawYAxisDecimalPattern === 'string' ? rawYAxisDecimalPattern.trim() : '';
 	const interpolation = typeof rawInterpolation === 'string' ? rawInterpolation.trim().toLowerCase() : 'linear';
 	const service = typeof rawService === 'string' ? rawService.trim() : '';
+	const legend = parseChartLegendMode(rawLegend);
+	if (legend === null) {
+		return res.status(400).json({ error: 'Invalid legend' });
+	}
 	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 		return res.status(400).json({ error: 'Invalid parameters' });
 	}

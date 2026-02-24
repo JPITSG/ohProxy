@@ -51,6 +51,9 @@ function loadValidateAdminUserConfig() {
 		hasAnyControlChars(value) {
 			return /[\x00-\x1F\x7F]/.test(String(value));
 		},
+		isValidUserMapviewRendering(value) {
+			return value === 'ohproxy' || value === 'openhab';
+		},
 	};
 
 	vm.createContext(sandbox);
@@ -94,5 +97,15 @@ describe('Admin user password validation', () => {
 		const valid = 'p'.repeat(200);
 		const errors = validateAdminUserConfig({ password: valid, confirm: valid });
 		assert.strictEqual(errors.length, 0);
+	});
+
+	it('accepts valid mapview rendering values', () => {
+		const errors = validateAdminUserConfig({ mapviewRendering: 'openhab' });
+		assert.strictEqual(errors.length, 0);
+	});
+
+	it('rejects invalid mapview rendering values', () => {
+		const errors = validateAdminUserConfig({ mapviewRendering: 'custom' });
+		assert.ok(errors.includes('user.mapviewRendering must be "ohproxy" or "openhab"'));
 	});
 });

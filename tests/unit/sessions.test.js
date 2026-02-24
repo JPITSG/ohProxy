@@ -333,7 +333,8 @@ describe('Sessions Module', () => {
 					created_at INTEGER DEFAULT (strftime('%s','now')),
 					disabled INTEGER DEFAULT 0,
 					trackgps INTEGER DEFAULT 0,
-					voice_preference TEXT DEFAULT 'system'
+					voice_preference TEXT DEFAULT 'system',
+					mapview_rendering TEXT DEFAULT 'ohproxy'
 				)
 			`);
 		}
@@ -352,6 +353,23 @@ describe('Sessions Module', () => {
 				db.prepare('UPDATE users SET voice_preference = ? WHERE username = ?').run(pref, 'bob');
 				const row = db.prepare('SELECT voice_preference FROM users WHERE username = ?').get('bob');
 				assert.strictEqual(row.voice_preference, pref, `Should accept '${pref}'`);
+			}
+		});
+
+		it('defaults mapview rendering to ohproxy for new users', () => {
+			createUsersTable();
+			db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run('eve', 'pw');
+			const row = db.prepare('SELECT mapview_rendering FROM users WHERE username = ?').get('eve');
+			assert.strictEqual(row.mapview_rendering, 'ohproxy');
+		});
+
+		it('accepts valid mapview rendering values', () => {
+			createUsersTable();
+			db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run('frank', 'pw');
+			for (const rendering of ['ohproxy', 'openhab']) {
+				db.prepare('UPDATE users SET mapview_rendering = ? WHERE username = ?').run(rendering, 'frank');
+				const row = db.prepare('SELECT mapview_rendering FROM users WHERE username = ?').get('frank');
+				assert.strictEqual(row.mapview_rendering, rendering, `Should accept '${rendering}'`);
 			}
 		});
 
