@@ -10,6 +10,12 @@ function safeText(value) {
 	return value === null || value === undefined ? '' : String(value);
 }
 
+function isButtongridButtonVisible(button) {
+	if (button?.visibility === false || button?.visibility === 0) return false;
+	const raw = safeText(button?.visibility).trim().toLowerCase();
+	return raw !== 'false' && raw !== '0';
+}
+
 function widgetType(widget) {
 	return safeText(widget?.type || widget?.widgetType || widget?.item?.type || '');
 }
@@ -71,6 +77,9 @@ function normalizeButtongridButtons(widget) {
 				itemName,
 				state: safeText(b?.state ?? b?.item?.state ?? ''),
 				stateless: !!b?.stateless,
+				labelcolor: safeText(b?.labelcolor || ''),
+				iconcolor: safeText(b?.iconcolor || ''),
+				visibility: isButtongridButtonVisible(b),
 			});
 		}
 		return buttons;
@@ -90,6 +99,9 @@ function normalizeButtongridButtons(widget) {
 				itemName,
 				state: safeText(b?.state ?? b?.item?.state ?? ''),
 				stateless: !!b?.stateless,
+				labelcolor: safeText(b?.labelcolor || ''),
+				iconcolor: safeText(b?.iconcolor || ''),
+				visibility: isButtongridButtonVisible(b),
 			});
 		}
 	}
@@ -108,6 +120,9 @@ function normalizeButtongridButtons(widget) {
 				itemName,
 				state: safeText(c?.state ?? c?.item?.state ?? ''),
 				stateless: !!c?.stateless,
+				labelcolor: safeText(c?.labelcolor || ''),
+				iconcolor: safeText(c?.iconcolor || ''),
+				visibility: isButtongridButtonVisible(c),
 			});
 		}
 	}
@@ -117,7 +132,7 @@ function normalizeButtongridButtons(widget) {
 function buttonsSignature(buttons) {
 	if (!buttons || !buttons.length) return '';
 	return buttons.map((b) =>
-		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}`
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}:${safeText(b?.labelcolor || '')}:${safeText(b?.iconcolor || '')}:${isButtongridButtonVisible(b) ? '1' : '0'}`
 	).join('|');
 }
 
@@ -602,6 +617,29 @@ describe('Widget Snapshot Helpers', () => {
 			const snap1 = widgetSnapshot(widget1);
 			const snap2 = widgetSnapshot(widget2);
 			assert.notStrictEqual(snap1.buttonsSig, snap2.buttonsSig);
+		});
+
+		it('includes per-button colors and visibility in buttonsSig', () => {
+			const widget1 = {
+				type: 'Buttongrid',
+				item: { name: 'Remote' },
+				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', labelcolor: 'red', iconcolor: 'blue', visibility: true }],
+			};
+			const widget2 = {
+				type: 'Buttongrid',
+				item: { name: 'Remote' },
+				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', labelcolor: 'green', iconcolor: 'blue', visibility: true }],
+			};
+			const widget3 = {
+				type: 'Buttongrid',
+				item: { name: 'Remote' },
+				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', labelcolor: 'red', iconcolor: 'blue', visibility: false }],
+			};
+			const snap1 = widgetSnapshot(widget1);
+			const snap2 = widgetSnapshot(widget2);
+			const snap3 = widgetSnapshot(widget3);
+			assert.notStrictEqual(snap1.buttonsSig, snap2.buttonsSig);
+			assert.notStrictEqual(snap1.buttonsSig, snap3.buttonsSig);
 		});
 	});
 });

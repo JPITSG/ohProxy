@@ -4966,10 +4966,17 @@ function mappingsSignature(mapping) {
 	return mappingsSignatureFromNormalized(normalizeMapping(mapping));
 }
 
+function isButtongridButtonVisible(button) {
+	if (button?.visibility === false || button?.visibility === 0) return false;
+	const raw = safeText(button?.visibility).trim().toLowerCase();
+	if (raw === 'false' || raw === '0') return false;
+	return true;
+}
+
 function buttonsSignature(buttons) {
 	if (!buttons || !buttons.length) return '';
 	return buttons.map((b) =>
-		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}`
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}:${safeText(b?.labelcolor || '')}:${safeText(b?.iconcolor || '')}:${isButtongridButtonVisible(b) ? '1' : '0'}`
 	).join('|');
 }
 
