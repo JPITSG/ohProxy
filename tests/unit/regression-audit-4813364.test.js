@@ -115,7 +115,7 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		assert.match(app, /btn\.disabled = true;/);
 	});
 
-	it('buttongrid render block never applies selected/active class regardless of button state', () => {
+	it('buttongrid render block applies selected/active class only for stateful child buttons', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		const start = app.indexOf('} else if (isButtongrid && buttons.length) {');
 		const end = app.indexOf("controls.innerHTML = '';", start);
@@ -123,9 +123,10 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		assert.ok(end > start, 'buttongrid render block end should exist');
 
 		const buttongridBlock = app.slice(start, end);
-		assert.doesNotMatch(buttongridBlock, /!b\.stateless/);
-		assert.doesNotMatch(buttongridBlock, /\.classList\.add\('is-active'\)/);
-		assert.doesNotMatch(buttongridBlock, /\.classList\.toggle\('is-active'/);
+		assert.match(buttongridBlock, /safeText\(b\?\.source\)\.trim\(\)\.toLowerCase\(\) === 'child'/);
+		assert.match(buttongridBlock, /b\?\.stateless !== true/);
+		assert.match(buttongridBlock, /safeText\(buttonState\)\.trim\(\) === pressCommand/);
+		assert.match(buttongridBlock, /\.classList\.toggle\('is-active', shouldBeActive\)/);
 	});
 
 	it('delta updates preserve buttongrid mapping structure and apply buttons payload', () => {
@@ -182,7 +183,7 @@ describe('Regression Guards for 4813364..HEAD', () => {
 
 	it('buttongrid render signature includes per-button state, colors, and visibility', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
-		assert.match(app, /\$\{b\.row\}:\$\{b\.column\}:\$\{b\.command\}:\$\{b\.releaseCommand\}:\$\{b\.label\}:\$\{b\.icon\}:\$\{b\.itemName\}:\$\{b\.state \|\| ''\}:\$\{b\.stateless\}:\$\{safeText\(b\?\.labelcolor \|\| ''\)\}:\$\{safeText\(b\?\.iconcolor \|\| ''\)\}:\$\{isButtongridButtonVisible\(b\) \? '1' : '0'\}/);
+		assert.match(app, /\$\{b\.row\}:\$\{b\.column\}:\$\{b\.command\}:\$\{b\.releaseCommand\}:\$\{b\.label\}:\$\{b\.icon\}:\$\{b\.itemName\}:\$\{b\.state \|\| ''\}:\$\{b\.stateless\}:\$\{safeText\(b\?\.source \|\| ''\)\}:\$\{safeText\(b\?\.labelcolor \|\| ''\)\}:\$\{safeText\(b\?\.iconcolor \|\| ''\)\}:\$\{isButtongridButtonVisible\(b\) \? '1' : '0'\}/);
 	});
 
 	it('switch dual-command refresh suppression tracks overlapping press cycles', () => {

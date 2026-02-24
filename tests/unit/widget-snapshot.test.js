@@ -61,22 +61,62 @@ function serverWidgetKey(widget) {
 	return `widget:${item}|${label}|${type}|${link}`;
 }
 
+function normalizeButtongridRow(value) {
+	const parsed = parseInt(value, 10);
+	return Number.isFinite(parsed) && parsed >= 1 ? parsed : 1;
+}
+
+function normalizeLegacyButtongridColumn(value) {
+	const parsed = parseInt(value, 10);
+	if (!Number.isFinite(parsed)) return 1;
+	if (parsed < 1 || parsed > 12) return null;
+	return parsed;
+}
+
+function normalizeChildButtongridColumn(value) {
+	const parsed = parseInt(value, 10);
+	return Number.isFinite(parsed) && parsed >= 1 ? parsed : 1;
+}
+
 function normalizeButtongridButtons(widget) {
 	const buttons = [];
+	const parentItemName = safeText(widget?.item?.name || widget?.itemName || '');
 	if (Array.isArray(widget?.buttons)) {
 		for (const b of widget.buttons) {
 			if (!b || typeof b !== 'object') continue;
-			const itemName = safeText(b?.itemName || b?.item?.name || '');
+			const source = safeText(b?.source).trim().toLowerCase() === 'child' ? 'child' : 'legacy';
+			if (source === 'child') {
+				const itemName = safeText(b?.itemName || b?.item?.name || '');
+				buttons.push({
+					row: normalizeButtongridRow(b?.row),
+					column: normalizeChildButtongridColumn(b?.column),
+					command: safeText(b?.command || b?.cmd || b?.click || ''),
+					releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
+					label: safeText(b?.label || ''),
+					icon: safeText(b?.icon || b?.staticIcon || ''),
+					itemName,
+					state: safeText(b?.state ?? b?.item?.state ?? ''),
+					stateless: !!b?.stateless,
+					source: 'child',
+					labelcolor: safeText(b?.labelcolor || ''),
+					iconcolor: safeText(b?.iconcolor || ''),
+					visibility: isButtongridButtonVisible(b),
+				});
+				continue;
+			}
+			const column = normalizeLegacyButtongridColumn(b?.column);
+			if (column == null) continue;
 			buttons.push({
-				row: parseInt(b?.row, 10) || 1,
-				column: parseInt(b?.column, 10) || 1,
+				row: normalizeButtongridRow(b?.row),
+				column,
 				command: safeText(b?.command || b?.cmd || ''),
-				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
+				releaseCommand: '',
 				label: safeText(b?.label || ''),
 				icon: safeText(b?.icon || b?.staticIcon || ''),
-				itemName,
-				state: safeText(b?.state ?? b?.item?.state ?? ''),
-				stateless: !!b?.stateless,
+				itemName: parentItemName,
+				state: '',
+				stateless: true,
+				source: 'legacy',
 				labelcolor: safeText(b?.labelcolor || ''),
 				iconcolor: safeText(b?.iconcolor || ''),
 				visibility: isButtongridButtonVisible(b),
@@ -88,17 +128,19 @@ function normalizeButtongridButtons(widget) {
 	if (Array.isArray(inlineButtons)) {
 		for (const b of inlineButtons) {
 			if (b?.row == null && b?.column == null) continue;
-			const itemName = safeText(b?.itemName || b?.item?.name || '');
+			const column = normalizeLegacyButtongridColumn(b?.column);
+			if (column == null) continue;
 			buttons.push({
-				row: parseInt(b?.row, 10) || 1,
-				column: parseInt(b?.column, 10) || 1,
+				row: normalizeButtongridRow(b?.row),
+				column,
 				command: safeText(b?.command || b?.cmd || ''),
-				releaseCommand: safeText(b?.releaseCommand || b?.release || ''),
+				releaseCommand: '',
 				label: safeText(b?.label || ''),
 				icon: safeText(b?.icon || b?.staticIcon || ''),
-				itemName,
-				state: safeText(b?.state ?? b?.item?.state ?? ''),
-				stateless: !!b?.stateless,
+				itemName: parentItemName,
+				state: '',
+				stateless: true,
+				source: 'legacy',
 				labelcolor: safeText(b?.labelcolor || ''),
 				iconcolor: safeText(b?.iconcolor || ''),
 				visibility: isButtongridButtonVisible(b),
@@ -111,8 +153,8 @@ function normalizeButtongridButtons(widget) {
 			if (safeText(c?.type).toLowerCase() !== 'button') continue;
 			const itemName = safeText(c?.itemName || c?.item?.name || '');
 			buttons.push({
-				row: parseInt(c?.row, 10) || 1,
-				column: parseInt(c?.column, 10) || 1,
+				row: normalizeButtongridRow(c?.row),
+				column: normalizeChildButtongridColumn(c?.column),
 				command: safeText(c?.command || c?.cmd || c?.click || ''),
 				releaseCommand: safeText(c?.releaseCommand || c?.release || ''),
 				label: safeText(c?.label || ''),
@@ -120,6 +162,7 @@ function normalizeButtongridButtons(widget) {
 				itemName,
 				state: safeText(c?.state ?? c?.item?.state ?? ''),
 				stateless: !!c?.stateless,
+				source: 'child',
 				labelcolor: safeText(c?.labelcolor || ''),
 				iconcolor: safeText(c?.iconcolor || ''),
 				visibility: isButtongridButtonVisible(c),
@@ -132,7 +175,7 @@ function normalizeButtongridButtons(widget) {
 function buttonsSignature(buttons) {
 	if (!buttons || !buttons.length) return '';
 	return buttons.map((b) =>
-		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}:${safeText(b?.labelcolor || '')}:${safeText(b?.iconcolor || '')}:${isButtongridButtonVisible(b) ? '1' : '0'}`
+		`${b.row}:${b.column}:${b.command}:${b.releaseCommand}:${b.label}:${b.icon}:${b.itemName}:${b.state || ''}:${b.stateless}:${safeText(b?.source || '')}:${safeText(b?.labelcolor || '')}:${safeText(b?.iconcolor || '')}:${isButtongridButtonVisible(b) ? '1' : '0'}`
 	).join('|');
 }
 
@@ -556,7 +599,8 @@ describe('Widget Snapshot Helpers', () => {
 			const snap = widgetSnapshot(widget);
 			assert.strictEqual(snap.buttons.length, 1);
 			assert.strictEqual(snap.buttons[0].command, 'POWER');
-			assert.strictEqual(snap.buttons[0].itemName, 'RemoteButtonItem');
+			assert.strictEqual(snap.buttons[0].itemName, 'Remote');
+			assert.strictEqual(snap.buttons[0].source, 'legacy');
 		});
 
 		it('includes buttons array for Buttongrid widget', () => {
@@ -574,6 +618,7 @@ describe('Widget Snapshot Helpers', () => {
 			assert.strictEqual(snap.buttons[0].command, 'POWER');
 			assert.strictEqual(snap.buttons[0].icon, 'material:power');
 			assert.strictEqual(snap.buttons[1].command, 'OK');
+			assert.strictEqual(snap.buttons[0].source, 'legacy');
 			assert.ok(snap.buttonsSig.length > 0);
 		});
 
@@ -607,12 +652,12 @@ describe('Widget Snapshot Helpers', () => {
 			const widget1 = {
 				type: 'Buttongrid',
 				item: { name: 'Remote' },
-				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', state: 'ON' }],
+				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', state: 'ON', source: 'child' }],
 			};
 			const widget2 = {
 				type: 'Buttongrid',
 				item: { name: 'Remote' },
-				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', state: 'OFF' }],
+				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', state: 'OFF', source: 'child' }],
 			};
 			const snap1 = widgetSnapshot(widget1);
 			const snap2 = widgetSnapshot(widget2);
@@ -623,23 +668,37 @@ describe('Widget Snapshot Helpers', () => {
 			const widget1 = {
 				type: 'Buttongrid',
 				item: { name: 'Remote' },
-				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', labelcolor: 'red', iconcolor: 'blue', visibility: true }],
+				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', source: 'child', labelcolor: 'red', iconcolor: 'blue', visibility: true }],
 			};
 			const widget2 = {
 				type: 'Buttongrid',
 				item: { name: 'Remote' },
-				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', labelcolor: 'green', iconcolor: 'blue', visibility: true }],
+				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', source: 'child', labelcolor: 'green', iconcolor: 'blue', visibility: true }],
 			};
 			const widget3 = {
 				type: 'Buttongrid',
 				item: { name: 'Remote' },
-				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', labelcolor: 'red', iconcolor: 'blue', visibility: false }],
+				buttons: [{ row: 1, column: 1, command: 'ON', label: 'On', itemName: 'LightA', source: 'child', labelcolor: 'red', iconcolor: 'blue', visibility: false }],
 			};
 			const snap1 = widgetSnapshot(widget1);
 			const snap2 = widgetSnapshot(widget2);
 			const snap3 = widgetSnapshot(widget3);
 			assert.notStrictEqual(snap1.buttonsSig, snap2.buttonsSig);
 			assert.notStrictEqual(snap1.buttonsSig, snap3.buttonsSig);
+		});
+
+		it('drops legacy buttons with column > 12 from snapshot', () => {
+			const widget = {
+				type: 'Buttongrid',
+				item: { name: 'Remote' },
+				mappings: [
+					{ row: 1, column: 1, command: 'ONE', label: 'One' },
+					{ row: 1, column: 13, command: 'THIRTEEN', label: 'Thirteen' },
+				],
+			};
+			const snap = widgetSnapshot(widget);
+			assert.strictEqual(snap.buttons.length, 1);
+			assert.strictEqual(snap.buttons[0].command, 'ONE');
 		});
 	});
 });
