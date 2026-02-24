@@ -646,7 +646,7 @@ let imageLoadQueue = [];
 let imageLoadProcessing = false;
 let searchDebounceTimer = null;
 let chartHashTimer = null;
-const chartHashes = new Map(); // item|period|mode -> hash
+const chartHashes = new Map(); // item|period|mode|assetVersion|title|legend|pattern|interpolation|service -> hash
 let searchStateAbort = null;
 let searchStateActiveToken = 0;
 let resumeReloadArmed = false;
@@ -2620,7 +2620,7 @@ function appendModeParam(url, mode) {
 }
 
 function chartWidgetUrl(widget) {
-	// Chart items use /chart?item=NAME&period=PERIOD&mode=light|dark&title=TITLE
+	// Chart items use /chart?item=NAME&period=PERIOD&mode=light|dark&title=TITLE&service=SERVICE
 	const itemName = safeText(widget?.item?.name || '').trim();
 	const period = safeText(widget?.period || '').trim() || 'h';
 	if (!itemName) return '';
@@ -2629,6 +2629,8 @@ function chartWidgetUrl(widget) {
 	const title = labelParts.title || '';
 	let url = `chart?item=${encodeURIComponent(itemName)}&period=${encodeURIComponent(period)}&mode=${mode}`;
 	if (title) url += `&title=${encodeURIComponent(title)}`;
+	const service = safeText(widget?.service || '').trim();
+	if (service) url += `&service=${encodeURIComponent(service)}`;
 	const legend = widget?.legend;
 	if (legend === false || legend === 'false') url += '&legend=false';
 	const yAxisDecimalPattern = safeText(widget?.yAxisDecimalPattern || '').trim();
@@ -4485,7 +4487,6 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'server.binaries.ffmpeg', type: 'text' },
 			{ key: 'server.binaries.convert', type: 'text' },
 			{ key: 'server.binaries.shell', type: 'text' },
-			{ key: 'server.paths.rrd', type: 'text', allowEmpty: true },
 		],
 	},
 	{
@@ -9962,10 +9963,11 @@ async function checkChartHashes() {
 			const legend = urlObj.searchParams.get('legend') === 'false' ? 'false' : 'true';
 			const yAxisDecimalPattern = urlObj.searchParams.get('yAxisDecimalPattern') || '';
 			const interpolation = (urlObj.searchParams.get('interpolation') || 'linear').toLowerCase();
+			const service = urlObj.searchParams.get('service') || '';
 			if (!item || !period) continue;
 
 			// Cache key includes assetVersion to match server
-			const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${yAxisDecimalPattern}|${interpolation}`;
+			const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${yAxisDecimalPattern}|${interpolation}|${service}`;
 			const prevHash = chartHashes.get(cacheKey) || null;
 
 				try {
@@ -9973,7 +9975,8 @@ async function checkChartHashes() {
 							(title ? `&title=${encodeURIComponent(title)}` : '') +
 							(legend === 'false' ? '&legend=false' : '') +
 							(yAxisDecimalPattern ? `&yAxisDecimalPattern=${encodeURIComponent(yAxisDecimalPattern)}` : '') +
-						(interpolation === 'step' ? '&interpolation=step' : '');
+						(interpolation === 'step' ? '&interpolation=step' : '') +
+						(service ? `&service=${encodeURIComponent(service)}` : '');
 				const res = await fetch(hashUrl, { cache: 'no-store' });
 				if (!res.ok) continue;
 				const data = await res.json();
@@ -10360,7 +10363,8 @@ function handleWsChartHashResponse(data) {
 	const legend = data.legend === false || data.legend === 'false' ? 'false' : 'true';
 	const yAxisDecimalPattern = safeText(data.yAxisDecimalPattern || '');
 	const interpolation = safeText(data.interpolation || 'linear').toLowerCase() === 'step' ? 'step' : 'linear';
-	const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${yAxisDecimalPattern}|${interpolation}`;
+	const service = safeText(data.service || '');
+	const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${yAxisDecimalPattern}|${interpolation}|${service}`;
 	if (MAX_CHART_HASHES > 0) {
 		setBoundedCache(chartHashes, cacheKey, hash, MAX_CHART_HASHES);
 	}
