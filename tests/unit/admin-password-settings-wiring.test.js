@@ -23,6 +23,7 @@ describe('Admin password settings wiring', () => {
 		assert.match(app, /id:\s*'user-password',\s*group:\s*'user',\s*reloadRequired:\s*true/, 'missing reloadRequired bubble flag for user-password section');
 		assert.match(app, /id:\s*'user-password'[\s\S]*\{\s*key:\s*'user\.password',\s*type:\s*'password'\s*\}/, 'missing user.password field');
 		assert.match(app, /id:\s*'user-password'[\s\S]*\{\s*key:\s*'user\.confirm',\s*type:\s*'password'\s*\}/, 'missing user.confirm field');
+		assert.match(app, /id:\s*'user-preferences'[\s\S]*\{\s*key:\s*'user\.mapviewRendering',\s*type:\s*'select'/, 'missing user.mapviewRendering field');
 	});
 
 	it('adds language strings for password fields and logout alert', () => {
@@ -30,6 +31,7 @@ describe('Admin password settings wiring', () => {
 		assert.match(lang, /'user-password': 'PASSWORD'/, 'missing PASSWORD section title');
 		assert.match(lang, /'user\.password': 'Password'/, 'missing user.password label');
 		assert.match(lang, /'user\.confirm': 'Confirm'/, 'missing user.confirm label');
+		assert.match(lang, /'user\.mapviewRendering': 'Mapview Rendering'/, 'missing user.mapviewRendering label');
 		assert.match(lang, /passwordChangedHeader:\s*'Password Changed'/, 'missing password changed alert header');
 		assert.match(lang, /passwordChangedBody:\s*'[^']*<br\/><br\/>[^']*'/, 'missing line break in password changed alert body');
 		assert.match(lang, /passwordChangedContinueBtn:\s*'Continue'/, 'missing Continue button label');

@@ -417,6 +417,7 @@ function createExtraValidationTestApp() {
 			const rawPeriod = req.query?.period;
 			const rawMode = req.query?.mode;
 			const rawTitle = req.query?.title;
+			const rawLegend = req.query?.legend;
 			if (typeof rawItem !== 'string') {
 				return res.status(400).send('Invalid item parameter');
 			}
@@ -426,10 +427,17 @@ function createExtraValidationTestApp() {
 			if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
 				return res.status(400).send('Invalid mode parameter');
 			}
+			if (rawLegend !== undefined && typeof rawLegend !== 'string') {
+				return res.status(400).send('Invalid legend parameter');
+			}
 			const item = rawItem.trim();
 			const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 			const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
 			const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+			const legend = rawLegend === undefined ? 'auto' : rawLegend.trim().toLowerCase();
+			if (rawLegend !== undefined && !['true', 'false'].includes(legend)) {
+				return res.status(400).send('Invalid legend parameter');
+			}
 		if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 			return res.status(400).send('Invalid parameters');
 		}
@@ -453,6 +461,7 @@ function createExtraValidationTestApp() {
 			const rawPeriod = req.query?.period;
 			const rawMode = req.query?.mode;
 			const rawTitle = req.query?.title;
+			const rawLegend = req.query?.legend;
 			if (typeof rawItem !== 'string') {
 				return res.status(400).json({ error: 'Invalid item' });
 			}
@@ -462,10 +471,17 @@ function createExtraValidationTestApp() {
 			if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
 				return res.status(400).json({ error: 'Invalid mode' });
 			}
+			if (rawLegend !== undefined && typeof rawLegend !== 'string') {
+				return res.status(400).json({ error: 'Invalid legend' });
+			}
 			const item = rawItem.trim();
 			const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 			const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
 			const title = (typeof rawTitle === 'string' ? rawTitle.trim() : '') || item;
+			const legend = rawLegend === undefined ? 'auto' : rawLegend.trim().toLowerCase();
+			if (rawLegend !== undefined && !['true', 'false'].includes(legend)) {
+				return res.status(400).json({ error: 'Invalid legend' });
+			}
 		if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 			return res.status(400).json({ error: 'Invalid parameters' });
 		}
@@ -893,6 +909,18 @@ describe('Extra Validation Coverage', () => {
 			assert.strictEqual(res.status, 400);
 		});
 
+		it('rejects chart invalid legend value', async () => {
+			const res = await get('/chart?item=Temp_Sensor&period=h&legend=maybe');
+			assert.strictEqual(res.status, 400);
+		});
+
+		it('accepts chart explicit legend=true and legend=false', async () => {
+			const resTrue = await get('/chart?item=Temp_Sensor&period=h&legend=true');
+			assert.strictEqual(resTrue.status, 200);
+			const resFalse = await get('/chart?item=Temp_Sensor&period=h&legend=false');
+			assert.strictEqual(resFalse.status, 200);
+		});
+
 		it('accepts chart valid parameters', async () => {
 			const res = await get('/chart?item=Temp_Sensor&period=h&mode=dark&title=OK');
 			assert.strictEqual(res.status, 200);
@@ -917,6 +945,18 @@ describe('Extra Validation Coverage', () => {
 			const longTitle = 'a'.repeat(201);
 			const res = await get(`/api/chart-hash?item=Temp_Sensor&period=h&title=${encodeURIComponent(longTitle)}`);
 			assert.strictEqual(res.status, 400);
+		});
+
+		it('rejects chart-hash invalid legend value', async () => {
+			const res = await get('/api/chart-hash?item=Temp_Sensor&period=h&legend=maybe');
+			assert.strictEqual(res.status, 400);
+		});
+
+		it('accepts chart-hash explicit legend=true and legend=false', async () => {
+			const resTrue = await get('/api/chart-hash?item=Temp_Sensor&period=D&legend=true');
+			assert.strictEqual(resTrue.status, 200);
+			const resFalse = await get('/api/chart-hash?item=Temp_Sensor&period=D&legend=false');
+			assert.strictEqual(resFalse.status, 200);
 		});
 
 		it('accepts chart-hash valid parameters', async () => {
