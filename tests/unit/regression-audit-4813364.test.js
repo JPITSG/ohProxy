@@ -74,8 +74,10 @@ describe('Regression Guards for 4813364..HEAD', () => {
 	it('chart hash polling includes interpolation in request URL and cache key', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /const interpolation = \(urlObj\.searchParams\.get\('interpolation'\) \|\| 'linear'\)\.toLowerCase\(\);/);
-		assert.match(app, /const cacheKey = `\$\{item\}\|\$\{period\}\|\$\{mode\}\|\$\{assetVersion\}\|\$\{title\}\|\$\{legend\}\|\$\{yAxisDecimalPattern\}\|\$\{interpolation\}`;/);
+		assert.match(app, /const service = urlObj\.searchParams\.get\('service'\) \|\| '';/);
+		assert.match(app, /const cacheKey = `\$\{item\}\|\$\{period\}\|\$\{mode\}\|\$\{assetVersion\}\|\$\{title\}\|\$\{legend\}\|\$\{yAxisDecimalPattern\}\|\$\{interpolation\}\|\$\{service\}`;/);
 		assert.match(app, /\(interpolation === 'step' \? '&interpolation=step' : ''\)/);
+		assert.match(app, /\(service \? `&service=\$\{encodeURIComponent\(service\)\}` : ''\)/);
 		assert.match(app, /period=\$\{encodeURIComponent\(period\)\}/);
 	});
 

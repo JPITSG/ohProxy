@@ -232,10 +232,6 @@ module.exports = {
 			// Shell binary path (used for auth failure notification commands).
 			shell: '/bin/sh',
 		},
-		paths: {
-			// RRD4J persistence directory (for chart generation).
-			rrd: '',
-		},
 
 		// === External Services ===
 		apiKeys: {

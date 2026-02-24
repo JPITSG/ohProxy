@@ -368,8 +368,6 @@ const BINARIES_CONFIG = SERVER_CONFIG.binaries || {};
 const BIN_FFMPEG = safeText(BINARIES_CONFIG.ffmpeg) || '/usr/bin/ffmpeg';
 const BIN_CONVERT = safeText(BINARIES_CONFIG.convert) || '/usr/bin/convert';
 const BIN_SHELL = safeText(BINARIES_CONFIG.shell) || '/bin/sh';
-const PATHS_CONFIG = SERVER_CONFIG.paths || {};
-const RRD_PATH = safeText(PATHS_CONFIG.rrd) || '';
 const CHART_CACHE_DIR = path.join(__dirname, 'cache', 'chart');
 // Parse any openHAB chart period string to seconds.
 // Supports simple (h, D, W, M, Y), multiplied (4h, 2D, 3W),
@@ -377,6 +375,7 @@ const CHART_CACHE_DIR = path.join(__dirname, 'cache', 'chart');
 // Returns 0 for invalid/unrecognised input. Capped at 10 years.
 const MAX_PERIOD_SEC = 10 * 365.25 * 86400; // ~10 years
 const CHART_PERIOD_MAX_LEN = 64;
+const CHART_SERVICE_RE = /^[A-Za-z0-9._-]{1,64}$/;
 function parseBasePeriodToSeconds(period) {
 	// Simple / multiplied: e.g. h, D, 4h, 2W, 12M
 	const simpleMatch = period.match(/^(\d*)([hDWMY])$/);
@@ -1259,9 +1258,6 @@ function validateAdminConfig(config) {
 		ensureAbsolutePath(s.binaries.convert, 'server.binaries.convert', errors);
 		ensureAbsolutePath(s.binaries.shell, 'server.binaries.shell', errors);
 	}
-	if (isPlainObject(s.paths)) {
-		ensureString(s.paths.rrd || '', 'server.paths.rrd', { allowEmpty: true, maxLen: 4096 }, errors);
-	}
 
 	// Features
 	if (Array.isArray(s.groupItems)) {
@@ -1821,7 +1817,6 @@ const liveConfig = {
 	wsPollingIntervalBgMs: WS_POLLING_INTERVAL_BG_MS,
 	wsAtmosphereNoUpdateWarnMs: WS_ATMOSPHERE_NO_UPDATE_WARN_MS,
 	backendRecoveryDelayMs: BACKEND_RECOVERY_DELAY_MS,
-	rrdPath: RRD_PATH,
 	cmdapiEnabled: CMDAPI_ENABLED,
 	cmdapiAllowedSubnets: CMDAPI_ALLOWED_SUBNETS,
 	cmdapiAllowedItems: CMDAPI_ALLOWED_ITEMS,
@@ -1996,8 +1991,6 @@ function reloadLiveConfig() {
 		0,
 		configNumber(newWsConfig.backendRecoveryDelayMs, 0)
 	);
-	const newPaths = newServer.paths || {};
-	liveConfig.rrdPath = safeText(newPaths.rrd) || '';
 
 	// CMD API config
 	liveConfig.cmdapiEnabled = newServer.cmdapi?.enabled === true;
@@ -3043,18 +3036,18 @@ const CHART_CACHE_MAX_BYTES = 256 * 1024 * 1024; // 256MB
 const CHART_CACHE_PRUNE_MIN_INTERVAL_MS = 5 * 60 * 1000;
 let lastChartCachePruneAt = 0;
 
-function chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation) {
+function chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service) {
 	const assetVersion = liveConfig.assetVersion || 'v1';
 	const dateFmt = liveConfig.clientConfig?.dateFormat || '';
 	const timeFmt = liveConfig.clientConfig?.timeFormat || '';
 	return crypto.createHash('md5')
-		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}|${legend}|${yAxisDecimalPattern || ''}|${interpolation || 'linear'}`)
+		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}|${legend}|${yAxisDecimalPattern || ''}|${interpolation || 'linear'}|${service || ''}`)
 		.digest('hex')
 		.substring(0, 16);
 }
 
-function getChartCachePath(item, period, mode, title, legend, yAxisDecimalPattern, interpolation) {
-	const hash = chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation);
+function getChartCachePath(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service) {
+	const hash = chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service);
 	return path.join(CHART_CACHE_DIR, `${hash}.html`);
 }
 
@@ -3108,95 +3101,100 @@ function deduceUnit(title) {
 	return '?';
 }
 
-function parseRrd4jFile(rrdPath, durationSec = 86400) {
-	try {
-		const data = fs.readFileSync(rrdPath);
-		if (data.length < 100) return null;
+function parsePersistenceStateNumber(value) {
+	if (typeof value === 'number' && Number.isFinite(value)) return value;
+	const text = safeText(value).trim();
+	if (!text) return null;
+	const upper = text.toUpperCase();
+	if (upper === 'ON' || upper === 'OPEN' || upper === 'TRUE') return 1;
+	if (upper === 'OFF' || upper === 'CLOSED' || upper === 'FALSE') return 0;
+	if (upper === 'NULL' || upper === 'UNDEF' || upper === 'NAN') return null;
+	if (!/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(text)) return null;
+	const parsed = Number(text);
+	return Number.isFinite(parsed) ? parsed : null;
+}
 
-		// Parse header (skip 40-byte signature)
-		let offset = 40;
-		const step = Number(data.readBigUInt64BE(offset)); offset += 8;
-		const dsCount = data.readUInt32BE(offset); offset += 4;
-		const arcCount = data.readUInt32BE(offset); offset += 4;
-		const lastUpdate = Number(data.readBigUInt64BE(offset)); offset += 8;
-
-		const safeStep = (step < 1 || step > 86400) ? 60 : step;
-		const now = Date.now() / 1000;
-		const safeLastUpdate = (lastUpdate < 1577836800 || lastUpdate > 2000000000) ? now : lastUpdate;
-
-		// Skip datasources (128 bytes each)
-		offset += dsCount * 128;
-
-		// Parse archives
-		const archives = [];
-		for (let arc = 0; arc < arcCount; arc++) {
-			// Archive definition: consolFun(40) + xff(8) + steps(4) + rows(4)
-			const arcSteps = data.readUInt32BE(offset + 48);
-			const arcRows = data.readUInt32BE(offset + 52);
-			offset += 56;
-
-			// Skip ArcState (16 bytes per datasource)
-			offset += dsCount * 16;
-
-			// Robin: pointer(4) + values(8 * rows)
-			const pointer = data.readUInt32BE(offset);
-			offset += 4;
-
-			const values = [];
-			for (let i = 0; i < arcRows; i++) {
-				values.push(data.readDoubleBE(offset));
-				offset += 8;
-			}
-
-			// Skip remaining datasources
-			for (let ds = 1; ds < dsCount; ds++) {
-				offset += 4 + arcRows * 8;
-			}
-
-			// Reorder circular buffer
-			let ordered;
-			if (pointer > 0 && pointer < values.length) {
-				ordered = values.slice(pointer).concat(values.slice(0, pointer));
-			} else {
-				ordered = values;
-			}
-
-			archives.push({ steps: arcSteps, rows: arcRows, values: ordered });
-		}
-
-		// Select archive based on duration
-		const required = durationSec || 86400;
-
-		let selected = null;
-		for (const arc of archives) {
-			const arcStep = safeStep * arc.steps;
-			const arcDuration = arc.rows * arcStep;
-			if (arcDuration >= required * 0.8) {
-				selected = arc;
-				break;
-			}
-		}
-		if (!selected) {
-			selected = archives.reduce((a, b) =>
-				(a.rows * safeStep * a.steps > b.rows * safeStep * b.steps) ? a : b
-			);
-		}
-
-		// Build timestamp-value pairs
-		const arcStep = safeStep * selected.steps;
-		const pairs = [];
-		for (let i = 0; i < selected.values.length; i++) {
-			const val = selected.values[i];
-			if (!isNaN(val) && isFinite(val)) {
-				const ts = safeLastUpdate - (selected.values.length - i - 1) * arcStep;
-				pairs.push([ts, val]);
-			}
-		}
-
-		return pairs.length > 0 ? pairs : null;
-	} catch (err) {
-		return null;
+function parsePersistenceTimestampSec(value) {
+	if (typeof value === 'number' && Number.isFinite(value)) {
+		if (value <= 0) return null;
+		return value > 1e12 ? Math.floor(value / 1000) : Math.floor(value);
 	}
+	const text = safeText(value).trim();
+	if (!text) return null;
+	if (/^\d+$/.test(text)) {
+		const asNumber = Number(text);
+		if (!Number.isFinite(asNumber) || asNumber <= 0) return null;
+		return asNumber > 1e12 ? Math.floor(asNumber / 1000) : Math.floor(asNumber);
+	}
+	const asDateMs = Date.parse(text);
+	if (!Number.isFinite(asDateMs)) return null;
+	return Math.floor(asDateMs / 1000);
+}
+
+function parsePersistencePoint(entry) {
+	if (Array.isArray(entry)) {
+		if (entry.length < 2) return null;
+		const ts = parsePersistenceTimestampSec(entry[0]);
+		const value = parsePersistenceStateNumber(entry[1]);
+		return Number.isFinite(ts) && value !== null ? [ts, value] : null;
+	}
+	if (!entry || typeof entry !== 'object') return null;
+	const ts = parsePersistenceTimestampSec(entry.time ?? entry.timestamp ?? entry.t ?? entry.date);
+	const value = parsePersistenceStateNumber(entry.state ?? entry.value ?? entry.val);
+	return Number.isFinite(ts) && value !== null ? [ts, value] : null;
+}
+
+function extractPersistencePoints(payload) {
+	const source = Array.isArray(payload?.data)
+		? payload.data
+		: Array.isArray(payload?.datapoints)
+			? payload.datapoints
+			: Array.isArray(payload?.values)
+				? payload.values
+				: Array.isArray(payload)
+					? payload
+					: [];
+	const parsed = [];
+	for (const entry of source) {
+		const point = parsePersistencePoint(entry);
+		if (point) parsed.push(point);
+	}
+	if (!parsed.length) return [];
+	parsed.sort((a, b) => a[0] - b[0]);
+	const deduped = [];
+	for (const point of parsed) {
+		if (deduped.length && deduped[deduped.length - 1][0] === point[0]) {
+			deduped[deduped.length - 1] = point;
+		} else {
+			deduped.push(point);
+		}
+	}
+	return deduped;
+}
+
+async function fetchPersistenceSeries(item, durationSec = 86400, service = '') {
+	const durSec = Math.max(1, Math.floor(durationSec || 0));
+	const end = new Date();
+	const start = new Date(end.getTime() - (durSec * 1000));
+	const params = new URLSearchParams();
+	params.set('starttime', start.toISOString());
+	params.set('endtime', end.toISOString());
+	if (service) params.set('serviceId', service);
+	const reqPath = `/rest/persistence/items/${encodeURIComponent(item)}?${params.toString()}`;
+	const result = await fetchOpenhab(reqPath);
+	if (!result?.ok) {
+		const status = Number(result?.status) || 500;
+		const detail = safeText(result?.body || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+		throw new Error(`Persistence request failed (${status})${detail ? `: ${detail}` : ''}`);
+	}
+	let payload;
+	try {
+		payload = JSON.parse(result.body);
+	} catch {
+		throw new Error('Persistence response was not valid JSON');
+	}
+	const points = extractPersistencePoints(payload);
+	return points.length ? points : null;
 }
 
 function processChartData(data, durationSec, maxPoints = 500) {
@@ -3421,21 +3419,8 @@ window._chartInterpolation=${inlineJson(interpolation || 'linear')};
 </html>`;
 }
 
-function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, durationSec, interpolation) {
-	const rrdDir = liveConfig.rrdPath || '';
-	if (!rrdDir) return null;
-
-	const rrdPath = path.join(rrdDir, `${item}.rrd`);
-	if (!fs.existsSync(rrdPath)) return null;
-
-	// Parse period once; callers may pre-compute durationSec
+function renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecimalPattern, durationSec, interpolation, precomputedDataHash = '') {
 	const durSec = durationSec || parsePeriodToSeconds(period) || 86400;
-
-	// Parse RRD file
-	const rawData = parseRrd4jFile(rrdPath, durSec);
-	if (!rawData) return null;
-
-	// Process data
 	const { data, yMin, yMax, dataMin, dataMax, dataAvg } = processChartData(rawData, durSec, 500);
 	if (!data || data.length === 0) return null;
 
@@ -3468,11 +3453,26 @@ function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, d
 	// Get current (latest) value from chart data
 	const dataCur = chartData.length > 0 ? chartData[chartData.length - 1].y : null;
 
-	// Compute data hash for cache invalidation
-	const dataHash = computeChartDataHash(rawData, durSec);
+	// Reuse precomputed hash when available (e.g. /api/chart-hash path) to avoid duplicate hashing.
+	const dataHash = (typeof precomputedDataHash === 'string' && precomputedDataHash)
+		? precomputedDataHash
+		: computeChartDataHash(rawData, durSec);
+	if (!dataHash) return null;
 
 	// Generate HTML
-	return generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern, durSec, interpolation);
+	const html = generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern, durSec, interpolation);
+	return {
+		html,
+		dataHash,
+	};
+}
+
+async function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, durationSec, interpolation, service = '') {
+	const durSec = durationSec || parsePeriodToSeconds(period) || 86400;
+	const rawData = await fetchPersistenceSeries(item, durSec, service);
+	if (!rawData) return null;
+	const rendered = renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecimalPattern, durSec, interpolation);
+	return rendered?.html || null;
 }
 
 async function fetchAllPagesAcrossSitemaps() {
@@ -8392,8 +8392,8 @@ app.get('/video-preview', (req, res) => {
 	res.sendFile(filePath);
 });
 
-// Chart endpoint - generates interactive HTML charts from RRD data
-app.get('/chart', (req, res) => {
+// Chart endpoint - generates interactive HTML charts from openHAB persistence data
+app.get('/chart', async (req, res) => {
 	// Extract and validate parameters
 	const rawItem = req.query?.item;
 	const rawPeriod = req.query?.period;
@@ -8402,6 +8402,7 @@ app.get('/chart', (req, res) => {
 	const rawLegend = req.query?.legend;
 	const rawYAxisDecimalPattern = req.query?.yAxisDecimalPattern;
 	const rawInterpolation = req.query?.interpolation;
+	const rawService = req.query?.service;
 	const legend = rawLegend === 'false' ? false : true;
 	if (typeof rawItem !== 'string') {
 		return sendStyledError(res, req, 400, 'Invalid item parameter');
@@ -8418,12 +8419,16 @@ app.get('/chart', (req, res) => {
 	if (rawInterpolation !== undefined && typeof rawInterpolation !== 'string') {
 		return sendStyledError(res, req, 400, 'Invalid interpolation parameter');
 	}
+	if (rawService !== undefined && typeof rawService !== 'string') {
+		return sendStyledError(res, req, 400, 'Invalid service parameter');
+	}
 	const item = rawItem.trim();
 	const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 	const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
 	const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
 	const yAxisDecimalPattern = typeof rawYAxisDecimalPattern === 'string' ? rawYAxisDecimalPattern.trim() : '';
 	const interpolation = typeof rawInterpolation === 'string' ? rawInterpolation.trim().toLowerCase() : 'linear';
+	const service = typeof rawService === 'string' ? rawService.trim() : '';
 	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 		return sendStyledError(res, req, 400, 'Invalid parameters');
 	}
@@ -8435,6 +8440,9 @@ app.get('/chart', (req, res) => {
 	}
 	if (!['linear', 'step'].includes(interpolation)) {
 		return sendStyledError(res, req, 400, 'Invalid interpolation parameter');
+	}
+	if (service && (hasAnyControlChars(service) || !CHART_SERVICE_RE.test(service))) {
+		return sendStyledError(res, req, 400, 'Invalid service parameter');
 	}
 
 	// Validate item: a-zA-Z0-9_- max 50 chars
@@ -8458,7 +8466,7 @@ app.get('/chart', (req, res) => {
 
 	const cacheTtlMs = chartCacheTtl(durationSec);
 	const resolvedTitle = title || item;
-	const cachePath = getChartCachePath(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern, interpolation);
+	const cachePath = getChartCachePath(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern, interpolation, service);
 
 	// Check cache
 	if (isChartCacheValid(cachePath, durationSec)) {
@@ -8473,9 +8481,8 @@ app.get('/chart', (req, res) => {
 		}
 	}
 
-	// Generate HTML chart from RRD
 	try {
-		const html = generateChart(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern, durationSec, interpolation);
+		const html = await generateChart(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern, durationSec, interpolation, service);
 		if (!html) {
 			return sendStyledError(res, req, 404, 'Chart data not available');
 		}
@@ -8498,7 +8505,7 @@ app.get('/chart', (req, res) => {
 });
 
 // Chart hash endpoint - regenerates chart and returns hash for smart iframe refresh
-app.get('/api/chart-hash', (req, res) => {
+app.get('/api/chart-hash', async (req, res) => {
 	const rawItem = req.query?.item;
 	const rawPeriod = req.query?.period;
 	const rawMode = req.query?.mode;
@@ -8506,6 +8513,7 @@ app.get('/api/chart-hash', (req, res) => {
 	const rawLegend = req.query?.legend;
 	const rawYAxisDecimalPattern = req.query?.yAxisDecimalPattern;
 	const rawInterpolation = req.query?.interpolation;
+	const rawService = req.query?.service;
 	const legend = rawLegend === 'false' ? false : true;
 	if (typeof rawItem !== 'string') {
 		return res.status(400).json({ error: 'Invalid item' });
@@ -8522,12 +8530,16 @@ app.get('/api/chart-hash', (req, res) => {
 	if (rawInterpolation !== undefined && typeof rawInterpolation !== 'string') {
 		return res.status(400).json({ error: 'Invalid interpolation' });
 	}
+	if (rawService !== undefined && typeof rawService !== 'string') {
+		return res.status(400).json({ error: 'Invalid service' });
+	}
 	const item = rawItem.trim();
 	const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 	const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
 	const title = (typeof rawTitle === 'string' ? rawTitle.trim() : '') || item;
 	const yAxisDecimalPattern = typeof rawYAxisDecimalPattern === 'string' ? rawYAxisDecimalPattern.trim() : '';
 	const interpolation = typeof rawInterpolation === 'string' ? rawInterpolation.trim().toLowerCase() : 'linear';
+	const service = typeof rawService === 'string' ? rawService.trim() : '';
 	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 		return res.status(400).json({ error: 'Invalid parameters' });
 	}
@@ -8539,6 +8551,9 @@ app.get('/api/chart-hash', (req, res) => {
 	}
 	if (!['linear', 'step'].includes(interpolation)) {
 		return res.status(400).json({ error: 'Invalid interpolation' });
+	}
+	if (service && (hasAnyControlChars(service) || !CHART_SERVICE_RE.test(service))) {
+		return res.status(400).json({ error: 'Invalid service' });
 	}
 
 	// Validate parameters
@@ -8556,23 +8571,10 @@ app.get('/api/chart-hash', (req, res) => {
 		return res.status(400).json({ error: 'Invalid mode' });
 	}
 
-	const cachePath = getChartCachePath(item, period, mode, title, legend, yAxisDecimalPattern, interpolation);
-
-	// Get RRD data for stable hash (not affected by label positioning)
-	const rrdDir = liveConfig.rrdPath || '';
-	if (!rrdDir) {
-		res.setHeader('Cache-Control', 'no-cache');
-		return res.json({ hash: null, error: 'No RRD path' });
-	}
-	const rrdPath = path.join(rrdDir, `${item}.rrd`);
-	if (!fs.existsSync(rrdPath)) {
-		res.setHeader('Cache-Control', 'no-cache');
-		return res.json({ hash: null, error: 'RRD not found' });
-	}
+	const cachePath = getChartCachePath(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service);
 
 	try {
-		// Parse raw data and compute hash
-		const rawData = parseRrd4jFile(rrdPath, durationSec);
+		const rawData = await fetchPersistenceSeries(item, durationSec, service);
 		if (!rawData || rawData.length === 0) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'No data' });
@@ -8599,16 +8601,15 @@ app.get('/api/chart-hash', (req, res) => {
 			return res.json({ hash: dataHash });
 		}
 
-		// Data changed - regenerate HTML (hash is embedded by generateChart)
-		const html = generateChart(item, period, mode, title, legend, yAxisDecimalPattern, durationSec, interpolation);
-		if (!html) {
+		const rendered = renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecimalPattern, durationSec, interpolation, dataHash);
+		if (!rendered?.html) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Generation failed' });
 		}
 
 			// Write to cache
 			ensureDir(CHART_CACHE_DIR);
-			fs.writeFileSync(cachePath, html);
+			fs.writeFileSync(cachePath, rendered.html);
 			maybePruneChartCache();
 
 		res.setHeader('Cache-Control', 'no-cache');

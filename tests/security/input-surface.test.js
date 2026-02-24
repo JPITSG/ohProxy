@@ -76,6 +76,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawLegend\s*=\s*req\.query\?\.legend\s*;/,
 			/const\s+rawYAxisDecimalPattern\s*=\s*req\.query\?\.yAxisDecimalPattern\s*;/,
 			/const\s+rawInterpolation\s*=\s*req\.query\?\.interpolation\s*;/,
+			/const\s+rawService\s*=\s*req\.query\?\.service\s*;/,
 			/const\s+rawFormat\s*=\s*safeText\(req\.query\?\.format\s*\|\|\s*''\)\.trim\(\)\.toLowerCase\(\)\s*;/,
 			/const\s+rawState\s*=\s*req\.query\?\.state\s*;/,
 			/const\s+rawEncoding\s*=\s*req\.query\?\.encoding\s*;/,
@@ -190,7 +191,7 @@ describe('Request-Derived File Paths', () => {
 		assert.ok(content.includes('const hash = videoUrlHash(url);'));
 		assert.ok(/const\s+filePath\s*=\s*path\.join\(VIDEO_PREVIEW_DIR,\s*`\$\{hash\}\.jpg`\s*\);/.test(content));
 
-		assert.ok(/const\s+rrdPath\s*=\s*path\.join\(rrdDir,\s*`\$\{item\}\.rrd`\s*\);/.test(content));
+		assert.ok(content.includes('/rest/persistence/items/'));
 	});
 });
 
