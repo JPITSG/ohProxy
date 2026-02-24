@@ -46,11 +46,12 @@ function parsePeriodToSeconds(period) {
 	if (dashCount > 1) return 0;
 	if (dashCount === 1) {
 		const [past, future] = raw.split('-');
-		if (!past) return 0;
-		const pastSec = parseBasePeriodToSeconds(past);
-		if (!pastSec) return 0;
-		if (future && !parseBasePeriodToSeconds(future)) return 0;
-		return pastSec;
+		const pastSec = past ? parseBasePeriodToSeconds(past) : 0;
+		const futureSec = future ? parseBasePeriodToSeconds(future) : 0;
+		if (past && !pastSec) return 0;
+		if (future && !futureSec) return 0;
+		if (!pastSec && !futureSec) return 0;
+		return pastSec + futureSec;
 	}
 	return parseBasePeriodToSeconds(raw);
 }
@@ -165,29 +166,32 @@ describe('parsePeriodToSeconds', () => {
 	});
 
 	describe('past-future periods', () => {
-		it('parses 2h-1h using past portion', () => {
-			assert.strictEqual(parsePeriodToSeconds('2h-1h'), 7200);
+		it('parses 2h-1h as full window (past + future)', () => {
+			assert.strictEqual(parsePeriodToSeconds('2h-1h'), 10800);
 		});
-		it('parses h-1h using past portion', () => {
-			assert.strictEqual(parsePeriodToSeconds('h-1h'), 3600);
+		it('parses h-1h as full window (past + future)', () => {
+			assert.strictEqual(parsePeriodToSeconds('h-1h'), 7200);
 		});
-		it('parses 4h-2h using past portion', () => {
-			assert.strictEqual(parsePeriodToSeconds('4h-2h'), 14400);
+		it('parses 4h-2h as full window (past + future)', () => {
+			assert.strictEqual(parsePeriodToSeconds('4h-2h'), 21600);
 		});
-		it('parses D-1D using past portion', () => {
-			assert.strictEqual(parsePeriodToSeconds('D-1D'), 86400);
+		it('parses D-1D as full window (past + future)', () => {
+			assert.strictEqual(parsePeriodToSeconds('D-1D'), 172800);
 		});
-		it('parses 2W-1D using past portion', () => {
-			assert.strictEqual(parsePeriodToSeconds('2W-1D'), 1209600);
+		it('parses 2W-1D as full window (past + future)', () => {
+			assert.strictEqual(parsePeriodToSeconds('2W-1D'), 1296000);
 		});
 		it('parses D- with empty future portion', () => {
 			assert.strictEqual(parsePeriodToSeconds('D-'), 86400);
 		});
-		it('parses PT1H30M-PT30M using past ISO portion', () => {
-			assert.strictEqual(parsePeriodToSeconds('PT1H30M-PT30M'), 5400);
+		it('parses -1h as future-only window', () => {
+			assert.strictEqual(parsePeriodToSeconds('-1h'), 3600);
+		});
+		it('parses PT1H30M-PT30M as full ISO window', () => {
+			assert.strictEqual(parsePeriodToSeconds('PT1H30M-PT30M'), 7200);
 		});
 		it('parses long ISO past-future period P10Y6M2DT3H4M5S-PT30M', () => {
-			assert.strictEqual(parsePeriodToSeconds('P10Y6M2DT3H4M5S-PT30M'), MAX_PERIOD_SEC);
+			assert.strictEqual(parsePeriodToSeconds('P10Y6M2DT3H4M5S-PT30M'), MAX_PERIOD_SEC + 1800);
 		});
 	});
 
@@ -213,11 +217,11 @@ describe('parsePeriodToSeconds', () => {
 		it('returns 0 for number only', () => {
 			assert.strictEqual(parsePeriodToSeconds('42'), 0);
 		});
-		it('returns 0 for future-only past-future period', () => {
-			assert.strictEqual(parsePeriodToSeconds('-1h'), 0);
-		});
 		it('returns 0 for malformed multi-dash past-future period', () => {
 			assert.strictEqual(parsePeriodToSeconds('h-1h-1h'), 0);
+		});
+		it('returns 0 for empty-sided past-future period', () => {
+			assert.strictEqual(parsePeriodToSeconds('-'), 0);
 		});
 	});
 
@@ -342,14 +346,17 @@ describe('periodDurationTier (client-side)', () => {
 	it('classifies 2h-1h past-future as hD', () => {
 		assert.strictEqual(periodDurationTier('2h-1h'), 'hD');
 	});
-	it('classifies 2W-1D past-future as M (past=2W>7d)', () => {
+	it('classifies 2W-1D past-future as M (full window > 7d)', () => {
 		assert.strictEqual(periodDurationTier('2W-1D'), 'M');
 	});
 	it('classifies D-1D past-future as hD', () => {
-		assert.strictEqual(periodDurationTier('D-1D'), 'hD');
+		assert.strictEqual(periodDurationTier('D-1D'), 'W');
 	});
 	it('classifies D- past-future as hD', () => {
 		assert.strictEqual(periodDurationTier('D-'), 'hD');
+	});
+	it('classifies -1h future-only as hD', () => {
+		assert.strictEqual(periodDurationTier('-1h'), 'hD');
 	});
 	it('classifies PT1H30M-PT30M past-future as hD', () => {
 		assert.strictEqual(periodDurationTier('PT1H30M-PT30M'), 'hD');
