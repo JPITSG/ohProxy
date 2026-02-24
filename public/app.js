@@ -2593,11 +2593,15 @@ function shouldBypassProxy(url) {
 	}
 }
 
+function mediaWidgetSourceUrl(widget) {
+	return safeText(widget?.url || '').trim();
+}
+
 function imageWidgetUrl(widget) {
-	// All image items use /proxy?url=LABEL - width added by resolveImageUrl
-	const label = safeText(widget?.label || '').trim();
-	if (!label) return '';
-	return `proxy?url=${encodeURIComponent(label)}`;
+	// All image items use /proxy?url=URL - width added by resolveImageUrl
+	const url = mediaWidgetSourceUrl(widget);
+	if (!url) return '';
+	return `proxy?url=${encodeURIComponent(url)}`;
 }
 
 function getThemeMode() {
@@ -7277,7 +7281,7 @@ function getWidgetRenderInfo(w) {
 	const rawMediaUrl = isImage ? normalizeMediaUrl(imageWidgetUrl(w)) : '';
 	const mediaUrl = rawMediaUrl ? rawMediaUrl + cacheParam : '';
 	const chartUrl = isChart ? normalizeMediaUrl(chartWidgetUrl(w)) : '';
-	const rawWebviewUrl = isWebview ? safeText(w?.label || '') : '';
+	const rawWebviewUrl = isWebview ? mediaWidgetSourceUrl(w) : '';
 	const themeMode = getThemeMode();
 	const webviewUrl = rawWebviewUrl
 		? (shouldBypassProxy(rawWebviewUrl)
@@ -7291,7 +7295,7 @@ function getWidgetRenderInfo(w) {
 	const mapviewCoordinates = isMapview ? parseMapviewCoordinates(st) : null;
 	const mapviewUrl = isMapview ? buildMapviewUrl(mapviewCoordinates) : '';
 	const mapviewHeight = isMapview ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
-	const rawVideoUrl = isVideo ? safeText(w?.label || '') : '';
+	const rawVideoUrl = isVideo ? mediaWidgetSourceUrl(w) : '';
 	const videoEncoding = isVideo ? safeText(w?.encoding || '').toLowerCase() : '';
 	const encodingParam = videoEncoding ? `&encoding=${encodeURIComponent(videoEncoding)}` : '';
 	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}&mode=${themeMode}${encodingParam}` : '';

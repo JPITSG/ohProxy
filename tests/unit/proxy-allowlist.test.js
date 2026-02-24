@@ -12,9 +12,9 @@ function safeText(value) {
 function parseProxyAllowEntry(value) {
 	const raw = safeText(value).trim();
 	if (!raw) return null;
-	// Reject non-http/https schemes (must have :// to be a scheme)
-	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && !/^https?:\/\//i.test(raw)) return null;
-	const candidate = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+	// Reject non-http/https/rtsp/rtsps schemes (must have :// to be a scheme)
+	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && !/^(https?|rtsps?):\/\//i.test(raw)) return null;
+	const candidate = /^(https?|rtsps?):\/\//i.test(raw) ? raw : `http://${raw}`;
 	try {
 		const url = new URL(candidate);
 		let host = safeText(url.hostname).toLowerCase();
@@ -41,7 +41,10 @@ function normalizeProxyAllowlist(list) {
 
 function targetPortForUrl(url) {
 	if (url.port) return url.port;
-	return url.protocol === 'https:' ? '443' : '80';
+	if (url.protocol === 'https:') return '443';
+	if (url.protocol === 'rtsp:') return '554';
+	if (url.protocol === 'rtsps:') return '322';
+	return '80';
 }
 
 function isProxyTargetAllowed(url, allowlist) {
@@ -100,6 +103,14 @@ describe('Proxy Allowlist Helpers', () => {
 
 		it('parses https scheme with port', () => {
 			assert.deepStrictEqual(parseProxyAllowEntry('https://example.com:8443'), { host: 'example.com', port: '8443' });
+		});
+
+		it('parses rtsp scheme', () => {
+			assert.deepStrictEqual(parseProxyAllowEntry('rtsp://camera.local'), { host: 'camera.local', port: '' });
+		});
+
+		it('parses rtsps scheme with port', () => {
+			assert.deepStrictEqual(parseProxyAllowEntry('rtsps://camera.local:322'), { host: 'camera.local', port: '322' });
 		});
 
 		it('parses host with path', () => {
@@ -224,6 +235,16 @@ describe('Proxy Allowlist Helpers', () => {
 			const url = new URL('https://example.com:8443/path');
 			assert.strictEqual(targetPortForUrl(url), '8443');
 		});
+
+		it('defaults to 554 for rtsp', () => {
+			const url = new URL('rtsp://camera.local/path');
+			assert.strictEqual(targetPortForUrl(url), '554');
+		});
+
+		it('defaults to 322 for rtsps', () => {
+			const url = new URL('rtsps://camera.local/path');
+			assert.strictEqual(targetPortForUrl(url), '322');
+		});
 	});
 
 	describe('isProxyTargetAllowed', () => {
@@ -307,6 +328,18 @@ describe('Proxy Allowlist Helpers', () => {
 		it('allows any port when allowlist port is empty', () => {
 			const list = allowlistFrom(['example.com']);
 			const url = new URL('http://example.com:1234/path');
+			assert.strictEqual(isProxyTargetAllowed(url, list), true);
+		});
+
+		it('matches rtsp default port 554', () => {
+			const list = allowlistFrom(['camera.local:554']);
+			const url = new URL('rtsp://camera.local/path');
+			assert.strictEqual(isProxyTargetAllowed(url, list), true);
+		});
+
+		it('matches rtsps default port 322', () => {
+			const list = allowlistFrom(['camera.local:322']);
+			const url = new URL('rtsps://camera.local/path');
 			assert.strictEqual(isProxyTargetAllowed(url, list), true);
 		});
 	});
