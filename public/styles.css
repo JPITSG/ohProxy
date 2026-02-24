@@ -920,6 +920,43 @@ html:not(.slim) #grid {
 	margin-top: -2px;
 }
 
+.section-header {
+	--section-icon-scale: 2;
+	--section-icon-text-offset: 0;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+html.no-flex-gap .section-header > * + * {
+	margin-left: 0.5rem;
+}
+
+.section-header-icon-wrap {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.section-header-icon {
+	display: block;
+	width: calc(var(--section-icon-scale) * 1em);
+	height: calc(var(--section-icon-scale) * 1em);
+	object-fit: contain;
+}
+
+.section-header-text {
+	min-width: 0;
+}
+
+.section-header.section-header-has-icon .section-header-text {
+	display: inline-flex;
+	align-items: center;
+	min-height: calc(var(--section-icon-scale) * 1em);
+	line-height: 1;
+	transform: translateY(var(--section-icon-text-offset));
+}
+
 /* Header buttons */
 #headerBottom button,
 #headerBottom input,

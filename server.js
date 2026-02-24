@@ -4652,10 +4652,13 @@ function normalizeWidgets(page, ctx = {}) {
 		for (const item of list) {
 			if (item?.type === 'Frame') {
 				const label = safeText(item?.label || item?.item?.label || item?.item?.name || '');
+				const icon = frameSectionIcon(item);
 				const nextSectionPath = label ? sectionPath.concat([label]) : sectionPath.slice();
 				out.push({
 					__section: true,
 					label,
+					icon,
+					staticIcon: !!item?.staticIcon,
 					__sectionPath: nextSectionPath.slice(),
 					__sitemapName: sitemapName,
 				});
@@ -4715,6 +4718,15 @@ function sectionLabel(widget) {
 	return safeText(widget?.label || widget?.item?.label || widget?.item?.name || '');
 }
 
+function frameSectionIcon(widget) {
+	const rawIcon = safeText(widgetIconName(widget)).trim();
+	if (!rawIcon) return '';
+	// openHAB can expose "frame" as the default category for Frame widgets.
+	// Treat that implicit default as "no icon" unless staticIcon is explicitly set.
+	if (rawIcon.toLowerCase() === 'frame' && !widget?.staticIcon) return '';
+	return rawIcon;
+}
+
 function widgetLabel(widget) {
 	if (widget?.label) return safeText(widget.label);
 	if (widget?.item?.label) return safeText(widget.item.label);
@@ -4748,11 +4760,14 @@ function normalizeSearchWidgets(page, ctx) {
 		for (const item of list) {
 			if (item?.type === 'Frame') {
 				const label = sectionLabel(item);
+				const icon = frameSectionIcon(item);
 				const nextSectionPath = label ? sectionPath.concat([label]) : sectionPath.slice();
 				if (label) {
 					out.push({
 						__section: true,
 						label,
+						icon,
+						staticIcon: !!item?.staticIcon,
 						__sectionPath: nextSectionPath.slice(),
 						__sitemapName: sitemapName,
 					});
@@ -7708,7 +7723,12 @@ app.get('/search-index', async (req, res) => {
 			const frameKey = `${pagePath.join('>')}|${frameLabel}`;
 			if (seenFrames.has(frameKey)) continue;
 			seenFrames.add(frameKey);
-			frames.push({ label: frameLabel, path: pagePath.slice() });
+			frames.push({
+				label: frameLabel,
+				path: pagePath.slice(),
+				icon: safeText(f.icon || ''),
+				staticIcon: !!f.staticIcon,
+			});
 		}
 
 		for (const w of normalized) {
