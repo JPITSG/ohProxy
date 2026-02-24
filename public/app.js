@@ -60,6 +60,29 @@ const supportsAspectRatio = (function() {
 	return el.style.aspectRatio === '1 / 1';
 })();
 
+// Feature detection for flex gap (Chrome 84+, Safari 14.1+, Firefox 63+)
+const supportsFlexGap = (function() {
+	try {
+		const flex = document.createElement('div');
+		flex.style.display = 'flex';
+		flex.style.flexDirection = 'column';
+		flex.style.rowGap = '1px';
+		flex.style.position = 'absolute';
+		flex.style.top = '-9999px';
+		flex.style.left = '-9999px';
+		flex.style.pointerEvents = 'none';
+
+		flex.appendChild(document.createElement('div'));
+		flex.appendChild(document.createElement('div'));
+		document.documentElement.appendChild(flex);
+		const hasFlexGap = flex.scrollHeight === 1;
+		document.documentElement.removeChild(flex);
+		return hasFlexGap;
+	} catch (err) {
+		return true;
+	}
+})();
+
 function applyIframeHeight(container, height) {
 	if (height > 0) {
 		container.style.height = height + 'px';
@@ -10610,6 +10633,7 @@ function restoreNormalPolling() {
 		state.headerMode = (headerParam === 'small' || headerParam === 'none') ? headerParam : 'full';
 		const modeParam = params.get('mode');
 		state.forcedMode = (modeParam === 'dark' || modeParam === 'light') ? modeParam : null;
+		if (!supportsFlexGap) document.documentElement.classList.add('no-flex-gap');
 		if (state.isSlim) document.documentElement.classList.add('slim');
 		if (state.headerMode === 'small') document.documentElement.classList.add('header-small');
 		if (state.headerMode === 'none') document.documentElement.classList.add('header-none');
