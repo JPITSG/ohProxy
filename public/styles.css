@@ -2150,6 +2150,7 @@ body.theme-light .oh-modal-body::-webkit-scrollbar-thumb:hover {
 	display: flex;
 	justify-content: flex-end;
 	align-items: center;
+	gap: 8px;
 	padding: 12px 20px;
 	border-top: 1px solid var(--glass-border-color);
 	flex-shrink: 0;
@@ -2169,12 +2170,15 @@ body.theme-light .oh-modal-footer {
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
 	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
 }
-.oh-modal-footer button + button {
-	margin-left: 8px;
-}
 .oh-modal-footer button:disabled {
 	opacity: .4;
 	cursor: default;
+}
+html.no-flex-gap .oh-modal-footer button + button {
+	margin-left: 8px;
+}
+html.no-flex-gap .oh-modal-body > * + * {
+	margin-top: 12px;
 }
 
 /* Alert Modal */
@@ -2382,6 +2386,9 @@ body.theme-light .admin-config-section:not(.collapsed) .admin-config-section-bod
 body.theme-light .card-config-body {
 	scrollbar-color: rgba(150, 150, 150, 0.35) transparent;
 }
+html.no-flex-gap .card-config-body > * + * {
+	margin-top: 12px;
+}
 .card-config-body::-webkit-scrollbar {
 	width: 4px;
 }
@@ -2400,6 +2407,16 @@ body.theme-light .card-config-body {
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
+}
+html.no-flex-gap .history-section > * + *,
+html.no-flex-gap .card-config-rules > * + *,
+html.no-flex-gap .default-sound-section > * + *,
+html.no-flex-gap .visibility-section > * + *,
+html.no-flex-gap .card-width-section > * + *,
+html.no-flex-gap .glow-rules-section > * + *,
+html.no-flex-gap .iframe-height-section > * + *,
+html.no-flex-gap .proxy-cache-section > * + * {
+	margin-top: 8px;
 }
 .history-entries { display: flex; flex-direction: column; margin-top: -6px; }
 .history-entry {
@@ -2444,6 +2461,7 @@ body.theme-light .card-config-body {
 	padding: 6px 0;
 }
 .history-nav { display: flex; gap: 6px; }
+html.no-flex-gap .history-nav > * + * { margin-left: 6px; }
 .history-older, .history-newer {
 	flex: 1;
 	padding: 11px 12px;
@@ -2462,6 +2480,10 @@ body.theme-light .card-config-body {
 	display: flex;
 	align-items: center;
 	gap: 6px;
+}
+html.no-flex-gap .glow-rule-row > * + *,
+html.no-flex-gap .admin-list-row > * + * {
+	margin-left: 6px;
 }
 .glow-rule-row input {
 	box-sizing: border-box;
@@ -2625,6 +2647,7 @@ body.theme-light .admin-list-input:focus {
 	display: flex;
 	justify-content: flex-end;
 	align-items: center;
+	gap: 8px;
 	padding: 12px 20px;
 	border-top: 1px solid var(--glass-border-color);
 	flex-shrink: 0;
@@ -2660,14 +2683,14 @@ body.theme-light .admin-config-footer {
 	box-shadow: 0 0 8px var(--color-control-off-shadow);
 	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
 }
-.card-config-footer button + button,
-.admin-config-footer button + button {
-	margin-left: 8px;
-}
 .card-config-footer button:disabled,
 .admin-config-footer button:disabled {
 	opacity: .4;
 	cursor: default;
+}
+html.no-flex-gap .card-config-footer button + button,
+html.no-flex-gap .admin-config-footer button + button {
+	margin-left: 8px;
 }
 body.card-config-open,
 body.admin-config-open,
@@ -2725,6 +2748,9 @@ body.theme-light .proxy-cache-input::placeholder {
 .item-config-visibility {
 	display: flex;
 	gap: 8px;
+}
+html.no-flex-gap .item-config-visibility > * + * {
+	margin-left: 8px;
 }
 .item-config-radio {
 	flex: 1;
@@ -2949,6 +2975,9 @@ body.theme-light .admin-config-sections {
 	cursor: pointer;
 	user-select: none;
 }
+html.no-flex-gap .admin-config-section-header > * + * {
+	margin-left: 8px;
+}
 .admin-config-section-title {
 	font-size: .75rem;
 	text-transform: uppercase;
@@ -2995,6 +3024,9 @@ body.theme-light .admin-config-sections {
 	flex-direction: column;
 	gap: 12px;
 }
+html.no-flex-gap .admin-config-section-body > * + * {
+	margin-top: 12px;
+}
 .admin-config-section.collapsed .admin-config-section-body {
 	display: none;
 }
@@ -3003,10 +3035,16 @@ body.theme-light .admin-config-sections {
 	align-items: center;
 	gap: 12px;
 }
+html.no-flex-gap .admin-config-field:not(.stacked) > * + * {
+	margin-left: 12px;
+}
 .admin-config-field.stacked {
 	flex-direction: column;
 	align-items: stretch;
 	gap: 4px;
+}
+html.no-flex-gap .admin-config-field.stacked > * + * {
+	margin-top: 4px;
 }
 .admin-config-field.stacked > label {
 	flex: 0 0 auto;
@@ -3063,6 +3101,9 @@ body.theme-light .admin-config-field textarea::placeholder {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
+}
+html.no-flex-gap .admin-list-wrap > * + * {
+	margin-top: 6px;
 }
 .admin-list-input {
 	flex: 1;
@@ -3196,6 +3237,7 @@ body.theme-light .admin-toggle input:checked ~ .admin-toggle-dot {
 .admin-config-footer {
 	display: flex;
 	align-items: center;
+	gap: 8px;
 	padding: 12px 20px;
 	border-top: 1px solid var(--glass-border-color);
 	flex-shrink: 0;

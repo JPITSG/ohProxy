@@ -8710,8 +8710,8 @@ app.get('/presence', async (req, res) => {
 .month-select{position:relative}
 .month-select-btn{min-width:60px;text-align:center;white-space:nowrap}
 .month-select-btn.active{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 8px rgba(78,183,128,0.35)}
-.month-select-menu{position:fixed;z-index:200;background:rgb(245,246,250);border:1px solid rgba(150,150,150,0.3);border-radius:10px;box-shadow:0 8px 16px rgba(0,0,0,0.12);padding:0;overflow:hidden;display:none}
-.month-select-menu.open{display:block}
+.month-select-menu{position:fixed;z-index:200;background:rgb(245,246,250);border:1px solid rgba(150,150,150,0.3);border-radius:10px;box-shadow:0 8px 16px rgba(0,0,0,0.12);padding:0;overflow:hidden;opacity:0;visibility:hidden;pointer-events:none;transition:opacity 0.4s ease,visibility 0.4s ease}
+.month-select-menu.open{opacity:1;visibility:visible;pointer-events:auto}
 .month-select-menu div{padding:6px 16px;font-size:.75rem;font-weight:300;font-family:'Rubik',sans-serif;color:#0f172a;cursor:pointer;white-space:nowrap;text-align:center}
 .month-select-menu div:first-child{padding-top:8px}
 .month-select-menu div:last-child{padding-bottom:8px}
