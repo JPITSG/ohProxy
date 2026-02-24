@@ -80,6 +80,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawState\s*=\s*req\.query\?\.state\s*;/,
 			/const\s+rawEncoding\s*=\s*req\.query\?\.encoding\s*;/,
 			/if\s*\(rawEncoding\s*!==\s*undefined\s*&&\s*typeof\s+rawEncoding\s*!==\s*'string'\s*\)/,
+			/if\s*\(startVideoProxyStream\(req,\s*res,\s*target,\s*req\.query\?\.encoding\)\)\s*return;/,
 			/const\s+key\s*=\s*req\.query\.key\s*;/,
 		];
 
@@ -140,7 +141,7 @@ describe('Input Validation Coverage', () => {
 
 		assert.ok(content.includes("delta !== '1' && delta !== 'true'"));
 
-		assert.ok(content.includes("if (!['http:', 'https:', 'rtsp:'].includes(target.protocol))"));
+			assert.ok(content.includes("if (!['http:', 'https:', 'rtsp:', 'rtsps:'].includes(target.protocol))"));
 		assert.ok(content.includes('isProxyTargetAllowed(target, liveConfig.proxyAllowlist)'));
 
 		assert.ok(content.includes("parsePeriodToSeconds(period)"));

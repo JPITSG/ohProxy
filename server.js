@@ -210,9 +210,9 @@ function loadUserConfig() {
 function parseProxyAllowEntry(value) {
 	const raw = safeText(value).trim();
 	if (!raw) return null;
-	// Reject non-http/https/rtsp schemes (must have :// to be a scheme)
-	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && !/^(https?|rtsp):\/\//i.test(raw)) return null;
-	const candidate = /^(https?|rtsp):\/\//i.test(raw) ? raw : `http://${raw}`;
+	// Reject non-http/https/rtsp/rtsps schemes (must have :// to be a scheme)
+	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && !/^(https?|rtsps?):\/\//i.test(raw)) return null;
+	const candidate = /^(https?|rtsps?):\/\//i.test(raw) ? raw : `http://${raw}`;
 	try {
 		const url = new URL(candidate);
 		let host = safeText(url.hostname).toLowerCase();
@@ -241,6 +241,7 @@ function targetPortForUrl(url) {
 	if (url.port) return url.port;
 	if (url.protocol === 'https:') return '443';
 	if (url.protocol === 'rtsp:') return '554';
+	if (url.protocol === 'rtsps:') return '322';
 	return '80';
 }
 
@@ -2911,7 +2912,7 @@ function extractVideoUrls(data, results = new Map()) {
 	if (!data) return results;
 	const type = (data.type || '').toLowerCase();
 	if (type === 'video') {
-		const url = (data.label || '').trim();
+		const url = safeText(data.url).trim();
 		if (url) {
 			const encoding = (data.encoding || '').trim().toLowerCase();
 			results.set(url, encoding || null);
@@ -2948,7 +2949,7 @@ function resolveVideoEncoding(rawEncoding, target) {
 		if (VALID_VIDEO_ENCODINGS.has(enc)) return enc;
 	}
 	// Auto-detect from URL
-	if (target.protocol === 'rtsp:') return 'rtsp';
+	if (target.protocol === 'rtsp:' || target.protocol === 'rtsps:') return 'rtsp';
 	const pathname = (target.pathname || '').toLowerCase();
 	if (pathname.endsWith('.m3u8')) return 'hls';
 	if (pathname.endsWith('.mp4') || pathname.endsWith('.m4v')) return 'mp4';
@@ -2971,6 +2972,69 @@ function buildFfmpegInputArgs(encoding, url) {
 	default:
 		return [...common, '-i', url];
 	}
+}
+
+function urlsHaveSameHostPort(left, right) {
+	if (!(left instanceof URL) || !(right instanceof URL)) return false;
+	const leftHost = safeText(left.hostname).toLowerCase();
+	const rightHost = safeText(right.hostname).toLowerCase();
+	if (!leftHost || !rightHost || leftHost !== rightHost) return false;
+	return targetPortForUrl(left) === targetPortForUrl(right);
+}
+
+function openhabProxyPath(baseUrl) {
+	try {
+		const base = new URL(baseUrl);
+		const basePath = base.pathname && base.pathname !== '/' ? base.pathname.replace(/\/$/, '') : '';
+		return `${basePath}/proxy`;
+	} catch {
+		return '/proxy';
+	}
+}
+
+function isOpenhabWidgetProxyTarget(target, baseUrl) {
+	if (!(target instanceof URL)) return false;
+	if (target.pathname !== openhabProxyPath(baseUrl)) return false;
+	const sitemap = safeText(target.searchParams.get('sitemap')).trim();
+	const widgetId = safeText(target.searchParams.get('widgetId')).trim();
+	if (!sitemap || !widgetId) return false;
+	let openhabTarget;
+	try {
+		openhabTarget = new URL(baseUrl);
+	} catch {
+		return false;
+	}
+	return urlsHaveSameHostPort(target, openhabTarget);
+}
+
+function cleanExtractedRtspUrl(candidate) {
+	let out = safeText(candidate).trim();
+	if (!out) return '';
+	out = out.replace(/(?:&(apos|quot|amp|lt|gt|#39);)+$/ig, '');
+	out = out.replace(/[\s)>,;'"`]+$/g, '');
+	return out;
+}
+
+function extractRtspUrlFromBody(body, _contentType) {
+	if (!body) return '';
+	let text = '';
+	try {
+		if (Buffer.isBuffer(body)) text = body.subarray(0, 131072).toString('utf8');
+		else text = safeText(body).slice(0, 131072);
+	} catch {
+		return '';
+	}
+	if (!text) return '';
+	const matches = text.match(/rtsps?:\/\/[^\s"'<>]+/ig) || [];
+	for (const rawMatch of matches) {
+		const cleaned = cleanExtractedRtspUrl(rawMatch);
+		if (!cleaned) continue;
+		try {
+			const parsed = new URL(cleaned);
+			if (parsed.protocol === 'rtsp:' || parsed.protocol === 'rtsps:') return parsed.toString();
+		} catch {}
+	}
+	return '';
 }
 
 // Chart cache helpers
@@ -5438,6 +5502,86 @@ function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3, agent, valida
 	});
 }
 
+function fetchErrorBodyIfHttpError(targetUrl, headers, redirectsLeft = 3, agent, validateRedirect) {
+	return new Promise((resolve, reject) => {
+		let url;
+		try {
+			url = new URL(targetUrl);
+		} catch (err) {
+			reject(err);
+			return;
+		}
+
+		const isHttps = url.protocol === 'https:';
+		const client = isHttps ? https : http;
+		const requestHeaders = { ...headers, 'User-Agent': liveConfig.userAgent };
+		const opts = {
+			method: 'GET',
+			hostname: url.hostname,
+			port: url.port || (isHttps ? 443 : 80),
+			path: `${url.pathname}${url.search}`,
+			headers: requestHeaders,
+		};
+		if (agent) opts.agent = agent;
+		opts.timeout = 30000;
+
+		const req = client.request(opts, (res) => {
+			const status = res.statusCode || 500;
+			const location = res.headers.location;
+			if (location && redirectsLeft > 0 && REDIRECT_STATUS.has(status)) {
+				res.resume();
+				const nextUrl = new URL(location, url);
+				if (typeof validateRedirect === 'function' && !validateRedirect(nextUrl)) {
+					reject(new Error('Redirect target not allowed'));
+					return;
+				}
+				resolve(fetchErrorBodyIfHttpError(nextUrl.toString(), headers, redirectsLeft - 1, agent, validateRedirect));
+				return;
+			}
+
+			const contentType = safeText(res.headers['content-type']);
+			if (status < 400) {
+				res.resume();
+				resolve({
+					status,
+					ok: true,
+					contentType,
+					url: url.toString(),
+				});
+				return;
+			}
+
+			const chunks = [];
+			res.on('error', reject);
+			res.on('data', (chunk) => chunks.push(chunk));
+			res.on('end', () => {
+				let body = Buffer.concat(chunks);
+				const encoding = safeText(res.headers['content-encoding']).toLowerCase();
+				try {
+					body = decodeCompressedBody(body, encoding);
+				} catch (err) {
+					reject(err);
+					return;
+				}
+				resolve({
+					status,
+					ok: false,
+					body,
+					contentType,
+					contentEncoding: encoding,
+					url: url.toString(),
+				});
+			});
+		});
+
+		req.on('timeout', () => {
+			req.destroy(new Error('Proxy fetch timed out'));
+		});
+		req.on('error', reject);
+		req.end();
+	});
+}
+
 function pipeStreamingProxy(targetUrl, expressRes, headers = {}, agent) {
 	return new Promise((resolve, reject) => {
 		let url;
@@ -5925,18 +6069,14 @@ async function refreshSitemapCache(options = {}) {
 		}
 	}
 
-	// Trigger initial video preview capture on first successful sitemap pull,
-	// but only if the task is due (respects restart persistence)
+	// Trigger initial video preview bootstrap on first successful sitemap pull:
+	// generate missing previews immediately (independent of schedule), then let
+	// normal task scheduling continue as configured.
 	if (!videoPreviewInitialCaptureDone && liveConfig.videoPreviewIntervalMs > 0) {
 		videoPreviewInitialCaptureDone = true;
-		const persistedTimes = loadTaskLastRunTimes();
-		const lastRun = persistedTimes['video-preview'] || 0;
-		const elapsed = Date.now() - lastRun;
-		if (elapsed >= liveConfig.videoPreviewIntervalMs) {
-			captureVideoPreviewsTask().catch((err) => {
-				logMessage(`Initial video preview capture failed: ${err.message || err}`);
-			});
-		}
+		captureVideoPreviewsTask({ onlyMissing: true, reason: 'startup-bootstrap' }).catch((err) => {
+			logMessage(`Initial video preview bootstrap failed: ${err.message || err}`);
+		});
 	}
 
 	return true;
@@ -8226,7 +8366,7 @@ app.get('/video-preview', (req, res) => {
 		}
 	}
 
-	if (!['http:', 'https:', 'rtsp:'].includes(target.protocol)) {
+	if (!['http:', 'https:', 'rtsp:', 'rtsps:'].includes(target.protocol)) {
 		return res.status(400).type('text/plain').send('Invalid video URL');
 	}
 
@@ -9628,6 +9768,137 @@ else if(ctxDragEnded){e.preventDefault();ctxDragEnded=false}
 	res.send(html);
 });
 
+function sendBinaryProxyResponse(res, result) {
+	res.status(result.status || 502);
+	if (result.contentType) res.setHeader('Content-Type', result.contentType);
+	res.setHeader('Cache-Control', 'no-store');
+	res.send(result.body || '');
+}
+
+function startVideoProxyStream(req, res, target, rawEncoding) {
+	if (rawEncoding !== undefined && typeof rawEncoding !== 'string') {
+		sendStyledError(res, req, 400, 'Invalid encoding parameter');
+		return true;
+	}
+
+	const encoding = resolveVideoEncoding(rawEncoding, target);
+	if (!encoding) return false;
+
+	const streamUrl = target.toString();
+	const streamUrlLog = redactUrlCredentials(streamUrl);
+	const clientIp = getRemoteIp(req) || 'unknown';
+	const username = req.ohProxyUser || 'anonymous';
+	const streamId = ++videoStreamIdCounter;
+
+	// Get viewport width for scaling time overlay (0-10000, invalid = 0)
+	if (req.query?.w !== undefined && typeof req.query.w !== 'string') {
+		sendStyledError(res, req, 400, 'Invalid viewport width');
+		return true;
+	}
+	const rawWidth = parseOptionalInt(req.query?.w, { min: 0, max: 10000 });
+	if (req.query?.w !== undefined && !Number.isFinite(rawWidth)) {
+		sendStyledError(res, req, 400, 'Invalid viewport width');
+		return true;
+	}
+	const viewportWidth = Number.isFinite(rawWidth) ? rawWidth : 0;
+	// Font size scales with viewport: ~2.5% of width, min 16px, max 48px
+	const fontSize = viewportWidth > 0 ? Math.max(16, Math.min(48, Math.round(viewportWidth / 40))) : 24;
+
+	// Track and log stream start
+	activeVideoStreams.set(streamId, { url: streamUrlLog, user: username, ip: clientIp, startTime: Date.now(), encoding });
+	logMessage(`[Video] Starting ${encoding} stream ${streamUrlLog} to ${username}@${clientIp} (w=${viewportWidth})`);
+
+	// Time overlay filter: top-right, using configured timeFormat (strftime expansion)
+	const timeOverlay = (liveConfig.clientConfig?.timeFormat || 'H:mm:ss')
+		.replace('HH', '%H').replace(/(?<![Dh%])H(?!H)/, '%-H')
+		.replace('hh', '%I').replace(/(?<![Hd%])h(?!h)/, '%-I')
+		.replace('mm', '%M').replace('ss', '%S').replace('A', '%p')
+		.replace(/:/g, '\\:');
+	const drawtext = `drawtext=text='${timeOverlay}':expansion=strftime:x=w-tw-15:y=15:fontsize=${fontSize}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`;
+	// Scale to viewport width if provided - ensure even dimensions for x264
+	const scaleWidth = viewportWidth > 0 ? (viewportWidth % 2 === 0 ? viewportWidth : viewportWidth + 1) : 0;
+	const videoFilter = scaleWidth > 0
+		? `scale=${scaleWidth}:-2,${drawtext}`
+		: drawtext;
+
+	const inputArgs = buildFfmpegInputArgs(encoding, streamUrl);
+	const ffmpegArgs = [
+		...inputArgs,
+		// Video encoding - low latency
+		'-vf', videoFilter,
+		'-c:v', 'libx264',
+		'-preset', 'ultrafast',
+		'-tune', 'zerolatency',
+		'-g', '25',
+		'-keyint_min', '25',
+		// Audio
+		'-c:a', 'aac',
+		'-b:a', '64k',
+		// Output - streaming optimized
+		'-f', 'mp4',
+		'-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart',
+		'-flush_packets', '1',
+		'-reset_timestamps', '1',
+		'pipe:1',
+	];
+	const ffmpeg = spawn(liveConfig.binFfmpeg, ffmpegArgs, {
+		stdio: ['ignore', 'pipe', 'pipe'],
+	});
+	res.setHeader('Content-Type', 'video/mp4');
+	res.setHeader('Cache-Control', 'no-store');
+	ffmpeg.stdout.pipe(res);
+
+	// Collect stderr to extract stream info
+	let stderrData = '';
+	let streamInfoLogged = false;
+	ffmpeg.stderr.on('data', (chunk) => {
+		if (stderrData.length < 8192) stderrData += chunk.toString();
+		// Log track info once we see Output (means probing is done)
+		if (!streamInfoLogged && stderrData.includes('Output #0')) {
+			streamInfoLogged = true;
+			try {
+				const inputStreams = [];
+				const outputStreams = [];
+				let inOutput = false;
+				for (const line of stderrData.split('\n')) {
+					if (line.includes('Output #0')) inOutput = true;
+					const streamMatch = line.match(/Stream #\d+:\d+.*?: (Video|Audio): (\w+)/);
+					if (streamMatch) {
+						const desc = `${streamMatch[1]}:${streamMatch[2]}`;
+						if (inOutput) outputStreams.push(desc);
+						else inputStreams.push(desc);
+					}
+				}
+				if (inputStreams.length || outputStreams.length) {
+					logMessage(`[Video] Stream info for ${username}@${clientIp}: in:[${inputStreams.join(', ')}] out:[${outputStreams.join(', ')}]`);
+				}
+			} catch {}
+		}
+	});
+
+	const endStream = () => {
+		if (activeVideoStreams.has(streamId)) {
+			activeVideoStreams.delete(streamId);
+			logMessage(`[Video] Ending ${encoding} stream ${streamUrlLog} to ${username}@${clientIp}`);
+		}
+	};
+
+	ffmpeg.on('error', () => {
+		endStream();
+		if (!res.headersSent) {
+			sendStyledError(res, req, 502, 'Video proxy error');
+		}
+	});
+	ffmpeg.on('close', () => {
+		endStream();
+		if (!res.writableEnded) res.end();
+	});
+	req.on('close', () => {
+		ffmpeg.kill('SIGKILL');
+	});
+	return true;
+}
+
 app.get('/proxy', async (req, res, next) => {
 	const raw = req.query?.url;
 
@@ -9657,7 +9928,7 @@ app.get('/proxy', async (req, res, next) => {
 			}
 		}
 
-		if (!['http:', 'https:', 'rtsp:'].includes(target.protocol)) {
+		if (!['http:', 'https:', 'rtsp:', 'rtsps:'].includes(target.protocol)) {
 			return sendStyledError(res, req, 400, 'Invalid proxy target');
 		}
 		if (target.port && (!/^\d+$/.test(target.port) || Number(target.port) < 1 || Number(target.port) > 65535)) {
@@ -9667,127 +9938,7 @@ app.get('/proxy', async (req, res, next) => {
 			return sendStyledError(res, req, 403, 'Proxy target not allowed');
 		}
 
-		// Validate encoding param
-		const rawEncoding = req.query?.encoding;
-		if (rawEncoding !== undefined && typeof rawEncoding !== 'string') {
-			return sendStyledError(res, req, 400, 'Invalid encoding parameter');
-		}
-		const encoding = resolveVideoEncoding(rawEncoding, target);
-
-		// Video stream - convert to MP4 via FFmpeg
-		if (encoding) {
-			const streamUrl = target.toString();
-			const streamUrlLog = redactUrlCredentials(streamUrl);
-			const clientIp = getRemoteIp(req) || 'unknown';
-			const username = req.ohProxyUser || 'anonymous';
-			const streamId = ++videoStreamIdCounter;
-
-			// Get viewport width for scaling time overlay (0-10000, invalid = 0)
-			if (req.query?.w !== undefined && typeof req.query.w !== 'string') {
-				return sendStyledError(res, req, 400, 'Invalid viewport width');
-			}
-			const rawWidth = parseOptionalInt(req.query?.w, { min: 0, max: 10000 });
-			if (req.query?.w !== undefined && !Number.isFinite(rawWidth)) {
-				return sendStyledError(res, req, 400, 'Invalid viewport width');
-			}
-			const viewportWidth = Number.isFinite(rawWidth) ? rawWidth : 0;
-			// Font size scales with viewport: ~2.5% of width, min 16px, max 48px
-			const fontSize = viewportWidth > 0 ? Math.max(16, Math.min(48, Math.round(viewportWidth / 40))) : 24;
-
-			// Track and log stream start
-			activeVideoStreams.set(streamId, { url: streamUrlLog, user: username, ip: clientIp, startTime: Date.now(), encoding });
-			logMessage(`[Video] Starting ${encoding} stream ${streamUrlLog} to ${username}@${clientIp} (w=${viewportWidth})`);
-
-			// Time overlay filter: top-right, using configured timeFormat (strftime expansion)
-			const timeOverlay = (liveConfig.clientConfig?.timeFormat || 'H:mm:ss')
-				.replace('HH', '%H').replace(/(?<![Dh%])H(?!H)/, '%-H')
-				.replace('hh', '%I').replace(/(?<![Hd%])h(?!h)/, '%-I')
-				.replace('mm', '%M').replace('ss', '%S').replace('A', '%p')
-				.replace(/:/g, '\\:');
-			const drawtext = `drawtext=text='${timeOverlay}':expansion=strftime:x=w-tw-15:y=15:fontsize=${fontSize}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`;
-			// Scale to viewport width if provided - ensure even dimensions for x264
-			const scaleWidth = viewportWidth > 0 ? (viewportWidth % 2 === 0 ? viewportWidth : viewportWidth + 1) : 0;
-			const videoFilter = scaleWidth > 0
-				? `scale=${scaleWidth}:-2,${drawtext}`
-				: drawtext;
-
-			const inputArgs = buildFfmpegInputArgs(encoding, streamUrl);
-			const ffmpegArgs = [
-				...inputArgs,
-				// Video encoding - low latency
-				'-vf', videoFilter,
-				'-c:v', 'libx264',
-				'-preset', 'ultrafast',
-				'-tune', 'zerolatency',
-				'-g', '25',
-				'-keyint_min', '25',
-				// Audio
-				'-c:a', 'aac',
-				'-b:a', '64k',
-				// Output - streaming optimized
-				'-f', 'mp4',
-				'-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart',
-				'-flush_packets', '1',
-				'-reset_timestamps', '1',
-				'pipe:1',
-			];
-			const ffmpeg = spawn(liveConfig.binFfmpeg, ffmpegArgs, {
-				stdio: ['ignore', 'pipe', 'pipe'],
-			});
-			res.setHeader('Content-Type', 'video/mp4');
-			res.setHeader('Cache-Control', 'no-store');
-			ffmpeg.stdout.pipe(res);
-
-			// Collect stderr to extract stream info
-			let stderrData = '';
-			let streamInfoLogged = false;
-			ffmpeg.stderr.on('data', (chunk) => {
-				if (stderrData.length < 8192) stderrData += chunk.toString();
-				// Log track info once we see Output (means probing is done)
-				if (!streamInfoLogged && stderrData.includes('Output #0')) {
-					streamInfoLogged = true;
-					try {
-						const inputStreams = [];
-						const outputStreams = [];
-						let inOutput = false;
-						for (const line of stderrData.split('\n')) {
-							if (line.includes('Output #0')) inOutput = true;
-							const streamMatch = line.match(/Stream #\d+:\d+.*?: (Video|Audio): (\w+)/);
-							if (streamMatch) {
-								const desc = `${streamMatch[1]}:${streamMatch[2]}`;
-								if (inOutput) outputStreams.push(desc);
-								else inputStreams.push(desc);
-							}
-						}
-						if (inputStreams.length || outputStreams.length) {
-							logMessage(`[Video] Stream info for ${username}@${clientIp}: in:[${inputStreams.join(', ')}] out:[${outputStreams.join(', ')}]`);
-						}
-					} catch {}
-				}
-			});
-
-			const endStream = () => {
-				if (activeVideoStreams.has(streamId)) {
-					activeVideoStreams.delete(streamId);
-					logMessage(`[Video] Ending ${encoding} stream ${streamUrlLog} to ${username}@${clientIp}`);
-				}
-			};
-
-			ffmpeg.on('error', (err) => {
-				endStream();
-				if (!res.headersSent) {
-					sendStyledError(res, req, 502, 'Video proxy error');
-				}
-			});
-			ffmpeg.on('close', () => {
-				endStream();
-				if (!res.writableEnded) res.end();
-			});
-			req.on('close', () => {
-				ffmpeg.kill('SIGKILL');
-			});
-			return;
-		}
+		if (startVideoProxyStream(req, res, target, req.query?.encoding)) return;
 
 		const headers = {};
 		const accept = normalizeHeaderValue(req.headers.accept);
@@ -9849,6 +10000,50 @@ app.get('/proxy', async (req, res, next) => {
 				res.send(result.body || '');
 			} catch (err) {
 				logMessage(`Cached proxy fetch failed for ${targetUrlLog}: ${err.message || err}`);
+				if (!res.headersSent) {
+					sendStyledError(res, req, 502, 'Proxy error');
+				}
+			}
+			return;
+		}
+
+		const shouldTryRtspFallback = isOpenhabWidgetProxyTarget(target, liveConfig.ohTarget);
+		if (shouldTryRtspFallback) {
+			const targetUrl = target.toString();
+			const targetUrlLog = redactUrlCredentials(targetUrl);
+			try {
+				const allowlist = liveConfig.proxyAllowlist;
+				const probe = await fetchErrorBodyIfHttpError(targetUrl, headers, 3, undefined,
+					(redirectUrl) => isProxyTargetAllowed(redirectUrl, allowlist));
+				if (probe.ok) {
+					await pipeStreamingProxy(targetUrl, res, headers);
+					return;
+				}
+
+				const fallbackUrl = extractRtspUrlFromBody(probe.body, probe.contentType);
+				if (!fallbackUrl) {
+					sendBinaryProxyResponse(res, probe);
+					return;
+				}
+
+				let fallbackTarget;
+				try {
+					fallbackTarget = new URL(fallbackUrl);
+				} catch {
+					sendBinaryProxyResponse(res, probe);
+					return;
+				}
+				if (!isProxyTargetAllowed(fallbackTarget, liveConfig.proxyAllowlist)) {
+					logMessage(`[Video] Ignoring disallowed RTSP fallback from ${targetUrlLog}: ${redactUrlCredentials(fallbackUrl)}`);
+					sendBinaryProxyResponse(res, probe);
+					return;
+				}
+
+				logMessage(`[Video] Retrying openHAB proxy error via RTSP fallback: ${targetUrlLog} -> ${redactUrlCredentials(fallbackUrl)}`);
+				if (startVideoProxyStream(req, res, fallbackTarget, 'rtsp')) return;
+				sendBinaryProxyResponse(res, probe);
+			} catch (err) {
+				logMessage(`Direct proxy failed for ${targetUrlLog}: ${err.message || err}`);
 				if (!res.headersSent) {
 					sendStyledError(res, req, 502, 'Proxy error');
 				}
@@ -9972,13 +10167,90 @@ registerBackgroundTask('icon-cache-cleanup', 3600000, () => {
 	if (pruned > 0) logMessage(`[Icon] Pruned ${pruned} stale dynamic icon(s)`);
 });
 
+async function resolveVideoPreviewSource(videoUrl, rawEncoding) {
+	const safeVideoUrl = redactUrlCredentials(videoUrl);
+	let target;
+	try {
+		target = new URL(videoUrl);
+	} catch {
+		return { ok: false, reason: 'invalid-url', safeVideoUrl };
+	}
+
+	const directEncoding = resolveVideoEncoding(rawEncoding, target);
+	if (directEncoding) {
+		return {
+			ok: true,
+			source: 'direct',
+			url: target.toString(),
+			safeUrl: safeVideoUrl,
+			encoding: directEncoding,
+		};
+	}
+
+	if (!isOpenhabWidgetProxyTarget(target, liveConfig.ohTarget)) {
+		return { ok: false, reason: 'unresolved-encoding', safeVideoUrl };
+	}
+
+	const headers = { Accept: '*/*' };
+	const ah = authHeader();
+	if (ah) headers.Authorization = ah;
+	const allowlist = liveConfig.proxyAllowlist;
+	try {
+		const probe = await fetchErrorBodyIfHttpError(target.toString(), headers, 3, getOhAgent(),
+			(redirectUrl) => isProxyTargetAllowed(redirectUrl, allowlist));
+		if (probe.ok) {
+			return { ok: false, reason: 'proxy-ok-no-rtsp', safeVideoUrl, status: probe.status || 200 };
+		}
+
+		const fallbackUrl = extractRtspUrlFromBody(probe.body, probe.contentType);
+		if (!fallbackUrl) {
+			return { ok: false, reason: 'proxy-error-no-rtsp', safeVideoUrl, status: probe.status || 0 };
+		}
+
+		let fallbackTarget;
+		try {
+			fallbackTarget = new URL(fallbackUrl);
+		} catch {
+			return { ok: false, reason: 'fallback-invalid-url', safeVideoUrl, status: probe.status || 0 };
+		}
+		if (!isProxyTargetAllowed(fallbackTarget, allowlist)) {
+			return {
+				ok: false,
+				reason: 'fallback-not-allowlisted',
+				safeVideoUrl,
+				status: probe.status || 0,
+				fallbackUrl: redactUrlCredentials(fallbackUrl),
+			};
+		}
+
+		const resolvedUrl = fallbackTarget.toString();
+		return {
+			ok: true,
+			source: 'fallback',
+			url: resolvedUrl,
+			safeUrl: redactUrlCredentials(resolvedUrl),
+			encoding: 'rtsp',
+			fromUrl: safeVideoUrl,
+			status: probe.status || 0,
+		};
+	} catch (err) {
+		return {
+			ok: false,
+			reason: 'fallback-probe-error',
+			safeVideoUrl,
+			error: err.message || String(err),
+		};
+	}
+}
+
 // Video preview capture function
-async function captureVideoPreview(videoUrl, encoding) {
+// cacheKeyUrl determines preview filename; sourceUrl is the actual ffmpeg input.
+async function captureVideoPreview(cacheKeyUrl, sourceUrl, encoding) {
 	ensureDir(VIDEO_PREVIEW_DIR);
-	const hash = videoUrlHash(videoUrl);
+	const hash = videoUrlHash(cacheKeyUrl);
 	const outputPath = path.join(VIDEO_PREVIEW_DIR, `${hash}.jpg`);
 
-	const inputArgs = buildFfmpegInputArgs(encoding, videoUrl);
+	const inputArgs = buildFfmpegInputArgs(encoding, sourceUrl);
 
 	return new Promise((resolve) => {
 		const ffmpeg = spawn(liveConfig.binFfmpeg, [
@@ -9991,20 +10263,38 @@ async function captureVideoPreview(videoUrl, encoding) {
 			stdio: ['ignore', 'pipe', 'pipe'],
 		});
 
+		let stderrData = '';
+		ffmpeg.stderr.on('data', (chunk) => {
+			if (stderrData.length < 4096) stderrData += chunk.toString();
+		});
+
 		let killed = false;
 		const timer = setTimeout(() => {
 			killed = true;
 			ffmpeg.kill('SIGKILL');
 		}, 10000);
 
-		ffmpeg.on('close', (code) => {
+		ffmpeg.on('close', (code, signal) => {
 			clearTimeout(timer);
-			resolve(!killed && code === 0);
+			resolve({
+				ok: !killed && code === 0,
+				exitCode: Number.isInteger(code) ? code : null,
+				signal: safeText(signal),
+				timedOut: killed,
+				stderr: stderrData.trim().slice(0, 400),
+			});
 		});
 
-		ffmpeg.on('error', () => {
+		ffmpeg.on('error', (err) => {
 			clearTimeout(timer);
-			resolve(false);
+			resolve({
+				ok: false,
+				exitCode: null,
+				signal: '',
+				timedOut: false,
+				error: err.message || String(err),
+				stderr: stderrData.trim().slice(0, 400),
+			});
 		});
 	});
 }
@@ -10065,10 +10355,11 @@ function pruneChartCache(options = {}) {
 
 // Prune old video preview images
 function pruneVideoPreviews() {
-	if (!fs.existsSync(VIDEO_PREVIEW_DIR)) return;
+	if (!fs.existsSync(VIDEO_PREVIEW_DIR)) return 0;
 
 	const maxAgeMs = liveConfig.videoPreviewPruneHours * 60 * 60 * 1000;
 	const now = Date.now();
+	let pruned = 0;
 
 	try {
 		const files = fs.readdirSync(VIDEO_PREVIEW_DIR);
@@ -10079,20 +10370,34 @@ function pruneVideoPreviews() {
 				const stat = fs.statSync(filePath);
 				if (now - stat.mtimeMs > maxAgeMs) {
 					fs.unlinkSync(filePath);
+					pruned += 1;
 				}
 			} catch (err) {
 				// Ignore individual file errors
 			}
 		}
+		if (pruned > 0) {
+			logMessage(`[Video] Preview pruned ${pruned} stale image(s)`);
+		}
+		return pruned;
 	} catch (err) {
 		logMessage(`[Video] Preview prune failed: ${err.message || err}`);
+		return 0;
 	}
 }
 
 // Video preview capture background task
-async function captureVideoPreviewsTask() {
+async function captureVideoPreviewsTask(options = {}) {
+	const onlyMissing = options && options.onlyMissing === true;
+	const reason = safeText(options && options.reason).trim();
 	const sitemaps = getBackgroundSitemaps();
 	if (!sitemaps.length) return;
+	const modeText = onlyMissing ? 'missing-only' : 'full';
+	const reasonText = reason ? `, reason=${reason}` : '';
+	logMessage(
+		`[Video] Preview task start (${sitemaps.length} sitemap${sitemaps.length === 1 ? '' : 's'}, ` +
+		`mode=${modeText}${reasonText})`
+	);
 
 	const videoUrls = new Map();
 	for (const entry of sitemaps) {
@@ -10109,6 +10414,7 @@ async function captureVideoPreviewsTask() {
 			}
 			const sitemapData = JSON.parse(response.body);
 			const sitemapVideoUrls = extractVideoUrls(sitemapData);
+			logMessage(`[Video] Preview sitemap "${sitemapName}" has ${sitemapVideoUrls.size} video URL(s)`);
 			for (const [url, rawEnc] of sitemapVideoUrls) {
 				if (videoUrls.has(url)) continue;
 				videoUrls.set(url, rawEnc);
@@ -10117,33 +10423,87 @@ async function captureVideoPreviewsTask() {
 			logMessage(`[Video] Preview failed to fetch/parse sitemap "${sitemapName}": ${err.message || err}`);
 		}
 	}
-	if (videoUrls.size === 0) return;
+	if (videoUrls.size === 0) {
+		logMessage('[Video] Preview task finished (no video URLs discovered)');
+		return;
+	}
+
+	const stats = {
+		discovered: videoUrls.size,
+		attempted: 0,
+		captured: 0,
+		failed: 0,
+		skipped: 0,
+		skippedExisting: 0,
+		fallbackUsed: 0,
+	};
 
 	// Capture screenshots sequentially
 	for (const [url, rawEnc] of videoUrls) {
 		const safeUrl = redactUrlCredentials(url);
-		let resolved;
-		try {
-			resolved = resolveVideoEncoding(rawEnc, new URL(url));
-		} catch {
-			logMessage(`[Video] Preview skipping invalid URL ${safeUrl}`);
+		if (onlyMissing) {
+			const hash = videoUrlHash(url);
+			const filePath = path.join(VIDEO_PREVIEW_DIR, `${hash}.jpg`);
+			if (fs.existsSync(filePath)) {
+				stats.skippedExisting += 1;
+				continue;
+			}
+		}
+		const resolvedSource = await resolveVideoPreviewSource(url, rawEnc);
+		if (!resolvedSource.ok) {
+			stats.skipped += 1;
+			const statusInfo = resolvedSource.status ? `, status=${resolvedSource.status}` : '';
+			const fallbackInfo = resolvedSource.fallbackUrl ? `, fallback=${resolvedSource.fallbackUrl}` : '';
+			const errorInfo = resolvedSource.error ? `, error=${resolvedSource.error}` : '';
+			logMessage(
+				`[Video] Preview skipping ${resolvedSource.safeVideoUrl || safeUrl} ` +
+				`(${resolvedSource.reason}${statusInfo}${fallbackInfo}${errorInfo})`
+			);
 			continue;
 		}
-		if (!resolved) continue;
+		if (resolvedSource.source === 'fallback') {
+			stats.fallbackUsed += 1;
+			logMessage(
+				`[Video] Preview fallback resolved ${resolvedSource.fromUrl || safeUrl} -> ` +
+				`${resolvedSource.safeUrl}`
+			);
+		}
+
+		stats.attempted += 1;
 		try {
-			const ok = await captureVideoPreview(url, resolved);
-			if (ok) {
-				logMessage(`[Video] Preview captured screenshot for ${safeUrl}`);
+			const result = await captureVideoPreview(url, resolvedSource.url, resolvedSource.encoding);
+			if (result.ok) {
+				stats.captured += 1;
+				logMessage(
+					`[Video] Preview captured screenshot for key=${safeUrl} ` +
+					`(sourceUrl=${resolvedSource.safeUrl}, source=${resolvedSource.source}, encoding=${resolvedSource.encoding})`
+				);
 			} else {
-				logMessage(`[Video] Preview failed to capture ${safeUrl}`);
+				stats.failed += 1;
+				const codeInfo = result.exitCode !== null ? `, code=${result.exitCode}` : '';
+				const signalInfo = result.signal ? `, signal=${result.signal}` : '';
+				const timeoutInfo = result.timedOut ? ', timeout=true' : '';
+				const errorInfo = result.error ? `, error=${result.error}` : '';
+				const stderrInfo = result.stderr ? `, stderr=${JSON.stringify(result.stderr)}` : '';
+				logMessage(
+					`[Video] Preview failed to capture key=${safeUrl} ` +
+					`(sourceUrl=${resolvedSource.safeUrl}, source=${resolvedSource.source}, encoding=${resolvedSource.encoding}${codeInfo}${signalInfo}${timeoutInfo}${errorInfo}${stderrInfo})`
+				);
 			}
 		} catch (err) {
-			logMessage(`[Video] Preview error capturing ${safeUrl}: ${err.message || err}`);
+			stats.failed += 1;
+			logMessage(`[Video] Preview error capturing key=${safeUrl} (sourceUrl=${resolvedSource.safeUrl}): ${err.message || err}`);
 		}
 	}
 
 	// Prune old previews
-	pruneVideoPreviews();
+	const pruned = pruneVideoPreviews();
+	logMessage(
+		`[Video] Preview task finished ` +
+		`(discovered=${stats.discovered}, attempted=${stats.attempted}, captured=${stats.captured}, ` +
+		`failed=${stats.failed}, skipped=${stats.skipped}, skippedExisting=${stats.skippedExisting}, ` +
+		`fallback=${stats.fallbackUsed}, pruned=${pruned}, mode=${modeText}${reasonText})`
+	);
 }
 
 // Register video preview task (interval 0 = disabled, can be hot-enabled via config reload)
