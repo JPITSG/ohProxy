@@ -5759,6 +5759,15 @@ function sectionLabel(widget) {
 	return safeText(widget?.label || widget?.item?.label || widget?.item?.name || '');
 }
 
+function frameSectionIcon(widget) {
+	const rawIcon = safeText(widgetIconName(widget)).trim();
+	if (!rawIcon) return '';
+	// openHAB can expose "frame" as the default category for Frame widgets.
+	// Treat that implicit default as "no icon" unless staticIcon is explicitly set.
+	if (rawIcon.toLowerCase() === 'frame' && !widget?.staticIcon) return '';
+	return rawIcon;
+}
+
 function flattenWidgets(list, out, ctx) {
 	const frameLabel = safeText(ctx?.frame || '');
 	const path = Array.isArray(ctx?.path) ? ctx.path.slice() : null;
@@ -5767,11 +5776,14 @@ function flattenWidgets(list, out, ctx) {
 	for (const w of list) {
 		if (w?.type === 'Frame') {
 			const label = sectionLabel(w);
+			const icon = frameSectionIcon(w);
 			const nextSectionPath = label ? sectionPath.concat([label]) : sectionPath.slice();
 			if (label) {
 				out.push({
 					__section: true,
 					label,
+					icon,
+					staticIcon: !!w?.staticIcon,
 					__sectionPath: nextSectionPath.slice(),
 					__sitemapName: sitemapName,
 				});
@@ -9113,12 +9125,45 @@ function buildCard(w) {
 	return card;
 }
 
+function sectionSignature(section) {
+	const label = safeText(section?.label || '');
+	const icon = safeText(section?.icon || '');
+	const staticIcon = section?.staticIcon ? '1' : '0';
+	return `${label}|${icon}|${staticIcon}`;
+}
+
+function applySectionHeaderContent(header, section) {
+	const label = safeText(section?.label || '');
+	const icon = safeText(section?.icon || '');
+	header.textContent = '';
+	header.dataset.section = label;
+	header.dataset.sectionSig = sectionSignature(section);
+	header.classList.toggle('section-header-has-icon', !!icon);
+	if (icon) {
+		const iconWrap = document.createElement('span');
+		iconWrap.className = 'section-header-icon-wrap';
+		const iconImg = document.createElement('img');
+		iconImg.className = 'section-header-icon';
+		iconImg.alt = '';
+		iconImg.setAttribute('aria-hidden', 'true');
+		iconImg.dataset.iconKey = `section:${icon}`;
+		loadBestIcon(iconImg, iconCandidates(icon));
+		iconWrap.appendChild(iconImg);
+		header.appendChild(iconWrap);
+	}
+	const text = document.createElement('span');
+	text.className = 'section-header-text';
+	text.textContent = label;
+	header.appendChild(text);
+}
+
 function patchWidgets(widgets, nodes) {
 	for (let i = 0; i < widgets.length; i += 1) {
 		const w = widgets[i];
 		const node = nodes[i];
 		if (w?.__section) {
-			if (node.textContent !== w.label) node.textContent = w.label;
+			const sig = sectionSignature(w);
+			if (node.dataset.sectionSig !== sig) applySectionHeaderContent(node, w);
 			continue;
 		}
 		const info = getWidgetRenderInfo(w);
@@ -9202,9 +9247,25 @@ function render() {
 				order.push(label);
 			}
 		}
+		const frameMetaByGroup = new Map();
+		for (const f of state.searchFrames || []) {
+			const frameLabel = safeText(f?.label || '');
+			if (!frameLabel) continue;
+			const groupLabel = searchGroupLabel({ __path: f.path, __frame: frameLabel });
+			if (frameMetaByGroup.has(groupLabel)) continue;
+			frameMetaByGroup.set(groupLabel, {
+				icon: safeText(f?.icon || ''),
+				staticIcon: !!f?.staticIcon,
+			});
+		}
 		const grouped = [];
 		for (const label of order) {
-			grouped.push({ __section: true, label });
+			const meta = frameMetaByGroup.get(label);
+			if (meta) {
+				grouped.push({ __section: true, label, icon: meta.icon, staticIcon: meta.staticIcon });
+			} else {
+				grouped.push({ __section: true, label });
+			}
 			grouped.push(...groups.get(label));
 		}
 		widgets = grouped;
@@ -9249,7 +9310,7 @@ function render() {
 	const canPatch = nodes.length === widgets.length && widgets.every((w, i) => {
 		const node = nodes[i];
 		if (!node) return false;
-		if (w?.__section) return node.dataset.section === w.label;
+		if (w?.__section) return node.dataset.sectionSig === sectionSignature(w);
 		return node.dataset.widgetKey === widgetKey(w);
 	});
 
@@ -9263,8 +9324,7 @@ function render() {
 			if (w?.__section) {
 				const header = document.createElement('div');
 				header.className = 'sm:col-span-2 lg:col-span-3 mt-0 text-xs uppercase tracking-widest text-slate-400 section-header';
-				header.textContent = w.label;
-				header.dataset.section = w.label;
+				applySectionHeaderContent(header, w);
 				header.addEventListener('click', (e) => {
 					if ((e.ctrlKey || e.metaKey) && getUserRole() === 'admin') {
 						e.preventDefault();
@@ -9530,7 +9590,12 @@ async function buildSearchIndex() {
 			const frameKey = `${pagePath.join('>')}|${frameLabel}`;
 			if (seenFrames.has(frameKey)) continue;
 			seenFrames.add(frameKey);
-			frames.push({ label: frameLabel, path: pagePath.slice() });
+			frames.push({
+				label: frameLabel,
+				path: pagePath.slice(),
+				icon: safeText(f.icon || ''),
+				staticIcon: !!f.staticIcon,
+			});
 		}
 
 		const widgets = normalized.filter(w => !w.__section);
