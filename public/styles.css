@@ -2967,6 +2967,10 @@ body.theme-light .admin-config-sections {
 .admin-config-section:not(.collapsed) .admin-config-section-body {
 	border-bottom: 1px solid var(--glass-border-color);
 }
+/* Keep a single divider at the modal footer junction. */
+.admin-config-sections > .admin-config-section:last-of-type:not(.collapsed) .admin-config-section-body {
+	border-bottom: none;
+}
 .admin-config-section-header {
 	display: flex;
 	align-items: center;

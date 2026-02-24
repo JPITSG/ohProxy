@@ -46,4 +46,10 @@ describe('System settings modal role visibility wiring', () => {
 		assert.match(app, /const schema = getAdminConfigSchemaForRole\(getUserRole\(\)\);[\s\S]*for \(const section of schema\)/, 'settings modal should render from role-filtered schema');
 		assert.match(app, /function collectAdminConfigValues\(\) \{[\s\S]*const schema = getAdminConfigSchemaForRole\(getUserRole\(\)\);/, 'settings payload should be collected from role-filtered schema');
 	});
+
+	it('uses a single divider above the footer for the last expanded settings section', () => {
+		const styles = read('public/styles.css');
+		assert.match(styles, /\.admin-config-footer \{[\s\S]*border-top: 1px solid var\(--glass-border-color\);/, 'footer should keep its top divider');
+		assert.match(styles, /\.admin-config-sections > \.admin-config-section:last-of-type:not\(\.collapsed\) \.admin-config-section-body \{\s*border-bottom: none;/, 'last expanded section should drop its bottom border to prevent a double divider');
+	});
 });
