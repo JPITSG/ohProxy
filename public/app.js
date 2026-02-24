@@ -9204,12 +9204,6 @@ function updateCard(card, w, info) {
 				bindSwitchSingleCommand(btn, btnItemName, pressCommand);
 			}
 
-			if (!b.stateless) {
-				if (pressCommand === buttonState) {
-					btn.classList.add('is-active');
-				}
-			}
-
 			grid.appendChild(btn);
 		}
 
