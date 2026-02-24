@@ -115,6 +115,19 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		assert.match(app, /btn\.disabled = true;/);
 	});
 
+	it('buttongrid render block never applies selected/active class regardless of button state', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		const start = app.indexOf('} else if (isButtongrid && buttons.length) {');
+		const end = app.indexOf("controls.innerHTML = '';", start);
+		assert.ok(start >= 0, 'buttongrid render block start should exist');
+		assert.ok(end > start, 'buttongrid render block end should exist');
+
+		const buttongridBlock = app.slice(start, end);
+		assert.doesNotMatch(buttongridBlock, /!b\.stateless/);
+		assert.doesNotMatch(buttongridBlock, /\.classList\.add\('is-active'\)/);
+		assert.doesNotMatch(buttongridBlock, /\.classList\.toggle\('is-active'/);
+	});
+
 	it('delta updates preserve buttongrid mapping structure and apply buttons payload', () => {
 		const widget = {
 			key: 'id:bg1',
