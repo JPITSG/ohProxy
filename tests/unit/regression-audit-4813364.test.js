@@ -71,11 +71,13 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		assert.doesNotMatch(server, /window\._chartYAxisPattern=\$\{JSON\.stringify\(yAxisDecimalPattern \|\| null\)\};/);
 	});
 
-	it('chart hash polling includes interpolation in request URL and cache key', () => {
+	it('chart hash polling includes interpolation and forceasitem in request URL and cache key', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /const interpolation = \(urlObj\.searchParams\.get\('interpolation'\) \|\| 'linear'\)\.toLowerCase\(\);/);
 		assert.match(app, /const service = urlObj\.searchParams\.get\('service'\) \|\| '';/);
-		assert.match(app, /const cacheKey = `\$\{item\}\|\$\{period\}\|\$\{mode\}\|\$\{assetVersion\}\|\$\{title\}\|\$\{legend\}\|\$\{yAxisDecimalPattern\}\|\$\{interpolation\}\|\$\{service\}`;/);
+		assert.match(app, /const forceAsItem = normalizeChartForceAsItem\(urlObj\.searchParams\.get\('forceasitem'\) \|\| urlObj\.searchParams\.get\('forceAsItem'\)\);/);
+		assert.match(app, /const cacheKey = `\$\{item\}\|\$\{period\}\|\$\{mode\}\|\$\{assetVersion\}\|\$\{title\}\|\$\{legend\}\|\$\{forceAsItem\}\|\$\{yAxisDecimalPattern\}\|\$\{interpolation\}\|\$\{service\}`;/);
+		assert.match(app, /\(forceAsItem \? `&forceasitem=\$\{forceAsItem\}` : ''\)/);
 		assert.match(app, /\(interpolation === 'step' \? '&interpolation=step' : ''\)/);
 		assert.match(app, /\(service \? `&service=\$\{encodeURIComponent\(service\)\}` : ''\)/);
 		assert.match(app, /period=\$\{encodeURIComponent\(period\)\}/);

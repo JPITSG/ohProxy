@@ -377,6 +377,8 @@ const MAX_PERIOD_SEC = 10 * 365.25 * 86400; // ~10 years
 const CHART_PERIOD_MAX_LEN = 64;
 const CHART_SERVICE_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const CHART_LEGEND_MODES = new Set(['true', 'false']);
+const CHART_BOOLEAN_TRUE = new Set(['true', '1', 'yes', 'on']);
+const CHART_BOOLEAN_FALSE = new Set(['false', '0', 'no', 'off']);
 function parseBasePeriodToSeconds(period) {
 	// Simple / multiplied: e.g. h, D, 4h, 2W, 12M
 	const simpleMatch = period.match(/^(\d*)([hDWMY])$/);
@@ -504,6 +506,16 @@ function parseChartLegendMode(rawLegend) {
 	const normalized = rawLegend.trim().toLowerCase();
 	if (!normalized) return null;
 	if (CHART_LEGEND_MODES.has(normalized)) return normalized;
+	return null;
+}
+
+function parseChartForceAsItem(rawForceAsItem) {
+	if (rawForceAsItem === undefined) return false;
+	if (typeof rawForceAsItem !== 'string') return null;
+	const normalized = rawForceAsItem.trim().toLowerCase();
+	if (!normalized) return null;
+	if (CHART_BOOLEAN_TRUE.has(normalized)) return true;
+	if (CHART_BOOLEAN_FALSE.has(normalized)) return false;
 	return null;
 }
 
@@ -3132,18 +3144,18 @@ const CHART_CACHE_MAX_BYTES = 256 * 1024 * 1024; // 256MB
 const CHART_CACHE_PRUNE_MIN_INTERVAL_MS = 5 * 60 * 1000;
 let lastChartCachePruneAt = 0;
 
-function chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service) {
+function chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service, forceAsItem = false) {
 	const assetVersion = liveConfig.assetVersion || 'v1';
 	const dateFmt = liveConfig.clientConfig?.dateFormat || '';
 	const timeFmt = liveConfig.clientConfig?.timeFormat || '';
 	return crypto.createHash('md5')
-		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}|${legend}|${yAxisDecimalPattern || ''}|${interpolation || 'linear'}|${service || ''}`)
+		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}|${legend}|${yAxisDecimalPattern || ''}|${interpolation || 'linear'}|${service || ''}|${forceAsItem ? 'forceasitem' : 'groupmode'}`)
 		.digest('hex')
 		.substring(0, 16);
 }
 
-function getChartCachePath(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service) {
-	const hash = chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service);
+function getChartCachePath(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service, forceAsItem = false) {
+	const hash = chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service, forceAsItem);
 	return path.join(CHART_CACHE_DIR, `${hash}.html`);
 }
 
@@ -3292,6 +3304,133 @@ async function fetchPersistenceSeries(item, periodWindow = 86400, service = '') 
 	return points.length ? points : null;
 }
 
+function isGroupItemType(itemType) {
+	const normalized = safeText(itemType).trim().toLowerCase();
+	return normalized === 'group' || normalized.startsWith('group:');
+}
+
+function normalizeChartSeriesLabel(rawLabel, fallbackName) {
+	const fallback = safeText(fallbackName).trim() || 'Series';
+	const text = safeText(rawLabel).trim();
+	if (!text) return fallback;
+	const parts = splitLabelState(text);
+	const title = safeText(parts?.title || '').trim();
+	return title || text || fallback;
+}
+
+async function fetchOpenhabItemDefinition(itemName) {
+	const reqPath = `/rest/items/${encodeURIComponent(itemName)}`;
+	const result = await fetchOpenhab(reqPath);
+	if (!result?.ok) {
+		const status = Number(result?.status) || 500;
+		const detail = safeText(result?.body || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+		throw new Error(`Item metadata request failed (${status})${detail ? `: ${detail}` : ''}`);
+	}
+	let payload;
+	try {
+		payload = JSON.parse(result.body);
+	} catch {
+		throw new Error('Item metadata response was not valid JSON');
+	}
+	if (!payload || typeof payload !== 'object') {
+		throw new Error('Item metadata response was not an object');
+	}
+	return payload;
+}
+
+function extractGroupMemberDefinitions(groupDef, groupItemName) {
+	const rawMembers = Array.isArray(groupDef?.members) ? groupDef.members : [];
+	const out = [];
+	const seen = new Set();
+	for (const member of rawMembers) {
+		const memberName = safeText(member?.name || '').trim();
+		if (!memberName || memberName === groupItemName) continue;
+		if (!/^[a-zA-Z0-9_-]{1,50}$/.test(memberName)) continue;
+		if (seen.has(memberName)) continue;
+		seen.add(memberName);
+		out.push({
+			name: memberName,
+			label: normalizeChartSeriesLabel(member?.label || memberName, memberName),
+		});
+	}
+	return out;
+}
+
+async function fetchChartSeriesData(item, periodWindow = 86400, service = '', forceAsItem = false) {
+	const fallbackLabel = normalizeChartSeriesLabel(item, item);
+	let itemDefinition = null;
+	if (!forceAsItem) {
+		try {
+			itemDefinition = await fetchOpenhabItemDefinition(item);
+		} catch (err) {
+			// Metadata lookup failure should not block single-item chart rendering.
+			logMessage(`[Chart] Item metadata lookup failed for "${item}": ${err.message || err}`);
+		}
+	}
+
+	const primaryLabel = normalizeChartSeriesLabel(itemDefinition?.label || item, item);
+	const isGroupItem = !forceAsItem && isGroupItemType(itemDefinition?.type);
+	if (!isGroupItem) {
+		const primaryData = await fetchPersistenceSeries(item, periodWindow, service);
+		if (!primaryData || !primaryData.length) return [];
+		return [{ item, label: primaryLabel || fallbackLabel, data: primaryData }];
+	}
+
+	const memberDefs = extractGroupMemberDefinitions(itemDefinition, item);
+	if (memberDefs.length) {
+		const fetchedMembers = await Promise.all(memberDefs.map(async (member, index) => {
+			try {
+				const points = await fetchPersistenceSeries(member.name, periodWindow, service);
+				if (!points || !points.length) return null;
+				return {
+					item: member.name,
+					label: member.label,
+					data: points,
+					order: index,
+				};
+			} catch (err) {
+				logMessage(`[Chart] Group member persistence lookup failed for "${member.name}": ${err.message || err}`);
+				return null;
+			}
+		}));
+		const memberSeries = fetchedMembers
+			.filter(Boolean)
+			.sort((left, right) => left.order - right.order)
+			.map(({ order, ...series }) => series);
+		if (memberSeries.length) return memberSeries;
+	}
+
+	// Fallback when no member data is available: render the group item as a single series.
+	const primaryData = await fetchPersistenceSeries(item, periodWindow, service);
+	if (!primaryData || !primaryData.length) return [];
+	return [{ item, label: primaryLabel || fallbackLabel, data: primaryData }];
+}
+
+function computeChartYBounds(dataMin, dataMax) {
+	if (!Number.isFinite(dataMin) || !Number.isFinite(dataMax)) {
+		return { yMin: 0, yMax: 100 };
+	}
+	let range = dataMax - dataMin;
+	if (range === 0) range = Math.abs(dataMax) * 0.1 || 1;
+
+	const padding = range * 0.15;
+	let yMin = dataMin - padding;
+	let yMax = dataMax + padding;
+
+	if (range > 0) {
+		const magnitude = Math.pow(10, Math.floor(Math.log10(range)));
+		const step = Math.max(magnitude / 10, 0.01);
+		yMin = Math.floor(yMin / step) * step;
+		yMax = Math.ceil(yMax / step) * step;
+	}
+
+	if (yMin === yMax) {
+		yMin -= 1;
+		yMax += 1;
+	}
+	return { yMin, yMax };
+}
+
 function processChartData(data, periodWindow, maxPoints = 500) {
 	if (!data || data.length === 0) return { data: [], yMin: 0, yMax: 100 };
 
@@ -3333,25 +3472,7 @@ function processChartData(data, periodWindow, maxPoints = 500) {
 		filtered = indices.map(i => filtered[i]);
 	}
 
-	// Calculate nice Y-range
-	if (!isFinite(dataMin)) return { data: filtered, yMin: 0, yMax: 100 };
-
-	let range = dataMax - dataMin;
-	if (range === 0) range = Math.abs(dataMax) * 0.1 || 1;
-
-	const padding = range * 0.15;
-	let yMin = dataMin - padding;
-	let yMax = dataMax + padding;
-
-	if (range > 0) {
-		const magnitude = Math.pow(10, Math.floor(Math.log10(range)));
-		const step = Math.max(magnitude / 10, 0.01);
-		yMin = Math.floor(yMin / step) * step;
-		yMax = Math.ceil(yMax / step) * step;
-	}
-
-	if (yMin === yMax) { yMin -= 1; yMax += 1; }
-
+	const { yMin, yMax } = computeChartYBounds(dataMin, dataMax);
 	return { data: filtered, yMin, yMax, dataMin, dataMax, dataAvg };
 }
 
@@ -3378,11 +3499,32 @@ function generateXLabels(data) {
 	return labels;
 }
 
-function generateChartPoints(data) {
+function generateXLabelsFromBounds(startSec, endSec) {
+	if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) return [];
+	const duration = endSec - startSec;
+	const interval = chartXLabelInterval(duration);
+	const labels = [];
+	for (let ts = startSec; ts <= endSec; ts += interval) {
+		const pos = duration > 0 ? ((ts - startSec) / duration) * 100 : 50;
+		labels.push({ ts: ts * 1000, pos });
+	}
+	if (labels.length === 0 || labels[labels.length - 1].pos < 99.5) {
+		labels.push({ ts: endSec * 1000, pos: 100 });
+	}
+	return labels;
+}
+
+function generateChartPoints(data, startSec = null, endSec = null) {
 	if (!data || data.length === 0) return [];
 
-	const startTs = data[0][0];
-	const endTs = data[data.length - 1][0];
+	const defaultStartTs = data[0][0];
+	const defaultEndTs = data[data.length - 1][0];
+	let startTs = Number.isFinite(startSec) ? startSec : defaultStartTs;
+	let endTs = Number.isFinite(endSec) ? endSec : defaultEndTs;
+	if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || endTs <= startTs) {
+		startTs = defaultStartTs;
+		endTs = defaultEndTs;
+	}
 	const duration = endTs - startTs;
 
 	return data.map(([ts, val], i) => ({
@@ -3414,6 +3556,26 @@ function computeChartDataHash(rawData, periodWindow) {
 	return crypto.createHash('md5').update(dataStr).digest('hex').substring(0, 16);
 }
 
+function computeChartSeriesDataHash(rawSeriesList, periodWindow) {
+	const list = Array.isArray(rawSeriesList) ? rawSeriesList : [];
+	if (list.length === 0) return null;
+	if (list.length === 1) {
+		const onlySeries = list[0];
+		return computeChartDataHash(Array.isArray(onlySeries?.data) ? onlySeries.data : [], periodWindow);
+	}
+	const parts = [];
+	for (const series of list) {
+		const itemName = safeText(series?.item || '').trim();
+		const seriesData = Array.isArray(series?.data) ? series.data : [];
+		const hash = computeChartDataHash(seriesData, periodWindow);
+		if (!hash) continue;
+		parts.push(`${itemName}:${hash}`);
+	}
+	if (!parts.length) return null;
+	parts.sort();
+	return crypto.createHash('md5').update(parts.join('|')).digest('hex').substring(0, 16);
+}
+
 function formatChartValue(n) {
 	var result;
 	if (n === 0) {
@@ -3435,13 +3597,78 @@ function formatChartValue(n) {
 	return result;
 }
 
-function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern, durationSec, interpolation) {
+function prepareChartSeriesRenderData(rawSeriesList, periodWindow) {
+	const window = normalizePeriodWindow(periodWindow) || periodWindowFromPeriodString('D');
+	const rawList = Array.isArray(rawSeriesList) ? rawSeriesList : [];
+	if (!rawList.length) return null;
+
+	let dataMin = Infinity;
+	let dataMax = -Infinity;
+	const processedSeries = [];
+	for (const rawSeries of rawList) {
+		const itemName = safeText(rawSeries?.item || '').trim();
+		const label = normalizeChartSeriesLabel(rawSeries?.label || itemName, itemName || 'Series');
+		const sourceData = Array.isArray(rawSeries?.data) ? rawSeries.data : [];
+		const processed = processChartData(sourceData, window, 500);
+		if (!processed?.data || !processed.data.length) continue;
+		if (Number.isFinite(processed.dataMin)) dataMin = Math.min(dataMin, processed.dataMin);
+		if (Number.isFinite(processed.dataMax)) dataMax = Math.max(dataMax, processed.dataMax);
+		processedSeries.push({
+			item: itemName,
+			label,
+			data: processed.data,
+			dataAvg: processed.dataAvg,
+		});
+	}
+	if (!processedSeries.length) return null;
+	const isMultiSeries = processedSeries.length > 1;
+	let labelStartSec = null;
+	let labelEndSec = null;
+	let xLabels = [];
+	if (isMultiSeries) {
+		const bounds = periodWindowBounds(window);
+		labelStartSec = bounds.startSec;
+		labelEndSec = bounds.endSec;
+		xLabels = generateXLabelsFromBounds(labelStartSec, labelEndSec);
+	} else {
+		xLabels = generateXLabels(processedSeries[0].data);
+	}
+
+	const chartSeries = processedSeries.map((series, index) => ({
+		item: series.item,
+		label: series.label,
+		colorIndex: index % 12,
+		points: generateChartPoints(series.data, labelStartSec, labelEndSec),
+	}));
+	const { yMin, yMax } = computeChartYBounds(dataMin, dataMax);
+	const primarySeries = processedSeries[0];
+	const primaryPoints = chartSeries[0]?.points || [];
+	const dataCur = primaryPoints.length ? primaryPoints[primaryPoints.length - 1].y : null;
+	return {
+		chartSeries,
+		xLabels,
+		yMin,
+		yMax,
+		dataMin,
+		dataMax,
+		dataAvg: primarySeries?.dataAvg ?? null,
+		dataCur,
+		isMultiSeries,
+		durationSec: window.totalSec,
+	};
+}
+
+function generateChartHtml(chartSeries, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern, durationSec, interpolation, isMultiSeries = false) {
 	const theme = mode === 'dark' ? 'dark' : 'light';
 	const safeTitle = escapeHtml(title);
 	const unitDisplay = unit !== '?' ? escapeHtml(unit) : '';
 	const assetVersion = liveConfig.assetVersion || 'v1';
 	const dataHashAttr = dataHash ? ` data-hash="${dataHash}"` : '';
-	const showLegend = shouldShowChartLegend(legend, 1);
+	const seriesCount = Array.isArray(chartSeries) ? chartSeries.length : 0;
+	const showLegend = !isMultiSeries && shouldShowChartLegend(legend, seriesCount || 1);
+	const primaryChartData = (Array.isArray(chartSeries) && chartSeries.length && Array.isArray(chartSeries[0].points))
+		? chartSeries[0].points
+		: [];
 
 	let legendHtml = '';
 	let statsHtml = '';
@@ -3479,7 +3706,9 @@ function generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, tit
 </div>
 </div>
 <script>
-window._chartData=${inlineJson(chartData)};
+window._chartData=${inlineJson(primaryChartData)};
+window._chartSeries=${inlineJson(chartSeries)};
+window._chartIsMultiSeries=${inlineJson(isMultiSeries)};
 window._chartXLabels=${inlineJson(xLabels)};
 window._chartYMin=${inlineJson(yMin)};
 window._chartYMax=${inlineJson(yMax)};
@@ -3498,11 +3727,10 @@ window._chartInterpolation=${inlineJson(interpolation || 'linear')};
 </html>`;
 }
 
-function renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, precomputedDataHash = '') {
+function renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, precomputedDataHash = '') {
 	const window = normalizePeriodWindow(periodWindow) || periodWindowFromPeriodString(period, 86400);
-	const durSec = window.totalSec;
-	const { data, yMin, yMax, dataMin, dataMax, dataAvg } = processChartData(rawData, window, 500);
-	if (!data || data.length === 0) return null;
+	const prepared = prepareChartSeriesRenderData(rawSeriesList, window);
+	if (!prepared?.chartSeries?.length) return null;
 
 	// Deduce unit from title
 	let unit = deduceUnit(title);
@@ -3526,32 +3754,44 @@ function renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecim
 		}
 	}
 
-	// Generate chart components
-	const chartData = generateChartPoints(data);
-	const xLabels = generateXLabels(data);
-
-	// Get current (latest) value from chart data
-	const dataCur = chartData.length > 0 ? chartData[chartData.length - 1].y : null;
-
 	// Reuse precomputed hash when available (e.g. /api/chart-hash path) to avoid duplicate hashing.
 	const dataHash = (typeof precomputedDataHash === 'string' && precomputedDataHash)
 		? precomputedDataHash
-		: computeChartDataHash(rawData, window);
+		: computeChartSeriesDataHash(rawSeriesList, window);
 	if (!dataHash) return null;
 
 	// Generate HTML
-	const html = generateChartHtml(chartData, xLabels, yMin, yMax, dataMin, dataMax, cleanTitle, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern, durSec, interpolation);
+	const html = generateChartHtml(
+		prepared.chartSeries,
+		prepared.xLabels,
+		prepared.yMin,
+		prepared.yMax,
+		prepared.dataMin,
+		prepared.dataMax,
+		cleanTitle,
+		unit,
+		mode,
+		dataHash,
+		prepared.dataAvg,
+		prepared.dataCur,
+		period,
+		legend,
+		yAxisDecimalPattern,
+		prepared.durationSec,
+		interpolation,
+		prepared.isMultiSeries
+	);
 	return {
 		html,
 		dataHash,
 	};
 }
 
-async function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, service = '') {
+async function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, service = '', forceAsItem = false) {
 	const window = normalizePeriodWindow(periodWindow) || periodWindowFromPeriodString(period, 86400);
-	const rawData = await fetchPersistenceSeries(item, window, service);
-	if (!rawData) return null;
-	const rendered = renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecimalPattern, window, interpolation);
+	const rawSeriesList = await fetchChartSeriesData(item, window, service, forceAsItem);
+	if (!rawSeriesList || !rawSeriesList.length) return null;
+	const rendered = renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, window, interpolation);
 	return rendered?.html || null;
 }
 
@@ -8514,6 +8754,7 @@ app.get('/chart', async (req, res) => {
 	const rawYAxisDecimalPattern = req.query?.yAxisDecimalPattern;
 	const rawInterpolation = req.query?.interpolation;
 	const rawService = req.query?.service;
+	const rawForceAsItem = req.query?.forceasitem ?? req.query?.forceAsItem;
 	if (typeof rawItem !== 'string') {
 		return sendStyledError(res, req, 400, 'Invalid item parameter');
 	}
@@ -8535,6 +8776,9 @@ app.get('/chart', async (req, res) => {
 	if (rawService !== undefined && typeof rawService !== 'string') {
 		return sendStyledError(res, req, 400, 'Invalid service parameter');
 	}
+	if (rawForceAsItem !== undefined && typeof rawForceAsItem !== 'string') {
+		return sendStyledError(res, req, 400, 'Invalid forceasitem parameter');
+	}
 	const item = rawItem.trim();
 	const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 	const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
@@ -8542,10 +8786,15 @@ app.get('/chart', async (req, res) => {
 	const yAxisDecimalPattern = typeof rawYAxisDecimalPattern === 'string' ? rawYAxisDecimalPattern.trim() : '';
 	const interpolation = typeof rawInterpolation === 'string' ? rawInterpolation.trim().toLowerCase() : 'linear';
 	const service = typeof rawService === 'string' ? rawService.trim() : '';
+	const forceAsItemParsed = parseChartForceAsItem(rawForceAsItem);
 	const legend = parseChartLegendMode(rawLegend);
 	if (legend === null) {
 		return sendStyledError(res, req, 400, 'Invalid legend parameter');
 	}
+	if (rawForceAsItem !== undefined && forceAsItemParsed === null) {
+		return sendStyledError(res, req, 400, 'Invalid forceasitem parameter');
+	}
+	const forceAsItem = forceAsItemParsed === true;
 	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 		return sendStyledError(res, req, 400, 'Invalid parameters');
 	}
@@ -8584,7 +8833,17 @@ app.get('/chart', async (req, res) => {
 
 	const cacheTtlMs = chartCacheTtl(durationSec);
 	const resolvedTitle = title || item;
-	const cachePath = getChartCachePath(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern, interpolation, service);
+	const cachePath = getChartCachePath(
+		item,
+		period,
+		mode,
+		resolvedTitle,
+		legend,
+		yAxisDecimalPattern,
+		interpolation,
+		service,
+		forceAsItem
+	);
 
 	// Check cache
 	if (isChartCacheValid(cachePath, durationSec)) {
@@ -8600,7 +8859,7 @@ app.get('/chart', async (req, res) => {
 	}
 
 	try {
-		const html = await generateChart(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern, periodWindow, interpolation, service);
+		const html = await generateChart(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern, periodWindow, interpolation, service, forceAsItem);
 		if (!html) {
 			return sendStyledError(res, req, 404, 'Chart data not available');
 		}
@@ -8632,6 +8891,7 @@ app.get('/api/chart-hash', async (req, res) => {
 	const rawYAxisDecimalPattern = req.query?.yAxisDecimalPattern;
 	const rawInterpolation = req.query?.interpolation;
 	const rawService = req.query?.service;
+	const rawForceAsItem = req.query?.forceasitem ?? req.query?.forceAsItem;
 	if (typeof rawItem !== 'string') {
 		return res.status(400).json({ error: 'Invalid item' });
 	}
@@ -8653,6 +8913,9 @@ app.get('/api/chart-hash', async (req, res) => {
 	if (rawService !== undefined && typeof rawService !== 'string') {
 		return res.status(400).json({ error: 'Invalid service' });
 	}
+	if (rawForceAsItem !== undefined && typeof rawForceAsItem !== 'string') {
+		return res.status(400).json({ error: 'Invalid forceasitem' });
+	}
 	const item = rawItem.trim();
 	const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 	const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
@@ -8660,10 +8923,15 @@ app.get('/api/chart-hash', async (req, res) => {
 	const yAxisDecimalPattern = typeof rawYAxisDecimalPattern === 'string' ? rawYAxisDecimalPattern.trim() : '';
 	const interpolation = typeof rawInterpolation === 'string' ? rawInterpolation.trim().toLowerCase() : 'linear';
 	const service = typeof rawService === 'string' ? rawService.trim() : '';
+	const forceAsItemParsed = parseChartForceAsItem(rawForceAsItem);
 	const legend = parseChartLegendMode(rawLegend);
 	if (legend === null) {
 		return res.status(400).json({ error: 'Invalid legend' });
 	}
+	if (rawForceAsItem !== undefined && forceAsItemParsed === null) {
+		return res.status(400).json({ error: 'Invalid forceasitem' });
+	}
+	const forceAsItem = forceAsItemParsed === true;
 	if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 		return res.status(400).json({ error: 'Invalid parameters' });
 	}
@@ -8695,16 +8963,26 @@ app.get('/api/chart-hash', async (req, res) => {
 		return res.status(400).json({ error: 'Invalid mode' });
 	}
 
-	const cachePath = getChartCachePath(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service);
+	const cachePath = getChartCachePath(
+		item,
+		period,
+		mode,
+		title,
+		legend,
+		yAxisDecimalPattern,
+		interpolation,
+		service,
+		forceAsItem
+	);
 
 	try {
-		const rawData = await fetchPersistenceSeries(item, periodWindow, service);
-		if (!rawData || rawData.length === 0) {
+		const rawSeriesList = await fetchChartSeriesData(item, periodWindow, service, forceAsItem);
+		if (!rawSeriesList || rawSeriesList.length === 0) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'No data' });
 		}
 
-		const dataHash = computeChartDataHash(rawData, periodWindow);
+		const dataHash = computeChartSeriesDataHash(rawSeriesList, periodWindow);
 		if (!dataHash) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Hash computation failed' });
@@ -8725,7 +9003,7 @@ app.get('/api/chart-hash', async (req, res) => {
 			return res.json({ hash: dataHash });
 		}
 
-		const rendered = renderChartFromRawData(rawData, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, dataHash);
+		const rendered = renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, dataHash);
 		if (!rendered?.html) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Generation failed' });

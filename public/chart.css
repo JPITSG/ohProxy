@@ -285,6 +285,11 @@ body.chart-fs-rotated .chart-card {
 	filter: drop-shadow(0 2px 4px rgba(var(--chart-line-rgb), 0.3));
 }
 
+.chart-line-series {
+	filter: none;
+	stroke-width: 2.25;
+}
+
 .chart-animated .chart-line {
 	animation: drawLine 1s ease-out forwards;
 }
