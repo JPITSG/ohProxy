@@ -307,6 +307,8 @@
 			this.wasDragging = false;
 			this.tooltipCache = { w: 0, h: 0, contentLen: 0 };
 			this.hasRenderedOnce = false;
+			this.isFullscreenActive = false;
+			this.isFullscreenRotated = false;
 			this.init();
 		}
 
@@ -808,6 +810,38 @@
 				return fmtDT(d, CHART_DATE_FMT + ' ' + CHART_TIME_FMT);
 			}
 
+			isRotatedViewportMode() {
+				return this.isFullscreenActive && this.isFullscreenRotated;
+			}
+
+			clientToContainerPoint(clientX, clientY) {
+				if (typeof clientX !== 'number' || typeof clientY !== 'number') return null;
+				var rect = this.layout.containerRect = this.container.getBoundingClientRect();
+				var rectW = rect.width || 1;
+				var rectH = rect.height || 1;
+				var localW = this.container.clientWidth || rectW;
+				var localH = this.container.clientHeight || rectH;
+				var relX = Math.max(0, Math.min(rectW, clientX - rect.left));
+				var relY = Math.max(0, Math.min(rectH, clientY - rect.top));
+				var x = (relX / rectW) * localW;
+				var y = (relY / rectH) * localH;
+				if (this.isRotatedViewportMode()) {
+					// Inverse of CSS rotate(90deg): screen x follows local y, screen y follows inverted local x.
+					x = (relY / rectH) * localW;
+					y = ((rectW - relX) / rectW) * localH;
+				}
+				return { x: x, y: y };
+			}
+
+			clientToPlotPoint(clientX, clientY) {
+				var containerPoint = this.clientToContainerPoint(clientX, clientY);
+				if (!containerPoint) return null;
+				return {
+					x: containerPoint.x - this.layout.pad.left,
+					y: containerPoint.y - this.layout.pad.top
+				};
+			}
+
 			findClosestPointInArray(points, plotX) {
 				if (!Array.isArray(points) || points.length === 0) return null;
 				var closest = null;
@@ -822,9 +856,8 @@
 				return closest;
 			}
 
-			findClosestPoint(clientX) {
-				var rect = this.layout.containerRect;
-				var x = clientX - rect.left - this.layout.pad.left;
+			findClosestPoint(plotX) {
+				var x = plotX;
 
 				if (x < 0 || x > this.layout.cw || this.seriesSets.length === 0) {
 					return null;
@@ -913,11 +946,9 @@
 				return;
 			}
 
-			// Refresh containerRect in case iframe scrolled/repositioned
-			this.layout.containerRect = this.container.getBoundingClientRect();
-
 			var touch = e.changedTouches ? e.changedTouches[0] : e;
-			var closest = this.findClosestPoint(touch.clientX);
+			var plotPoint = this.clientToPlotPoint(touch.clientX, touch.clientY);
+			var closest = plotPoint ? this.findClosestPoint(plotPoint.x) : null;
 
 			if (closest) {
 				haptic();
@@ -931,13 +962,11 @@
 		}
 
 			onTouchStart(e) {
-				if (!this.layout.sm || this.seriesSets.length === 0) return;
-
-			// Refresh containerRect in case iframe scrolled/repositioned
-			this.layout.containerRect = this.container.getBoundingClientRect();
+				if (this.seriesSets.length === 0) return;
 
 			var touch = e.touches[0];
-			var closest = this.findClosestPoint(touch.clientX);
+			var plotPoint = this.clientToPlotPoint(touch.clientX, touch.clientY);
+			var closest = plotPoint ? this.findClosestPoint(plotPoint.x) : null;
 
 			if (closest) {
 				this.isTouching = true;
@@ -954,7 +983,8 @@
 			this.touchMoved = true;
 
 			var touch = e.touches[0];
-			var closest = this.findClosestPoint(touch.clientX);
+			var plotPoint = this.clientToPlotPoint(touch.clientX, touch.clientY);
+			var closest = plotPoint ? this.findClosestPoint(plotPoint.x) : null;
 
 			if (closest) {
 				this.showTapCircle(closest);
@@ -978,12 +1008,13 @@
 				// Skip on mobile or during touch interaction
 				if (this.layout.sm || this.isTouching || this.seriesSets.length === 0) return;
 
-				// Refresh containerRect in case iframe scrolled/repositioned
-				this.layout.containerRect = this.container.getBoundingClientRect();
-
-				var rect = this.layout.containerRect;
-				var cursorX = e.clientX - rect.left - this.layout.pad.left;
-				var cursorY = e.clientY - rect.top - this.layout.pad.top;
+				var plotPoint = this.clientToPlotPoint(e.clientX, e.clientY);
+				if (!plotPoint) {
+					this.hideTooltip();
+					return;
+				}
+				var cursorX = plotPoint.x;
+				var cursorY = plotPoint.y;
 				if (this.isMultiSeries) {
 					var lineHit = this.getClosestSeriesLinePoint(cursorX, cursorY);
 					if (lineHit && lineHit.dist <= 20) {
@@ -996,7 +1027,7 @@
 					return;
 				}
 
-				var closest = this.findClosestPoint(e.clientX);
+				var closest = this.findClosestPoint(cursorX);
 				if (closest) {
 					// Check if cursor is within 20px of the visible line shape.
 					var lineY = this.getLineYAtX(cursorX, cursorY);
@@ -1253,12 +1284,18 @@
 		var isRotated = false;
 		var expandSvg = '<svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg>';
 		var minimizeSvg = '<svg viewBox="0 0 24 24"><path d="M9 3v6H3V7h4V3h2zm6 0h2v4h4v2h-6V3zM3 15h6v6H7v-4H3v-2zm12 0h6v2h-4v4h-2v-6z"/></svg>';
+		function syncRendererFullscreenState() {
+			if (!chartRenderer) return;
+			chartRenderer.isFullscreenActive = !!fsActive;
+			chartRenderer.isFullscreenRotated = !!(fsActive && isRotated);
+		}
 		function applyRotation() {
 			if (isRotated) {
 				document.body.classList.add('chart-fs-rotated');
 			} else {
 				document.body.classList.remove('chart-fs-rotated');
 			}
+			syncRendererFullscreenState();
 			scheduleChartReflow();
 		}
 		function syncRotateButton() {
@@ -1289,10 +1326,12 @@
 				isRotated = false;
 				applyRotation();
 			} else {
+				syncRendererFullscreenState();
 				scheduleChartReflow();
 			}
 			syncRotateButton();
 		});
+		syncRendererFullscreenState();
 		syncRotateButton();
 	})();
 })();
