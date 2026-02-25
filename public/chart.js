@@ -23,6 +23,18 @@
 	var CHART_PERIOD = window._chartPeriod || 'D';
 	var CHART_Y_PATTERN = window._chartYAxisPattern || null;
 	var CHART_INTERP = window._chartInterpolation || 'linear';
+	var CHART_SERIES = Array.isArray(window._chartSeries) ? window._chartSeries : [];
+	var CHART_IS_MULTI_SERIES = window._chartIsMultiSeries === true || CHART_SERIES.length > 1;
+	if (!CHART_SERIES.length && Array.isArray(window._chartData)) {
+		CHART_SERIES = [{ item: '', label: '', colorIndex: 0, points: window._chartData }];
+	}
+	var SERIES_PALETTE_LIGHT = ['#b91c1c', '#1d4ed8', '#0f766e', '#7c3aed', '#c2410c', '#be185d', '#15803d', '#0369a1', '#a16207', '#4f46e5', '#9d174d', '#166534'];
+	var SERIES_PALETTE_DARK = ['#f87171', '#60a5fa', '#34d399', '#c084fc', '#fb923c', '#f472b6', '#4ade80', '#22d3ee', '#facc15', '#a5b4fc', '#f9a8d4', '#2dd4bf'];
+	function getSeriesColor(index) {
+		var palette = document.documentElement.getAttribute('data-theme') === 'light' ? SERIES_PALETTE_LIGHT : SERIES_PALETTE_DARK;
+		var i = Number.isFinite(index) ? Math.max(0, Math.floor(index)) : 0;
+		return palette[i % palette.length];
+	}
 
 		function parseBasePeriodSeconds(p) {
 			// Simple / multiplied
@@ -282,11 +294,13 @@
 			this.container = document.getElementById(containerId);
 			this.svg = document.getElementById(svgId);
 			this.tooltip = document.getElementById('tooltip');
-			this.tooltipValue = document.getElementById('tooltipValue');
-			this.tooltipLabel = document.getElementById('tooltipLabel');
-			this.points = [];
-			this.layout = {};
-			this.tapCircle = null;
+				this.tooltipValue = document.getElementById('tooltipValue');
+				this.tooltipLabel = document.getElementById('tooltipLabel');
+				this.points = [];
+				this.seriesSets = [];
+				this.isMultiSeries = CHART_IS_MULTI_SERIES;
+				this.layout = {};
+				this.tapCircle = null;
 			this.hideTimer = null;
 			this.isTouching = false;
 			this.touchMoved = false;
@@ -378,24 +392,27 @@
 			var iR = 0;
 			var dw = cw - iL - iR;
 
-			this.layout = { sm: sm, pad: pad, cw: cw, ch: ch, iL: iL, dw: dw, margin: margin, containerRect: rect, yDecimals: yDecimals };
-			this.tooltipCache = { w: 0, h: 0, contentLen: 0 }; // Reset cache on render
-			this.svg.innerHTML = '';
+				this.layout = { sm: sm, pad: pad, cw: cw, ch: ch, iL: iL, dw: dw, margin: margin, containerRect: rect, yDecimals: yDecimals };
+				this.tooltipCache = { w: 0, h: 0, contentLen: 0 }; // Reset cache on render
+				this.svg.innerHTML = '';
+				var rawSeriesData = Array.isArray(CHART_SERIES) ? CHART_SERIES : [];
+				this.isMultiSeries = window._chartIsMultiSeries === true || rawSeriesData.length > 1;
 
-			var $ = (t, a) => this.svg$(t, a);
+				var $ = (t, a) => this.svg$(t, a);
 
-			// Defs: gradient, masks, clip path
-			var defs = $('defs', {});
+				// Defs: gradient, masks, clip path
+				var defs = $('defs', {});
+				if (!this.isMultiSeries) {
+					var grad = $('linearGradient', { id: 'areaGradient', x1: '0%', y1: '0%', x2: '0%', y2: '100%' });
+					grad.appendChild($('stop', { offset: '0%', style: 'stop-color:var(--chart-gradient-start)' }));
+					grad.appendChild($('stop', { offset: '50%', style: 'stop-color:var(--chart-gradient-start);stop-opacity:0.6' }));
+					grad.appendChild($('stop', { offset: '100%', style: 'stop-color:var(--chart-gradient-end)' }));
+					defs.appendChild(grad);
+				}
 
-			var grad = $('linearGradient', { id: 'areaGradient', x1: '0%', y1: '0%', x2: '0%', y2: '100%' });
-			grad.appendChild($('stop', { offset: '0%', style: 'stop-color:var(--chart-gradient-start)' }));
-			grad.appendChild($('stop', { offset: '50%', style: 'stop-color:var(--chart-gradient-start);stop-opacity:0.6' }));
-			grad.appendChild($('stop', { offset: '100%', style: 'stop-color:var(--chart-gradient-end)' }));
-			defs.appendChild(grad);
-
-			var clipPath = $('clipPath', { id: 'chartClip' });
-			clipPath.appendChild($('rect', { x: '0', y: '0', width: cw, height: ch }));
-			defs.appendChild(clipPath);
+				var clipPath = $('clipPath', { id: 'chartClip' });
+				clipPath.appendChild($('rect', { x: '0', y: '0', width: cw, height: ch }));
+				defs.appendChild(clipPath);
 
 			this.svg.appendChild(defs);
 
@@ -459,86 +476,129 @@
 				var text = $('text', { class: 'axis-label', x: labelX, y: xLabelY, 'text-anchor': anchor });
 				text.textContent = labelText;
 				g.appendChild(text);
-			});
-			g.appendChild(vGridGroup);
+				});
+				g.appendChild(vGridGroup);
 
-			// Build points array
-			this.points = [];
-			var minPoint = null;
-			var maxPoint = null;
-			for (var i = 0; i < window._chartData.length; i++) {
-				var d = window._chartData[i];
-				var pt = {
-					x: iL + (d.x / 100) * dw,
-					y: isFlat ? ch / 2 : ch - ((d.y - window._chartYMin) / yRange) * ch,
-					value: d.y,
-					t: d.t,
-					index: i
-				};
-				this.points.push(pt);
-				if (!minPoint || pt.value < minPoint.value) minPoint = pt;
-				if (!maxPoint || pt.value > maxPoint.value) maxPoint = pt;
-			}
-			this.minPoint = minPoint;
-			this.maxPoint = maxPoint;
-			this.curPoint = this.points.length > 0 ? this.points[this.points.length - 1] : null;
-
-			// Draw chart if we have points
-			if (this.points.length > 0) {
-				var linePath = this.createPath(this.points);
-				var chartGroup = $('g', { 'clip-path': 'url(#chartClip)' });
-
-				// Area path
-				var areaPath = linePath + ' L ' + this.points[this.points.length - 1].x + ' ' + ch + ' L ' + this.points[0].x + ' ' + ch + ' Z';
-				chartGroup.appendChild($('path', { class: 'chart-area', d: areaPath }));
-				var glowPath = $('path', { class: 'chart-line-glow', d: linePath });
-				var mainPath = $('path', { class: 'chart-line', d: linePath });
-				chartGroup.appendChild(glowPath);
-				chartGroup.appendChild(mainPath);
-				g.appendChild(chartGroup);
-
-				// Set stroke-dasharray dynamically for line animation (only when animated)
-				if (document.documentElement.classList.contains('chart-animated')) {
-					var pathLen = mainPath.getTotalLength();
-					glowPath.style.strokeDasharray = pathLen;
-					glowPath.style.strokeDashoffset = pathLen;
-					mainPath.style.strokeDasharray = pathLen;
-					mainPath.style.strokeDashoffset = pathLen;
+				// Build per-series points array
+				this.points = [];
+				this.seriesSets = [];
+				this.circleData = [];
+				for (var s = 0; s < rawSeriesData.length; s++) {
+					var seriesRaw = rawSeriesData[s];
+					var seriesData = Array.isArray(seriesRaw && seriesRaw.points) ? seriesRaw.points : [];
+					if (seriesData.length === 0) continue;
+					var labelText = (typeof seriesRaw.label === 'string' && seriesRaw.label.trim())
+						? seriesRaw.label.trim()
+						: (typeof seriesRaw.item === 'string' && seriesRaw.item.trim() ? seriesRaw.item.trim() : ('Series ' + (s + 1)));
+					var color = getSeriesColor(Number(seriesRaw.colorIndex));
+					var seriesPoints = [];
+					var seriesMin = null;
+					var seriesMax = null;
+					for (var i = 0; i < seriesData.length; i++) {
+						var d = seriesData[i];
+						var pt = {
+							x: iL + (d.x / 100) * dw,
+							y: isFlat ? ch / 2 : ch - ((d.y - window._chartYMin) / yRange) * ch,
+							value: d.y,
+							t: d.t,
+							index: i,
+							seriesIndex: s,
+							seriesLabel: labelText,
+							seriesColor: color
+						};
+						seriesPoints.push(pt);
+						if (!seriesMin || pt.value < seriesMin.value) seriesMin = pt;
+						if (!seriesMax || pt.value > seriesMax.value) seriesMax = pt;
+					}
+					if (seriesPoints.length) {
+						this.seriesSets.push({
+							index: s,
+							label: labelText,
+							color: color,
+							points: seriesPoints,
+							minPoint: seriesMin,
+							maxPoint: seriesMax,
+							curPoint: seriesPoints[seriesPoints.length - 1]
+						});
+					}
+				}
+				if (this.seriesSets.length) {
+					this.points = this.seriesSets[0].points;
+					this.minPoint = this.seriesSets[0].minPoint;
+					this.maxPoint = this.seriesSets[0].maxPoint;
+					this.curPoint = this.seriesSets[0].curPoint;
+				} else {
+					this.minPoint = null;
+					this.maxPoint = null;
+					this.curPoint = null;
 				}
 
-				// Data points (desktop only)
-				if (!sm) {
-					this.circleData = [];
-					var pointsGroup = $('g', { class: 'data-points' });
-
-					// Collect grid X positions for interpolated points
-					var gridXPositions = [];
-					for (var i = 0; i < window._chartXLabels.length; i++) {
-						var ld = window._chartXLabels[i];
-						var lp = typeof ld === 'object' ? ld.pos : null;
-						if (lp !== null) {
-							gridXPositions.push({ x: iL + (lp / 100) * dw, delay: 0.6 + i * 0.025 });
+				// Draw chart if we have points
+				if (this.seriesSets.length > 0) {
+					var chartGroup = $('g', { 'clip-path': 'url(#chartClip)' });
+					var animated = document.documentElement.classList.contains('chart-animated');
+					for (var s = 0; s < this.seriesSets.length; s++) {
+						var series = this.seriesSets[s];
+						var linePath = this.createPath(series.points);
+						if (!linePath) continue;
+						var glowPath = null;
+						if (!this.isMultiSeries) {
+							var areaPath = linePath + ' L ' + series.points[series.points.length - 1].x + ' ' + ch + ' L ' + series.points[0].x + ' ' + ch + ' Z';
+							chartGroup.appendChild($('path', { class: 'chart-area', d: areaPath }));
+							glowPath = $('path', { class: 'chart-line-glow', d: linePath });
+							chartGroup.appendChild(glowPath);
+						}
+						var lineClass = this.isMultiSeries ? 'chart-line chart-line-series' : 'chart-line';
+						var mainPath = $('path', { class: lineClass, d: linePath });
+						if (this.isMultiSeries) {
+							mainPath.style.stroke = series.color;
+							mainPath.style.filter = 'none';
+						}
+						chartGroup.appendChild(mainPath);
+						if (animated) {
+							var pathLen = mainPath.getTotalLength();
+							if (glowPath) {
+								glowPath.style.strokeDasharray = pathLen;
+								glowPath.style.strokeDashoffset = pathLen;
+							}
+							mainPath.style.strokeDasharray = pathLen;
+							mainPath.style.strokeDashoffset = pathLen;
 						}
 					}
+					g.appendChild(chartGroup);
 
-					// Add min/max points
-					var delays = ['0.5s', '0.55s'];
-					[minPoint, maxPoint].forEach((pt, idx) => {
-						var circle = $('circle', { class: 'data-point', cx: pt.x, cy: pt.y, r: 5 });
-						circle.style.animationDelay = delays[idx];
-						circle.dataset.idx = this.circleData.length;
-						this.circleData.push(pt);
-						pointsGroup.appendChild(circle);
-					});
+					// Data points (desktop only, single-series mode)
+					if (!sm && !this.isMultiSeries && this.points.length > 0) {
+						var pointsGroup = $('g', { class: 'data-points' });
 
-					// Add interpolated points at grid lines (two-pointer, O(n+m))
-					var gridIdx = 0;
-					for (var i = 1; i < this.points.length; i++) {
-						var prev = this.points[i - 1];
-						var curr = this.points[i];
-						// Process grid positions within this segment
-						while (gridIdx < gridXPositions.length && gridXPositions[gridIdx].x <= curr.x) {
-							var gd = gridXPositions[gridIdx];
+						// Collect grid X positions for interpolated points
+						var gridXPositions = [];
+						for (var i = 0; i < window._chartXLabels.length; i++) {
+							var ld = window._chartXLabels[i];
+							var lp = typeof ld === 'object' ? ld.pos : null;
+							if (lp !== null) {
+								gridXPositions.push({ x: iL + (lp / 100) * dw, delay: 0.6 + i * 0.025 });
+							}
+						}
+
+						// Add min/max points
+						var delays = ['0.5s', '0.55s'];
+						[this.minPoint, this.maxPoint].forEach((pt, idx) => {
+							var circle = $('circle', { class: 'data-point', cx: pt.x, cy: pt.y, r: 5 });
+							circle.style.animationDelay = delays[idx];
+							circle.dataset.idx = this.circleData.length;
+							this.circleData.push(pt);
+							pointsGroup.appendChild(circle);
+						});
+
+						// Add interpolated points at grid lines (two-pointer, O(n+m))
+						var gridIdx = 0;
+						for (var i = 1; i < this.points.length; i++) {
+							var prev = this.points[i - 1];
+							var curr = this.points[i];
+							// Process grid positions within this segment
+							while (gridIdx < gridXPositions.length && gridXPositions[gridIdx].x <= curr.x) {
+								var gd = gridXPositions[gridIdx];
 								if (gd.x >= prev.x) {
 									var segXSpan = curr.x - prev.x;
 									var t = Math.abs(segXSpan) > 1e-9 ? (gd.x - prev.x) / segXSpan : 1;
@@ -559,28 +619,28 @@
 									var circle = $('circle', { class: 'data-point', cx: gd.x, cy: interpY, r: 5 });
 									circle.style.animationDelay = gd.delay + 's';
 									circle.dataset.idx = this.circleData.length;
-								this.circleData.push({ x: gd.x, y: interpY, value: interpValue, t: interpTime });
-								pointsGroup.appendChild(circle);
+									this.circleData.push({ x: gd.x, y: interpY, value: interpValue, t: interpTime });
+									pointsGroup.appendChild(circle);
+								}
+								gridIdx++;
 							}
-							gridIdx++;
 						}
+
+						// Event listeners for desktop tooltips
+						pointsGroup.addEventListener('mouseenter', e => {
+							if (e.target.classList.contains('data-point')) {
+								this.showTooltip(e, this.circleData[e.target.dataset.idx]);
+							}
+						}, true);
+						pointsGroup.addEventListener('mouseleave', e => {
+							if (e.target.classList.contains('data-point')) {
+								this.hideTooltip();
+							}
+						}, true);
+
+						g.appendChild(pointsGroup);
 					}
-
-					// Event listeners for desktop tooltips
-					pointsGroup.addEventListener('mouseenter', e => {
-						if (e.target.classList.contains('data-point')) {
-							this.showTooltip(e, this.circleData[e.target.dataset.idx]);
-						}
-					}, true);
-					pointsGroup.addEventListener('mouseleave', e => {
-						if (e.target.classList.contains('data-point')) {
-							this.hideTooltip();
-						}
-					}, true);
-
-					g.appendChild(pointsGroup);
 				}
-			}
 
 			this.svg.appendChild(g);
 		}
@@ -739,33 +799,52 @@
 			return Math.ceil(maxWidth);
 		}
 
-		fmtTimestamp(ts) {
-			var d = new Date(ts);
-			return fmtDT(d, CHART_DATE_FMT + ' ' + CHART_TIME_FMT);
-		}
-
-		findClosestPoint(clientX) {
-			var rect = this.layout.containerRect;
-			var x = clientX - rect.left - this.layout.pad.left;
-
-			if (x < 0 || x > this.layout.cw || this.points.length === 0) {
-				return null;
+			fmtTimestamp(ts) {
+				var d = new Date(ts);
+				return fmtDT(d, CHART_DATE_FMT + ' ' + CHART_TIME_FMT);
 			}
 
-			var closest = null;
-			var minDist = Infinity;
-			for (var i = 0; i < this.points.length; i++) {
-				var dist = Math.abs(this.points[i].x - x);
-				if (dist < minDist) {
-					minDist = dist;
-					closest = this.points[i];
+			findClosestPointInArray(points, plotX) {
+				if (!Array.isArray(points) || points.length === 0) return null;
+				var closest = null;
+				var minDist = Infinity;
+				for (var i = 0; i < points.length; i++) {
+					var dist = Math.abs(points[i].x - plotX);
+					if (dist < minDist) {
+						minDist = dist;
+						closest = points[i];
+					}
 				}
+				return closest;
 			}
-			return closest;
-		}
 
-		getLineYAtX(plotX, cursorY) {
-			if (this.points.length === 0) return null;
+			findClosestPoint(clientX) {
+				var rect = this.layout.containerRect;
+				var x = clientX - rect.left - this.layout.pad.left;
+
+				if (x < 0 || x > this.layout.cw || this.seriesSets.length === 0) {
+					return null;
+				}
+
+				if (!this.isMultiSeries) {
+					return this.findClosestPointInArray(this.points, x);
+				}
+				var best = null;
+				var bestDist = Infinity;
+				for (var s = 0; s < this.seriesSets.length; s++) {
+					var seriesClosest = this.findClosestPointInArray(this.seriesSets[s].points, x);
+					if (!seriesClosest) continue;
+					var dist = Math.abs(seriesClosest.x - x);
+					if (dist < bestDist) {
+						bestDist = dist;
+						best = seriesClosest;
+					}
+				}
+				return best;
+			}
+
+			getLineYAtX(plotX, cursorY) {
+				if (this.points.length === 0) return null;
 			if (this.points.length === 1) return this.points[0].y;
 			if (plotX <= this.points[0].x) return this.points[0].y;
 
@@ -792,9 +871,35 @@
 				if (t < 0) t = 0;
 				if (t > 1) t = 1;
 				return prev.y + t * (curr.y - prev.y);
+				}
+				return this.points[this.points.length - 1].y;
 			}
-			return this.points[this.points.length - 1].y;
-		}
+
+			getLineYAtXForPoints(points, plotX, cursorY) {
+				var originalPoints = this.points;
+				this.points = Array.isArray(points) ? points : [];
+				var y = this.getLineYAtX(plotX, cursorY);
+				this.points = originalPoints;
+				return y;
+			}
+
+			getClosestSeriesLinePoint(cursorX, cursorY) {
+				if (!this.seriesSets.length) return null;
+				var best = null;
+				for (var s = 0; s < this.seriesSets.length; s++) {
+					var series = this.seriesSets[s];
+					if (!series || !series.points || series.points.length === 0) continue;
+					var closest = this.findClosestPointInArray(series.points, cursorX);
+					if (!closest) continue;
+					var lineY = this.getLineYAtXForPoints(series.points, cursorX, cursorY);
+					if (!Number.isFinite(lineY)) lineY = closest.y;
+					var dist = Math.abs(cursorY - lineY);
+					if (!best || dist < best.dist) {
+						best = { point: closest, dist: dist };
+					}
+				}
+				return best;
+			}
 
 		onClick(e) {
 			if (!this.layout.sm) return;
@@ -821,8 +926,8 @@
 			}
 		}
 
-		onTouchStart(e) {
-			if (!this.layout.sm || this.points.length === 0) return;
+			onTouchStart(e) {
+				if (!this.layout.sm || this.seriesSets.length === 0) return;
 
 			// Refresh containerRect in case iframe scrolled/repositioned
 			this.layout.containerRect = this.container.getBoundingClientRect();
@@ -865,62 +970,86 @@
 			}
 		}
 
-		onMouseMove(e) {
-			// Skip on mobile or during touch interaction
-			if (this.layout.sm || this.isTouching || this.points.length === 0) return;
+			onMouseMove(e) {
+				// Skip on mobile or during touch interaction
+				if (this.layout.sm || this.isTouching || this.seriesSets.length === 0) return;
 
-			// Refresh containerRect in case iframe scrolled/repositioned
-			this.layout.containerRect = this.container.getBoundingClientRect();
+				// Refresh containerRect in case iframe scrolled/repositioned
+				this.layout.containerRect = this.container.getBoundingClientRect();
 
-			var closest = this.findClosestPoint(e.clientX);
-
-			if (closest) {
-				// Check if cursor is within 20px of the visible line shape.
 				var rect = this.layout.containerRect;
 				var cursorX = e.clientX - rect.left - this.layout.pad.left;
 				var cursorY = e.clientY - rect.top - this.layout.pad.top;
-				var lineY = this.getLineYAtX(cursorX, cursorY);
-				if (!Number.isFinite(lineY)) lineY = closest.y;
-				var dist = Math.abs(cursorY - lineY);
+				if (this.isMultiSeries) {
+					var lineHit = this.getClosestSeriesLinePoint(cursorX, cursorY);
+					if (lineHit && lineHit.dist <= 20) {
+						if (this.hideTimer) clearTimeout(this.hideTimer);
+						this.showTapCircle(lineHit.point);
+						this.showMobileTooltip(lineHit.point);
+					} else {
+						this.hideTooltip();
+					}
+					return;
+				}
 
-				if (dist <= 20) {
-					if (this.hideTimer) clearTimeout(this.hideTimer);
-					this.showTapCircle(closest);
-					this.showMobileTooltip(closest);
+				var closest = this.findClosestPoint(e.clientX);
+				if (closest) {
+					// Check if cursor is within 20px of the visible line shape.
+					var lineY = this.getLineYAtX(cursorX, cursorY);
+					if (!Number.isFinite(lineY)) lineY = closest.y;
+					var dist = Math.abs(cursorY - lineY);
+
+					if (dist <= 20) {
+						if (this.hideTimer) clearTimeout(this.hideTimer);
+						this.showTapCircle(closest);
+						this.showMobileTooltip(closest);
+					} else {
+						this.hideTooltip();
+					}
 				} else {
 					this.hideTooltip();
 				}
-			} else {
+			}
+
+			onMouseLeave(e) {
+				if (this.layout.sm || this.isTouching) return;
 				this.hideTooltip();
 			}
-		}
 
-		onMouseLeave(e) {
-			if (this.layout.sm || this.isTouching) return;
-			this.hideTooltip();
-		}
+			formatTooltipValue(pt, decimals) {
+				var unit = window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '';
+				var valueText = this.fmt(pt.value, decimals) + unit;
+				if (this.isMultiSeries && pt.seriesLabel) {
+					return pt.seriesLabel + ': ' + valueText;
+				}
+				return valueText;
+			}
 
-		showTapCircle(pt) {
-			if (this.tapCircle) this.tapCircle.remove();
-			var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-			circle.setAttribute('cx', pt.x + this.layout.pad.left);
-			circle.setAttribute('cy', pt.y + this.layout.pad.top);
-			circle.setAttribute('r', '5');
-			circle.setAttribute('class', 'data-point');
-			circle.style.opacity = '1';
-			this.svg.appendChild(circle);
-			this.tapCircle = circle;
-		}
+			showTapCircle(pt) {
+				if (this.tapCircle) this.tapCircle.remove();
+				var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+				circle.setAttribute('cx', pt.x + this.layout.pad.left);
+				circle.setAttribute('cy', pt.y + this.layout.pad.top);
+				circle.setAttribute('r', '5');
+				circle.setAttribute('class', 'data-point');
+				circle.style.opacity = '1';
+				if (pt.seriesColor) {
+					circle.style.stroke = pt.seriesColor;
+					circle.style.filter = 'none';
+				}
+				this.svg.appendChild(circle);
+				this.tapCircle = circle;
+			}
 
 		showTooltip(e, pt) {
 			// Refresh rect in case iframe scrolled/repositioned
 			var rect = this.layout.containerRect = this.container.getBoundingClientRect();
-			var x = e.clientX - rect.left;
-			var y = e.clientY - rect.top;
+				var x = e.clientX - rect.left;
+				var y = e.clientY - rect.top;
 
-			var decimals = this.layout.yDecimals;
-			this.tooltipValue.textContent = this.fmt(pt.value, decimals) + (window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '');
-			this.tooltipLabel.textContent = pt.t ? this.fmtTimestamp(pt.t) : '';
+				var decimals = this.layout.yDecimals;
+				this.tooltipValue.textContent = this.formatTooltipValue(pt, decimals);
+				this.tooltipLabel.textContent = pt.t ? this.fmtTimestamp(pt.t) : '';
 
 			var tx = x + 15;
 			var ty = y - 15;
@@ -932,12 +1061,12 @@
 			this.tooltip.classList.add('visible');
 		}
 
-		showMobileTooltip(pt) {
-			var decimals = this.layout.yDecimals;
-			var valueText = this.fmt(pt.value, decimals) + (window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '');
-			var labelText = pt.t ? this.fmtTimestamp(pt.t) : '';
-			this.tooltipValue.textContent = valueText;
-			this.tooltipLabel.textContent = labelText;
+			showMobileTooltip(pt) {
+				var decimals = this.layout.yDecimals;
+				var valueText = this.formatTooltipValue(pt, decimals);
+				var labelText = pt.t ? this.fmtTimestamp(pt.t) : '';
+				this.tooltipValue.textContent = valueText;
+				this.tooltipLabel.textContent = labelText;
 
 			// Use cached dimensions if content length is similar (within 3 chars)
 			var contentLen = valueText.length + labelText.length;
@@ -1023,13 +1152,13 @@
 			this.tooltip.classList.add('visible');
 		}
 
-		showStatTooltip(pt) {
-			if (!pt) return;
-			var rect = this.layout.containerRect || this.container.getBoundingClientRect();
-			var decimals = this.layout.yDecimals;
+			showStatTooltip(pt) {
+				if (!pt) return;
+				var rect = this.layout.containerRect || this.container.getBoundingClientRect();
+				var decimals = this.layout.yDecimals;
 
-			this.tooltipValue.textContent = this.fmt(pt.value, decimals) + (window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '');
-			this.tooltipLabel.textContent = pt.t ? this.fmtTimestamp(pt.t) : '';
+				this.tooltipValue.textContent = this.formatTooltipValue(pt, decimals);
+				this.tooltipLabel.textContent = pt.t ? this.fmtTimestamp(pt.t) : '';
 
 			// Position tooltip near the point on the chart
 			var tx = this.layout.pad.left + pt.x + 15;
