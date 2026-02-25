@@ -16,7 +16,7 @@ describe('Chart Group Multi-Series Wiring', () => {
 		assert.match(server, /function parseChartForceAsItem\(rawForceAsItem\) \{/);
 		assert.match(server, /const rawForceAsItem = req\.query\?\.forceasitem \?\? req\.query\?\.forceAsItem;/);
 		assert.match(server, /const forceAsItem = forceAsItemParsed === true;/);
-		assert.match(server, /function fetchChartSeriesData\(item, periodWindow = 86400, service = '', forceAsItem = false\) \{/);
+		assert.match(server, /function fetchChartSeriesData\(item, periodWindow = 86400, service = '', forceAsItem = false, preloadedItemDefinition = null\) \{/);
 		assert.match(server, /const isGroupItem = !forceAsItem && isGroupItemType\(itemDefinition\?\.type\);/);
 		assert.match(server, /const showLegend = !isMultiSeries && shouldShowChartLegend\(legend, seriesCount \|\| 1\);/);
 		assert.match(server, /window\._chartSeries=\$\{inlineJson\(chartSeries\)\};/);

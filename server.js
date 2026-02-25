@@ -3144,18 +3144,18 @@ const CHART_CACHE_MAX_BYTES = 256 * 1024 * 1024; // 256MB
 const CHART_CACHE_PRUNE_MIN_INTERVAL_MS = 5 * 60 * 1000;
 let lastChartCachePruneAt = 0;
 
-function chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service, forceAsItem = false) {
+function chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service, forceAsItem = false, unitSignature = '') {
 	const assetVersion = liveConfig.assetVersion || 'v1';
 	const dateFmt = liveConfig.clientConfig?.dateFormat || '';
 	const timeFmt = liveConfig.clientConfig?.timeFormat || '';
 	return crypto.createHash('md5')
-		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}|${legend}|${yAxisDecimalPattern || ''}|${interpolation || 'linear'}|${service || ''}|${forceAsItem ? 'forceasitem' : 'groupmode'}`)
+		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}|${legend}|${yAxisDecimalPattern || ''}|${interpolation || 'linear'}|${service || ''}|${forceAsItem ? 'forceasitem' : 'groupmode'}|${normalizeChartUnitSymbol(unitSignature)}`)
 		.digest('hex')
 		.substring(0, 16);
 }
 
-function getChartCachePath(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service, forceAsItem = false) {
-	const hash = chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service, forceAsItem);
+function getChartCachePath(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service, forceAsItem = false, unitSignature = '') {
+	const hash = chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service, forceAsItem, unitSignature);
 	return path.join(CHART_CACHE_DIR, `${hash}.html`);
 }
 
@@ -3343,17 +3343,64 @@ function extractGroupMemberDefinitions(groupDef, groupItemName) {
 	return out;
 }
 
+function normalizeChartUnitSymbol(rawUnitSymbol) {
+	const text = safeText(rawUnitSymbol).replace(/\s+/g, ' ').trim();
+	return text || '';
+}
+
 function extractUnitFromPattern(pattern) {
 	if (!pattern || typeof pattern !== 'string') return '';
 	const spaceIdx = pattern.indexOf(' ');
 	if (spaceIdx === -1) return '';
-	return pattern.slice(spaceIdx + 1).replace('%%', '%');
+	return normalizeChartUnitSymbol(pattern.slice(spaceIdx + 1).replace(/%%/g, '%'));
 }
 
-async function fetchChartSeriesData(item, periodWindow = 86400, service = '', forceAsItem = false) {
+function resolveItemDefinitionUnitSymbol(itemDefinition) {
+	const direct = normalizeChartUnitSymbol(itemDefinition?.unitSymbol);
+	if (direct) return direct;
+	return extractUnitFromPattern(itemDefinition?.stateDescription?.pattern);
+}
+
+function deriveChartUnitSignatureFromItemDefinition(itemDefinition, itemName, forceAsItem = false) {
+	if (!itemDefinition || typeof itemDefinition !== 'object') return '';
+	if (forceAsItem || !isGroupItemType(itemDefinition?.type)) {
+		return resolveItemDefinitionUnitSymbol(itemDefinition);
+	}
+	const normalizedGroupName = safeText(itemName).trim();
+	const rawMembers = Array.isArray(itemDefinition?.members) ? itemDefinition.members : [];
+	const uniqueUnits = new Set();
+	for (const member of rawMembers) {
+		const memberName = safeText(member?.name || '').trim();
+		if (!memberName || memberName === normalizedGroupName) continue;
+		if (!/^[a-zA-Z0-9_-]{1,50}$/.test(memberName)) continue;
+		const unitSymbol = resolveItemDefinitionUnitSymbol(member);
+		if (!unitSymbol) continue;
+		uniqueUnits.add(unitSymbol);
+		if (uniqueUnits.size > 1) return '';
+	}
+	if (uniqueUnits.size === 1) return Array.from(uniqueUnits)[0];
+	return resolveItemDefinitionUnitSymbol(itemDefinition);
+}
+
+function resolveDisplayedSeriesUnitSymbol(seriesList) {
+	const list = Array.isArray(seriesList) ? seriesList : [];
+	const uniqueUnits = new Set();
+	for (const series of list) {
+		const unit = normalizeChartUnitSymbol(series?.unitSymbol);
+		if (!unit) continue;
+		uniqueUnits.add(unit);
+		if (uniqueUnits.size > 1) return '';
+	}
+	if (uniqueUnits.size === 1) return Array.from(uniqueUnits)[0];
+	return '';
+}
+
+async function fetchChartSeriesData(item, periodWindow = 86400, service = '', forceAsItem = false, preloadedItemDefinition = null) {
 	const fallbackLabel = normalizeChartSeriesLabel(item, item);
-	let itemDefinition = null;
-	if (!forceAsItem) {
+	let itemDefinition = (preloadedItemDefinition && typeof preloadedItemDefinition === 'object')
+		? preloadedItemDefinition
+		: null;
+	if (!itemDefinition) {
 		try {
 			itemDefinition = await fetchOpenhabItemDefinition(item);
 		} catch (err) {
@@ -3362,23 +3409,27 @@ async function fetchChartSeriesData(item, periodWindow = 86400, service = '', fo
 		}
 	}
 
+	const cacheUnitSignature = deriveChartUnitSignatureFromItemDefinition(itemDefinition, item, forceAsItem);
 	const primaryLabel = normalizeChartSeriesLabel(itemDefinition?.label || item, item);
 	const isGroupItem = !forceAsItem && isGroupItemType(itemDefinition?.type);
 	if (!isGroupItem) {
 		const primaryData = await fetchPersistenceSeries(item, periodWindow, service);
-		if (!primaryData || !primaryData.length) return { series: [], unitSymbol: '' };
-		const unitSymbol = itemDefinition?.unitSymbol
-			|| extractUnitFromPattern(itemDefinition?.stateDescription?.pattern)
-			|| '';
-		return { series: [{ item, label: primaryLabel || fallbackLabel, data: primaryData }], unitSymbol };
+		if (!primaryData || !primaryData.length) return { series: [], unitSymbol: '', cacheUnitSignature };
+		const unitSymbol = resolveItemDefinitionUnitSymbol(itemDefinition);
+		return { series: [{ item, label: primaryLabel || fallbackLabel, data: primaryData }], unitSymbol, cacheUnitSignature };
 	}
 
 	const memberDefs = extractGroupMemberDefinitions(itemDefinition, item);
 	if (memberDefs.length) {
 		const rawMembers = Array.isArray(itemDefinition?.members) ? itemDefinition.members : [];
-		const memberUnitSymbol = rawMembers.reduce((found, m) => {
-			return found || m?.unitSymbol || extractUnitFromPattern(m?.stateDescription?.pattern) || '';
-		}, '');
+		const memberUnitByName = new Map();
+		for (const member of rawMembers) {
+			const memberName = safeText(member?.name || '').trim();
+			if (!memberName || memberName === item) continue;
+			if (!/^[a-zA-Z0-9_-]{1,50}$/.test(memberName)) continue;
+			if (memberUnitByName.has(memberName)) continue;
+			memberUnitByName.set(memberName, resolveItemDefinitionUnitSymbol(member));
+		}
 		const fetchedMembers = await Promise.all(memberDefs.map(async (member, index) => {
 			try {
 				const points = await fetchPersistenceSeries(member.name, periodWindow, service);
@@ -3387,6 +3438,7 @@ async function fetchChartSeriesData(item, periodWindow = 86400, service = '', fo
 					item: member.name,
 					label: member.label,
 					data: points,
+					unitSymbol: memberUnitByName.get(member.name) || '',
 					order: index,
 				};
 			} catch (err) {
@@ -3398,13 +3450,17 @@ async function fetchChartSeriesData(item, periodWindow = 86400, service = '', fo
 			.filter(Boolean)
 			.sort((left, right) => left.order - right.order)
 			.map(({ order, ...series }) => series);
-		if (memberSeries.length) return { series: memberSeries, unitSymbol: memberUnitSymbol };
+		if (memberSeries.length) {
+			const unitSymbol = resolveDisplayedSeriesUnitSymbol(memberSeries);
+			return { series: memberSeries, unitSymbol, cacheUnitSignature };
+		}
 	}
 
 	// Fallback when no member data is available: render the group item as a single series.
 	const primaryData = await fetchPersistenceSeries(item, periodWindow, service);
-	if (!primaryData || !primaryData.length) return { series: [], unitSymbol: '' };
-	return { series: [{ item, label: primaryLabel || fallbackLabel, data: primaryData }], unitSymbol: '' };
+	if (!primaryData || !primaryData.length) return { series: [], unitSymbol: '', cacheUnitSignature };
+	const unitSymbol = resolveItemDefinitionUnitSymbol(itemDefinition);
+	return { series: [{ item, label: primaryLabel || fallbackLabel, data: primaryData }], unitSymbol, cacheUnitSignature };
 }
 
 function computeChartYBounds(dataMin, dataMax) {
@@ -3557,12 +3613,16 @@ function computeChartDataHash(rawData, periodWindow) {
 	return crypto.createHash('md5').update(dataStr).digest('hex').substring(0, 16);
 }
 
-function computeChartSeriesDataHash(rawSeriesList, periodWindow) {
+function computeChartSeriesDataHash(rawSeriesList, periodWindow, unitSymbol = '') {
 	const list = Array.isArray(rawSeriesList) ? rawSeriesList : [];
 	if (list.length === 0) return null;
+	let baseHash = null;
 	if (list.length === 1) {
 		const onlySeries = list[0];
-		return computeChartDataHash(Array.isArray(onlySeries?.data) ? onlySeries.data : [], periodWindow);
+		baseHash = computeChartDataHash(Array.isArray(onlySeries?.data) ? onlySeries.data : [], periodWindow);
+		if (!baseHash) return null;
+		const unitSig = normalizeChartUnitSymbol(unitSymbol);
+		return crypto.createHash('md5').update(`${baseHash}|u:${unitSig}`).digest('hex').substring(0, 16);
 	}
 	const parts = [];
 	for (const series of list) {
@@ -3574,7 +3634,9 @@ function computeChartSeriesDataHash(rawSeriesList, periodWindow) {
 	}
 	if (!parts.length) return null;
 	parts.sort();
-	return crypto.createHash('md5').update(parts.join('|')).digest('hex').substring(0, 16);
+	baseHash = crypto.createHash('md5').update(parts.join('|')).digest('hex').substring(0, 16);
+	const unitSig = normalizeChartUnitSymbol(unitSymbol);
+	return crypto.createHash('md5').update(`${baseHash}|u:${unitSig}`).digest('hex').substring(0, 16);
 }
 
 function formatChartValue(n) {
@@ -3733,12 +3795,12 @@ function renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxis
 	const prepared = prepareChartSeriesRenderData(rawSeriesList, window);
 	if (!prepared?.chartSeries?.length) return null;
 
-	const unit = unitSymbol || '';
+	const unit = normalizeChartUnitSymbol(unitSymbol);
 
 	// Reuse precomputed hash when available (e.g. /api/chart-hash path) to avoid duplicate hashing.
 	const dataHash = (typeof precomputedDataHash === 'string' && precomputedDataHash)
 		? precomputedDataHash
-		: computeChartSeriesDataHash(rawSeriesList, window);
+		: computeChartSeriesDataHash(rawSeriesList, window, unit);
 	if (!dataHash) return null;
 
 	// Generate HTML
@@ -3768,12 +3830,16 @@ function renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxis
 	};
 }
 
-async function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, service = '', forceAsItem = false) {
+async function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, service = '', forceAsItem = false, preloadedItemDefinition = null) {
 	const window = normalizePeriodWindow(periodWindow) || periodWindowFromPeriodString(period, 86400);
-	const { series: rawSeriesList, unitSymbol } = await fetchChartSeriesData(item, window, service, forceAsItem);
+	const { series: rawSeriesList, unitSymbol, cacheUnitSignature } = await fetchChartSeriesData(item, window, service, forceAsItem, preloadedItemDefinition);
 	if (!rawSeriesList || !rawSeriesList.length) return null;
 	const rendered = renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, window, interpolation, '', unitSymbol);
-	return rendered?.html || null;
+	if (!rendered?.html) return null;
+	return {
+		html: rendered.html,
+		cacheUnitSignature,
+	};
 }
 
 async function fetchAllPagesAcrossSitemaps() {
@@ -8814,6 +8880,13 @@ app.get('/chart', async (req, res) => {
 
 	const cacheTtlMs = chartCacheTtl(durationSec);
 	const resolvedTitle = title || item;
+	let preloadedItemDefinition = null;
+	try {
+		preloadedItemDefinition = await fetchOpenhabItemDefinition(item);
+	} catch {
+		// Non-fatal; chart generation will retry metadata lookup if needed.
+	}
+	const cacheUnitSignature = deriveChartUnitSignatureFromItemDefinition(preloadedItemDefinition, item, forceAsItem);
 	const cachePath = getChartCachePath(
 		item,
 		period,
@@ -8823,7 +8896,8 @@ app.get('/chart', async (req, res) => {
 		yAxisDecimalPattern,
 		interpolation,
 		service,
-		forceAsItem
+		forceAsItem,
+		cacheUnitSignature
 	);
 
 	// Check cache
@@ -8840,22 +8914,47 @@ app.get('/chart', async (req, res) => {
 	}
 
 	try {
-		const html = await generateChart(item, period, mode, resolvedTitle, legend, yAxisDecimalPattern, periodWindow, interpolation, service, forceAsItem);
-		if (!html) {
+		const generated = await generateChart(
+			item,
+			period,
+			mode,
+			resolvedTitle,
+			legend,
+			yAxisDecimalPattern,
+			periodWindow,
+			interpolation,
+			service,
+			forceAsItem,
+			preloadedItemDefinition
+		);
+		if (!generated?.html) {
 			return sendStyledError(res, req, 404, 'Chart data not available');
 		}
+		const finalCacheUnitSignature = normalizeChartUnitSymbol(generated.cacheUnitSignature || cacheUnitSignature);
+		const writeCachePath = getChartCachePath(
+			item,
+			period,
+			mode,
+			resolvedTitle,
+			legend,
+			yAxisDecimalPattern,
+			interpolation,
+			service,
+			forceAsItem,
+			finalCacheUnitSignature
+		);
 
 			// Cache the generated HTML
 			try {
 				ensureDir(CHART_CACHE_DIR);
-				fs.writeFileSync(cachePath, html);
+				fs.writeFileSync(writeCachePath, generated.html);
 				maybePruneChartCache();
 			} catch {}
 
 		res.setHeader('Content-Type', 'text/html; charset=utf-8');
 		res.setHeader('Cache-Control', `private, max-age=${Math.floor(cacheTtlMs / 1000)}`);
 		res.setHeader('X-Chart-Cache', 'miss');
-		res.send(html);
+		res.send(generated.html);
 	} catch (err) {
 		logMessage(`Chart generation failed: ${err.message || err}`);
 		sendStyledError(res, req, 500, 'Chart generation failed');
@@ -8944,26 +9043,26 @@ app.get('/api/chart-hash', async (req, res) => {
 		return res.status(400).json({ error: 'Invalid mode' });
 	}
 
-	const cachePath = getChartCachePath(
-		item,
-		period,
-		mode,
-		title,
-		legend,
-		yAxisDecimalPattern,
-		interpolation,
-		service,
-		forceAsItem
-	);
-
 	try {
-		const { series: rawSeriesList, unitSymbol } = await fetchChartSeriesData(item, periodWindow, service, forceAsItem);
+		const { series: rawSeriesList, unitSymbol, cacheUnitSignature } = await fetchChartSeriesData(item, periodWindow, service, forceAsItem);
 		if (!rawSeriesList || rawSeriesList.length === 0) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'No data' });
 		}
 
-		const dataHash = computeChartSeriesDataHash(rawSeriesList, periodWindow);
+		const cachePath = getChartCachePath(
+			item,
+			period,
+			mode,
+			title,
+			legend,
+			yAxisDecimalPattern,
+			interpolation,
+			service,
+			forceAsItem,
+			cacheUnitSignature
+		);
+		const dataHash = computeChartSeriesDataHash(rawSeriesList, periodWindow, unitSymbol);
 		if (!dataHash) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Hash computation failed' });

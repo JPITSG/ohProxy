@@ -214,6 +214,6 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /const CHART_PERIOD_MAX_LEN = \d+;/);
 		assert.match(server, /period\.length > CHART_PERIOD_MAX_LEN/);
-		assert.match(server, /fs\.writeFileSync\(cachePath,\s*html\);\s*[\r\n]+\s*maybePruneChartCache\(\);/);
+		assert.match(server, /fs\.writeFileSync\([^,]+,\s*[^)]+\);\s*[\r\n]+\s*maybePruneChartCache\(\);/);
 	});
 });
