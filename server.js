@@ -3194,20 +3194,7 @@ function isProxyCacheValid(cachePath, maxAgeSeconds) {
 	}
 }
 
-// Chart generation (ported from genchart.py)
-function deduceUnit(title) {
-	if (/\skwh(\s|$)/i.test(title)) return 'kWh';
-	if (/\s%%?(\s|$)/.test(title)) return '%';
-	// Match various degree-like characters: ° (U+00B0), º (U+00BA), ˚ (U+02DA), or just C
-	if (/\s[°º˚]?c(\s|$)/i.test(title)) return '°C';
-	if (/\smbar(\s|$)/i.test(title)) return 'mbar';
-	if (/\sl\/min(\s|$)/i.test(title)) return 'l/min';
-	if (/\sm3(\s|$)/i.test(title)) return 'm³';
-	if (/\sv(\s|$)/i.test(title)) return 'V';
-	if (/\sw(\s|$)/i.test(title)) return 'W';
-	if (/\slm\/m2(\s|$)/i.test(title)) return 'lm/m²';
-	return '?';
-}
+// Chart generation
 
 function parsePersistenceStateNumber(value) {
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -3372,12 +3359,15 @@ async function fetchChartSeriesData(item, periodWindow = 86400, service = '', fo
 	const isGroupItem = !forceAsItem && isGroupItemType(itemDefinition?.type);
 	if (!isGroupItem) {
 		const primaryData = await fetchPersistenceSeries(item, periodWindow, service);
-		if (!primaryData || !primaryData.length) return [];
-		return [{ item, label: primaryLabel || fallbackLabel, data: primaryData }];
+		if (!primaryData || !primaryData.length) return { series: [], unitSymbol: '' };
+		const unitSymbol = itemDefinition?.unitSymbol || '';
+		return { series: [{ item, label: primaryLabel || fallbackLabel, data: primaryData }], unitSymbol };
 	}
 
 	const memberDefs = extractGroupMemberDefinitions(itemDefinition, item);
 	if (memberDefs.length) {
+		const rawMembers = Array.isArray(itemDefinition?.members) ? itemDefinition.members : [];
+		const memberUnitSymbol = rawMembers.reduce((found, m) => found || (m?.unitSymbol || ''), '');
 		const fetchedMembers = await Promise.all(memberDefs.map(async (member, index) => {
 			try {
 				const points = await fetchPersistenceSeries(member.name, periodWindow, service);
@@ -3397,13 +3387,13 @@ async function fetchChartSeriesData(item, periodWindow = 86400, service = '', fo
 			.filter(Boolean)
 			.sort((left, right) => left.order - right.order)
 			.map(({ order, ...series }) => series);
-		if (memberSeries.length) return memberSeries;
+		if (memberSeries.length) return { series: memberSeries, unitSymbol: memberUnitSymbol };
 	}
 
 	// Fallback when no member data is available: render the group item as a single series.
 	const primaryData = await fetchPersistenceSeries(item, periodWindow, service);
-	if (!primaryData || !primaryData.length) return [];
-	return [{ item, label: primaryLabel || fallbackLabel, data: primaryData }];
+	if (!primaryData || !primaryData.length) return { series: [], unitSymbol: '' };
+	return { series: [{ item, label: primaryLabel || fallbackLabel, data: primaryData }], unitSymbol: '' };
 }
 
 function computeChartYBounds(dataMin, dataMax) {
@@ -3661,7 +3651,7 @@ function prepareChartSeriesRenderData(rawSeriesList, periodWindow) {
 function generateChartHtml(chartSeries, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern, durationSec, interpolation, isMultiSeries = false) {
 	const theme = mode === 'dark' ? 'dark' : 'light';
 	const safeTitle = escapeHtml(title);
-	const unitDisplay = unit !== '?' ? escapeHtml(unit) : '';
+	const unitDisplay = unit ? escapeHtml(unit) : '';
 	const assetVersion = liveConfig.assetVersion || 'v1';
 	const dataHashAttr = dataHash ? ` data-hash="${dataHash}"` : '';
 	const seriesCount = Array.isArray(chartSeries) ? chartSeries.length : 0;
@@ -3727,32 +3717,12 @@ window._chartInterpolation=${inlineJson(interpolation || 'linear')};
 </html>`;
 }
 
-function renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, precomputedDataHash = '') {
+function renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, precomputedDataHash = '', unitSymbol = '') {
 	const window = normalizePeriodWindow(periodWindow) || periodWindowFromPeriodString(period, 86400);
 	const prepared = prepareChartSeriesRenderData(rawSeriesList, window);
 	if (!prepared?.chartSeries?.length) return null;
 
-	// Deduce unit from title
-	let unit = deduceUnit(title);
-	let cleanTitle = title;
-	if (unit !== '?') {
-		// Remove unit pattern(s) from end of title - handles variations like "Humidity %" and "Humidity %%"
-		const unitPatterns = {
-			'%': /\s*%%?\s*$/,
-			'°C': /\s*[°º˚]?c\s*$/i,
-			'kWh': /\s*kwh\s*$/i,
-			'mbar': /\s*mbar\s*$/i,
-			'l/min': /\s*l\/min\s*$/i,
-			'm³': /\s*m3\s*$/i,
-			'V': /\s*v\s*$/i,
-			'W': /\s*w\s*$/i,
-			'lm/m²': /\s*lm\/m2\s*$/i,
-		};
-		const pattern = unitPatterns[unit];
-		if (pattern) {
-			cleanTitle = cleanTitle.replace(pattern, '').trim();
-		}
-	}
+	const unit = unitSymbol || '';
 
 	// Reuse precomputed hash when available (e.g. /api/chart-hash path) to avoid duplicate hashing.
 	const dataHash = (typeof precomputedDataHash === 'string' && precomputedDataHash)
@@ -3768,7 +3738,7 @@ function renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxis
 		prepared.yMax,
 		prepared.dataMin,
 		prepared.dataMax,
-		cleanTitle,
+		title,
 		unit,
 		mode,
 		dataHash,
@@ -3789,9 +3759,9 @@ function renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxis
 
 async function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, service = '', forceAsItem = false) {
 	const window = normalizePeriodWindow(periodWindow) || periodWindowFromPeriodString(period, 86400);
-	const rawSeriesList = await fetchChartSeriesData(item, window, service, forceAsItem);
+	const { series: rawSeriesList, unitSymbol } = await fetchChartSeriesData(item, window, service, forceAsItem);
 	if (!rawSeriesList || !rawSeriesList.length) return null;
-	const rendered = renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, window, interpolation);
+	const rendered = renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, window, interpolation, '', unitSymbol);
 	return rendered?.html || null;
 }
 
@@ -8976,7 +8946,7 @@ app.get('/api/chart-hash', async (req, res) => {
 	);
 
 	try {
-		const rawSeriesList = await fetchChartSeriesData(item, periodWindow, service, forceAsItem);
+		const { series: rawSeriesList, unitSymbol } = await fetchChartSeriesData(item, periodWindow, service, forceAsItem);
 		if (!rawSeriesList || rawSeriesList.length === 0) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'No data' });
@@ -9003,7 +8973,7 @@ app.get('/api/chart-hash', async (req, res) => {
 			return res.json({ hash: dataHash });
 		}
 
-		const rendered = renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, dataHash);
+		const rendered = renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, dataHash, unitSymbol);
 		if (!rendered?.html) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Generation failed' });
