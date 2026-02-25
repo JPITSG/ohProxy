@@ -16,9 +16,9 @@ describe('Sitemap Selector Localization Wiring', () => {
 		assert.match(lang, /title:\s*'Select Sitemap'/);
 		assert.match(lang, /closeBtn:\s*'Close'/);
 		assert.match(lang, /currentBadge:\s*'Current Sitemap'/);
-		assert.match(lang, /switchingStatus:\s*'Switching sitemap\.'/);
-		assert.match(lang, /switchFailedStatus:\s*'Failed to switch sitemap\.'/);
-		assert.match(lang, /refreshFailedStatus:\s*'Could not refresh sitemap list\. Showing cached options\.'/);
+		assert.match(lang, /switchingStatus:\s*'Switching sitemap'/);
+		assert.match(lang, /switchFailedStatus:\s*'Failed to switch sitemap'/);
+		assert.match(lang, /refreshFailedStatus:\s*'Could not refresh sitemap list, showing cached options'/);
 		assert.match(lang, /unnamedFallback:\s*'Unnamed sitemap'/);
 		assert.match(lang, /triggerAriaLabel:\s*'Select sitemap'/);
 	});
