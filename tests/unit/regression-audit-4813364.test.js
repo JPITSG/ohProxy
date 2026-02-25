@@ -117,6 +117,13 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		assert.match(app, /btn\.disabled = true;/);
 	});
 
+	it('buttongrid ignores implicit type/category icon fallback when no explicit icon is configured', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		assert.match(app, /const rawIcon = safeText\(widgetIconName\(w\)\)\.trim\(\);/);
+		assert.match(app, /const icon = rawIcon\.toLowerCase\(\) === 'buttongrid'\s*\?\s*''\s*:\s*rawIcon;/);
+		assert.doesNotMatch(app, /const icon = widgetIconName\(w\);/);
+	});
+
 	it('buttongrid render block applies selected/active class only for stateful child buttons', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		const start = app.indexOf('} else if (isButtongrid && buttons.length) {');
