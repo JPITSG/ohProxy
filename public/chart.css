@@ -193,7 +193,7 @@ body.chart-fs-rotated .chart-card {
 	transition: r .4s ease, stroke-width .4s ease, filter .4s ease;
 }
 
-.chart-animated .data-point {
+.chart-svg.chart-animated-once .data-point {
 	opacity: 0;
 	animation: fadeIn 0.3s ease-out forwards;
 }
@@ -271,7 +271,7 @@ body.chart-fs-rotated .chart-card {
 	fill: url(#areaGradient);
 }
 
-.chart-animated .chart-area {
+.chart-svg.chart-animated-once .chart-area {
 	opacity: 0;
 	animation: fadeIn 0.5s ease-out 0.15s forwards;
 }
@@ -290,7 +290,7 @@ body.chart-fs-rotated .chart-card {
 	stroke-width: 2.25;
 }
 
-.chart-animated .chart-line {
+.chart-svg.chart-animated-once .chart-line {
 	animation: drawLine 1s ease-out forwards;
 }
 
@@ -304,7 +304,7 @@ body.chart-fs-rotated .chart-card {
 	filter: blur(4px);
 }
 
-.chart-animated .chart-line-glow {
+.chart-svg.chart-animated-once .chart-line-glow {
 	animation: drawLine 1s ease-out forwards;
 }
 
