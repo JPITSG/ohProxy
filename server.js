@@ -3343,6 +3343,13 @@ function extractGroupMemberDefinitions(groupDef, groupItemName) {
 	return out;
 }
 
+function extractUnitFromPattern(pattern) {
+	if (!pattern || typeof pattern !== 'string') return '';
+	const spaceIdx = pattern.indexOf(' ');
+	if (spaceIdx === -1) return '';
+	return pattern.slice(spaceIdx + 1).replace('%%', '%');
+}
+
 async function fetchChartSeriesData(item, periodWindow = 86400, service = '', forceAsItem = false) {
 	const fallbackLabel = normalizeChartSeriesLabel(item, item);
 	let itemDefinition = null;
@@ -3360,14 +3367,18 @@ async function fetchChartSeriesData(item, periodWindow = 86400, service = '', fo
 	if (!isGroupItem) {
 		const primaryData = await fetchPersistenceSeries(item, periodWindow, service);
 		if (!primaryData || !primaryData.length) return { series: [], unitSymbol: '' };
-		const unitSymbol = itemDefinition?.unitSymbol || '';
+		const unitSymbol = itemDefinition?.unitSymbol
+			|| extractUnitFromPattern(itemDefinition?.stateDescription?.pattern)
+			|| '';
 		return { series: [{ item, label: primaryLabel || fallbackLabel, data: primaryData }], unitSymbol };
 	}
 
 	const memberDefs = extractGroupMemberDefinitions(itemDefinition, item);
 	if (memberDefs.length) {
 		const rawMembers = Array.isArray(itemDefinition?.members) ? itemDefinition.members : [];
-		const memberUnitSymbol = rawMembers.reduce((found, m) => found || (m?.unitSymbol || ''), '');
+		const memberUnitSymbol = rawMembers.reduce((found, m) => {
+			return found || m?.unitSymbol || extractUnitFromPattern(m?.stateDescription?.pattern) || '';
+		}, '');
 		const fetchedMembers = await Promise.all(memberDefs.map(async (member, index) => {
 			try {
 				const points = await fetchPersistenceSeries(member.name, periodWindow, service);
