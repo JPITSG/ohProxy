@@ -7628,15 +7628,17 @@ function updateCard(card, w, info) {
 	}
 
 	titleEl.textContent = labelParts.title;
+	const metaState = (isText || isGroup) ? (labelParts.state || (!pageLink && ['NULL', 'UNDEF'].includes(st) ? '—' : '')) : labelParts.state;
 	if (isText || isGroup) {
-		crossfadeText(metaEl, labelParts.state);
+		crossfadeText(metaEl, metaState);
 	} else if (!isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput && !isButtongrid && !isColorpicker) {
 		// Don't show meta text for Selection/Switch/Setpoint/Colortemperaturepicker/Input/Buttongrid/Colorpicker.
-		metaEl.textContent = labelParts.state;
+		metaEl.textContent = metaState;
 	} else if (isColorTemperaturePicker || isInput || isButtongrid || isColorpicker) {
 		metaEl.textContent = '';
 	}
-	if (labelParts.state && !isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput && !isButtongrid && !isColorpicker) card.classList.add('has-meta');
+	const hasMeta = !!metaState && !isSelection && !isSwitchType && !isSetpoint && !isColorTemperaturePicker && !isInput && !isButtongrid && !isColorpicker;
+	if (hasMeta) card.classList.add('has-meta');
 	// Apply openHAB labelcolor / valuecolor
 	const lc = data.labelcolor;
 	const vc = data.valuecolor;
@@ -9215,14 +9217,7 @@ function updateCard(card, w, info) {
 		controls.innerHTML = '';
 		controls.appendChild(grid);
 	} else {
-		if (!labelParts.state) {
-			controls.classList.add('mt-3');
-			controls.innerHTML = `
-				<div class="stateValue text-sm text-slate-300 font-semibold break-words overflow-hidden">${escapeHtml(st) || '—'}</div>
-			`;
-		} else {
-			controls.innerHTML = '';
-		}
+		controls.innerHTML = '';
 	}
 
 	return true;
