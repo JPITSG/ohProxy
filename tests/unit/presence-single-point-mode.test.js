@@ -52,9 +52,22 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /rotateBtn\.style\.display=\(isTouchDevice&&fsActive\)\?'flex':'none';/);
 		assert.match(server, /rotateBtn\.addEventListener\('click',function\(\)\{\s*if\(!isTouchDevice\|\|!fsActive\)return;\s*isRotated=!isRotated;\s*applyRotation\(\);/);
 		assert.match(server, /function isRotatedTouchPanMode\(\)\{\s*return isTouchDevice&&presenceFullscreenActive&&presenceRotated;\s*\}/);
+		assert.match(server, /function isRotatedViewportMode\(\)\{\s*return presenceFullscreenActive&&presenceRotated;\s*\}/);
+		assert.match(server, /function clientToMapPixel\(clientX,clientY\)\{/);
+		assert.match(server, /var rectW=rect\.width\|\|1;/);
+		assert.match(server, /var rectH=rect\.height\|\|1;/);
+		assert.match(server, /var relX=Math\.max\(0,Math\.min\(rectW,clientX-rect\.left\)\);/);
+		assert.match(server, /var relY=Math\.max\(0,Math\.min\(rectH,clientY-rect\.top\)\);/);
+		assert.match(server, /if\(isRotatedViewportMode\(\)\)\{\s*\/\/ Inverse of CSS rotate\(90deg\): screen x follows local y, screen y follows inverted local x\.\s*var mappedX=\(relY\/rectH\)\*localW;\s*var mappedY=\(\(rectW-relX\)\/rectW\)\*localH;\s*x=mappedX;\s*y=mappedY;\s*\}/);
+		assert.match(server, /var originalGetMousePosition=map\.events\.getMousePosition;/);
+		assert.match(server, /map\.events\.getMousePosition=function\(evt\)\{\s*if\(isRotatedViewportMode\(\)&&evt&&typeof evt\.clientX==='number'&&typeof evt\.clientY==='number'\)\{\s*return clientToMapPixel\(evt\.clientX,evt\.clientY\);\s*\}\s*return originalGetMousePosition\.call\(this,evt\);/);
 		assert.match(server, /map\.pan\(-dy,dx,\{animate:false\}\);/);
 		assert.match(server, /presenceFullscreenActive=fsActive;/);
 		assert.match(server, /if\(!fsActive\)\{\s*isRotated=false;\s*applyRotation\(\);\s*\}/);
+		assert.match(server, /function eventToPixel\(e\)\{\s*return clientToMapPixel\(e\.clientX,e\.clientY\);\s*\}/);
+		assert.match(server, /touchStartPx=clientToMapPixel\(e\.touches\[0\]\.clientX,e\.touches\[0\]\.clientY\);/);
+		assert.match(server, /var movePx=clientToMapPixel\(e\.touches\[0\]\.clientX,e\.touches\[0\]\.clientY\);/);
+		assert.match(server, /var endPx=clientToMapPixel\(e\.changedTouches\[0\]\.clientX,e\.changedTouches\[0\]\.clientY\);/);
 	});
 
 	it('shows search modal in constrained fullscreen only when measured layout fit allows', () => {

@@ -9466,6 +9466,35 @@ vector.addFeatures(feature);
 	function isRotatedTouchPanMode(){
 	return isTouchDevice&&presenceFullscreenActive&&presenceRotated;
 	}
+	function isRotatedViewportMode(){
+	return presenceFullscreenActive&&presenceRotated;
+	}
+	function clientToMapPixel(clientX,clientY){
+	var rect=mapEl.getBoundingClientRect();
+	var rectW=rect.width||1;
+	var rectH=rect.height||1;
+	var localW=mapEl.clientWidth||rectW;
+	var localH=mapEl.clientHeight||rectH;
+	var relX=Math.max(0,Math.min(rectW,clientX-rect.left));
+	var relY=Math.max(0,Math.min(rectH,clientY-rect.top));
+	var x=(relX/rectW)*localW;
+	var y=(relY/rectH)*localH;
+	if(isRotatedViewportMode()){
+	// Inverse of CSS rotate(90deg): screen x follows local y, screen y follows inverted local x.
+	var mappedX=(relY/rectH)*localW;
+	var mappedY=((rectW-relX)/rectW)*localH;
+	x=mappedX;
+	y=mappedY;
+	}
+	return new OpenLayers.Pixel(x,y);
+	}
+	var originalGetMousePosition=map.events.getMousePosition;
+	map.events.getMousePosition=function(evt){
+	if(isRotatedViewportMode()&&evt&&typeof evt.clientX==='number'&&typeof evt.clientY==='number'){
+	return clientToMapPixel(evt.clientX,evt.clientY);
+	}
+	return originalGetMousePosition.call(this,evt);
+	};
 	mapEl.addEventListener('wheel',function(e){e.preventDefault()},{passive:false});
 	mapEl.addEventListener('mousewheel',function(e){e.preventDefault()},{passive:false});
 	mapEl.addEventListener('touchstart',function(e){
@@ -9607,8 +9636,7 @@ vector.addFeatures(feature);
 	}
 
 	function eventToPixel(e){
-	var rect=mapEl.getBoundingClientRect();
-	return new OpenLayers.Pixel(e.clientX-rect.left,e.clientY-rect.top);
+	return clientToMapPixel(e.clientX,e.clientY);
 	}
 
 	function findBlueFeatureNearPixel(px,maxDistance){
@@ -9694,17 +9722,14 @@ showBlueAndHandleClick(f,null,true);
 	var touchMoved=false;
 	mapEl.addEventListener('touchstart',function(e){
 	if(e.touches.length!==1)return;
-	var rect=mapEl.getBoundingClientRect();
-	touchStartPx=new OpenLayers.Pixel(e.touches[0].clientX-rect.left,e.touches[0].clientY-rect.top);
+	touchStartPx=clientToMapPixel(e.touches[0].clientX,e.touches[0].clientY);
 	touchMoved=false;
 	},{passive:true});
 	mapEl.addEventListener('touchmove',function(e){
 	if(!touchStartPx||e.touches.length!==1)return;
-	var rect=mapEl.getBoundingClientRect();
-	var x=e.touches[0].clientX-rect.left;
-	var y=e.touches[0].clientY-rect.top;
-	var dx=x-touchStartPx.x;
-	var dy=y-touchStartPx.y;
+	var movePx=clientToMapPixel(e.touches[0].clientX,e.touches[0].clientY);
+	var dx=movePx.x-touchStartPx.x;
+	var dy=movePx.y-touchStartPx.y;
 	if(dx*dx+dy*dy>100)touchMoved=true;
 	},{passive:true});
 	mapEl.addEventListener('touchend',function(e){
@@ -9712,8 +9737,7 @@ showBlueAndHandleClick(f,null,true);
 	var startPx=touchStartPx;
 	touchStartPx=null;
 	if(touchMoved||!e.changedTouches||!e.changedTouches.length)return;
-	var rect=mapEl.getBoundingClientRect();
-	var endPx=new OpenLayers.Pixel(e.changedTouches[0].clientX-rect.left,e.changedTouches[0].clientY-rect.top);
+	var endPx=clientToMapPixel(e.changedTouches[0].clientX,e.changedTouches[0].clientY);
 	var dx=endPx.x-startPx.x;
 	var dy=endPx.y-startPx.y;
 	if(dx*dx+dy*dy>100)return;
@@ -10186,7 +10210,7 @@ function clampCtxMenu(){var r=ctxMenu.getBoundingClientRect();var mapR=mapEl.get
 
 function ctxUpdatePos(e){
 var rect=mapEl.getBoundingClientRect();
-var px=new OpenLayers.Pixel(e.clientX-rect.left,e.clientY-rect.top);
+var px=clientToMapPixel(e.clientX,e.clientY);
 var lonlat=map.getLonLatFromPixel(px);
 if(!lonlat)return false;
 lonlat=lonlat.transform(proj,wgs84);
