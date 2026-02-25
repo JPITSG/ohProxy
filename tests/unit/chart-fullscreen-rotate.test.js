@@ -27,9 +27,26 @@ describe('Chart Fullscreen Rotate', () => {
 		assert.match(chartJs, /if \(!fsActive\) \{\s*isRotated = false;\s*applyRotation\(\);\s*\}/);
 		assert.match(chartJs, /document\.body\.classList\.add\('chart-fs-rotated'\);/);
 		assert.match(chartJs, /document\.body\.classList\.remove\('chart-fs-rotated'\);/);
-		assert.match(chartJs, /var reflowDelays = \[0, 60, 180, 320\];/);
+		assert.match(chartJs, /var CHART_REFLOW_DEBOUNCE_MS = 64;/);
+		assert.match(chartJs, /if \(chartReflowDebounceTimer\) \{\s*clearTimeout\(chartReflowDebounceTimer\);\s*\}/);
+		assert.match(chartJs, /chartReflowDebounceTimer = window\.setTimeout\(function\(\) \{/);
+		assert.match(chartJs, /chartReflowRafId = window\.requestAnimationFrame\(function\(\) \{\s*chartReflowRafId = 0;\s*reflowChartLayout\(\);/);
+		assert.doesNotMatch(chartJs, /var reflowDelays = \[0, 60, 180, 320\];/);
 		assert.match(chartJs, /window\.addEventListener\('orientationchange', scheduleChartReflow\);/);
 		assert.match(chartJs, /window\.addEventListener\('resize', scheduleChartReflow\);/);
+		assert.match(chartJs, /if \(window\.visualViewport\) \{\s*window\.visualViewport\.addEventListener\('resize', scheduleChartReflow\);\s*\}/);
+	});
+
+	it('limits chart animation classes to initial paint only', () => {
+		const chartJs = fs.readFileSync(CHART_JS_FILE, 'utf8');
+		const chartCss = fs.readFileSync(CHART_CSS_FILE, 'utf8');
+		assert.match(chartJs, /this\.hasRenderedOnce = false;/);
+		assert.match(chartJs, /var animated = document\.documentElement\.classList\.contains\('chart-animated'\) && !this\.hasRenderedOnce;/);
+		assert.match(chartJs, /this\.svg\.classList\.toggle\('chart-animated-once', animated\);/);
+		assert.match(chartJs, /if \(w > 0 && h > 0\) \{\s*this\.hasRenderedOnce = true;\s*\}/);
+		assert.match(chartCss, /\.chart-svg\.chart-animated-once \.chart-line \{/);
+		assert.match(chartCss, /\.chart-svg\.chart-animated-once \.chart-area \{/);
+		assert.match(chartCss, /\.chart-svg\.chart-animated-once \.data-point \{/);
 	});
 
 	it('uses a 90 degree fullscreen rotated chart-card layout', () => {

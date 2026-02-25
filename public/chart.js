@@ -306,8 +306,8 @@
 			this.touchMoved = false;
 			this.wasDragging = false;
 			this.tooltipCache = { w: 0, h: 0, contentLen: 0 };
+			this.hasRenderedOnce = false;
 			this.init();
-			window.addEventListener('resize', () => this.render());
 		}
 
 		init() {
@@ -368,6 +368,8 @@
 				h = rect.height;
 			}
 			var sm = w < 500;
+			var animated = document.documentElement.classList.contains('chart-animated') && !this.hasRenderedOnce;
+			this.svg.classList.toggle('chart-animated-once', animated);
 
 			// Compute y-axis info once for this render
 			var rawYValues = this.getYAxisValues(sm);
@@ -536,7 +538,6 @@
 				// Draw chart if we have points
 				if (this.seriesSets.length > 0) {
 					var chartGroup = $('g', { 'clip-path': 'url(#chartClip)' });
-					var animated = document.documentElement.classList.contains('chart-animated');
 					for (var s = 0; s < this.seriesSets.length; s++) {
 						var series = this.seriesSets[s];
 						var linePath = this.createPath(series.points);
@@ -643,6 +644,9 @@
 				}
 
 			this.svg.appendChild(g);
+			if (w > 0 && h > 0) {
+				this.hasRenderedOnce = true;
+			}
 		}
 
 		createPath(pts) {
@@ -1198,12 +1202,39 @@
 	// Script is at end of body, DOM is ready - instantiate immediately
 	var chartRenderer = new window.ChartRenderer('chartContainer', 'chartSvg');
 	checkTitleOverflow();
-	window.addEventListener('resize', checkTitleOverflow);
 	function reflowChartLayout() {
 		if (chartRenderer && typeof chartRenderer.render === 'function') {
 			chartRenderer.render();
 		}
 		checkTitleOverflow();
+	}
+	var chartReflowDebounceTimer = null;
+	var chartReflowRafId = 0;
+	var CHART_REFLOW_DEBOUNCE_MS = 64;
+	function scheduleChartReflow() {
+		if (chartReflowDebounceTimer) {
+			clearTimeout(chartReflowDebounceTimer);
+		}
+		chartReflowDebounceTimer = window.setTimeout(function() {
+			chartReflowDebounceTimer = null;
+			if (chartReflowRafId && window.cancelAnimationFrame) {
+				window.cancelAnimationFrame(chartReflowRafId);
+				chartReflowRafId = 0;
+			}
+			if (window.requestAnimationFrame) {
+				chartReflowRafId = window.requestAnimationFrame(function() {
+					chartReflowRafId = 0;
+					reflowChartLayout();
+				});
+				return;
+			}
+			reflowChartLayout();
+		}, CHART_REFLOW_DEBOUNCE_MS);
+	}
+	window.addEventListener('orientationchange', scheduleChartReflow);
+	window.addEventListener('resize', scheduleChartReflow);
+	if (window.visualViewport) {
+		window.visualViewport.addEventListener('resize', scheduleChartReflow);
 	}
 
 	// Fullscreen toggle (only when embedded in an iframe)
@@ -1222,17 +1253,6 @@
 		var isRotated = false;
 		var expandSvg = '<svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg>';
 		var minimizeSvg = '<svg viewBox="0 0 24 24"><path d="M9 3v6H3V7h4V3h2zm6 0h2v4h4v2h-6V3zM3 15h6v6H7v-4H3v-2zm12 0h6v2h-4v4h-2v-6z"/></svg>';
-		function scheduleChartReflow() {
-			var reflowDelays = [0, 60, 180, 320];
-			reflowDelays.forEach(function(delayMs) {
-				setTimeout(reflowChartLayout, delayMs);
-			});
-			if (window.requestAnimationFrame) {
-				window.requestAnimationFrame(function() {
-					window.requestAnimationFrame(reflowChartLayout);
-				});
-			}
-		}
 		function applyRotation() {
 			if (isRotated) {
 				document.body.classList.add('chart-fs-rotated');
@@ -1273,11 +1293,6 @@
 			}
 			syncRotateButton();
 		});
-		window.addEventListener('orientationchange', scheduleChartReflow);
-		window.addEventListener('resize', scheduleChartReflow);
-		if (window.visualViewport) {
-			window.visualViewport.addEventListener('resize', scheduleChartReflow);
-		}
 		syncRotateButton();
 	})();
 })();
