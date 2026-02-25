@@ -7363,7 +7363,12 @@ function getWidgetRenderInfo(w) {
 	const isColorpicker = t === 'colorpicker';
 	const label = isImage || isVideo || isChart ? safeText(w?.label || '') : widgetLabel(w);
 	const st = widgetState(w);
-	const icon = widgetIconName(w);
+	const rawIcon = safeText(widgetIconName(w)).trim();
+	// openHAB can surface "buttongrid" as an implicit fallback/category icon.
+	// This icon does not exist in the classic icon set and only produces 404 noise.
+	const icon = rawIcon.toLowerCase() === 'buttongrid'
+		? ''
+		: rawIcon;
 	const isStaticIcon = !!w?.staticIcon;
 	const itemName = safeText(w?.item?.name || w?.itemName || '');
 	// Support both OH 1.x 'mapping' and OH 3.x+ 'mappings'
