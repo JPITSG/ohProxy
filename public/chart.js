@@ -340,7 +340,7 @@
 			if (CHART_Y_PATTERN) {
 				var statsEl = document.getElementById('chartStats');
 				if (statsEl) {
-					var unit = window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '';
+					var unit = window._chartUnit ? ' ' + window._chartUnit : '';
 					statsEl.querySelectorAll('.stat-value[data-raw]').forEach(function(el) {
 						var raw = parseFloat(el.getAttribute('data-raw'));
 						if (Number.isFinite(raw)) {
@@ -763,7 +763,7 @@
 		}
 
 		getUnitSuffix() {
-			return window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '';
+			return window._chartUnit ? ' ' + window._chartUnit : '';
 		}
 
 		getYAxisRelevancy(yValues) {
@@ -1017,7 +1017,7 @@
 			}
 
 			formatTooltipValue(pt, decimals) {
-				var unit = window._chartUnit && window._chartUnit !== '?' ? ' ' + window._chartUnit : '';
+				var unit = window._chartUnit ? ' ' + window._chartUnit : '';
 				var valueText = this.fmt(pt.value, decimals) + unit;
 				if (this.isMultiSeries && pt.seriesLabel) {
 					return pt.seriesLabel + ': ' + valueText;
