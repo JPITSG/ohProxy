@@ -563,6 +563,22 @@ const AI_CACHE_DIR = path.join(__dirname, 'cache', 'ai');
 const STRUCTURE_MAP_ON_DEMAND_TIMEOUT_MS = 20000;
 const STRUCTURE_MAP_ON_DEMAND_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const ANTHROPIC_API_KEY = safeText(SERVER_CONFIG.apiKeys?.anthropic) || '';
+const AI_MODEL_IDS = [
+	'claude-3-haiku-20240307',
+	'claude-3-5-haiku-20241022',
+	'claude-haiku-4-5-20251001',
+	'claude-sonnet-4-20250514',
+	'claude-sonnet-4-5-20250514',
+];
+const AI_MODEL_PRICING = {
+	'claude-3-haiku-20240307':  { input: 0.25, output: 1.25 },
+	'claude-3-5-haiku-20241022': { input: 0.80, output: 4.00 },
+	'claude-haiku-4-5-20251001': { input: 0.80, output: 4.00 },
+	'claude-sonnet-4-20250514':  { input: 3.00, output: 15.00 },
+	'claude-sonnet-4-5-20250514': { input: 3.00, output: 15.00 },
+};
+const AI_MODEL = AI_MODEL_IDS.includes(safeText(SERVER_CONFIG.apiKeys?.aiModel))
+	? safeText(SERVER_CONFIG.apiKeys.aiModel) : 'claude-3-haiku-20240307';
 const VOICE_CONFIG = SERVER_CONFIG.voice || {};
 const VOICE_MODEL = (['browser', 'vosk'].includes((safeText(VOICE_CONFIG.model) || '').toLowerCase()))
 	? safeText(VOICE_CONFIG.model).toLowerCase() : 'browser';
@@ -1938,6 +1954,7 @@ const liveConfig = {
 	binConvert: BIN_CONVERT,
 	binShell: BIN_SHELL,
 	anthropicApiKey: ANTHROPIC_API_KEY,
+	aiModel: AI_MODEL,
 	voiceModel: VOICE_MODEL,
 	voskHost: VOSK_HOST,
 	weatherbitApiKey: WEATHERBIT_API_KEY,
@@ -2127,6 +2144,8 @@ function reloadLiveConfig() {
 
 	// External services
 	liveConfig.anthropicApiKey = safeText(newServer.apiKeys?.anthropic) || '';
+	const newAiModel = safeText(newServer.apiKeys?.aiModel) || '';
+	liveConfig.aiModel = AI_MODEL_IDS.includes(newAiModel) ? newAiModel : 'claude-3-haiku-20240307';
 	const newVoice = newServer.voice || {};
 	const vm = (safeText(newVoice.model) || 'browser').toLowerCase();
 	liveConfig.voiceModel = (vm === 'browser' || vm === 'vosk') ? vm : 'browser';
@@ -6288,7 +6307,7 @@ async function generateStructureMapForSitemap(sitemapName, sitemapNames = null) 
 	return generateStructureMap(
 		async () => names.map((name) => ({ name })),
 		(name) => fetchStructureMapSitemapFull(name),
-		{ sitemapName: targetSitemap }
+		{ sitemapName: targetSitemap, model: liveConfig.aiModel }
 	);
 }
 
@@ -8055,7 +8074,7 @@ app.post('/api/voice', jsonParserSmall, async (req, res) => {
 
 	try {
 		const aiResponse = await callAnthropicApi({
-			model: 'claude-3-haiku-20240307',
+			model: liveConfig.aiModel,
 			max_tokens: 4096,
 			system: `You are a home automation voice command interpreter. Your job is to match voice commands to the available smart home items and determine what actions to take.
 
@@ -8159,8 +8178,9 @@ Rules:
 			: 'none';
 		const inputTokens = aiResponse.usage?.input_tokens || 0;
 		const outputTokens = aiResponse.usage?.output_tokens || 0;
-		const inputCost = (inputTokens / 1000000) * 0.25;  // Haiku: $0.25/1M input
-		const outputCost = (outputTokens / 1000000) * 1.25; // Haiku: $1.25/1M output
+		const pricing = AI_MODEL_PRICING[liveConfig.aiModel] || AI_MODEL_PRICING['claude-3-haiku-20240307'];
+		const inputCost = (inputTokens / 1000000) * pricing.input;
+		const outputCost = (outputTokens / 1000000) * pricing.output;
 		const totalCost = inputCost + outputCost;
 		logMessage(`[Voice] [${username}] "${trimmed}" -> understood=${parsed.understood}, actions=[${actionSummary}], tokens=${inputTokens}+${outputTokens}, cost=$${totalCost.toFixed(6)}`);
 

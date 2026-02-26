@@ -4554,6 +4554,13 @@ const ADMIN_CONFIG_SCHEMA = [
 		id: 'external', group: 'server',
 		fields: [
 			{ key: 'server.apiKeys.anthropic', type: 'secret', allowEmpty: true },
+			{ key: 'server.apiKeys.aiModel', type: 'select', options: [
+				'claude-3-haiku-20240307',
+				'claude-3-5-haiku-20241022',
+				'claude-haiku-4-5-20251001',
+				'claude-sonnet-4-20250514',
+				'claude-sonnet-4-5-20250514',
+			] },
 			{ key: 'server.weatherbit.apiKey', type: 'secret', allowEmpty: true },
 			{ key: 'server.weatherbit.latitude', type: 'text', allowEmpty: true },
 			{ key: 'server.weatherbit.longitude', type: 'text', allowEmpty: true },

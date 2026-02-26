@@ -237,6 +237,8 @@ module.exports = {
 		apiKeys: {
 			// Anthropic API key (for Claude AI integration).
 			anthropic: '',
+			// Claude model for voice command processing and structure map generation.
+			aiModel: 'claude-3-haiku-20240307',
 		},
 		weatherbit: {
 			// Weatherbit API key (get from weatherbit.io).
