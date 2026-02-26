@@ -21,6 +21,7 @@ describe('PWA Soft Reset Resume', () => {
 	it('holds status rendering while resume UI is locked', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /function isResumeUiLocked\(\)\s*\{\s*return state\.resumeInProgress === true;\s*\}/);
+		assert.match(app, /function beginResumeTransition\(\) \{\s*state\.resumeHeldStatusText = 'Disconnected';\s*state\.resumeHeldStatusOk = false;/);
 		assert.match(app, /if \(isResumeUiLocked\(\)\) \{\s*const label = state\.resumeHeldStatusText \|\| state\.initialStatusText \|\| connectionStatusInfo\(\)\.label \|\| 'Connected';/);
 		assert.match(app, /if \(isResumeUiLocked\(\)\) \{\s*document\.documentElement\.classList\.remove\('error-state'\);/);
 	});
@@ -39,5 +40,7 @@ describe('PWA Soft Reset Resume', () => {
 		assert.match(app, /await waitForResumeSettleWindow\(\);/);
 		assert.match(app, /const hardDeadline = Date\.now\(\) \+ RESUME_HARD_TIMEOUT_MS;/);
 		assert.match(app, /throw new Error\('Resume timeout'\);/);
+		assert.doesNotMatch(app, /state\.pageUrl = state\.rootPageUrl;\s*setConnectionStatus\(true\);\s*const refreshed = await refresh\(true\);/);
+		assert.doesNotMatch(app, /applySitemapOption\(selected\);\s*\/\/ Success - now refresh to get widgets\s*setConnectionStatus\(true\);\s*const refreshed = await refresh\(true\);/);
 	});
 });
