@@ -392,7 +392,7 @@ const state = {
 	isSlim: false,
 	headerMode: 'full',
 	forcedMode: null,
-	connectionOk: true,
+	connectionOk: false,
 	connectionReady: false,
 	connectionPending: false,
 	lastError: '',
@@ -406,7 +406,7 @@ const state = {
 	resumeStartedAt: 0,
 	resumeSettleReadyAt: 0,
 	resumeHeldStatusText: '',
-	resumeHeldStatusOk: true,
+	resumeHeldStatusOk: false,
 	sitemapCache: new Map(),		// Full sitemap cache: pageUrl -> page data
 	sitemapCacheReady: false,		// Whether the full sitemap has been loaded
 };
@@ -438,6 +438,38 @@ const CLIENT_CONFIG = (OH_CONFIG.client && typeof OH_CONFIG.client === 'object')
 const AUTH_INFO = (window.__OH_AUTH__ && typeof window.__OH_AUTH__ === 'object')
 	? window.__OH_AUTH__
 	: {};
+const ASSET_VERSION_STORAGE_KEY = 'ohAssetVersion';
+
+function normalizeAssetVersion(value) {
+	const normalized = safeText(value).trim();
+	if (!normalized) return '';
+	if (normalized.length > 100) return '';
+	if (!/^v[\w.-]+$/.test(normalized)) return '';
+	return normalized;
+}
+
+function readStoredAssetVersion() {
+	try {
+		return normalizeAssetVersion(localStorage.getItem(ASSET_VERSION_STORAGE_KEY));
+	} catch (_) {
+		return '';
+	}
+}
+
+function writeStoredAssetVersion(version) {
+	const normalized = normalizeAssetVersion(version);
+	if (!normalized) return;
+	try {
+		localStorage.setItem(ASSET_VERSION_STORAGE_KEY, normalized);
+	} catch (_) {}
+}
+
+let effectiveAssetVersion = normalizeAssetVersion(OH_CONFIG.assetVersion);
+if (effectiveAssetVersion) {
+	writeStoredAssetVersion(effectiveAssetVersion);
+} else {
+	effectiveAssetVersion = readStoredAssetVersion();
+}
 
 function normalizeMapviewRenderingMode(value) {
 	const mode = safeText(value).trim().toLowerCase();
@@ -10204,6 +10236,7 @@ function shouldShowStatusNotification() {
 	return CLIENT_CONFIG.statusNotification !== false
 		&& notificationPermission === 'granted'
 		&& isTouchDevice()
+		&& state.connectionReady
 		&& state.connectionOk
 		&& !isResumeUiLocked()
 		&& document.visibilityState === 'visible';
@@ -10677,12 +10710,21 @@ function connectWs() {
 		wsConnection.onmessage = (event) => {
 			try {
 				const msg = JSON.parse(event.data);
-				if (msg.event === 'connected' && msg.data?.assetVersion) {
-					if (msg.data.assetVersion !== OH_CONFIG.assetVersion) {
+				if (msg.event === 'connected') {
+					const serverAssetVersion = normalizeAssetVersion(msg.data?.assetVersion);
+					if (!serverAssetVersion) return;
+					if (!effectiveAssetVersion) {
+						effectiveAssetVersion = serverAssetVersion;
+						writeStoredAssetVersion(serverAssetVersion);
+						return;
+					}
+					if (serverAssetVersion !== effectiveAssetVersion) {
 						console.log('Asset version mismatch on reconnect, reloading...');
 						promptAssetReload();
 						return;
 					}
+					writeStoredAssetVersion(serverAssetVersion);
+					return;
 				}
 				if (msg.event === 'account-deleted') {
 					// Account was deleted - redirect to login
@@ -11614,8 +11656,12 @@ function restoreNormalPolling() {
 	if (els.darkMode) els.darkMode.addEventListener('click', () => { haptic(); setTheme('dark'); });
 	initTheme(state.forcedMode);
 	state.initialStatusText = safeText(els.statusText ? els.statusText.textContent : '');
-	scheduleConnectionPending();
-	updateStatusBar();
+	if (navigator.onLine === false) {
+		setConnectionStatus(false, 'Network offline');
+	} else {
+		scheduleConnectionPending();
+		updateStatusBar();
+	}
 
 	updateNavButtons();
 
@@ -11638,7 +11684,6 @@ function restoreNormalPolling() {
 			state.rawWidgets = Array.isArray(embeddedHome.widgets) ? embeddedHome.widgets : [];
 
 			syncHistory(true);
-			setConnectionStatus(true);
 			render();
 
 			if (window.__OH_SITEMAP_CACHE__?.pages) {
@@ -11651,6 +11696,7 @@ function restoreNormalPolling() {
 			} else {
 				fetchFullSitemap().catch(() => {});
 			}
+			void refresh(false).catch(() => {});
 		} else {
 			syncHistory(true);
 			fetchFullSitemap().catch(() => {});
