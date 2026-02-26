@@ -179,14 +179,21 @@ describe('Service Worker: Cache Strategy', () => {
 
 	it('falls back to cached app shell for app-shell 5xx navigations', () => {
 		const content = readFile(SW_FILE);
-		assert.match(content, /if \(isAppShell && response\.status >= 500 && response\.status < 600\) \{/);
+		assert.match(content, /if \(response\.status >= 500 && response\.status < 600\) \{/);
 		assert.match(content, /return caches\.match\('\.\/index\.html'\)\.then\(\(cached\) => cached \|\| response\);/);
 	});
 
 	it('only updates cached app shell from successful navigation responses', () => {
 		const content = readFile(SW_FILE);
-		assert.match(content, /if \(isAppShell && response && response\.ok\) \{/);
+		assert.match(content, /if \(response && response\.ok\) \{/);
 		assert.match(content, /cache\.put\('\.\/index\.html', copy\);/);
+	});
+
+	it('serves cached app shell immediately and revalidates app-shell navigations in background', () => {
+		const content = readFile(SW_FILE);
+		assert.match(content, /if \(isAppShell\) \{\s*event\.respondWith\(\s*caches\.match\('\.\/index\.html'\)\.then\(\(cachedShell\) => \{/);
+		assert.match(content, /if \(cachedShell\) \{\s*fetch\(request\)\s*\.then\(\(response\) => \{/);
+		assert.match(content, /return cachedShell;/);
 	});
 });
 

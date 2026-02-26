@@ -75,33 +75,51 @@ self.addEventListener('fetch', (event) => {
 		const navPath = url.pathname;
 		const isAppShell = navPath === '/' || navPath.endsWith('/index.html') ||
 			navPath === self.registration.scope.replace(url.origin, '');
-		event.respondWith(
-			fetch(request)
-				.then((response) => {
-					if (isAppShell && response.status >= 500 && response.status < 600) {
-						return caches.match('./index.html').then((cached) => cached || response);
+		if (isAppShell) {
+			event.respondWith(
+				caches.match('./index.html').then((cachedShell) => {
+					if (cachedShell) {
+						fetch(request)
+							.then((response) => {
+								if (response && response.ok) {
+									const copy = response.clone();
+									caches.open(CACHE_NAME).then((cache) => {
+										cache.put('./index.html', copy);
+									});
+								}
+							})
+							.catch(() => {});
+						return cachedShell;
 					}
-					if (isAppShell && response && response.ok) {
-						const copy = response.clone();
-						caches.open(CACHE_NAME).then((cache) => {
-							cache.put('./index.html', copy);
-						});
-					}
-					return response;
-				})
-				.catch(() => {
-					if (isAppShell) {
-						return caches.match('./index.html')
+					return fetch(request)
+						.then((response) => {
+							if (response && response.ok) {
+								const copy = response.clone();
+								caches.open(CACHE_NAME).then((cache) => {
+									cache.put('./index.html', copy);
+								});
+								return response;
+							}
+							if (response.status >= 500 && response.status < 600) {
+								return caches.match('./index.html').then((cached) => cached || response);
+							}
+							return response;
+						})
+						.catch(() => caches.match('./index.html')
 							.then(cached => cached || new Response('Offline', {
 								status: 503, statusText: 'Service Unavailable',
 								headers: { 'Content-Type': 'text/plain' },
-							}));
-					}
-					return new Response('Offline', {
-						status: 503, statusText: 'Service Unavailable',
-						headers: { 'Content-Type': 'text/plain' },
-					});
+							})));
 				})
+			);
+			return;
+		}
+
+		event.respondWith(
+			fetch(request).catch(() => new Response('Offline', {
+				status: 503, statusText: 'Service Unavailable',
+				headers: { 'Content-Type': 'text/plain' },
+			}))
 		);
 		return;
 	}
