@@ -181,10 +181,8 @@ function isResumeUiLocked() {
 }
 
 function beginResumeTransition() {
-	const fallback = state.initialStatusText || connectionStatusInfo().label || 'Connected';
-	const current = safeText(els.statusText ? els.statusText.textContent : '');
-	state.resumeHeldStatusText = current || fallback;
-	state.resumeHeldStatusOk = !!state.connectionOk;
+	state.resumeHeldStatusText = 'Disconnected';
+	state.resumeHeldStatusOk = false;
 	state.resumeInProgress = true;
 	state.resumePhase = 'loading';
 	state.resumeStartedAt = Date.now();
@@ -273,7 +271,6 @@ async function softReset() {
 		// Fast path: if snapshot provided valid rootPageUrl, skip sitemap fetch
 		if (snapshotApplied && state.rootPageUrl) {
 			state.pageUrl = state.rootPageUrl;
-			setConnectionStatus(true);
 			const refreshed = await refresh(true);
 			if (refreshed && state.connectionOk) {
 				await completeSoftResetSuccess();
@@ -317,7 +314,6 @@ async function softReset() {
 				applySitemapOption(selected);
 
 				// Success - now refresh to get widgets
-				setConnectionStatus(true);
 				const refreshed = await refresh(true);
 				if (refreshed && state.connectionOk) {
 					await completeSoftResetSuccess();
