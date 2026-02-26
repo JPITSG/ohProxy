@@ -13,6 +13,23 @@ const AI_CACHE_DIR = path.join(CACHE_DIR, 'ai');
 const config = require('./config');
 const serverConfig = config.server || {};
 
+const AI_MODEL_IDS = [
+	'claude-3-haiku-20240307',
+	'claude-3-5-haiku-20241022',
+	'claude-haiku-4-5-20251001',
+	'claude-sonnet-4-20250514',
+	'claude-sonnet-4-5-20250514',
+];
+const AI_MODEL_PRICING = {
+	'claude-3-haiku-20240307':  { input: 0.25, output: 1.25 },
+	'claude-3-5-haiku-20241022': { input: 0.80, output: 4.00 },
+	'claude-haiku-4-5-20251001': { input: 0.80, output: 4.00 },
+	'claude-sonnet-4-20250514':  { input: 3.00, output: 15.00 },
+	'claude-sonnet-4-5-20250514': { input: 3.00, output: 15.00 },
+};
+const cfgAiModel = String(serverConfig.apiKeys?.aiModel || '').trim();
+const AI_MODEL = AI_MODEL_IDS.includes(cfgAiModel) ? cfgAiModel : 'claude-3-haiku-20240307';
+
 const args = process.argv.slice(2);
 const command = args[0];
 
@@ -127,7 +144,7 @@ async function genStructureMap(options = {}) {
 			return await getSitemapFull(name);
 		};
 
-		const result = await generateStructureMap(fetchList, fetchFull, { sitemapName });
+		const result = await generateStructureMap(fetchList, fetchFull, { sitemapName, model: AI_MODEL });
 
 		console.log(`Using sitemap: ${result.sitemapName}`);
 		console.log(`Found ${result.stats.total} items with items`);
@@ -278,7 +295,7 @@ async function testVoice(voiceCommand) {
 	console.log('');
 
 	const requestBody = {
-		model: 'claude-3-haiku-20240307',
+		model: AI_MODEL,
 		max_tokens: 1024,
 		system: `You are a home automation voice command interpreter. Your job is to match voice commands to the available smart home items and determine what actions to take.
 
@@ -358,8 +375,9 @@ Rules:
 		console.log(`Input tokens: ${response.usage?.input_tokens || 'N/A'}`);
 		console.log(`Output tokens: ${response.usage?.output_tokens || 'N/A'}`);
 
-		const inputCost = ((response.usage?.input_tokens || 0) / 1000000) * 0.25;
-		const outputCost = ((response.usage?.output_tokens || 0) / 1000000) * 1.25;
+		const pricing = AI_MODEL_PRICING[AI_MODEL] || AI_MODEL_PRICING['claude-3-haiku-20240307'];
+		const inputCost = ((response.usage?.input_tokens || 0) / 1000000) * pricing.input;
+		const outputCost = ((response.usage?.output_tokens || 0) / 1000000) * pricing.output;
 		console.log(`Estimated cost: $${(inputCost + outputCost).toFixed(6)}`);
 
 	} catch (err) {
