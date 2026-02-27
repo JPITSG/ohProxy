@@ -609,6 +609,10 @@ function getUserRole() {
 	return OH_CONFIG.userRole || null;
 }
 
+function isAdminUser() {
+	return getUserRole() === 'admin';
+}
+
 // Check if widget should be visible to current user
 function isWidgetVisible(widget) {
 	const userRole = getUserRole();
@@ -3083,6 +3087,11 @@ let sitemapSelectModal = null;
 let sitemapSelectHistoryPushed = false;
 let sitemapSelectClosePending = false;
 let sitemapSelectSwitching = false;
+let sitemapSettingsModal = null;
+let sitemapSettingsHistoryPushed = false;
+let sitemapSettingsClosePending = false;
+let sitemapSettingsTargetName = '';
+let sitemapSettingsSaving = false;
 
 function makeFrameDraggable(frame, handle) {
 	let dragging = false;
@@ -4051,6 +4060,18 @@ function sitemapOptionPrimaryLabel(option) {
 	return title || name || ohLang?.sitemapSelect?.unnamedFallback || 'Unnamed sitemap';
 }
 
+function sitemapSettingsModalTitle(option) {
+	const ss = ohLang?.sitemapSettings || {};
+	const fallbackName = ohLang?.sitemapSelect?.unnamedFallback || 'Unnamed sitemap';
+	const name = safeText(option?.name || '').trim() || fallbackName;
+	const title = safeText(option?.title || '').trim() || name;
+	const template = safeText(ss.titleTemplate || '').trim();
+	if (template.includes('{TITLE}') && template.includes('{NAME}')) {
+		return template.replace(/\{TITLE\}/g, title).replace(/\{NAME\}/g, name);
+	}
+	return `Sitemap ${title} (${name}) Settings`;
+}
+
 function setSitemapSelectStatus(message, isError, isPending) {
 	if (!sitemapSelectModal) return;
 	const statusEl = sitemapSelectModal.querySelector('.sitemap-select-status');
@@ -4060,7 +4081,204 @@ function setSitemapSelectStatus(message, isError, isPending) {
 		? 'sitemap-select-status error'
 		: isPending
 			? 'sitemap-select-status pending'
-			: 'sitemap-select-status';
+				: 'sitemap-select-status';
+}
+
+function setSitemapSettingsStatus(message, { isError, isPending, isSuccess } = {}) {
+	if (!sitemapSettingsModal) return;
+	const statusEl = sitemapSettingsModal.querySelector('.sitemap-settings-status');
+	if (!statusEl) return;
+	statusEl.textContent = safeText(message);
+	let className = 'sitemap-settings-status';
+	if (isError) className += ' error';
+	else if (isPending) className += ' pending';
+	else if (isSuccess) className += ' success';
+	statusEl.className = className;
+}
+
+function applySitemapSettingsVisibility(visibility) {
+	if (!sitemapSettingsModal) return;
+	const normalized = ['all', 'normal', 'admin'].includes(visibility) ? visibility : 'all';
+	const radio = sitemapSettingsModal.querySelector(`input[name="sitemapVisibility"][value="${normalized}"]`);
+	if (!radio) return;
+	radio.checked = true;
+	syncRadioClasses(sitemapSettingsModal, 'sitemapVisibility');
+}
+
+function collectSitemapSettingsVisibility() {
+	if (!sitemapSettingsModal) return 'all';
+	const selected = sitemapSettingsModal.querySelector('input[name="sitemapVisibility"]:checked');
+	const value = safeText(selected?.value).trim().toLowerCase();
+	return ['all', 'normal', 'admin'].includes(value) ? value : 'all';
+}
+
+async function fetchSitemapSettingsConfig(sitemapName) {
+	const resp = await fetch('/api/sitemap-config/' + encodeURIComponent(sitemapName));
+	if (!resp.ok) {
+		const err = await resp.json().catch(() => ({}));
+		throw new Error(err.error || `HTTP ${resp.status}`);
+	}
+	return resp.json();
+}
+
+async function postSitemapSettingsConfig(sitemapName, visibility) {
+	const resp = await fetch('/api/sitemap-config', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ sitemapName, visibility }),
+	});
+	if (!resp.ok) {
+		const err = await resp.json().catch(() => ({}));
+		throw new Error(err.error || `HTTP ${resp.status}`);
+	}
+	return resp.json();
+}
+
+function ensureSitemapSettingsModal() {
+	if (sitemapSettingsModal) return;
+	const ss = ohLang?.sitemapSettings || {};
+	const wrap = document.createElement('div');
+	wrap.id = 'sitemapSettingsModal';
+	wrap.className = 'sitemap-settings-modal oh-modal hidden';
+	wrap.innerHTML = `
+		<div class="sitemap-settings-frame oh-modal-frame glass">
+			<div class="sitemap-settings-header oh-modal-header">
+				<h2>${ss.title || 'Sitemap Settings'}</h2>
+				<button type="button" class="sitemap-settings-close oh-modal-close" aria-label="${ss.closeBtn || 'Close'}">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M18 6L6 18M6 6l12 12"/>
+					</svg>
+				</button>
+			</div>
+			<div class="sitemap-settings-body oh-modal-body">
+				<div class="item-config-section-header">${ss.visibilityHeader || 'Visibility'}</div>
+				<div class="item-config-visibility">
+					<label class="item-config-radio">
+						<input type="radio" name="sitemapVisibility" value="all" checked>
+						<span>${ss.visAll || 'All'}</span>
+					</label>
+					<label class="item-config-radio">
+						<input type="radio" name="sitemapVisibility" value="normal">
+						<span>${ss.visNormal || 'Normal'}</span>
+					</label>
+					<label class="item-config-radio">
+						<input type="radio" name="sitemapVisibility" value="admin">
+						<span>${ss.visAdmin || 'Admin'}</span>
+					</label>
+				</div>
+			</div>
+			<div class="sitemap-settings-footer oh-modal-footer">
+				<div class="sitemap-settings-status"></div>
+				<button type="button" class="sitemap-settings-cancel">${ss.closeBtn || 'Close'}</button>
+				<button type="button" class="sitemap-settings-save">${ss.saveBtn || 'Save'}</button>
+			</div>
+		</div>
+	`;
+	document.body.appendChild(wrap);
+	sitemapSettingsModal = wrap;
+
+	wrap.querySelector('.sitemap-settings-close').addEventListener('click', () => { haptic(); closeSitemapSettingsModal(); });
+	wrap.querySelector('.sitemap-settings-cancel').addEventListener('click', () => { haptic(); closeSitemapSettingsModal(); });
+	wrap.querySelector('.sitemap-settings-save').addEventListener('click', () => { haptic(); void saveSitemapSettings(); });
+	wrap.addEventListener('change', (e) => {
+		if (e.target?.type !== 'radio') return;
+		syncRadioClasses(wrap, e.target.name);
+	});
+	attachModalDismissListeners(wrap, sitemapSettingsModal, closeSitemapSettingsModal);
+	makeFrameDraggable(wrap.querySelector('.sitemap-settings-frame'), wrap.querySelector('.sitemap-settings-header h2'));
+}
+
+async function openSitemapSettingsModal(option) {
+	if (!isAdminUser()) return;
+	const sitemapName = safeText(option?.name).trim();
+	if (!sitemapName) return;
+
+	ensureSitemapSettingsModal();
+	sitemapSettingsTargetName = sitemapName;
+	sitemapSettingsSaving = false;
+
+	const titleEl = sitemapSettingsModal.querySelector('.sitemap-settings-header h2');
+	const saveBtn = sitemapSettingsModal.querySelector('.sitemap-settings-save');
+	if (titleEl) titleEl.textContent = sitemapSettingsModalTitle(option);
+	if (saveBtn) saveBtn.disabled = true;
+	applySitemapSettingsVisibility('all');
+	setSitemapSettingsStatus(ohLang?.sitemapSettings?.loading || 'Loading…', { isPending: true });
+
+	const modalIsOpen = !sitemapSettingsModal.classList.contains('hidden');
+	if (!modalIsOpen) {
+		openModalBase(sitemapSettingsModal, 'sitemap-settings-open');
+		sitemapSettingsHistoryPushed = true;
+		history.pushState(null, '', window.location.pathname + window.location.search + window.location.hash);
+		equalizeFooterButtons(sitemapSettingsModal.querySelector('.sitemap-settings-footer'));
+	}
+
+	try {
+		const config = await fetchSitemapSettingsConfig(sitemapName);
+		applySitemapSettingsVisibility(safeText(config?.visibility).trim().toLowerCase());
+		setSitemapSettingsStatus('', {});
+	} catch (err) {
+		logJsError('openSitemapSettingsModal failed', err);
+		setSitemapSettingsStatus(
+			(ohLang?.sitemapSettings?.loadFailed || 'Failed to load sitemap settings: ') + err.message,
+			{ isError: true }
+		);
+		shakeElement(sitemapSettingsModal?.querySelector('.sitemap-settings-frame'));
+	} finally {
+		if (saveBtn) saveBtn.disabled = false;
+	}
+}
+
+function closeSitemapSettingsModal({ skipHistory } = {}) {
+	if (!sitemapSettingsModal || sitemapSettingsModal.classList.contains('hidden')) return;
+	if (sitemapSettingsHistoryPushed) {
+		sitemapSettingsHistoryPushed = false;
+		if (!skipHistory) {
+			sitemapSettingsClosePending = true;
+			history.back();
+		}
+	}
+	sitemapSettingsSaving = false;
+	sitemapSettingsTargetName = '';
+	setSitemapSettingsStatus('', {});
+	closeModalBase(sitemapSettingsModal, '.sitemap-settings-frame', 'sitemap-settings-open');
+}
+
+async function saveSitemapSettings() {
+	if (!sitemapSettingsModal || !sitemapSettingsTargetName || sitemapSettingsSaving) return;
+	sitemapSettingsSaving = true;
+	const saveBtn = sitemapSettingsModal.querySelector('.sitemap-settings-save');
+	if (saveBtn) saveBtn.disabled = true;
+
+	const visibility = collectSitemapSettingsVisibility();
+	setSitemapSettingsStatus(ohLang?.sitemapSettings?.saving || 'Saving…', { isPending: true });
+	try {
+		await postSitemapSettingsConfig(sitemapSettingsTargetName, visibility);
+		setSitemapSettingsStatus(ohLang?.sitemapSettings?.savedOk || 'Saved successfully', { isSuccess: true });
+		await refreshSitemapOptionsForModalOpen();
+		renderSitemapSelectOptions();
+
+		const currentStillVisible = Array.isArray(state.sitemapOptions)
+			&& state.sitemapOptions.some((entry) => entry?.name === state.sitemapName);
+		if (!currentStillVisible) {
+			const reloadUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+			window.location.assign(reloadUrl);
+			return;
+		}
+
+		if (Array.isArray(state.sitemapOptions) && state.sitemapOptions.length <= 1) {
+			closeSitemapSelectModal();
+		}
+	} catch (err) {
+		logJsError('saveSitemapSettings failed', err);
+		setSitemapSettingsStatus(
+			(ohLang?.sitemapSettings?.saveFailed || 'Failed to save sitemap settings: ') + err.message,
+			{ isError: true }
+		);
+		shakeElement(sitemapSettingsModal?.querySelector('.sitemap-settings-frame'));
+	} finally {
+		sitemapSettingsSaving = false;
+		if (saveBtn) saveBtn.disabled = false;
+	}
 }
 
 function renderSitemapSelectOptions() {
@@ -4106,13 +4324,27 @@ function renderSitemapSelectOptions() {
 
 		button.appendChild(headerRow);
 
-		button.addEventListener('click', () => {
+		button.addEventListener('click', (e) => {
+			if (isAdminUser() && (e.ctrlKey || e.metaKey)) {
+				e.preventDefault();
+				e.stopPropagation();
+				haptic();
+				void openSitemapSettingsModal(option);
+				return;
+			}
 			haptic();
 			if (isActive) {
 				closeSitemapSelectModal();
 				return;
 			}
 			selectSitemapAndReload(option.name);
+		});
+		button.addEventListener('contextmenu', (e) => {
+			if (!isAdminUser()) return;
+			e.preventDefault();
+			e.stopPropagation();
+			haptic();
+			void openSitemapSettingsModal(option);
 		});
 
 		listEl.appendChild(button);
@@ -11164,6 +11396,16 @@ function restoreNormalPolling() {
 		// Absorb popstate fired by sitemap modal closing via UI.
 		if (sitemapSelectClosePending) {
 			sitemapSelectClosePending = false;
+			return;
+		}
+		// Absorb popstate fired by sitemap settings modal closing via UI.
+		if (sitemapSettingsClosePending) {
+			sitemapSettingsClosePending = false;
+			return;
+		}
+		// Back button pressed while sitemap settings modal is open — close it.
+		if (sitemapSettingsHistoryPushed) {
+			closeSitemapSettingsModal({ skipHistory: true });
 			return;
 		}
 		// Back button pressed while sitemap selector is open — close it.
