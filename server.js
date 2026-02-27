@@ -26,6 +26,7 @@ const {
 	buildAuthCookieValue,
 	parseAuthCookieValue,
 } = require('./lib/auth-cookie');
+const { createAuthLockoutManager } = require('./lib/auth-lockout');
 const { buildOpenhabClient } = require('./lib/openhab-client');
 const { getBackendRecoveryDelayMs } = require('./lib/backend-recovery-delay');
 
@@ -328,6 +329,7 @@ const AUTH_FAIL_NOTIFY_CMD = safeText(SERVER_AUTH.authFailNotifyCmd || '');
 const AUTH_MODE = safeText(SERVER_AUTH.mode || 'basic');
 const AUTH_FAIL_NOTIFY_INTERVAL_MINS = configNumber(SERVER_AUTH.authFailNotifyIntervalMins, 15);
 const AUTH_LOCKOUT_THRESHOLD = 3;
+const AUTH_LOCKOUT_WINDOW_MS = 10 * 60 * 1000;
 const SESSION_MAX_AGE_DAYS = (() => {
 	const val = configNumber(SERVER_CONFIG.sessionMaxAgeDays, 14);
 	if (val < 1) {
@@ -338,7 +340,7 @@ const SESSION_MAX_AGE_DAYS = (() => {
 })();
 const AUTH_LOCKOUT_MS = 15 * 60 * 1000;
 const AUTH_LOCKOUT_PRUNE_MS = 60 * 1000;
-const AUTH_LOCKOUT_STALE_MS = Math.max(AUTH_LOCKOUT_MS, 15 * 60 * 1000);
+const AUTH_LOCKOUT_STALE_MS = Math.max(AUTH_LOCKOUT_MS, AUTH_LOCKOUT_WINDOW_MS);
 const SECURITY_HEADERS_ENABLED = SECURITY_HEADERS.enabled !== false;
 const SECURITY_HSTS = SECURITY_HEADERS.hsts || {};
 const SECURITY_CSP = SECURITY_HEADERS.csp || {};
@@ -610,6 +612,14 @@ let videoPreviewInitialCaptureDone = false;
 const activeVideoStreams = new Map(); // Track active video streams: id -> { url, user, ip, startTime, encoding }
 let videoStreamIdCounter = 0;
 const authLockouts = new Map();
+const authLockoutManager = createAuthLockoutManager({
+	state: authLockouts,
+	threshold: AUTH_LOCKOUT_THRESHOLD,
+	windowMs: AUTH_LOCKOUT_WINDOW_MS,
+	lockoutMs: AUTH_LOCKOUT_MS,
+	staleMs: AUTH_LOCKOUT_STALE_MS,
+});
+const authFailNotifyByIp = new Map();
 
 function logMessage(message) {
 	writeLogLine(liveConfig.logFile, message);
@@ -624,55 +634,34 @@ function getLockoutKey(ip) {
 	return ip || 'unknown';
 }
 
+function getLockoutRemainingSeconds(lockout, now = Date.now()) {
+	return authLockoutManager.remainingSeconds(lockout, now);
+}
+
 function getAuthLockout(key) {
-	if (!key) return null;
-	const entry = authLockouts.get(key);
-	if (!entry) return null;
-	const now = Date.now();
-	if (entry.lockUntil && entry.lockUntil <= now) {
-		authLockouts.delete(key);
-		return null;
-	}
-	return entry;
+	return authLockoutManager.get(key);
 }
 
 function recordAuthFailure(key) {
-	if (!key) return null;
-	const now = Date.now();
-	let entry = authLockouts.get(key);
-	if (!entry || (entry.lockUntil && entry.lockUntil <= now)) {
-		entry = { count: 1, lockUntil: 0, lastFailAt: now };
-		authLockouts.set(key, entry);
-		return entry;
-	}
-	entry.count += 1;
-	entry.lastFailAt = now;
-	if (entry.count >= AUTH_LOCKOUT_THRESHOLD) {
-		entry.lockUntil = now + AUTH_LOCKOUT_MS;
-	}
-	authLockouts.set(key, entry);
-	return entry;
+	return authLockoutManager.recordFailure(key);
 }
 
 function clearAuthFailures(key) {
-	if (!key) return;
-	authLockouts.delete(key);
+	authLockoutManager.clear(key);
 }
 
 function pruneAuthLockouts() {
+	authLockoutManager.prune();
+}
+
+function pruneAuthFailureNotifyState() {
 	const now = Date.now();
-	for (const [key, entry] of authLockouts) {
-		if (!entry) {
-			authLockouts.delete(key);
-			continue;
-		}
-		if (entry.lockUntil && entry.lockUntil <= now) {
-			authLockouts.delete(key);
-			continue;
-		}
-		const lastFailAt = entry.lastFailAt || 0;
-		if (!entry.lockUntil && lastFailAt && now - lastFailAt > AUTH_LOCKOUT_STALE_MS) {
-			authLockouts.delete(key);
+	const intervalMs = Math.max(60 * 1000, (liveConfig.authFailNotifyIntervalMins || 15) * 60 * 1000);
+	const staleAfterMs = intervalMs * 2;
+	for (const [ip, lastNotify] of authFailNotifyByIp) {
+		const ts = Number(lastNotify) || 0;
+		if (!ts || now - ts > staleAfterMs) {
+			authFailNotifyByIp.delete(ip);
 		}
 	}
 }
@@ -1793,17 +1782,31 @@ function maybeNotifyAuthFailure(ip) {
 	if (!liveConfig.authFailNotifyCmd) return;
 	const now = Date.now();
 	const intervalMs = (liveConfig.authFailNotifyIntervalMins || 15) * 60 * 1000;
-	const lastNotify = Number(sessions.getServerSetting('lastAuthFailNotifyAt')) || 0;
-	if (lastNotify && now - lastNotify < intervalMs) return;
 	const safeIp = normalizeNotifyIp(ip);
+	const lastNotify = Number(authFailNotifyByIp.get(safeIp)) || 0;
+	if (lastNotify && now - lastNotify < intervalMs) {
+		logMessage(`Auth failure notify command skipped for ${safeIp} (per-IP rate limit)`);
+		return;
+	}
 	const command = liveConfig.authFailNotifyCmd.replace(/\{IP\}/g, safeIp).trim();
 	if (!command) return;
-	sessions.setServerSetting('lastAuthFailNotifyAt', String(now));
+	authFailNotifyByIp.set(safeIp, now);
 	try {
 		const child = execFile(liveConfig.binShell, ['-c', command], { detached: true, stdio: 'ignore' });
+		child.once('error', (err) => {
+			logMessage(`Auth failure notify command error for ${safeIp}: ${err.message || err}`);
+		});
+		child.once('exit', (code, signal) => {
+			if (code && code !== 0) {
+				logMessage(`Auth failure notify command exited with code ${code} for ${safeIp}`);
+			} else if (signal) {
+				logMessage(`Auth failure notify command terminated by signal ${signal} for ${safeIp}`);
+			}
+		});
 		child.unref();
 		logMessage(`Auth failure notify command executed for ${safeIp}`);
 	} catch (err) {
+		authFailNotifyByIp.delete(safeIp);
 		logMessage(`Failed to run auth failure notify command: ${err.message || err}`);
 	}
 }
@@ -4413,7 +4416,7 @@ function handleWsUpgrade(req, socket, head) {
 		const lockKey = getLockoutKey(clientIp);
 		const lockout = getAuthLockout(lockKey);
 		if (lockout && lockout.lockUntil) {
-			const remaining = Math.max(0, Math.ceil((lockout.lockUntil - Date.now()) / 1000));
+			const remaining = getLockoutRemainingSeconds(lockout);
 			logMessage(`[WS] Auth lockout active for ${lockKey} (${remaining}s remaining)`);
 			sendWsUpgradeError(socket, 429, 'Too many authentication attempts');
 			return;
@@ -4435,7 +4438,8 @@ function handleWsUpgrade(req, socket, head) {
 				maybeNotifyAuthFailure(clientIp || '');
 				const entry = recordAuthFailure(lockKey);
 				if (entry && entry.lockUntil) {
-					logMessage(`[WS] Auth lockout triggered for ${lockKey} after ${entry.count} failures`);
+					const failureCount = Array.isArray(entry.failures) ? entry.failures.length : 0;
+					logMessage(`[WS] Auth lockout triggered for ${lockKey} after ${failureCount} failures in ${Math.round(AUTH_LOCKOUT_WINDOW_MS / 60000)} minutes`);
 					sendWsUpgradeError(socket, 429, 'Too many authentication attempts');
 					return;
 				}
@@ -6835,7 +6839,8 @@ app.post('/api/auth/login', jsonParserSmall, (req, res) => {
 	// Check lockout
 	const lockout = getAuthLockout(lockKey);
 	if (lockout && lockout.lockUntil) {
-		const remaining = Math.max(0, Math.ceil((lockout.lockUntil - Date.now()) / 1000));
+		const remaining = getLockoutRemainingSeconds(lockout);
+		res.setHeader('Retry-After', String(remaining));
 		res.status(429).json({
 			error: 'Too many failed attempts',
 			lockedOut: true,
@@ -6856,11 +6861,14 @@ app.post('/api/auth/login', jsonParserSmall, (req, res) => {
 		maybeNotifyAuthFailure(notifyIp);
 		const entry = recordAuthFailure(lockKey);
 		if (entry && entry.lockUntil) {
-			logMessage(`Auth lockout triggered for ${lockKey} after ${entry.count} failures (HTML login)`);
+			const failureCount = Array.isArray(entry.failures) ? entry.failures.length : 0;
+			const remaining = getLockoutRemainingSeconds(entry);
+			logMessage(`Auth lockout triggered for ${lockKey} after ${failureCount} failures in ${Math.round(AUTH_LOCKOUT_WINDOW_MS / 60000)} minutes (HTML login)`);
+			res.setHeader('Retry-After', String(remaining));
 			res.status(429).json({
 				error: 'Too many failed attempts',
 				lockedOut: true,
-				remainingSeconds: Math.max(0, Math.ceil((entry.lockUntil - Date.now()) / 1000)),
+				remainingSeconds: remaining,
 			});
 			return;
 		}
@@ -6949,7 +6957,17 @@ app.use((req, res, next) => {
 			!reqPath.endsWith('.woff') &&
 			!reqPath.endsWith('.woff2');
 
+		const lockKey = getLockoutKey(clientIp);
+		const lockout = getAuthLockout(lockKey);
 		if (isHtmlPageRequest) {
+			if (lockout && lockout.lockUntil) {
+				const remaining = getLockoutRemainingSeconds(lockout);
+				applySecurityHeaders(req, res);
+				res.setHeader('Cache-Control', 'no-store');
+				res.setHeader('Retry-After', String(remaining));
+				sendStyledError(res, req, 429, `Too many failed login attempts. Try again in ${remaining} seconds.`);
+				return;
+			}
 			// Redirect all paths to / for login
 			if (req.path !== '/') {
 				applySecurityHeaders(req, res);
@@ -6976,8 +6994,9 @@ app.use((req, res, next) => {
 	const lockKey = getLockoutKey(clientIp);
 	const lockout = getAuthLockout(lockKey);
 	if (lockout && lockout.lockUntil) {
-		const remaining = Math.max(0, Math.ceil((lockout.lockUntil - Date.now()) / 1000));
+		const remaining = getLockoutRemainingSeconds(lockout);
 		logMessage(`Auth lockout active for ${lockKey} (${remaining}s remaining)`);
+		res.setHeader('Retry-After', String(remaining));
 		res.status(429).type('text/plain').send('Too many authentication attempts');
 		return;
 	}
@@ -6989,7 +7008,10 @@ app.use((req, res, next) => {
 			maybeNotifyAuthFailure(notifyIp);
 			const entry = recordAuthFailure(lockKey);
 			if (entry && entry.lockUntil) {
-				logMessage(`Auth lockout triggered for ${lockKey} after ${entry.count} failures`);
+				const failureCount = Array.isArray(entry.failures) ? entry.failures.length : 0;
+				const remaining = getLockoutRemainingSeconds(entry);
+				logMessage(`Auth lockout triggered for ${lockKey} after ${failureCount} failures in ${Math.round(AUTH_LOCKOUT_WINDOW_MS / 60000)} minutes`);
+				res.setHeader('Retry-After', String(remaining));
 				res.status(429).type('text/plain').send('Too many authentication attempts');
 				return;
 			}
@@ -11234,6 +11256,7 @@ setInterval(() => {
 
 // Periodic auth lockout pruning to prevent unbounded growth
 setInterval(pruneAuthLockouts, AUTH_LOCKOUT_PRUNE_MS);
+setInterval(pruneAuthFailureNotifyState, AUTH_LOCKOUT_PRUNE_MS);
 
 // Initialize sessions database
 try {
