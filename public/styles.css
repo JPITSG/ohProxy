@@ -446,6 +446,7 @@ html:not(.slim) .has-meta .labelStack {
 }
 .selection-card {
 	position: relative;
+	overflow: hidden;
 }
 .selection-card .labelStack,
 .switch-card .labelStack {
@@ -599,6 +600,7 @@ html:not(.slim) .has-meta .labelStack {
 }
 .selection-card.menu-open {
 	z-index: 20;
+	overflow: visible;
 }
 
 .selection-card .select-menu {
