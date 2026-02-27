@@ -32,6 +32,7 @@
 
 :root {
 	--row-control-height: 36px;
+	--modal-body-edge-spacing: 12px;
 	/* Primary color - Frosted Glass indigo */
 	--color-primary: rgb(106, 116, 211);
 	--color-primary-light: rgb(167, 182, 199);
@@ -2157,7 +2158,7 @@ body.theme-light .oh-modal-header {
 	flex: 1;
 	overflow-y: auto;
 	overflow-x: hidden;
-	padding: 12px 20px;
+	padding: var(--modal-body-edge-spacing) 20px;
 	scrollbar-width: thin;
 	scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 	overscroll-behavior: contain;
@@ -2441,7 +2442,7 @@ body.theme-light .admin-config-section:not(.collapsed) .admin-config-section-bod
 	flex: 1;
 	overflow-y: auto;
 	overflow-x: hidden;
-	padding: 12px 20px;
+	padding: var(--modal-body-edge-spacing) 20px;
 	scrollbar-width: thin;
 	scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 	overscroll-behavior: contain;
@@ -2768,6 +2769,7 @@ body.sitemap-settings-open {
 /* Item Config Section Headers */
 .item-config-section-header {
 	font-size: .75rem;
+	line-height: 1;
 	text-transform: uppercase;
 	letter-spacing: .1em;
 	color: var(--color-text-muted);
@@ -3049,6 +3051,7 @@ html.no-flex-gap .admin-config-section-header > * + * {
 }
 .admin-config-section-title {
 	font-size: .75rem;
+	line-height: 1;
 	text-transform: uppercase;
 	letter-spacing: .1em;
 	color: var(--color-text-muted);
