@@ -26,6 +26,26 @@
 		return seconds + 's';
 	}
 
+	function toPositiveInt(value) {
+		const n = Number(value);
+		if (!Number.isFinite(n)) return 0;
+		const int = Math.floor(n);
+		return int > 0 ? int : 0;
+	}
+
+	function resolveLockoutSeconds(response, data) {
+		const bodySeconds = toPositiveInt(data && data.remainingSeconds);
+		if (bodySeconds > 0) return bodySeconds;
+
+		const retryAfter = response && response.headers && typeof response.headers.get === 'function'
+			? response.headers.get('Retry-After')
+			: '';
+		const headerSeconds = toPositiveInt(retryAfter);
+		if (headerSeconds > 0) return headerSeconds;
+
+		return 900;
+	}
+
 	function startLockoutCountdown(seconds) {
 		if (lockoutTimer) {
 			clearInterval(lockoutTimer);
@@ -95,7 +115,7 @@
 			} else if (response.status === 429 && data.lockedOut) {
 				lockedOut = true;
 				shake();
-				startLockoutCountdown(data.remainingSeconds || 900);
+				startLockoutCountdown(resolveLockoutSeconds(response, data));
 			} else {
 				shake();
 			}
