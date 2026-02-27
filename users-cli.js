@@ -81,6 +81,10 @@ function addUser(username, password, role = 'normal') {
 		console.error('Error: Username can only contain a-z, A-Z, 0-9, underscore, and hyphen (max 20 chars)');
 		process.exit(1);
 	}
+	if (String(username).trim().toLowerCase() === 'admin') {
+		console.error("Error: Username 'admin' is reserved and cannot be created");
+		process.exit(1);
+	}
 	if (!['admin', 'normal', 'readonly'].includes(role)) {
 		console.error('Error: Role must be admin, normal, or readonly');
 		process.exit(1);

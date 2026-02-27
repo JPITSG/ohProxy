@@ -75,6 +75,15 @@ function initDb() {
 		);
 	`);
 
+	// Create sitemap visibility table
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS sitemap_visibility (
+			sitemap_name TEXT PRIMARY KEY,
+			visibility TEXT NOT NULL DEFAULT 'all',
+			updated_at INTEGER DEFAULT (strftime('%s','now'))
+		);
+	`);
+
 	// Create widget video config table
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS widget_video_config (
@@ -262,14 +271,45 @@ function getDefaultSettings() {
 	return { ...DEFAULT_SETTINGS };
 }
 
-const WIDGET_CONFIG_TARGETS = Object.freeze({
-	widget_glow_rules: 'rules',
-	widget_visibility: 'visibility',
-	widget_video_config: 'default_muted',
-	widget_iframe_config: 'height',
-	widget_proxy_cache: 'cache_seconds',
-	widget_card_width: 'width',
+const KEYED_CONFIG_TARGETS = Object.freeze({
+	widget_glow_rules: { keyColumn: 'widget_id', valueColumn: 'rules' },
+	widget_visibility: { keyColumn: 'widget_id', valueColumn: 'visibility' },
+	widget_video_config: { keyColumn: 'widget_id', valueColumn: 'default_muted' },
+	widget_iframe_config: { keyColumn: 'widget_id', valueColumn: 'height' },
+	widget_proxy_cache: { keyColumn: 'widget_id', valueColumn: 'cache_seconds' },
+	widget_card_width: { keyColumn: 'widget_id', valueColumn: 'width' },
+	sitemap_visibility: { keyColumn: 'sitemap_name', valueColumn: 'visibility' },
 });
+
+/**
+ * Upsert or delete a keyed config row while keeping updated_at in sync.
+ * Table/key/value columns are allowlisted to avoid dynamic SQL injection.
+ * @param {object} options
+ * @param {string} options.table
+ * @param {string} options.keyColumn
+ * @param {string} options.valueColumn
+ * @param {string} options.keyValue
+ * @param {any} options.value
+ * @param {boolean} options.shouldDelete
+ */
+function upsertOrDeleteKeyedConfig({ table, keyColumn, valueColumn, keyValue, value, shouldDelete }) {
+	if (!db) initDb();
+	const target = KEYED_CONFIG_TARGETS[table];
+	if (!target || target.keyColumn !== keyColumn || target.valueColumn !== valueColumn) {
+		throw new Error(`Invalid keyed config target: ${table}.${keyColumn}.${valueColumn}`);
+	}
+
+	if (shouldDelete) {
+		db.prepare(`DELETE FROM ${table} WHERE ${keyColumn} = ?`).run(keyValue);
+		return;
+	}
+
+	const now = Math.floor(Date.now() / 1000);
+	db.prepare(`
+		INSERT INTO ${table} (${keyColumn}, ${valueColumn}, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT(${keyColumn}) DO UPDATE SET ${valueColumn} = excluded.${valueColumn}, updated_at = excluded.updated_at
+	`).run(keyValue, value, now);
+}
 
 /**
  * Upsert or delete a widget-scoped config row while keeping updated_at in sync.
@@ -282,21 +322,14 @@ const WIDGET_CONFIG_TARGETS = Object.freeze({
  * @param {boolean} options.shouldDelete
  */
 function upsertOrDeleteWidgetConfig({ table, column, widgetId, value, shouldDelete }) {
-	if (!db) initDb();
-	if (WIDGET_CONFIG_TARGETS[table] !== column) {
-		throw new Error(`Invalid widget config target: ${table}.${column}`);
-	}
-
-	if (shouldDelete) {
-		db.prepare(`DELETE FROM ${table} WHERE widget_id = ?`).run(widgetId);
-		return;
-	}
-
-	const now = Math.floor(Date.now() / 1000);
-	db.prepare(`
-		INSERT INTO ${table} (widget_id, ${column}, updated_at) VALUES (?, ?, ?)
-		ON CONFLICT(widget_id) DO UPDATE SET ${column} = excluded.${column}, updated_at = excluded.updated_at
-	`).run(widgetId, value, now);
+	upsertOrDeleteKeyedConfig({
+		table,
+		keyColumn: 'widget_id',
+		valueColumn: column,
+		keyValue: widgetId,
+		value,
+		shouldDelete,
+	});
 }
 
 // ============================================
@@ -350,6 +383,7 @@ function setGlowRules(widgetId, rules) {
 // ============================================
 
 const VALID_VISIBILITIES = ['all', 'normal', 'admin'];
+const SITEMAP_NAME_REGEX = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * Get all visibility rules.
@@ -376,6 +410,44 @@ function setVisibility(widgetId, visibility) {
 		table: 'widget_visibility',
 		column: 'visibility',
 		widgetId,
+		value: visibility,
+		shouldDelete: visibility === 'all',
+	});
+	return true;
+}
+
+// ============================================
+// Sitemap Visibility Functions
+// ============================================
+
+/**
+ * Get all sitemap visibility rules.
+ * @returns {Array} - Array of {sitemapName, visibility} objects
+ */
+function getAllSitemapVisibilityRules() {
+	if (!db) initDb();
+	const rows = db.prepare('SELECT sitemap_name, visibility FROM sitemap_visibility').all();
+	return rows.map((row) => ({
+		sitemapName: row.sitemap_name,
+		visibility: row.visibility,
+	}));
+}
+
+/**
+ * Set visibility for a sitemap. 'all' deletes the entry (default).
+ * @param {string} sitemapName - The sitemap name
+ * @param {string} visibility - 'all', 'normal', or 'admin'
+ * @returns {boolean} - True if successful
+ */
+function setSitemapVisibility(sitemapName, visibility) {
+	const name = String(sitemapName || '').trim();
+	if (!SITEMAP_NAME_REGEX.test(name)) return false;
+	if (!VALID_VISIBILITIES.includes(visibility)) return false;
+	upsertOrDeleteKeyedConfig({
+		table: 'sitemap_visibility',
+		keyColumn: 'sitemap_name',
+		valueColumn: 'visibility',
+		keyValue: name,
 		value: visibility,
 		shouldDelete: visibility === 'all',
 	});
@@ -538,8 +610,13 @@ function getAuthUserMap() {
 
 const VALID_ROLES = ['admin', 'normal', 'readonly'];
 const USERNAME_REGEX = /^[a-zA-Z0-9_-]{1,20}$/;
+const RESERVED_USERNAMES = new Set(['admin']);
 const VALID_VOICE_PREFERENCES = new Set(['system', 'browser', 'vosk']);
 const VALID_MAPVIEW_RENDERINGS = new Set(['ohproxy', 'openhab']);
+
+function isReservedUsername(username) {
+	return RESERVED_USERNAMES.has(String(username || '').trim().toLowerCase());
+}
 
 function normalizeUserMapviewRendering(value) {
 	const normalized = String(value || '').trim().toLowerCase();
@@ -601,6 +678,7 @@ function getUser(username) {
 function createUser(username, password, role = 'normal') {
 	if (!db) initDb();
 	if (!USERNAME_REGEX.test(username)) return false;
+	if (isReservedUsername(username)) return false;
 	if (!VALID_ROLES.includes(role)) return false;
 
 	const now = Math.floor(Date.now() / 1000);
@@ -781,6 +859,8 @@ module.exports = {
 	// Visibility
 	getAllVisibilityRules,
 	setVisibility,
+	getAllSitemapVisibilityRules,
+	setSitemapVisibility,
 	// Video config
 	getAllVideoConfigs,
 	setVideoConfig,

@@ -2324,6 +2324,31 @@ body.alert-open { overflow: hidden; position: fixed; width: 100%; }
 	flex-shrink: 0;
 }
 
+/* Sitemap Settings Modal */
+.sitemap-settings-modal .oh-modal-frame { max-width: 520px; }
+.sitemap-settings-body {
+	gap: 10px;
+}
+.sitemap-settings-footer {
+	justify-content: flex-start;
+}
+.sitemap-settings-status {
+	flex: 1;
+	font-size: .7rem;
+	min-height: 1em;
+	text-align: left;
+	color: var(--color-text-muted);
+}
+.sitemap-settings-status.pending {
+	color: var(--color-modal-status-pending);
+}
+.sitemap-settings-status.error {
+	color: var(--color-status-error);
+}
+.sitemap-settings-status.success {
+	color: var(--color-status-success);
+}
+
 /* Card Config Modal */
 .card-config-modal,
 .admin-config-modal {
@@ -2733,7 +2758,8 @@ html.no-flex-gap .admin-config-footer button + button {
 }
 body.card-config-open,
 body.admin-config-open,
-body.sitemap-select-open {
+body.sitemap-select-open,
+body.sitemap-settings-open {
 	overflow: hidden;
 	position: fixed;
 	width: 100%;

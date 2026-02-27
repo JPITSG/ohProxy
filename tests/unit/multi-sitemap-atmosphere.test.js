@@ -55,7 +55,7 @@ describe('Multi-Sitemap Atmosphere and Bootstrap Wiring', () => {
 	it('sendIndex resolves selected sitemap and bootstraps homepage/cache for that sitemap', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /const sitemapName = resolveRequestSitemapName\(req\);/);
-		assert.match(server, /const selectedSitemap = getBackgroundSitemaps\(\)\.find\(\(entry\) => entry\?\.name === sitemapName\);/);
+		assert.match(server, /const selectedSitemap = getVisibleBackgroundSitemapsForRequest\(req\)\.find\(\(entry\) => entry\?\.name === sitemapName\);/);
 		assert.match(server, /status\.selectedSitemapTitle = safeText\(selectedSitemap\?\.title \|\| selectedSitemap\?\.name \|\| ''\)\.trim\(\);/);
 		assert.match(server, /getHomepageData\(req, sitemapName\),/);
 		assert.match(server, /getFullSitemapData\(sitemapName\),/);
