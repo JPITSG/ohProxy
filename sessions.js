@@ -71,6 +71,7 @@ function initDb() {
 		CREATE TABLE IF NOT EXISTS widget_visibility (
 			widget_id TEXT PRIMARY KEY,
 			visibility TEXT NOT NULL DEFAULT 'all',
+			users_json TEXT NOT NULL DEFAULT '[]',
 			updated_at INTEGER DEFAULT (strftime('%s','now'))
 		);
 	`);
@@ -80,6 +81,7 @@ function initDb() {
 		CREATE TABLE IF NOT EXISTS sitemap_visibility (
 			sitemap_name TEXT PRIMARY KEY,
 			visibility TEXT NOT NULL DEFAULT 'all',
+			users_json TEXT NOT NULL DEFAULT '[]',
 			updated_at INTEGER DEFAULT (strftime('%s','now'))
 		);
 	`);
@@ -382,8 +384,53 @@ function setGlowRules(widgetId, rules) {
 // Widget Visibility Functions
 // ============================================
 
-const VALID_VISIBILITIES = ['all', 'normal', 'admin'];
+const VALID_VISIBILITIES = ['all', 'admin', 'users'];
+const VISIBILITY_USERNAME_REGEX = /^[a-zA-Z0-9_-]{1,20}$/;
 const SITEMAP_NAME_REGEX = /^[A-Za-z0-9_-]{1,64}$/;
+
+function normalizeVisibilityUsers(value) {
+	if (!Array.isArray(value)) return [];
+	const out = [];
+	const seen = new Set();
+	for (const entry of value) {
+		if (typeof entry !== 'string') continue;
+		const username = entry.trim();
+		if (!VISIBILITY_USERNAME_REGEX.test(username)) continue;
+		if (seen.has(username)) continue;
+		seen.add(username);
+		out.push(username);
+	}
+	return out;
+}
+
+function parseVisibilityUsersJson(value) {
+	if (typeof value !== 'string' || !value.trim()) return [];
+	try {
+		return normalizeVisibilityUsers(JSON.parse(value));
+	} catch {
+		return [];
+	}
+}
+
+function upsertVisibilityConfig({
+	table, keyColumn, keyValue, visibility, visibilityUsers, shouldDelete
+}) {
+	if (!db) initDb();
+	const validTable = (table === 'widget_visibility' && keyColumn === 'widget_id')
+		|| (table === 'sitemap_visibility' && keyColumn === 'sitemap_name');
+	if (!validTable) {
+		throw new Error(`Invalid visibility config target: ${table}.${keyColumn}`);
+	}
+	const now = Math.floor(Date.now() / 1000);
+	if (shouldDelete) {
+		db.prepare(`DELETE FROM ${table} WHERE ${keyColumn} = ?`).run(keyValue);
+		return;
+	}
+	db.prepare(`
+		INSERT INTO ${table} (${keyColumn}, visibility, users_json, updated_at) VALUES (?, ?, ?, ?)
+		ON CONFLICT(${keyColumn}) DO UPDATE SET visibility = excluded.visibility, users_json = excluded.users_json, updated_at = excluded.updated_at
+	`).run(keyValue, visibility, JSON.stringify(visibilityUsers), now);
+}
 
 /**
  * Get all visibility rules.
@@ -391,27 +438,32 @@ const SITEMAP_NAME_REGEX = /^[A-Za-z0-9_-]{1,64}$/;
  */
 function getAllVisibilityRules() {
 	if (!db) initDb();
-	const rows = db.prepare('SELECT widget_id, visibility FROM widget_visibility').all();
+	const rows = db.prepare('SELECT widget_id, visibility, users_json FROM widget_visibility').all();
 	return rows.map(row => ({
 		widgetId: row.widget_id,
-		visibility: row.visibility
+		visibility: row.visibility,
+		visibilityUsers: parseVisibilityUsersJson(row.users_json),
 	}));
 }
 
 /**
  * Set visibility for a widget. 'all' deletes the entry (default).
  * @param {string} widgetId - The widget ID
- * @param {string} visibility - 'all', 'normal', or 'admin'
+ * @param {string} visibility - 'all', 'admin', or 'users'
+ * @param {Array<string>} visibilityUsers - explicit usernames when visibility is 'users'
  * @returns {boolean} - True if successful
  */
-function setVisibility(widgetId, visibility) {
+function setVisibility(widgetId, visibility, visibilityUsers = []) {
 	if (!VALID_VISIBILITIES.includes(visibility)) return false;
-	upsertOrDeleteWidgetConfig({
+	const users = normalizeVisibilityUsers(visibilityUsers);
+	const effectiveVisibility = visibility === 'users' && users.length === 0 ? 'all' : visibility;
+	upsertVisibilityConfig({
 		table: 'widget_visibility',
-		column: 'visibility',
-		widgetId,
-		value: visibility,
-		shouldDelete: visibility === 'all',
+		keyColumn: 'widget_id',
+		keyValue: widgetId,
+		visibility: effectiveVisibility,
+		visibilityUsers: effectiveVisibility === 'users' ? users : [],
+		shouldDelete: effectiveVisibility === 'all',
 	});
 	return true;
 }
@@ -426,30 +478,34 @@ function setVisibility(widgetId, visibility) {
  */
 function getAllSitemapVisibilityRules() {
 	if (!db) initDb();
-	const rows = db.prepare('SELECT sitemap_name, visibility FROM sitemap_visibility').all();
+	const rows = db.prepare('SELECT sitemap_name, visibility, users_json FROM sitemap_visibility').all();
 	return rows.map((row) => ({
 		sitemapName: row.sitemap_name,
 		visibility: row.visibility,
+		visibilityUsers: parseVisibilityUsersJson(row.users_json),
 	}));
 }
 
 /**
  * Set visibility for a sitemap. 'all' deletes the entry (default).
  * @param {string} sitemapName - The sitemap name
- * @param {string} visibility - 'all', 'normal', or 'admin'
+ * @param {string} visibility - 'all', 'admin', or 'users'
+ * @param {Array<string>} visibilityUsers - explicit usernames when visibility is 'users'
  * @returns {boolean} - True if successful
  */
-function setSitemapVisibility(sitemapName, visibility) {
+function setSitemapVisibility(sitemapName, visibility, visibilityUsers = []) {
 	const name = String(sitemapName || '').trim();
 	if (!SITEMAP_NAME_REGEX.test(name)) return false;
 	if (!VALID_VISIBILITIES.includes(visibility)) return false;
-	upsertOrDeleteKeyedConfig({
+	const users = normalizeVisibilityUsers(visibilityUsers);
+	const effectiveVisibility = visibility === 'users' && users.length === 0 ? 'all' : visibility;
+	upsertVisibilityConfig({
 		table: 'sitemap_visibility',
 		keyColumn: 'sitemap_name',
-		valueColumn: 'visibility',
 		keyValue: name,
-		value: visibility,
-		shouldDelete: visibility === 'all',
+		visibility: effectiveVisibility,
+		visibilityUsers: effectiveVisibility === 'users' ? users : [],
+		shouldDelete: effectiveVisibility === 'all',
 	});
 	return true;
 }

@@ -127,6 +127,27 @@ function isValidSitemapName(value) {
 	return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
 }
 
+function normalizeVisibilityUsersInput(value) {
+	if (value === undefined) return { users: [], provided: false };
+	if (!Array.isArray(value)) return { error: 'visibilityUsers must be an array' };
+	if (value.length > 500) return { error: 'Too many visibilityUsers entries' };
+	const users = [];
+	const seen = new Set();
+	for (const entry of value) {
+		if (typeof entry !== 'string' || hasAnyControlChars(entry)) {
+			return { error: 'visibilityUsers must contain valid usernames' };
+		}
+		const username = entry.trim();
+		if (!/^[a-zA-Z0-9_-]{1,20}$/.test(username)) {
+			return { error: 'visibilityUsers must contain valid usernames' };
+		}
+		if (seen.has(username)) continue;
+		seen.add(username);
+		users.push(username);
+	}
+	return { users, provided: true };
+}
+
 function formatLogTimestamp(date) {
 	const pad = (value) => String(value).padStart(2, '0');
 	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
@@ -4907,7 +4928,7 @@ async function getFullSitemapData(sitemapName) {
 	return { pages, root: rootPath };
 }
 
-function filterSitemapCacheVisibility(cache, userRole) {
+function filterSitemapCacheVisibility(cache, userRole, username) {
 	if (!cache || !cache.pages || userRole === 'admin') return cache;
 	const visibilityMap = buildVisibilityMap();
 
@@ -4930,8 +4951,8 @@ function filterSitemapCacheVisibility(cache, userRole) {
 		if (!w) return false;
 		const { clone } = withWidgetKeyContext(w, ctx);
 		const wKey = widgetKey(clone);
-		const vis = visibilityMap.get(wKey) || 'all';
-		return !isVisibilityAllowedForRole(vis, userRole);
+		const visibilityRule = visibilityMap.get(wKey) || { visibility: 'all', visibilityUsers: [] };
+		return !isVisibilityAllowedForUser(visibilityRule, userRole, username);
 	};
 
 	// Filter an array of widgets, cloning each kept widget before recursing.
@@ -4996,9 +5017,10 @@ async function getHomepageData(req, sitemapName) {
 
 		// Apply visibility filtering
 		const userRole = getRequestUserRole(req);
+		const username = getRequestUsername(req);
 		const visibilityMap = buildVisibilityMap();
 
-		const visibleWidgets = widgets.filter((w) => isWidgetVisibleForRole(w, userRole, visibilityMap));
+		const visibleWidgets = widgets.filter((w) => isWidgetVisibleForRole(w, userRole, username, visibilityMap));
 		const inlineIcons = await buildHomepageInlineIcons(visibleWidgets);
 
 		return {
@@ -5035,9 +5057,10 @@ async function sendIndex(req, res) {
 				getFullSitemapData(sitemapName),
 			]);
 			const userRole = getRequestUserRole(req);
+			const username = getRequestUsername(req);
 			status.homepageData = homepageData;
 			status.homepagePageTitle = safeText(homepageData?.pageTitle || '').trim();
-			status.sitemapCache = filterSitemapCacheVisibility(sitemapCache, userRole);
+			status.sitemapCache = filterSitemapCacheVisibility(sitemapCache, userRole, username);
 		}
 	}
 
@@ -5315,50 +5338,85 @@ function getRequestUserRole(req) {
 	return safeText(req?.ohProxyUserData?.role || '').trim().toLowerCase();
 }
 
-function isVisibilityAllowedForRole(visibility, userRole) {
-	const vis = safeText(visibility || '').trim().toLowerCase() || 'all';
+function getRequestUsername(req) {
+	return safeText(req?.ohProxyUserData?.username || req?.ohProxyUser || '').trim();
+}
+
+function normalizeVisibilityUsers(value) {
+	if (!Array.isArray(value)) return [];
+	const out = [];
+	const seen = new Set();
+	for (const entry of value) {
+		if (typeof entry !== 'string' || hasAnyControlChars(entry)) continue;
+		const username = entry.trim();
+		if (!/^[a-zA-Z0-9_-]{1,20}$/.test(username)) continue;
+		if (seen.has(username)) continue;
+		seen.add(username);
+		out.push(username);
+	}
+	return out;
+}
+
+function normalizeVisibilityRule(entry) {
+	const visibility = safeText(entry?.visibility ?? entry).trim().toLowerCase() || 'all';
+	return {
+		visibility,
+		visibilityUsers: normalizeVisibilityUsers(entry?.visibilityUsers),
+	};
+}
+
+function isVisibilityAllowedForUser(visibilityRule, userRole, username) {
+	const { visibility, visibilityUsers } = normalizeVisibilityRule(visibilityRule);
 	const role = safeText(userRole || '').trim().toLowerCase();
-	if (vis === 'all') return true;
-	if (vis === 'admin') return role === 'admin';
-	if (vis === 'normal') return role === 'normal' || role === 'readonly';
+	const user = safeText(username).trim();
+	if (!role) return false;
+	if (visibility === 'all') return true;
+	if (visibility === 'admin') return role === 'admin';
+	if (visibility === 'users') {
+		if (role === 'admin') return true;
+		return !!user && visibilityUsers.includes(user);
+	}
 	return true;
 }
 
 function buildSitemapVisibilityMap() {
 	const rules = sessions.getAllSitemapVisibilityRules();
-	return new Map(rules.map((entry) => [safeText(entry?.sitemapName).trim(), entry?.visibility]));
+	return new Map(rules.map((entry) => [
+		safeText(entry?.sitemapName).trim(),
+		normalizeVisibilityRule(entry),
+	]));
 }
 
 function sitemapVisibilityForName(sitemapName, sitemapVisibilityMap = null) {
 	const name = safeText(sitemapName).trim();
-	if (!name) return 'all';
+	if (!name) return { visibility: 'all', visibilityUsers: [] };
 	const map = sitemapVisibilityMap || buildSitemapVisibilityMap();
-	return safeText(map.get(name) || 'all').trim().toLowerCase() || 'all';
+	return normalizeVisibilityRule(map.get(name) || { visibility: 'all', visibilityUsers: [] });
 }
 
-function isSitemapVisibleForRole(sitemapName, userRole, sitemapVisibilityMap = null) {
+function isSitemapVisibleForRole(sitemapName, userRole, username = '', sitemapVisibilityMap = null) {
 	const name = safeText(sitemapName).trim();
 	if (!name) return false;
-	const visibility = sitemapVisibilityForName(name, sitemapVisibilityMap);
-	return isVisibilityAllowedForRole(visibility, userRole);
+	const visibilityRule = sitemapVisibilityForName(name, sitemapVisibilityMap);
+	return isVisibilityAllowedForUser(visibilityRule, userRole, username);
 }
 
-function filterSitemapEntriesForRole(entries, userRole, sitemapVisibilityMap = null) {
+function filterSitemapEntriesForRole(entries, userRole, username = '', sitemapVisibilityMap = null) {
 	if (!Array.isArray(entries) || !entries.length) return [];
 	const map = sitemapVisibilityMap || buildSitemapVisibilityMap();
 	return entries.filter((entry) => {
 		const name = safeText(entry?.name).trim();
 		if (!name) return false;
-		return isSitemapVisibleForRole(name, userRole, map);
+		return isSitemapVisibleForRole(name, userRole, username, map);
 	});
 }
 
-function filterSitemapPayloadForRole(payload, userRole, sitemapVisibilityMap = null) {
+function filterSitemapPayloadForRole(payload, userRole, username = '', sitemapVisibilityMap = null) {
 	const map = sitemapVisibilityMap || buildSitemapVisibilityMap();
 	const canSee = (entry) => {
 		const normalized = normalizeSitemapEntry(entry, 0);
 		if (!normalized?.name) return false;
-		return isSitemapVisibleForRole(normalized.name, userRole, map);
+		return isSitemapVisibleForRole(normalized.name, userRole, username, map);
 	};
 	const filterList = (list) => (Array.isArray(list) ? list.filter(canSee) : []);
 
@@ -5394,7 +5452,8 @@ function filterSitemapPayloadForRole(payload, userRole, sitemapVisibilityMap = n
 
 function getVisibleBackgroundSitemapsForRequest(req, sitemapVisibilityMap = null) {
 	const userRole = getRequestUserRole(req);
-	return filterSitemapEntriesForRole(getBackgroundSitemaps(), userRole, sitemapVisibilityMap);
+	const username = getRequestUsername(req);
+	return filterSitemapEntriesForRole(getBackgroundSitemaps(), userRole, username, sitemapVisibilityMap);
 }
 
 function getPrimaryBackgroundSitemap() {
@@ -5416,15 +5475,15 @@ function resolveRequestSitemapName(req) {
 
 function buildVisibilityMap() {
 	const visibilityRules = sessions.getAllVisibilityRules();
-	return new Map(visibilityRules.map((entry) => [entry.widgetId, entry.visibility]));
+	return new Map(visibilityRules.map((entry) => [entry.widgetId, normalizeVisibilityRule(entry)]));
 }
 
 
-function isWidgetVisibleForRole(widget, userRole, visibilityMap) {
+function isWidgetVisibleForRole(widget, userRole, username, visibilityMap) {
 	if (widget?.__section) return true;
 	const wKey = widgetKey(widget);
-	const vis = visibilityMap.get(wKey) || 'all';
-	return isVisibilityAllowedForRole(vis, userRole);
+	const rule = visibilityMap.get(wKey) || { visibility: 'all', visibilityUsers: [] };
+	return isVisibilityAllowedForUser(rule, userRole, username);
 }
 
 function mappingsSignatureFromNormalized(normalized) {
@@ -7129,11 +7188,13 @@ app.get('/config.js', (req, res) => {
 
 	// Get user role, GPS tracking flag, and user preferences if authenticated
 	let userRole = null;
+	let username = '';
 	let trackGps = false;
 	let effectiveVoiceModel = liveConfig.voiceModel;
 	let mapviewRendering = 'ohproxy';
 	if (req.ohProxyUserData) {
 		userRole = req.ohProxyUserData.role || null;
+		username = safeText(req.ohProxyUserData.username).trim();
 		if (req.ohProxyUserData.trackgps) trackGps = true;
 		const userVoicePreference = isValidUserVoicePreference(req.ohProxyUserData.voicePreference) ? req.ohProxyUserData.voicePreference : 'system';
 		if (userVoicePreference !== 'system') {
@@ -7157,6 +7218,7 @@ app.get('/config.js', (req, res) => {
 		widgetIframeConfigs: sessions.getAllIframeConfigs(),
 		widgetProxyCacheConfigs: sessions.getAllProxyCacheConfigs(),
 		widgetCardWidths: sessions.getAllCardWidths(),
+		username: username,
 		userRole: userRole,
 		trackGps: trackGps,
 		groupItems: liveConfig.groupItems || [],
@@ -7242,7 +7304,7 @@ app.post('/api/settings', jsonParserSmall, (req, res) => {
 				res.status(400).json({ error: 'Invalid selectedSitemap value' });
 				return;
 			}
-			if (!isSitemapVisibleForRole(selected, getRequestUserRole(req))) {
+			if (!isSitemapVisibleForRole(selected, getRequestUserRole(req), getRequestUsername(req))) {
 				res.status(403).json({ error: 'Selected sitemap is not accessible' });
 				return;
 			}
@@ -7454,7 +7516,7 @@ app.post('/api/card-config', jsonParserLarge, requireAdmin, (req, res) => {
 		return;
 	}
 
-	const { widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth } = req.body;
+	const { widgetId, rules, visibility, visibilityUsers, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth } = req.body;
 	if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200 || hasAnyControlChars(widgetId)) {
 		res.status(400).json({ error: 'Missing or invalid widgetId' });
 		return;
@@ -7517,8 +7579,29 @@ app.post('/api/card-config', jsonParserLarge, requireAdmin, (req, res) => {
 	}
 
 	// Validate visibility if provided
+	let normalizedVisibilityUsers = [];
+	let visibilityUsersProvided = false;
+	const visibilityUsersResult = normalizeVisibilityUsersInput(visibilityUsers);
+	if (visibilityUsersResult.error) {
+		res.status(400).json({ error: visibilityUsersResult.error });
+		return;
+	}
+	normalizedVisibilityUsers = visibilityUsersResult.users;
+	visibilityUsersProvided = visibilityUsersResult.provided;
+	if (visibilityUsersProvided || visibility !== undefined) {
+		const existingUsers = new Set(sessions.getAllUsers().map((entry) => safeText(entry?.username).trim()).filter(Boolean));
+		const unknownUser = normalizedVisibilityUsers.find((username) => !existingUsers.has(username));
+		if (unknownUser) {
+			res.status(400).json({ error: `Unknown visibility user: ${unknownUser}` });
+			return;
+		}
+	}
+	if (visibilityUsersProvided && visibility === undefined) {
+		res.status(400).json({ error: 'visibilityUsers requires visibility' });
+		return;
+	}
 	if (visibility !== undefined) {
-		const validVisibilities = ['all', 'normal', 'admin'];
+		const validVisibilities = ['all', 'admin', 'users'];
 		if (typeof visibility !== 'string' || hasAnyControlChars(visibility) || !validVisibilities.includes(visibility)) {
 			res.status(400).json({ error: `Invalid visibility: ${visibility}` });
 			return;
@@ -7574,7 +7657,7 @@ app.post('/api/card-config', jsonParserLarge, requireAdmin, (req, res) => {
 			sessions.setGlowRules(widgetId, rules);
 		}
 		if (visibility !== undefined) {
-			sessions.setVisibility(widgetId, visibility);
+			sessions.setVisibility(widgetId, visibility, normalizedVisibilityUsers);
 		}
 		if (defaultMuted !== undefined) {
 			sessions.setVideoConfig(widgetId, defaultMuted);
@@ -7588,7 +7671,19 @@ app.post('/api/card-config', jsonParserLarge, requireAdmin, (req, res) => {
 		if (cardWidth !== undefined) {
 			sessions.setCardWidth(widgetId, cardWidth);
 		}
-		res.json({ ok: true, widgetId, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth });
+		const effectiveVisibility = visibility === 'users' && normalizedVisibilityUsers.length === 0 ? 'all' : visibility;
+		const effectiveVisibilityUsers = effectiveVisibility === 'users' ? normalizedVisibilityUsers : [];
+		res.json({
+			ok: true,
+			widgetId,
+			rules,
+			visibility: effectiveVisibility,
+			visibilityUsers: effectiveVisibilityUsers,
+			defaultMuted,
+			iframeHeight,
+			proxyCacheSeconds,
+			cardWidth
+		});
 	} catch (err) {
 		logMessage(`Failed to save card config: ${err.message || err}`, 'error');
 		res.status(500).json({ error: 'Failed to save config' });
@@ -7610,10 +7705,12 @@ app.get('/api/sitemap-config/:sitemapName', requireAdmin, (req, res) => {
 		return;
 	}
 	const visibilityMap = new Map(
-		sessions.getAllSitemapVisibilityRules().map((entry) => [safeText(entry?.sitemapName).trim(), entry?.visibility])
+		sessions.getAllSitemapVisibilityRules().map((entry) => [safeText(entry?.sitemapName).trim(), entry])
 	);
-	const visibility = safeText(visibilityMap.get(sitemapName) || 'all').trim().toLowerCase() || 'all';
-	res.json({ sitemapName, visibility });
+	const rule = visibilityMap.get(sitemapName) || { visibility: 'all', visibilityUsers: [] };
+	const visibility = safeText(rule?.visibility || 'all').trim().toLowerCase() || 'all';
+	const users = Array.isArray(rule?.visibilityUsers) ? rule.visibilityUsers : [];
+	res.json({ sitemapName, visibility, visibilityUsers: users });
 });
 
 app.post('/api/sitemap-config', jsonParserMedium, requireAdmin, (req, res) => {
@@ -7625,19 +7722,47 @@ app.post('/api/sitemap-config', jsonParserMedium, requireAdmin, (req, res) => {
 	}
 	const sitemapName = safeText(req.body.sitemapName).trim();
 	const visibility = safeText(req.body.visibility).trim().toLowerCase();
+	const visibilityUsersResult = normalizeVisibilityUsersInput(req.body.visibilityUsers);
+	if (visibilityUsersResult.error) {
+		res.status(400).json({ error: visibilityUsersResult.error });
+		return;
+	}
+	const visibilityUsers = visibilityUsersResult.users;
 	if (!isValidSitemapName(sitemapName)) {
 		res.status(400).json({ error: 'Invalid sitemapName' });
 		return;
 	}
-	if (!['all', 'normal', 'admin'].includes(visibility)) {
+	if (!['all', 'admin', 'users'].includes(visibility)) {
 		res.status(400).json({ error: `Invalid visibility: ${visibility}` });
 		return;
 	}
-	if (!sessions.setSitemapVisibility(sitemapName, visibility)) {
+	const existingUsers = new Set(sessions.getAllUsers().map((entry) => safeText(entry?.username).trim()).filter(Boolean));
+	const unknownUser = visibilityUsers.find((username) => !existingUsers.has(username));
+	if (unknownUser) {
+		res.status(400).json({ error: `Unknown visibility user: ${unknownUser}` });
+		return;
+	}
+	if (!sessions.setSitemapVisibility(sitemapName, visibility, visibilityUsers)) {
 		res.status(400).json({ error: 'Failed to save sitemap visibility' });
 		return;
 	}
-	res.json({ ok: true, sitemapName, visibility });
+	const effectiveVisibility = visibility === 'users' && visibilityUsers.length === 0 ? 'all' : visibility;
+	const effectiveVisibilityUsers = effectiveVisibility === 'users' ? visibilityUsers : [];
+	res.json({ ok: true, sitemapName, visibility: effectiveVisibility, visibilityUsers: effectiveVisibilityUsers });
+});
+
+app.get('/api/admin/visibility-users', requireAdmin, (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+	const users = sessions.getAllUsers()
+		.map((entry) => ({
+			username: safeText(entry?.username).trim(),
+			role: safeText(entry?.role).trim().toLowerCase(),
+			disabled: entry?.disabled === true,
+		}))
+		.filter((entry) => !!entry.username)
+		.sort((a, b) => a.username.localeCompare(b.username));
+	res.json({ users });
 });
 
 // System settings endpoints
@@ -8398,7 +8523,8 @@ app.get('/search-index', async (req, res) => {
 	rootPath = ensureJsonParam(rootPath);
 	const searchSitemapName = sitemapInput || sitemapNameFromRestSitemapPath(rootPath);
 	const userRole = getRequestUserRole(req);
-	if (!isSitemapVisibleForRole(searchSitemapName, userRole)) {
+	const username = getRequestUsername(req);
+	if (!isSitemapVisibleForRole(searchSitemapName, userRole, username)) {
 		return res.status(403).json({ error: 'Sitemap access denied' });
 	}
 
@@ -8466,7 +8592,7 @@ app.get('/search-index', async (req, res) => {
 	// Filter widgets/frames by visibility for the current role.
 	const visibilityMap = buildVisibilityMap();
 
-	const filteredWidgets = widgets.filter(w => isWidgetVisibleForRole(w, userRole, visibilityMap));
+	const filteredWidgets = widgets.filter(w => isWidgetVisibleForRole(w, userRole, username, visibilityMap));
 
 	const filteredFrames = frames.filter(f => {
 		const label = safeText(f.label);
@@ -8477,8 +8603,8 @@ app.get('/search-index', async (req, res) => {
 			__sectionPath: sectionPath,
 			__sitemapName: searchSitemapName,
 		});
-		const vis = visibilityMap.get(fKey) || 'all';
-		return isVisibilityAllowedForRole(vis, userRole);
+		const visibilityRule = visibilityMap.get(fKey) || { visibility: 'all', visibilityUsers: [] };
+		return isVisibilityAllowedForUser(visibilityRule, userRole, username);
 	});
 
 	res.setHeader('Cache-Control', 'no-store');
@@ -8510,7 +8636,8 @@ app.get('/sitemap-full', async (req, res) => {
 		rootPath = ensureJsonParam(rootPath);
 		const targetSitemapName = sitemapInput || sitemapNameFromRestSitemapPath(rootPath);
 		const userRole = getRequestUserRole(req);
-		if (!isSitemapVisibleForRole(targetSitemapName, userRole)) {
+		const username = getRequestUsername(req);
+		if (!isSitemapVisibleForRole(targetSitemapName, userRole, username)) {
 			return res.status(403).json({ error: 'Sitemap access denied' });
 		}
 
@@ -8574,7 +8701,7 @@ app.get('/sitemap-full', async (req, res) => {
 			findLinks(page?.widgets || page?.widget);
 		}
 
-		const filtered = filterSitemapCacheVisibility({ pages, root: rootPath }, userRole);
+		const filtered = filterSitemapCacheVisibility({ pages, root: rootPath }, userRole, username);
 
 		res.setHeader('Cache-Control', 'no-store');
 		return res.json(filtered);
@@ -8807,12 +8934,13 @@ app.get(/^\/icon\/(v\d+)\/(.+)$/i, async (req, res, next) => {
 app.use('/rest', async (req, res, next) => {
 	if (req.method !== 'GET') return next();
 	const userRole = getRequestUserRole(req);
+	const username = getRequestUsername(req);
 	const sitemapVisibilityMap = buildSitemapVisibilityMap();
 
 	const rawQuerySitemap = typeof req.query?.sitemap === 'string' ? req.query.sitemap : '';
 	if (rawQuerySitemap && !hasAnyControlChars(rawQuerySitemap)) {
 		const querySitemapName = safeText(rawQuerySitemap).trim();
-		if (querySitemapName && !isSitemapVisibleForRole(querySitemapName, userRole, sitemapVisibilityMap)) {
+		if (querySitemapName && !isSitemapVisibleForRole(querySitemapName, userRole, username, sitemapVisibilityMap)) {
 			return res.status(403).type('text/plain').send('Sitemap access denied');
 		}
 	}
@@ -8841,12 +8969,12 @@ app.use('/rest', async (req, res, next) => {
 			return res.status(502).json({ error: 'Non-JSON response from openHAB' });
 		}
 		res.setHeader('Cache-Control', 'no-store');
-		return res.json(filterSitemapPayloadForRole(payload, userRole, sitemapVisibilityMap));
+		return res.json(filterSitemapPayloadForRole(payload, userRole, username, sitemapVisibilityMap));
 	}
 
 	// Deny direct page access for blocked sitemaps.
 	const sitemapName = sitemapNameFromRestSitemapPath(`/rest${req.path}`);
-	if (sitemapName && !isSitemapVisibleForRole(sitemapName, userRole, sitemapVisibilityMap)) {
+	if (sitemapName && !isSitemapVisibleForRole(sitemapName, userRole, username, sitemapVisibilityMap)) {
 		return res.status(403).type('text/plain').send('Sitemap access denied');
 	}
 	return next();
@@ -10795,7 +10923,7 @@ app.get('/proxy', async (req, res, next) => {
 	const proxySitemapName = (rawSitemapQuery && !hasAnyControlChars(rawSitemapQuery))
 		? safeText(rawSitemapQuery).trim()
 		: '';
-	if (proxySitemapName && !isSitemapVisibleForRole(proxySitemapName, getRequestUserRole(req))) {
+	if (proxySitemapName && !isSitemapVisibleForRole(proxySitemapName, getRequestUserRole(req), getRequestUsername(req))) {
 		return sendStyledError(res, req, 403, 'Sitemap access denied');
 	}
 	const proxyPath = `/proxy${req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''}`;

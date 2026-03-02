@@ -576,8 +576,32 @@ function buildWidgetMap(arr, config) {
 const widgetGlowRulesMap = buildWidgetMap(OH_CONFIG.widgetGlowRules, {
 	extract: e => e.rules, validate: v => Array.isArray(v)
 });
+
+function normalizeVisibilityUsers(value) {
+	if (!Array.isArray(value)) return [];
+	const users = [];
+	const seen = new Set();
+	for (const entry of value) {
+		if (typeof entry !== 'string') continue;
+		const username = entry.trim();
+		if (!/^[a-zA-Z0-9_-]{1,20}$/.test(username)) continue;
+		if (seen.has(username)) continue;
+		seen.add(username);
+		users.push(username);
+	}
+	return users;
+}
+
+function normalizeVisibilityRule(value) {
+	const raw = safeText(value?.visibility ?? value).trim().toLowerCase();
+	const visibility = raw === 'admin' || raw === 'users' ? raw : 'all';
+	const visibilityUsers = visibility === 'users' ? normalizeVisibilityUsers(value?.visibilityUsers) : [];
+	return { visibility, visibilityUsers };
+}
+
 const widgetVisibilityMap = buildWidgetMap(OH_CONFIG.widgetVisibilityRules, {
-	extract: e => e.visibility, validate: v => !!v
+	extract: e => normalizeVisibilityRule(e),
+	validate: v => !!v && typeof v === 'object'
 });
 const widgetVideoConfigMap = buildWidgetMap(OH_CONFIG.widgetVideoConfigs);
 
@@ -609,23 +633,35 @@ function getUserRole() {
 	return OH_CONFIG.userRole || null;
 }
 
+function getUsername() {
+	return safeText(OH_CONFIG.username || '').trim();
+}
+
 function isAdminUser() {
 	return getUserRole() === 'admin';
+}
+
+function isVisibilityAllowedForUser(rule, userRole, username) {
+	const normalized = normalizeVisibilityRule(rule);
+	if (normalized.visibility === 'all') return true;
+	if (normalized.visibility === 'admin') return userRole === 'admin';
+	if (normalized.visibility === 'users') {
+		if (userRole === 'admin') return true;
+		return !!username && normalized.visibilityUsers.includes(username);
+	}
+	return true;
 }
 
 // Check if widget should be visible to current user
 function isWidgetVisible(widget) {
 	const userRole = getUserRole();
+	const username = getUsername();
 	// Admins see everything
 	if (userRole === 'admin') return true;
 
 	const wKey = widgetKey(widget);
-	const vis = widgetVisibilityMap.get(wKey) || 'all';
-
-	if (vis === 'all') return true;
-	if (vis === 'admin') return false;
-	if (vis === 'normal') return userRole === 'normal' || userRole === 'readonly';
-	return true;
+	const rule = widgetVisibilityMap.get(wKey) || { visibility: 'all', visibilityUsers: [] };
+	return isVisibilityAllowedForUser(rule, userRole, username);
 }
 
 let connectionPendingTimer = null;
@@ -3092,6 +3128,296 @@ let sitemapSettingsHistoryPushed = false;
 let sitemapSettingsClosePending = false;
 let sitemapSettingsTargetName = '';
 let sitemapSettingsSaving = false;
+let visibilityUsersListCache = null;
+let cardVisibilityUsersPicker = null;
+let sitemapVisibilityUsersPicker = null;
+let cardVisibilityCurrent = 'all';
+let cardVisibilityPreviousBeforeUsers = 'all';
+let cardVisibilityUsersTouched = false;
+let sitemapVisibilityCurrent = 'all';
+let sitemapVisibilityPreviousBeforeUsers = 'all';
+let sitemapVisibilityUsersTouched = false;
+
+const VISIBILITY_USERS_PAGE_SIZE = 5;
+
+function selectedUsersButtonLabel(template, count) {
+	const countText = String(Math.max(0, Number(count) || 0));
+	const text = safeText(template).trim();
+	if (text.includes('{count}')) return text.replace(/\{count\}/g, countText);
+	return `Selected Users (${countText})`;
+}
+
+async function fetchVisibilityUsersList() {
+	if (Array.isArray(visibilityUsersListCache)) return visibilityUsersListCache.slice();
+	const resp = await fetch('/api/admin/visibility-users');
+	if (!resp.ok) {
+		const err = await resp.json().catch(() => ({}));
+		throw new Error(err.error || `HTTP ${resp.status}`);
+	}
+	const data = await resp.json().catch(() => ({}));
+	const users = Array.isArray(data?.users) ? data.users : [];
+	visibilityUsersListCache = users
+		.map((entry) => safeText(entry?.username).trim())
+		.filter((username) => /^[a-zA-Z0-9_-]{1,20}$/.test(username));
+	return visibilityUsersListCache.slice();
+}
+
+function createVisibilityUsersPicker(wrap, {
+	labelTemplate = 'Selected Users ({count})',
+	moreLabel = 'More',
+	lessLabel = 'Less',
+	emptyLabel = 'No users',
+	labelEl = null,
+	onSelectionTouched = null,
+	onMenuClosed = null,
+} = {}) {
+	const button = wrap?.querySelector('.visibility-users-btn');
+	if (!wrap || !button) return null;
+
+	const menu = document.createElement('div');
+	menu.className = 'visibility-users-menu';
+	menu.style.display = 'none';
+	document.body.appendChild(menu);
+
+	let users = [];
+	let selected = new Set();
+	let page = 0;
+	let scrollParent = null;
+	let menuAnchor = button;
+	const pageSize = VISIBILITY_USERS_PAGE_SIZE;
+
+	const onScrollParent = () => closeMenu('scroll');
+	const onViewportResize = () => {
+		if (!wrap.classList.contains('menu-open')) return;
+		positionMenu();
+	};
+
+	function syncButtonLabel() {
+		const text = selectedUsersButtonLabel(labelTemplate, selected.size);
+		button.textContent = text;
+		if (labelEl) labelEl.textContent = text;
+	}
+
+	function clampPage() {
+		const maxPage = Math.max(0, Math.ceil(users.length / pageSize) - 1);
+		page = Math.max(0, Math.min(maxPage, page));
+	}
+
+	function renderMenu() {
+		menu.innerHTML = '';
+		clampPage();
+
+		if (!users.length) {
+			const empty = document.createElement('div');
+			empty.className = 'visibility-users-empty';
+			empty.textContent = emptyLabel;
+			menu.appendChild(empty);
+			return;
+		}
+
+		const start = page * pageSize;
+		const pageUsers = users.slice(start, start + pageSize);
+		for (const username of pageUsers) {
+			const row = document.createElement('button');
+			row.type = 'button';
+			row.className = 'visibility-users-option';
+			if (selected.has(username)) row.classList.add('selected');
+			const name = document.createElement('span');
+			name.className = 'visibility-users-option-name';
+			name.textContent = username;
+			row.appendChild(name);
+			row.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				if (selected.has(username)) selected.delete(username);
+				else selected.add(username);
+				if (typeof onSelectionTouched === 'function') {
+					onSelectionTouched(Array.from(selected));
+				}
+				syncButtonLabel();
+				renderMenu();
+			});
+			menu.appendChild(row);
+		}
+
+		const maxPage = Math.max(0, Math.ceil(users.length / pageSize) - 1);
+		if (maxPage > 0) {
+			const nav = document.createElement('div');
+			nav.className = 'visibility-users-nav';
+			if (page > 0) {
+				const lessBtn = document.createElement('button');
+				lessBtn.type = 'button';
+				lessBtn.className = 'visibility-users-less';
+				lessBtn.textContent = lessLabel;
+				lessBtn.addEventListener('click', (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					page = Math.max(0, page - 1);
+					renderMenu();
+				});
+				nav.appendChild(lessBtn);
+			}
+			if (page < maxPage) {
+				const moreBtn = document.createElement('button');
+				moreBtn.type = 'button';
+				moreBtn.className = 'visibility-users-more';
+				moreBtn.textContent = moreLabel;
+				moreBtn.addEventListener('click', (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					page = Math.min(maxPage, page + 1);
+					renderMenu();
+				});
+				nav.appendChild(moreBtn);
+			}
+			menu.appendChild(nav);
+		}
+	}
+
+	function positionMenu(anchorEl = menuAnchor) {
+		const anchor = anchorEl && typeof anchorEl.getBoundingClientRect === 'function' ? anchorEl : button;
+		menuAnchor = anchor;
+		const rect = anchor.getBoundingClientRect();
+		const fallbackRect = button.getBoundingClientRect();
+		const triggerHeight = Math.max(0, Math.round(rect.height || fallbackRect.height || 0));
+		if (triggerHeight > 0) menu.style.setProperty('--visibility-users-trigger-height', `${triggerHeight}px`);
+		const targetWidth = Math.max(0, Math.min((rect.width || fallbackRect.width || 180), window.innerWidth - 16));
+		const menuCS = getComputedStyle(menu);
+		const menuExtra = parseFloat(menuCS.paddingLeft) + parseFloat(menuCS.paddingRight) + parseFloat(menuCS.borderLeftWidth) + parseFloat(menuCS.borderRightWidth);
+		menu.style.width = `${targetWidth + menuExtra}px`;
+		const menuRect = menu.getBoundingClientRect();
+		const menuWidth = menuRect.width || rect.width;
+		let left = rect.left - menuExtra / 2;
+		if (left + menuWidth > window.innerWidth - 8) left = Math.max(8, window.innerWidth - menuWidth - 8);
+		menu.style.left = `${left}px`;
+
+		const menuHeight = menuRect.height || menu.offsetHeight;
+		if (menuFitsBelow(rect, menuHeight, 4)) {
+			menu.style.top = `${rect.bottom + 4}px`;
+			menu.style.bottom = '';
+		} else {
+			menu.style.top = '';
+			menu.style.bottom = `${window.innerHeight - rect.top + 4}px`;
+		}
+	}
+
+	function attachViewportListeners() {
+		window.addEventListener('resize', onViewportResize, { passive: true });
+		if (window.visualViewport) {
+			window.visualViewport.addEventListener('resize', onViewportResize, { passive: true });
+		}
+	}
+
+	function detachViewportListeners() {
+		window.removeEventListener('resize', onViewportResize);
+		if (window.visualViewport) {
+			window.visualViewport.removeEventListener('resize', onViewportResize);
+		}
+	}
+
+	function closeMenu(reason = 'dismiss') {
+		const wasOpen = wrap.classList.contains('menu-open');
+		menu.style.display = 'none';
+		menu.classList.remove('open');
+		wrap.classList.remove('menu-open');
+		detachViewportListeners();
+		if (scrollParent) {
+			scrollParent.removeEventListener('scroll', onScrollParent);
+			scrollParent = null;
+		}
+		if (wasOpen && typeof onMenuClosed === 'function') {
+			onMenuClosed({ reason, selected: Array.from(selected) });
+		}
+	}
+
+	function openMenu(anchorEl = button) {
+		if (scrollParent) {
+			scrollParent.removeEventListener('scroll', onScrollParent);
+			scrollParent = null;
+		}
+		detachViewportListeners();
+		renderMenu();
+		menu.style.position = 'fixed';
+		menu.style.display = 'block';
+		menu.classList.add('open');
+		wrap.classList.add('menu-open');
+		positionMenu(anchorEl || button);
+		attachViewportListeners();
+		scrollParent = menuAnchor.closest('.card-config-frame, .sitemap-settings-frame, .admin-config-sections');
+		if (scrollParent) scrollParent.addEventListener('scroll', onScrollParent, { passive: true });
+	}
+
+	function closeOtherPickers() {
+		document.querySelectorAll('.visibility-users-wrap.menu-open').forEach((entry) => {
+			if (entry !== wrap && typeof entry._closeMenu === 'function') entry._closeMenu();
+		});
+	}
+
+	button.addEventListener('click', (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		haptic();
+		closeOtherPickers();
+		if (wrap.classList.contains('menu-open')) closeMenu('toggle');
+		else openMenu();
+	});
+
+	const onDocClick = (e) => {
+		if (!wrap.isConnected) {
+			document.removeEventListener('click', onDocClick);
+			detachViewportListeners();
+			if (scrollParent) {
+				scrollParent.removeEventListener('scroll', onScrollParent);
+				scrollParent = null;
+			}
+			menu.remove();
+			return;
+		}
+		if (!wrap.contains(e.target) && !menu.contains(e.target)) closeMenu('outside');
+	};
+	document.addEventListener('click', onDocClick);
+
+	wrap._closeMenu = closeMenu;
+	wrap._visibilityUsersMenu = menu;
+	syncButtonLabel();
+
+	return {
+		setUsers(nextUsers) {
+			users = normalizeVisibilityUsers(nextUsers);
+			const allow = new Set(users);
+			selected = new Set(Array.from(selected).filter((username) => allow.has(username)));
+			page = 0;
+			syncButtonLabel();
+			if (wrap.classList.contains('menu-open')) renderMenu();
+		},
+		setSelected(nextUsers) {
+			const normalized = normalizeVisibilityUsers(nextUsers);
+			const allow = new Set(users);
+			selected = new Set(users.length ? normalized.filter((username) => allow.has(username)) : normalized);
+			syncButtonLabel();
+			if (wrap.classList.contains('menu-open')) renderMenu();
+		},
+		getSelected() {
+			return Array.from(selected);
+		},
+		showForVisibility(visibility) {
+			const visible = visibility === 'users';
+			wrap.style.display = visible ? '' : 'none';
+			if (!visible) closeMenu('visibility-change');
+		},
+		openFrom(anchorEl) {
+			closeOtherPickers();
+			openMenu(anchorEl || button);
+		},
+		isOpen() {
+			return wrap.classList.contains('menu-open');
+		},
+		closeMenu,
+		setLoading(loading) {
+			button.disabled = !!loading;
+		},
+	};
+}
 
 function makeFrameDraggable(frame, handle) {
 	let dragging = false;
@@ -3105,7 +3431,7 @@ function makeFrameDraggable(frame, handle) {
 		handle.setPointerCapture(e.pointerId);
 		handle.style.cursor = 'move';
 		// Close any open select dropdown menus inside the frame
-		frame.querySelectorAll('.glow-select-wrap.menu-open, .admin-select-wrap.menu-open').forEach(w => {
+		frame.querySelectorAll('.glow-select-wrap.menu-open, .admin-select-wrap.menu-open, .visibility-users-wrap.menu-open').forEach(w => {
 			if (typeof w._closeMenu === 'function') w._closeMenu();
 		});
 	}
@@ -3206,13 +3532,16 @@ function ensureCardConfigModal() {
 							<span>${cc.visAll}</span>
 						</label>
 						<label class="item-config-radio">
-							<input type="radio" name="visibility" value="normal">
-							<span>${cc.visNormal}</span>
-						</label>
-						<label class="item-config-radio">
 							<input type="radio" name="visibility" value="admin">
 							<span>${cc.visAdmin}</span>
 						</label>
+						<label class="item-config-radio">
+							<input type="radio" name="visibility" value="users">
+							<span class="card-visibility-users-label">${cc.visUsers}</span>
+						</label>
+					</div>
+					<div class="visibility-users-wrap" style="display:none;">
+						<button type="button" class="visibility-users-btn">Selected Users (0)</button>
 					</div>
 				</div>
 				<div class="card-width-section" style="display:none;">
@@ -3247,6 +3576,47 @@ function ensureCardConfigModal() {
 	`;
 	document.body.appendChild(wrap);
 	cardConfigModal = wrap;
+	const cardUsersVisibilityRadio = wrap.querySelector('input[name="visibility"][value="users"]');
+	const cardUsersVisibilityLabel = cardUsersVisibilityRadio?.closest('.item-config-radio') || null;
+	cardVisibilityUsersPicker = createVisibilityUsersPicker(
+		wrap.querySelector('.visibility-users-wrap'),
+		{
+			labelTemplate: ohLang.cardConfig.selectedUsersBtn || 'Selected Users ({count})',
+			moreLabel: ohLang.cardConfig.moreBtn || 'More',
+			lessLabel: ohLang.cardConfig.lessBtn || 'Less',
+			emptyLabel: ohLang.cardConfig.noUsers || 'No users',
+			labelEl: wrap.querySelector('.card-visibility-users-label'),
+			onSelectionTouched: () => {
+				cardVisibilityUsersTouched = true;
+			},
+			onMenuClosed: ({ reason }) => {
+				if (!cardConfigModal || cardConfigModal.classList.contains('hidden')) return;
+				if (reason === 'visibility-change') return;
+				if (!cardUsersVisibilityRadio?.checked) return;
+				const selectedUsers = cardVisibilityUsersPicker?.getSelected() || [];
+				if (selectedUsers.length > 0) return;
+				const fallbackVisibility = (!cardVisibilityUsersTouched
+					&& (cardVisibilityPreviousBeforeUsers === 'all' || cardVisibilityPreviousBeforeUsers === 'admin'))
+					? cardVisibilityPreviousBeforeUsers
+					: 'all';
+				const fallbackRadio = wrap.querySelector(`input[name="visibility"][value="${fallbackVisibility}"]`);
+				if (fallbackRadio) fallbackRadio.checked = true;
+				cardVisibilityCurrent = fallbackVisibility;
+				cardVisibilityUsersTouched = false;
+				syncRadioClasses(wrap, 'visibility');
+				cardVisibilityUsersPicker?.showForVisibility(fallbackVisibility);
+			},
+		}
+	);
+	if (cardUsersVisibilityLabel && cardUsersVisibilityRadio && cardVisibilityUsersPicker) {
+		cardUsersVisibilityLabel.addEventListener('click', () => {
+			setTimeout(() => {
+				if (!cardConfigModal || cardConfigModal.classList.contains('hidden')) return;
+				if (!cardUsersVisibilityRadio.checked) return;
+				cardVisibilityUsersPicker.openFrom(cardUsersVisibilityLabel);
+			}, 0);
+		});
+	}
 
 	// Event listeners
 	wrap.querySelector('.card-config-close').addEventListener('click', () => { haptic(); closeCardConfigModal(); });
@@ -3262,7 +3632,35 @@ function ensureCardConfigModal() {
 		haptic();
 		const group = e.target.name;
 		syncRadioClasses(wrap, group);
-	});
+		if (group === 'visibility' && cardVisibilityUsersPicker) {
+			const previousVisibility = cardVisibilityCurrent;
+			const selectedVisibility = e.target.value;
+			cardVisibilityCurrent = selectedVisibility;
+			cardVisibilityUsersPicker.showForVisibility(selectedVisibility);
+			if (selectedVisibility === 'users') {
+				if (previousVisibility !== 'users') {
+					cardVisibilityPreviousBeforeUsers = previousVisibility === 'admin' ? 'admin' : 'all';
+					cardVisibilityUsersTouched = false;
+				}
+				setTimeout(() => {
+					if (cardVisibilityUsersPicker?.isOpen()) return;
+					cardVisibilityUsersPicker?.openFrom(cardUsersVisibilityLabel || e.target.closest('.item-config-radio'));
+				}, 0);
+				cardVisibilityUsersPicker.setLoading(true);
+				void (async () => {
+					try {
+						const users = await fetchVisibilityUsersList();
+						cardVisibilityUsersPicker.setUsers(users);
+					} finally {
+						cardVisibilityUsersPicker.setLoading(false);
+					}
+				})();
+				} else {
+					cardVisibilityUsersTouched = false;
+					cardVisibilityUsersPicker.setSelected([]);
+				}
+			}
+		});
 	attachModalDismissListeners(wrap, cardConfigModal, closeCardConfigModal);
 	makeFrameDraggable(wrap.querySelector('.card-config-frame'), wrap.querySelector('.card-config-header h2'));
 }
@@ -3486,6 +3884,9 @@ function collectCardConfigValues() {
 	// Get visibility
 	const visRadio = cardConfigModal.querySelector('input[name="visibility"]:checked');
 	const visibility = visRadio?.value || 'all';
+	const visibilityUsers = visibility === 'users' && cardVisibilityUsersPicker
+		? cardVisibilityUsersPicker.getSelected()
+		: [];
 
 	// Get defaultMuted for video widgets (only if section is visible)
 	const defaultSoundSection = cardConfigModal.querySelector('.default-sound-section');
@@ -3538,7 +3939,7 @@ function collectCardConfigValues() {
 		}
 	}
 
-	return { widgetId: cardConfigWidgetKey, rules, visibility, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth };
+	return { widgetId: cardConfigWidgetKey, rules, visibility, visibilityUsers, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth };
 }
 
 function openCardConfigModal(widget, card) {
@@ -3551,11 +3952,31 @@ function openCardConfigModal(widget, card) {
 	cardConfigWidgetLabel = widget?.label || widget?.item?.label || widget?.item?.name || wKey;
 
 	// Load existing visibility
-	const visibility = widgetVisibilityMap.get(wKey) || 'all';
+	const visibilityRule = normalizeVisibilityRule(widgetVisibilityMap.get(wKey) || { visibility: 'all', visibilityUsers: [] });
+	const visibility = visibilityRule.visibility;
+	cardVisibilityCurrent = visibility;
+	cardVisibilityPreviousBeforeUsers = visibility === 'admin' ? 'admin' : 'all';
+	cardVisibilityUsersTouched = false;
 	const visRadio = cardConfigModal.querySelector(`input[name="visibility"][value="${visibility}"]`);
 	if (visRadio) {
 		visRadio.checked = true;
 		syncRadioClasses(cardConfigModal, 'visibility');
+	}
+	if (cardVisibilityUsersPicker) {
+		cardVisibilityUsersPicker.setSelected(visibilityRule.visibilityUsers);
+		cardVisibilityUsersPicker.showForVisibility(visibility);
+		cardVisibilityUsersPicker.setLoading(visibility === 'users');
+		if (visibility === 'users') {
+			void (async () => {
+				try {
+					const users = await fetchVisibilityUsersList();
+					cardVisibilityUsersPicker.setUsers(users);
+					cardVisibilityUsersPicker.setSelected(visibilityRule.visibilityUsers);
+				} finally {
+					cardVisibilityUsersPicker.setLoading(false);
+				}
+			})();
+		}
 	}
 
 	// Show/hide default sound section for video widgets
@@ -4096,20 +4517,33 @@ function setSitemapSettingsStatus(message, { isError, isPending, isSuccess } = {
 	statusEl.className = className;
 }
 
-function applySitemapSettingsVisibility(visibility) {
+function applySitemapSettingsVisibility(config) {
 	if (!sitemapSettingsModal) return;
-	const normalized = ['all', 'normal', 'admin'].includes(visibility) ? visibility : 'all';
-	const radio = sitemapSettingsModal.querySelector(`input[name="sitemapVisibility"][value="${normalized}"]`);
+	const normalized = normalizeVisibilityRule(config);
+	sitemapVisibilityCurrent = normalized.visibility;
+	if (normalized.visibility !== 'users') {
+		sitemapVisibilityPreviousBeforeUsers = normalized.visibility === 'admin' ? 'admin' : 'all';
+	}
+	sitemapVisibilityUsersTouched = false;
+	const radio = sitemapSettingsModal.querySelector(`input[name="sitemapVisibility"][value="${normalized.visibility}"]`);
 	if (!radio) return;
 	radio.checked = true;
 	syncRadioClasses(sitemapSettingsModal, 'sitemapVisibility');
+	if (sitemapVisibilityUsersPicker) {
+		sitemapVisibilityUsersPicker.setSelected(normalized.visibilityUsers);
+		sitemapVisibilityUsersPicker.showForVisibility(normalized.visibility);
+	}
 }
 
 function collectSitemapSettingsVisibility() {
-	if (!sitemapSettingsModal) return 'all';
+	if (!sitemapSettingsModal) return { visibility: 'all', visibilityUsers: [] };
 	const selected = sitemapSettingsModal.querySelector('input[name="sitemapVisibility"]:checked');
 	const value = safeText(selected?.value).trim().toLowerCase();
-	return ['all', 'normal', 'admin'].includes(value) ? value : 'all';
+	const visibility = ['all', 'admin', 'users'].includes(value) ? value : 'all';
+	const visibilityUsers = visibility === 'users' && sitemapVisibilityUsersPicker
+		? sitemapVisibilityUsersPicker.getSelected()
+		: [];
+	return { visibility, visibilityUsers };
 }
 
 async function fetchSitemapSettingsConfig(sitemapName) {
@@ -4121,11 +4555,11 @@ async function fetchSitemapSettingsConfig(sitemapName) {
 	return resp.json();
 }
 
-async function postSitemapSettingsConfig(sitemapName, visibility) {
+async function postSitemapSettingsConfig(sitemapName, visibility, visibilityUsers) {
 	const resp = await fetch('/api/sitemap-config', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ sitemapName, visibility }),
+		body: JSON.stringify({ sitemapName, visibility, visibilityUsers }),
 	});
 	if (!resp.ok) {
 		const err = await resp.json().catch(() => ({}));
@@ -4158,13 +4592,16 @@ function ensureSitemapSettingsModal() {
 						<span>${ss.visAll || 'All'}</span>
 					</label>
 					<label class="item-config-radio">
-						<input type="radio" name="sitemapVisibility" value="normal">
-						<span>${ss.visNormal || 'Normal'}</span>
-					</label>
-					<label class="item-config-radio">
 						<input type="radio" name="sitemapVisibility" value="admin">
 						<span>${ss.visAdmin || 'Admin'}</span>
 					</label>
+					<label class="item-config-radio">
+						<input type="radio" name="sitemapVisibility" value="users">
+						<span class="sitemap-visibility-users-label">${ss.visUsers || 'List of users'}</span>
+					</label>
+				</div>
+				<div class="visibility-users-wrap" style="display:none;">
+					<button type="button" class="visibility-users-btn">Selected Users (0)</button>
 				</div>
 			</div>
 			<div class="sitemap-settings-footer oh-modal-footer">
@@ -4176,6 +4613,47 @@ function ensureSitemapSettingsModal() {
 	`;
 	document.body.appendChild(wrap);
 	sitemapSettingsModal = wrap;
+	const sitemapUsersVisibilityRadio = wrap.querySelector('input[name="sitemapVisibility"][value="users"]');
+	const sitemapUsersVisibilityLabel = sitemapUsersVisibilityRadio?.closest('.item-config-radio') || null;
+	sitemapVisibilityUsersPicker = createVisibilityUsersPicker(
+		wrap.querySelector('.visibility-users-wrap'),
+		{
+			labelTemplate: ss.selectedUsersBtn || 'Selected Users ({count})',
+			moreLabel: ss.moreBtn || 'More',
+			lessLabel: ss.lessBtn || 'Less',
+			emptyLabel: ss.noUsers || 'No users',
+			labelEl: wrap.querySelector('.sitemap-visibility-users-label'),
+			onSelectionTouched: () => {
+				sitemapVisibilityUsersTouched = true;
+			},
+			onMenuClosed: ({ reason }) => {
+				if (!sitemapSettingsModal || sitemapSettingsModal.classList.contains('hidden')) return;
+				if (reason === 'visibility-change') return;
+				if (!sitemapUsersVisibilityRadio?.checked) return;
+				const selectedUsers = sitemapVisibilityUsersPicker?.getSelected() || [];
+				if (selectedUsers.length > 0) return;
+				const fallbackVisibility = (!sitemapVisibilityUsersTouched
+					&& (sitemapVisibilityPreviousBeforeUsers === 'all' || sitemapVisibilityPreviousBeforeUsers === 'admin'))
+					? sitemapVisibilityPreviousBeforeUsers
+					: 'all';
+				const fallbackRadio = wrap.querySelector(`input[name="sitemapVisibility"][value="${fallbackVisibility}"]`);
+				if (fallbackRadio) fallbackRadio.checked = true;
+				sitemapVisibilityCurrent = fallbackVisibility;
+				sitemapVisibilityUsersTouched = false;
+				syncRadioClasses(wrap, 'sitemapVisibility');
+				sitemapVisibilityUsersPicker?.showForVisibility(fallbackVisibility);
+			},
+		}
+	);
+	if (sitemapUsersVisibilityLabel && sitemapUsersVisibilityRadio && sitemapVisibilityUsersPicker) {
+		sitemapUsersVisibilityLabel.addEventListener('click', () => {
+			setTimeout(() => {
+				if (!sitemapSettingsModal || sitemapSettingsModal.classList.contains('hidden')) return;
+				if (!sitemapUsersVisibilityRadio.checked) return;
+				sitemapVisibilityUsersPicker.openFrom(sitemapUsersVisibilityLabel);
+			}, 0);
+		});
+	}
 
 	wrap.querySelector('.sitemap-settings-close').addEventListener('click', () => { haptic(); closeSitemapSettingsModal(); });
 	wrap.querySelector('.sitemap-settings-cancel').addEventListener('click', () => { haptic(); closeSitemapSettingsModal(); });
@@ -4183,7 +4661,35 @@ function ensureSitemapSettingsModal() {
 	wrap.addEventListener('change', (e) => {
 		if (e.target?.type !== 'radio') return;
 		syncRadioClasses(wrap, e.target.name);
-	});
+		if (e.target.name === 'sitemapVisibility' && sitemapVisibilityUsersPicker) {
+			const previousVisibility = sitemapVisibilityCurrent;
+			const selectedVisibility = e.target.value;
+			sitemapVisibilityCurrent = selectedVisibility;
+			sitemapVisibilityUsersPicker.showForVisibility(selectedVisibility);
+			if (selectedVisibility === 'users') {
+				if (previousVisibility !== 'users') {
+					sitemapVisibilityPreviousBeforeUsers = previousVisibility === 'admin' ? 'admin' : 'all';
+					sitemapVisibilityUsersTouched = false;
+				}
+				setTimeout(() => {
+					if (sitemapVisibilityUsersPicker?.isOpen()) return;
+					sitemapVisibilityUsersPicker?.openFrom(sitemapUsersVisibilityLabel || e.target.closest('.item-config-radio'));
+				}, 0);
+				sitemapVisibilityUsersPicker.setLoading(true);
+				void (async () => {
+					try {
+						const users = await fetchVisibilityUsersList();
+						sitemapVisibilityUsersPicker.setUsers(users);
+					} finally {
+						sitemapVisibilityUsersPicker.setLoading(false);
+					}
+				})();
+				} else {
+					sitemapVisibilityUsersTouched = false;
+					sitemapVisibilityUsersPicker.setSelected([]);
+				}
+			}
+		});
 	attachModalDismissListeners(wrap, sitemapSettingsModal, closeSitemapSettingsModal);
 	makeFrameDraggable(wrap.querySelector('.sitemap-settings-frame'), wrap.querySelector('.sitemap-settings-header h2'));
 }
@@ -4201,7 +4707,7 @@ async function openSitemapSettingsModal(option) {
 	const saveBtn = sitemapSettingsModal.querySelector('.sitemap-settings-save');
 	if (titleEl) titleEl.textContent = sitemapSettingsModalTitle(option);
 	if (saveBtn) saveBtn.disabled = true;
-	applySitemapSettingsVisibility('all');
+	applySitemapSettingsVisibility({ visibility: 'all', visibilityUsers: [] });
 	setSitemapSettingsStatus(ohLang?.sitemapSettings?.loading || 'Loading…', { isPending: true });
 
 	const modalIsOpen = !sitemapSettingsModal.classList.contains('hidden');
@@ -4214,7 +4720,19 @@ async function openSitemapSettingsModal(option) {
 
 	try {
 		const config = await fetchSitemapSettingsConfig(sitemapName);
-		applySitemapSettingsVisibility(safeText(config?.visibility).trim().toLowerCase());
+		if (sitemapVisibilityUsersPicker) {
+			sitemapVisibilityUsersPicker.setLoading(true);
+			try {
+				const users = await fetchVisibilityUsersList();
+				sitemapVisibilityUsersPicker.setUsers(users);
+			} finally {
+				sitemapVisibilityUsersPicker.setLoading(false);
+			}
+		}
+		applySitemapSettingsVisibility({
+			visibility: safeText(config?.visibility).trim().toLowerCase(),
+			visibilityUsers: config?.visibilityUsers,
+		});
 		setSitemapSettingsStatus('', {});
 	} catch (err) {
 		logJsError('openSitemapSettingsModal failed', err);
@@ -4239,6 +4757,10 @@ function closeSitemapSettingsModal({ skipHistory } = {}) {
 	}
 	sitemapSettingsSaving = false;
 	sitemapSettingsTargetName = '';
+	sitemapVisibilityUsersPicker?.closeMenu();
+	sitemapVisibilityCurrent = 'all';
+	sitemapVisibilityPreviousBeforeUsers = 'all';
+	sitemapVisibilityUsersTouched = false;
 	setSitemapSettingsStatus('', {});
 	closeModalBase(sitemapSettingsModal, '.sitemap-settings-frame', 'sitemap-settings-open');
 }
@@ -4249,10 +4771,17 @@ async function saveSitemapSettings() {
 	const saveBtn = sitemapSettingsModal.querySelector('.sitemap-settings-save');
 	if (saveBtn) saveBtn.disabled = true;
 
-	const visibility = collectSitemapSettingsVisibility();
+	const { visibility, visibilityUsers } = collectSitemapSettingsVisibility();
 	setSitemapSettingsStatus(ohLang?.sitemapSettings?.saving || 'Saving…', { isPending: true });
 	try {
-		await postSitemapSettingsConfig(sitemapSettingsTargetName, visibility);
+		const result = await postSitemapSettingsConfig(sitemapSettingsTargetName, visibility, visibilityUsers);
+		applySitemapSettingsVisibility({
+			visibility: safeText(result?.visibility).trim().toLowerCase(),
+			visibilityUsers: result?.visibilityUsers,
+		});
+		if (safeText(result?.visibility).trim().toLowerCase() !== 'users') {
+			sitemapVisibilityUsersPicker?.setSelected([]);
+		}
 		setSitemapSettingsStatus(ohLang?.sitemapSettings?.savedOk || 'Saved successfully', { isSuccess: true });
 		await refreshSitemapOptionsForModalOpen();
 		renderSitemapSelectOptions();
@@ -4470,13 +4999,16 @@ function closeCardConfigModal() {
 	// Abort any in-flight history fetches
 	if (historyAbort) { historyAbort.abort(); historyAbort = null; }
 	// Close any open select menus (removes scroll listeners) then remove from body
-	cardConfigModal.querySelectorAll('.glow-select-wrap').forEach(w => {
+	cardConfigModal.querySelectorAll('.glow-select-wrap, .visibility-users-wrap').forEach(w => {
 		if (typeof w._closeMenu === 'function') w._closeMenu();
 		if (w._glowMenu) { w._glowMenu.remove(); w._glowMenu = null; }
 	});
 	closeModalBase(cardConfigModal, '.card-config-frame', 'card-config-open');
 	cardConfigWidgetKey = '';
 	cardConfigWidgetLabel = '';
+	cardVisibilityCurrent = 'all';
+	cardVisibilityPreviousBeforeUsers = 'all';
+	cardVisibilityUsersTouched = false;
 	historyGlowColor = null;
 	cardConfigInitialStateJson = null;
 }
@@ -4502,7 +5034,7 @@ async function saveCardConfig() {
 		if (saveBtn) saveBtn.disabled = false;
 		return false;
 	}
-	const { visibility, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth, rules } = payload;
+	const { visibility, visibilityUsers, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth, rules } = payload;
 
 	try {
 		// Save widget config (rules, visibility, etc.)
@@ -4528,10 +5060,19 @@ async function saveCardConfig() {
 		}
 
 		// Update local visibility map
-		if (visibility !== 'all') {
-			widgetVisibilityMap.set(cardConfigWidgetKey, visibility);
+		const effectiveVisibility = visibility === 'users' && visibilityUsers.length === 0 ? 'all' : visibility;
+		const effectiveVisibilityRule = {
+			visibility: effectiveVisibility,
+			visibilityUsers: effectiveVisibility === 'users' ? visibilityUsers : [],
+		};
+		if (effectiveVisibility !== 'all') {
+			widgetVisibilityMap.set(cardConfigWidgetKey, effectiveVisibilityRule);
 		} else {
 			widgetVisibilityMap.delete(cardConfigWidgetKey);
+		}
+		if (cardVisibilityUsersPicker) {
+			if (effectiveVisibility === 'users') cardVisibilityUsersPicker.setSelected(effectiveVisibilityRule.visibilityUsers);
+			else cardVisibilityUsersPicker.setSelected([]);
 		}
 
 		// Update local video config map
