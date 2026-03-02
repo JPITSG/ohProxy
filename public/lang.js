@@ -364,8 +364,8 @@ window.ohLang = {
 		cachePlaceholder: 'seconds',
 		glowValuePlaceholder: 'value',
 
-		newerBtn: 'Newer \u25B4',
-		olderBtn: 'Older \u25BE',
+		newerBtn: 'Newer',
+		olderBtn: 'Older',
 
 		loading: 'Loading\u2026',
 		savedOk: 'Saved successfully',
