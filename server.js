@@ -4676,25 +4676,35 @@ html, body {
 	padding: 12px;
 }
 .forecast-container {
-	display: flex;
-	gap: 12px;
 	overflow: hidden;
 	padding: 5px;
 	flex: 1;
+	position: relative;
+}
+.forecast-track {
+	display: flex;
+	gap: 12px;
+	transform: translate3d(0, 0, 0);
+	transition: transform 0.26s ease;
+	will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+	.forecast-track {
+		transition: none;
+	}
 }
 .forecast-day {
-	flex: 1;
+	flex: 0 0 auto;
 	min-width: 70px;
 	background: transparent;
 	border-radius: 10px;
 	padding: 12px;
-	display: none;
+	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
 	gap: 12px;
 }
-.forecast-day.visible { display: flex; }
 .day-name {
 	font-size: 1.125rem;
 	font-weight: 400;
@@ -4757,7 +4767,9 @@ html, body {
 <script>if(window.self===window.top)document.documentElement.style.background='${isDark ? '#0f172a' : '#ffffff'}'</script>
 <div class="weather-card">
 	<div class="forecast-container">
-		${forecastCards}
+		<div class="forecast-track">
+			${forecastCards}
+		</div>
 	</div>
 	<div class="forecast-dots"></div>
 </div>
@@ -4765,23 +4777,15 @@ html, body {
 (function() {
   var container = document.querySelector('.forecast-container');
   if (!container) return;
-  var cards = container.querySelectorAll('.forecast-day');
+  var track = container.querySelector('.forecast-track');
+  if (!track) return;
+  var cards = track.querySelectorAll('.forecast-day');
   if (!cards.length) return;
   var dotsEl = document.querySelector('.forecast-dots');
   var startIndex = 0;
   var maxFit = 1;
-
-  function fitCards() {
-    var contentWidth = container.clientWidth - 10;
-    maxFit = Math.max(1, Math.floor((contentWidth + 10) / 80));
-    var maxStart = Math.max(0, cards.length - maxFit);
-    if (startIndex > maxStart) startIndex = maxStart;
-    for (var i = 0; i < cards.length; i++) {
-      if (i >= startIndex && i < startIndex + maxFit) cards[i].classList.add('visible');
-      else cards[i].classList.remove('visible');
-    }
-    updateDots();
-  }
+  var cardWidth = 0;
+  var CARD_GAP = 12;
 
   function updateDots() {
     if (!dotsEl) return;
@@ -4798,6 +4802,33 @@ html, body {
     dotsEl.innerHTML = html;
   }
 
+  function applyTrackOffset(animate) {
+    if (!animate) track.style.transition = 'none';
+    var offsetX = startIndex * (cardWidth + CARD_GAP);
+    track.style.transform = 'translate3d(' + (-offsetX) + 'px,0,0)';
+    if (!animate) {
+      track.getBoundingClientRect();
+      track.style.transition = '';
+    }
+  }
+
+  function fitCards(animate) {
+    var contentWidth = Math.max(0, container.clientWidth - 10);
+    maxFit = Math.max(1, Math.min(cards.length, Math.floor((contentWidth + 10) / 80)));
+    var maxStart = Math.max(0, cards.length - maxFit);
+    if (startIndex > maxStart) startIndex = maxStart;
+
+    var totalGap = CARD_GAP * (maxFit - 1);
+    cardWidth = Math.max(1, (contentWidth - totalGap) / maxFit);
+    for (var i = 0; i < cards.length; i++) {
+      cards[i].style.flexBasis = cardWidth + 'px';
+      cards[i].style.width = cardWidth + 'px';
+    }
+
+    applyTrackOffset(animate);
+    updateDots();
+  }
+
   // Click on dots to navigate
   if (dotsEl) {
     dotsEl.addEventListener('click', function(e) {
@@ -4805,7 +4836,7 @@ html, body {
       if (!dot) return;
       var dots = dotsEl.querySelectorAll('.forecast-dot');
       for (var i = 0; i < dots.length; i++) {
-        if (dots[i] === dot) { startIndex = i; fitCards(); break; }
+        if (dots[i] === dot) { startIndex = i; fitCards(true); break; }
       }
     });
   }
@@ -4837,14 +4868,19 @@ html, body {
     var maxStart = Math.max(0, cards.length - maxFit);
     if (delta < 0) startIndex = Math.min(startIndex + 1, maxStart);
     else startIndex = Math.max(startIndex - 1, 0);
-    fitCards();
+    fitCards(true);
   }, { passive: true });
 
+  fitCards(false);
+
   if (typeof ResizeObserver !== 'undefined') {
-    new ResizeObserver(fitCards).observe(container);
+    new ResizeObserver(function() {
+      fitCards(false);
+    }).observe(container);
   } else {
-    fitCards();
-    window.addEventListener('resize', fitCards);
+    window.addEventListener('resize', function() {
+      fitCards(false);
+    });
   }
 })();
 </script>
