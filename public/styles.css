@@ -2879,6 +2879,7 @@ html.no-flex-gap .item-config-visibility > * + * {
 	box-shadow: 0 0 8px var(--color-switch-active-shadow);
 }
 .visibility-users-wrap {
+	display: none !important;
 	margin-top: 8px;
 }
 .visibility-users-btn {

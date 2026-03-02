@@ -3401,9 +3401,10 @@ function createVisibilityUsersPicker(wrap, {
 			return Array.from(selected);
 		},
 		showForVisibility(visibility) {
-			const visible = visibility === 'users';
-			wrap.style.display = visible ? '' : 'none';
-			if (!visible) closeMenu('visibility-change');
+			const usersMode = visibility === 'users';
+			// Picker opens from the users radio label; keep inline button hidden to avoid duplicate controls.
+			wrap.style.display = 'none';
+			if (!usersMode) closeMenu('visibility-change');
 		},
 		openFrom(anchorEl) {
 			closeOtherPickers();
