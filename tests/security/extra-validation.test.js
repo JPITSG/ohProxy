@@ -314,7 +314,7 @@ function createExtraValidationTestApp() {
 		}
 
 		if (visibility !== undefined) {
-			const validVisibilities = ['all', 'normal', 'admin'];
+			const validVisibilities = ['all', 'admin', 'users'];
 			if (typeof visibility !== 'string' || hasAnyControlChars(visibility) || !validVisibilities.includes(visibility)) {
 				return res.status(400).json({ error: `Invalid visibility: ${visibility}` });
 			}

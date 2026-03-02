@@ -36,9 +36,10 @@ describe('Input Surface Coverage', () => {
 			/const\s+incoming\s*=\s*req\.body\s*;/,
 			/const\s+rawWidgetId\s*=\s*req\.params\.widgetId\s*;/,
 			/const\s+rawSitemapName\s*=\s*req\.params\.sitemapName\s*;/,
-			/const\s+\{\s*widgetId,\s*rules,\s*visibility,\s*defaultMuted,\s*iframeHeight,\s*proxyCacheSeconds,\s*cardWidth\s*\}\s*=\s*req\.body\s*;/,
+			/const\s+\{\s*widgetId,\s*rules,\s*visibility,\s*visibilityUsers,\s*defaultMuted,\s*iframeHeight,\s*proxyCacheSeconds,\s*cardWidth\s*\}\s*=\s*req\.body\s*;/,
 			/const\s+sitemapName\s*=\s*safeText\(req\.body\.sitemapName\)\.trim\(\)\s*;/,
 			/const\s+visibility\s*=\s*safeText\(req\.body\.visibility\)\.trim\(\)\.toLowerCase\(\)\s*;/,
+			/const\s+visibilityUsersResult\s*=\s*normalizeVisibilityUsersInput\(req\.body\.visibilityUsers\)\s*;/,
 			/const\s+\{\s*command\s*\}\s*=\s*req\.body\s*;/,
 			/if\s*\(!Buffer\.isBuffer\(req\.body\)\s*\|\|\s*req\.body\.length\s*===\s*0\)/,
 			/ws\.send\(req\.body\)\s*;/,
@@ -119,7 +120,7 @@ describe('Input Validation Coverage', () => {
 		assert.ok(content.includes('rules.length > 100'));
 		assert.ok(content.includes("const validOperators = ['=', '!=', '>', '<', '>=', '<=', 'contains', '!contains', 'startsWith', 'endsWith', '*'];"));
 		assert.ok(content.includes("const validColors = ['green', 'orange', 'red'];"));
-		assert.ok(content.includes("const validVisibilities = ['all', 'normal', 'admin'];"));
+		assert.ok(content.includes("const validVisibilities = ['all', 'admin', 'users'];"));
 
 		assert.ok(content.includes('command.length > 500'));
 		assert.ok(content.includes('const trimmed = command.trim();'));

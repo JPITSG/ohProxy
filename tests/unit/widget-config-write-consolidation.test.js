@@ -36,8 +36,9 @@ describe('Keyed Config Write Consolidation', () => {
 		const source = fs.readFileSync(SESSIONS_FILE, 'utf8');
 		assert.match(source, /function setGlowRules\(widgetId, rules\) \{/);
 		assert.match(source, /table: 'widget_glow_rules',\s*column: 'rules'/);
-		assert.match(source, /function setVisibility\(widgetId, visibility\) \{/);
-		assert.match(source, /table: 'widget_visibility',\s*column: 'visibility'/);
+		assert.match(source, /function setVisibility\(widgetId, visibility, visibilityUsers = \[\]\) \{/);
+		assert.match(source, /function upsertVisibilityConfig\(\{\s*table, keyColumn, keyValue, visibility, visibilityUsers, shouldDelete\s*\}\) \{/s);
+		assert.match(source, /table: 'widget_visibility',\s*keyColumn: 'widget_id'/s);
 		assert.match(source, /function setVideoConfig\(widgetId, defaultMuted\) \{/);
 		assert.match(source, /table: 'widget_video_config',\s*column: 'default_muted'/);
 		assert.match(source, /function setIframeConfig\(widgetId, height\) \{/);
@@ -46,8 +47,8 @@ describe('Keyed Config Write Consolidation', () => {
 		assert.match(source, /table: 'widget_proxy_cache',\s*column: 'cache_seconds'/);
 		assert.match(source, /function setCardWidth\(widgetId, width\) \{/);
 		assert.match(source, /table: 'widget_card_width',\s*column: 'width'/);
-		assert.match(source, /function setSitemapVisibility\(sitemapName, visibility\) \{/);
-		assert.match(source, /table: 'sitemap_visibility',\s*keyColumn: 'sitemap_name',\s*valueColumn: 'visibility'/);
+		assert.match(source, /function setSitemapVisibility\(sitemapName, visibility, visibilityUsers = \[\]\) \{/);
+		assert.match(source, /table: 'sitemap_visibility',\s*keyColumn: 'sitemap_name'/s);
 	});
 
 	it('keeps insert-on-conflict SQL centralized in one helper', () => {

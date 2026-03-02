@@ -18,8 +18,9 @@ describe('Sitemap Settings Modal Wiring', () => {
 		assert.match(lang, /titleTemplate:\s*'Sitemap \{TITLE\} \(\{NAME\}\) Settings'/);
 		assert.match(lang, /visibilityHeader:\s*'Visibility'/);
 		assert.match(lang, /visAll:\s*'All'/);
-		assert.match(lang, /visNormal:\s*'Normal'/);
 		assert.match(lang, /visAdmin:\s*'Admin'/);
+		assert.match(lang, /visUsers:\s*'List of users'/);
+		assert.match(lang, /selectedUsersBtn:\s*'Selected Users \(\{count\}\)'/);
 	});
 
 	it('creates sitemap settings modal and persists visibility through sitemap-config API', () => {
@@ -30,10 +31,11 @@ describe('Sitemap Settings Modal Wiring', () => {
 		assert.match(app, /return `Sitemap \$\{title\} \(\$\{name\}\) Settings`;/);
 		assert.match(app, /titleEl\.textContent = sitemapSettingsModalTitle\(option\);/);
 		assert.match(app, /input type="radio" name="sitemapVisibility" value="all" checked/);
-		assert.match(app, /input type="radio" name="sitemapVisibility" value="normal"/);
 		assert.match(app, /input type="radio" name="sitemapVisibility" value="admin"/);
+		assert.match(app, /input type="radio" name="sitemapVisibility" value="users"/);
 		assert.match(app, /fetch\('\/api\/sitemap-config\/' \+ encodeURIComponent\(sitemapName\)\)/);
 		assert.match(app, /fetch\('\/api\/sitemap-config', \{/);
+		assert.match(app, /JSON\.stringify\(\{ sitemapName, visibility, visibilityUsers \}\)/);
 		assert.doesNotMatch(app, /class="sitemap-settings-target"/);
 	});
 
