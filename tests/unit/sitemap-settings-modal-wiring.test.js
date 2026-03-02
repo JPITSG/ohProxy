@@ -20,7 +20,7 @@ describe('Sitemap Settings Modal Wiring', () => {
 		assert.match(lang, /visAll:\s*'All'/);
 		assert.match(lang, /visAdmin:\s*'Admin'/);
 		assert.match(lang, /visUsers:\s*'List of users'/);
-		assert.match(lang, /selectedUsersBtn:\s*'Selected Users \(\{count\}\)'/);
+		assert.match(lang, /selectedUsersBtn:\s*'Users \(\{count\}\)'/);
 	});
 
 	it('creates sitemap settings modal and persists visibility through sitemap-config API', () => {

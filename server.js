@@ -9721,7 +9721,10 @@ app.get('/presence', async (req, res) => {
 .ctx-close:hover{color:rgba(19,21,54,0.8)}
 .ctx-day{display:flex;align-items:center;justify-content:space-between;padding:6px 0;cursor:pointer;font-size:.75rem;font-weight:300;font-family:'Rubik',sans-serif;color:#0f172a}
 .ctx-count{font-size:0.625rem;color:rgba(19,21,54,0.4);margin-left:12px;white-space:nowrap}
-.ctx-older,.ctx-newer{box-sizing:border-box;display:block;width:100%;height:36px;padding:0 12px;margin-top:8px;font-size:.75rem;font-weight:300;font-family:'Rubik',sans-serif;color:#0f172a;background:rgba(19,21,54,0.08);border:1px solid rgba(19,21,54,0.2);border-radius:10px;cursor:pointer;transition:background-color .4s ease,border-color .4s ease,box-shadow .4s ease;outline:none}
+.ctx-older,.ctx-newer{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;text-align:center;width:100%;height:36px;padding:0 12px;margin-top:8px;font-size:.75rem;font-weight:300;font-family:'Rubik',sans-serif;color:#0f172a;background:rgba(19,21,54,0.08);border:1px solid rgba(19,21,54,0.2);border-radius:10px;cursor:pointer;transition:background-color .4s ease,border-color .4s ease,box-shadow .4s ease;outline:none}
+.ctx-older::after,.ctx-newer::after{content:'';position:relative;top:-1px;transform:rotate(0deg);width:17.5px;height:17.5px;display:inline-block;margin-left:4px;flex-shrink:0;background-color:currentColor;-webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z'/%3E%3C/svg%3E");-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:contain;mask-size:contain;opacity:.75;pointer-events:none;transition:transform .2s ease}
+.ctx-older::after{top:0;transform:rotate(0deg)}
+.ctx-newer::after{top:1px;transform:rotate(180deg)}
 .ctx-older:hover,.ctx-newer:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}
 .ctx-nav{display:flex;gap:6px;margin-top:8px}
 .ctx-nav .ctx-older,.ctx-nav .ctx-newer{margin-top:0}
@@ -10515,8 +10518,8 @@ html+='<div class="ctx-day" data-month="'+d.month+'" data-day="'+d.day+'" data-y
 var hasNewer=ctxOffset>0;
 if(hasNewer||data.hasMore){
 if(hasNewer&&data.hasMore)html+='<div class="ctx-nav">';
-if(hasNewer)html+='<button class="ctx-newer" type="button">Newer \\u25B4</button>';
-if(data.hasMore)html+='<button class="ctx-older" type="button">Older \\u25BE</button>';
+if(hasNewer)html+='<button class="ctx-newer" type="button">Newer</button>';
+if(data.hasMore)html+='<button class="ctx-older" type="button">Older</button>';
 if(hasNewer&&data.hasMore)html+='</div>';
 }
 renderCtxMenuBody(html);

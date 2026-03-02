@@ -3022,7 +3022,7 @@ html.no-flex-gap .visibility-users-nav > * + * {
 	transition: transform .2s ease;
 }
 .visibility-users-less::after {
-	top: 0.5px;
+	top: 1px;
 	transform: rotate(180deg);
 }
 .visibility-users-more::after {
