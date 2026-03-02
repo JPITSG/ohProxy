@@ -3144,7 +3144,7 @@ function selectedUsersButtonLabel(template, count) {
 	const countText = String(Math.max(0, Number(count) || 0));
 	const text = safeText(template).trim();
 	if (text.includes('{count}')) return text.replace(/\{count\}/g, countText);
-	return `Selected Users (${countText})`;
+	return `Users (${countText})`;
 }
 
 async function fetchVisibilityUsersList() {
@@ -3163,7 +3163,7 @@ async function fetchVisibilityUsersList() {
 }
 
 function createVisibilityUsersPicker(wrap, {
-	labelTemplate = 'Selected Users ({count})',
+	labelTemplate = 'Users ({count})',
 	moreLabel = 'More',
 	lessLabel = 'Less',
 	emptyLabel = 'No users',
@@ -3542,7 +3542,7 @@ function ensureCardConfigModal() {
 						</label>
 					</div>
 					<div class="visibility-users-wrap" style="display:none;">
-						<button type="button" class="visibility-users-btn">Selected Users (0)</button>
+						<button type="button" class="visibility-users-btn">Users (0)</button>
 					</div>
 				</div>
 				<div class="card-width-section" style="display:none;">
@@ -3582,7 +3582,7 @@ function ensureCardConfigModal() {
 	cardVisibilityUsersPicker = createVisibilityUsersPicker(
 		wrap.querySelector('.visibility-users-wrap'),
 		{
-			labelTemplate: ohLang.cardConfig.selectedUsersBtn || 'Selected Users ({count})',
+			labelTemplate: ohLang.cardConfig.selectedUsersBtn || 'Users ({count})',
 			moreLabel: ohLang.cardConfig.moreBtn || 'More',
 			lessLabel: ohLang.cardConfig.lessBtn || 'Less',
 			emptyLabel: ohLang.cardConfig.noUsers || 'No users',
@@ -4602,7 +4602,7 @@ function ensureSitemapSettingsModal() {
 					</label>
 				</div>
 				<div class="visibility-users-wrap" style="display:none;">
-					<button type="button" class="visibility-users-btn">Selected Users (0)</button>
+					<button type="button" class="visibility-users-btn">Users (0)</button>
 				</div>
 			</div>
 			<div class="sitemap-settings-footer oh-modal-footer">
@@ -4619,7 +4619,7 @@ function ensureSitemapSettingsModal() {
 	sitemapVisibilityUsersPicker = createVisibilityUsersPicker(
 		wrap.querySelector('.visibility-users-wrap'),
 		{
-			labelTemplate: ss.selectedUsersBtn || 'Selected Users ({count})',
+			labelTemplate: ss.selectedUsersBtn || 'Users ({count})',
 			moreLabel: ss.moreBtn || 'More',
 			lessLabel: ss.lessBtn || 'Less',
 			emptyLabel: ss.noUsers || 'No users',
