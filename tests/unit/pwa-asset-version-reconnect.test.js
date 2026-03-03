@@ -12,6 +12,9 @@ describe('PWA reconnect asset version handling', () => {
 	it('normalizes asset versions with defensive length and pattern guards', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /function normalizeAssetVersion\(value\) \{\s*const normalized = safeText\(value\)\.trim\(\);\s*if \(!normalized\) return '';\s*if \(normalized\.length > 100\) return '';\s*if \(!\/\^v\[\\w\.-\]\+\$\/\.test\(normalized\)\) return '';\s*return normalized;\s*\}/);
+		assert.match(app, /function parseNumericAssetVersion\(value\) \{/);
+		assert.match(app, /const match = \/\^v\(\\d\+\)\$\/\.exec\(normalized\);/);
+		assert.match(app, /return Number\.isSafeInteger\(parsed\) \? parsed : null;/);
 	});
 
 	it('persists known asset version and falls back to stored baseline', () => {
@@ -22,9 +25,10 @@ describe('PWA reconnect asset version handling', () => {
 		assert.match(app, /let effectiveAssetVersion = normalizeAssetVersion\(OH_CONFIG\.assetVersion\);\s*if \(effectiveAssetVersion\) \{\s*writeStoredAssetVersion\(effectiveAssetVersion\);\s*\} else \{\s*effectiveAssetVersion = readStoredAssetVersion\(\);\s*\}/);
 	});
 
-	it('uses stored baseline on reconnect and avoids false prompt when baseline is unknown', () => {
+	it('uses stored baseline on reconnect, prompts on upgrade, and adopts downgrade baselines', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
-		assert.match(app, /if \(msg\.event === 'connected'\) \{\s*const serverAssetVersion = normalizeAssetVersion\(msg\.data\?\.assetVersion\);\s*if \(!serverAssetVersion\) return;\s*if \(!effectiveAssetVersion\) \{\s*effectiveAssetVersion = serverAssetVersion;\s*writeStoredAssetVersion\(serverAssetVersion\);\s*return;\s*\}\s*if \(serverAssetVersion !== effectiveAssetVersion\) \{\s*console\.log\('Asset version mismatch on reconnect, reloading\.\.\.'\);\s*promptAssetReload\(\);/);
+		assert.match(app, /function shouldPromptAssetReloadOnConnected\(localVersion, serverVersion\) \{\s*const localNormalized = normalizeAssetVersion\(localVersion\);\s*const serverNormalized = normalizeAssetVersion\(serverVersion\);\s*if \(!localNormalized \|\| !serverNormalized\) return false;\s*const localNumeric = parseNumericAssetVersion\(localNormalized\);\s*const serverNumeric = parseNumericAssetVersion\(serverNormalized\);\s*if \(localNumeric !== null && serverNumeric !== null\) \{\s*return serverNumeric > localNumeric;\s*\}\s*return serverNormalized !== localNormalized;\s*\}/);
+		assert.match(app, /if \(msg\.event === 'connected'\) \{\s*const serverAssetVersion = normalizeAssetVersion\(msg\.data\?\.assetVersion\);\s*if \(!serverAssetVersion\) return;\s*if \(!effectiveAssetVersion\) \{\s*effectiveAssetVersion = serverAssetVersion;\s*writeStoredAssetVersion\(serverAssetVersion\);\s*return;\s*\}\s*if \(serverAssetVersion !== effectiveAssetVersion\) \{\s*if \(shouldPromptAssetReloadOnConnected\(effectiveAssetVersion, serverAssetVersion\)\) \{\s*console\.log\('Asset version mismatch on reconnect, reloading\.\.\.'\);\s*promptAssetReload\(\);\s*return;\s*\}\s*effectiveAssetVersion = serverAssetVersion;\s*writeStoredAssetVersion\(serverAssetVersion\);\s*return;\s*\}\s*writeStoredAssetVersion\(serverAssetVersion\);\s*return;\s*\}/);
 		assert.doesNotMatch(app, /msg\.data\.assetVersion !== OH_CONFIG\.assetVersion/);
 	});
 

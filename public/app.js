@@ -444,6 +444,27 @@ function normalizeAssetVersion(value) {
 	return normalized;
 }
 
+function parseNumericAssetVersion(value) {
+	const normalized = normalizeAssetVersion(value);
+	if (!normalized) return null;
+	const match = /^v(\d+)$/.exec(normalized);
+	if (!match) return null;
+	const parsed = Number(match[1]);
+	return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function shouldPromptAssetReloadOnConnected(localVersion, serverVersion) {
+	const localNormalized = normalizeAssetVersion(localVersion);
+	const serverNormalized = normalizeAssetVersion(serverVersion);
+	if (!localNormalized || !serverNormalized) return false;
+	const localNumeric = parseNumericAssetVersion(localNormalized);
+	const serverNumeric = parseNumericAssetVersion(serverNormalized);
+	if (localNumeric !== null && serverNumeric !== null) {
+		return serverNumeric > localNumeric;
+	}
+	return serverNormalized !== localNormalized;
+}
+
 function readStoredAssetVersion() {
 	try {
 		return normalizeAssetVersion(localStorage.getItem(ASSET_VERSION_STORAGE_KEY));
@@ -1947,9 +1968,76 @@ function updateThemeMeta() {
 let serverSettingsLoaded = false;
 const colorResolveCache = new Map();
 let colorResolveEl = null;
+const THEME_TRANSITION_CLASS = 'theme-transitioning';
+const THEME_TRANSITION_ACTIVE_CLASS = 'theme-transition-active';
+const THEME_TRANSITION_OVERLAY_COLOR_VAR = '--theme-transition-overlay-color';
+const THEME_TRANSITION_DURATION_MS = 220;
+const THEME_TRANSITION_CLEANUP_BUFFER_MS = 80;
+let themeTransitionsEnabled = false;
+let themeTransitionRafId = 0;
+let themeTransitionCleanupTimer = 0;
+
+function clearThemeTransitionHandles() {
+	if (themeTransitionRafId && typeof cancelAnimationFrame === 'function') {
+		cancelAnimationFrame(themeTransitionRafId);
+	}
+	themeTransitionRafId = 0;
+	if (themeTransitionCleanupTimer) clearTimeout(themeTransitionCleanupTimer);
+	themeTransitionCleanupTimer = 0;
+}
+
+function finishThemeTransition() {
+	const body = document.body;
+	clearThemeTransitionHandles();
+	if (!body) return;
+	body.classList.remove(THEME_TRANSITION_ACTIVE_CLASS);
+	body.classList.remove(THEME_TRANSITION_CLASS);
+	body.style.removeProperty(THEME_TRANSITION_OVERLAY_COLOR_VAR);
+}
+
+function shouldAnimateThemeTransition(themeChanged) {
+	if (!themeChanged || !themeTransitionsEnabled) return false;
+	if (document.documentElement.classList.contains('slim')) return false;
+	try {
+		if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			return false;
+		}
+	} catch (_) {}
+	return true;
+}
+
+function beginThemeTransition() {
+	const body = document.body;
+	if (!body) return;
+	clearThemeTransitionHandles();
+	body.classList.remove(THEME_TRANSITION_ACTIVE_CLASS);
+	body.classList.remove(THEME_TRANSITION_CLASS);
+	const previousBg = getComputedStyle(body).backgroundColor || 'transparent';
+	body.style.setProperty(THEME_TRANSITION_OVERLAY_COLOR_VAR, previousBg);
+	body.classList.add(THEME_TRANSITION_CLASS);
+	if (typeof requestAnimationFrame === 'function') {
+		themeTransitionRafId = requestAnimationFrame(() => {
+			themeTransitionRafId = 0;
+			body.classList.add(THEME_TRANSITION_ACTIVE_CLASS);
+		});
+	} else {
+		body.classList.add(THEME_TRANSITION_ACTIVE_CLASS);
+	}
+	themeTransitionCleanupTimer = setTimeout(() => {
+		finishThemeTransition();
+	}, THEME_TRANSITION_DURATION_MS + THEME_TRANSITION_CLEANUP_BUFFER_MS);
+}
 
 function setTheme(mode, syncToServer = true) {
 	const isLight = mode === 'light';
+	const resolvedMode = isLight ? 'light' : 'dark';
+	const wasLight = document.body.classList.contains('theme-light');
+	const themeChanged = isLight !== wasLight;
+	if (shouldAnimateThemeTransition(themeChanged)) {
+		beginThemeTransition();
+	} else if (themeChanged) {
+		finishThemeTransition();
+	}
 	document.body.classList.toggle('theme-light', isLight);
 	document.body.classList.toggle('theme-dark', !isLight);
 	colorResolveCache.clear();
@@ -1960,15 +2048,15 @@ function setTheme(mode, syncToServer = true) {
 	} else {
 		updateThemeMeta();
 	}
-	try { localStorage.setItem('ohTheme', isLight ? 'light' : 'dark'); }
+	try { localStorage.setItem('ohTheme', resolvedMode); }
 	catch (err) { logJsError('setTheme localStorage failed', err); }
 	// Sync to server if settings have been loaded and this isn't the initial load
 	if (syncToServer && serverSettingsLoaded) {
 		saveSettingsToServer({ darkMode: !isLight });
 	}
 	// Reload visible chart and webview iframes with new theme mode
-	reloadChartIframes(mode);
-	reloadWebviewIframes(mode);
+	reloadChartIframes(resolvedMode);
+	reloadWebviewIframes(resolvedMode);
 }
 
 function reloadIframes(selector, mode, config) {
@@ -2034,6 +2122,7 @@ function initTheme(forcedMode) {
 	}
 	setTheme(mode, false); // Don't sync to server on init
 	serverSettingsLoaded = true; // Settings already loaded from server via injection
+	themeTransitionsEnabled = true;
 }
 
 async function saveSettingsToServer(settings, options = {}) {
@@ -11496,8 +11585,13 @@ function connectWs() {
 						return;
 					}
 					if (serverAssetVersion !== effectiveAssetVersion) {
-						console.log('Asset version mismatch on reconnect, reloading...');
-						promptAssetReload();
+						if (shouldPromptAssetReloadOnConnected(effectiveAssetVersion, serverAssetVersion)) {
+							console.log('Asset version mismatch on reconnect, reloading...');
+							promptAssetReload();
+							return;
+						}
+						effectiveAssetVersion = serverAssetVersion;
+						writeStoredAssetVersion(serverAssetVersion);
 						return;
 					}
 					writeStoredAssetVersion(serverAssetVersion);

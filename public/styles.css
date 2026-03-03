@@ -286,6 +286,31 @@ body {
 	cursor: default;
 }
 
+body {
+	position: relative;
+}
+
+body.theme-transitioning::before {
+	content: '';
+	position: fixed;
+	inset: 0;
+	background: var(--theme-transition-overlay-color, transparent);
+	opacity: 1;
+	pointer-events: none;
+	z-index: 200;
+}
+
+body.theme-transitioning.theme-transition-active::before {
+	opacity: 0;
+	transition: opacity 220ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	body.theme-transitioning.theme-transition-active::before {
+		transition-duration: 1ms;
+	}
+}
+
 button:focus,
 select:focus {
 	outline: none;
