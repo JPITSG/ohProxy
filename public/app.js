@@ -2823,7 +2823,6 @@ function chartWidgetUrl(widget) {
 	const interpolation = safeText(widget?.interpolation || '').trim().toLowerCase()
 		|| ((itemType === 'switch' || itemType === 'contact') ? 'step' : 'linear');
 	if (interpolation === 'step') url += '&interpolation=step';
-	if (state.isSlim) url += '&slim=true';
 	return url;
 }
 
@@ -3020,7 +3019,7 @@ function scheduleImageScrollRefresh() {
 		if (!hasProxyImagesInView()) return;
 		refreshVisibleProxyImages();
 		if (!hasStaleProxyImages()) imageResizePending = false;
-	}, state.isSlim ? 400 : 150);
+	}, 150);
 }
 
 function processImageQueue() {
@@ -3137,10 +3136,6 @@ function getChartAnimKey(chartUrl) {
 }
 
 function setChartIframeAnimState(iframe, chartUrl) {
-	if (state.isSlim) {
-		iframe.name = 'noanim';
-		return;
-	}
 	const key = getChartAnimKey(chartUrl);
 	if (!key) {
 		iframe.name = 'chart';
@@ -3467,8 +3462,7 @@ function createVisibilityUsersPicker(wrap, {
 			menu.remove();
 			return;
 		}
-		if (!wrap.contains(e.target) && !menu.contains(e.target)
-			&& !(menuAnchor && menuAnchor !== button && menuAnchor.contains(e.target))) closeMenu('outside');
+		if (!wrap.contains(e.target) && !menu.contains(e.target)) closeMenu('outside');
 	};
 	document.addEventListener('click', onDocClick);
 
@@ -3503,11 +3497,7 @@ function createVisibilityUsersPicker(wrap, {
 		},
 		openFrom(anchorEl) {
 			closeOtherPickers();
-			if (wrap.classList.contains('menu-open')) {
-				closeMenu('toggle');
-			} else {
-				openMenu(anchorEl || button);
-			}
+			openMenu(anchorEl || button);
 		},
 		isOpen() {
 			return wrap.classList.contains('menu-open');
@@ -3709,8 +3699,7 @@ function ensureCardConfigModal() {
 		}
 	);
 	if (cardUsersVisibilityLabel && cardUsersVisibilityRadio && cardVisibilityUsersPicker) {
-		cardUsersVisibilityLabel.addEventListener('click', (e) => {
-			if (e.target === cardUsersVisibilityRadio) return;
+		cardUsersVisibilityLabel.addEventListener('click', () => {
 			setTimeout(() => {
 				if (!cardConfigModal || cardConfigModal.classList.contains('hidden')) return;
 				if (!cardUsersVisibilityRadio.checked) return;
@@ -4747,8 +4736,7 @@ function ensureSitemapSettingsModal() {
 		}
 	);
 	if (sitemapUsersVisibilityLabel && sitemapUsersVisibilityRadio && sitemapVisibilityUsersPicker) {
-		sitemapUsersVisibilityLabel.addEventListener('click', (e) => {
-			if (e.target === sitemapUsersVisibilityRadio) return;
+		sitemapUsersVisibilityLabel.addEventListener('click', () => {
 			setTimeout(() => {
 				if (!sitemapSettingsModal || sitemapSettingsModal.classList.contains('hidden')) return;
 				if (!sitemapUsersVisibilityRadio.checked) return;
@@ -5785,7 +5773,7 @@ function renderAdminConfigSection(section, config) {
 		if (!wasCollapsed) {
 			sectionEl.querySelectorAll('textarea').forEach(autoResizeTextarea);
 			requestAnimationFrame(() => {
-				sectionEl.scrollIntoView({ block: 'start', behavior: state.isSlim ? 'auto' : 'smooth' });
+				sectionEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
 			});
 		}
 	};
@@ -7712,12 +7700,6 @@ function resetLabelRow(labelRow, labelStack, navHint, preserve = null) {
 
 function animateSliderValue(input, targetValue, valueBubble = null, positionCallback = null, durationMs = 400, fromValue = null) {
 	if (!input) return;
-	if (state.isSlim) {
-		input.value = targetValue;
-		if (valueBubble) valueBubble.textContent = targetValue;
-		if (positionCallback) positionCallback();
-		return;
-	}
 	const startValue = fromValue !== null ? Number(fromValue) : Number(input.value);
 	const endValue = Number(targetValue);
 	if (startValue === endValue || !Number.isFinite(startValue) || !Number.isFinite(endValue)) {
@@ -8010,7 +7992,6 @@ function crossfadeText(element, newText, fadeOutMs = 200, fadeInMs = 200) {
 	if (!element) return;
 	const oldText = element.textContent;
 	if (oldText === newText) return;
-	if (state.isSlim) { element.textContent = newText; return; }
 
 	// Increment token to invalidate any pending animation
 	const token = (element.__crossfadeToken || 0) + 1;
@@ -8063,7 +8044,6 @@ function crossfadeTextOverlap(element, oldText, newText, durationMs = 400) {
 	const fromText = safeText(oldText);
 	const toText = safeText(newText);
 	if (fromText === toText) return;
-	if (state.isSlim) { element.textContent = toText; return; }
 
 	// If empty, just set directly (no animation needed for initial render)
 	if (!fromText) {
@@ -8302,11 +8282,10 @@ function getWidgetRenderInfo(w) {
 	const chartUrl = isChart ? normalizeMediaUrl(chartWidgetUrl(w)) : '';
 	const rawWebviewUrl = isWebview ? mediaWidgetSourceUrl(w) : '';
 	const themeMode = getThemeMode();
-	const slimParam = state.isSlim ? '&slim=true' : '';
 	const webviewUrl = rawWebviewUrl
 		? (shouldBypassProxy(rawWebviewUrl)
-			? appendModeParam(rawWebviewUrl, themeMode) + slimParam
-			: `/proxy?url=${encodeURIComponent(rawWebviewUrl)}&mode=${themeMode}${slimParam}`)
+			? appendModeParam(rawWebviewUrl, themeMode)
+			: `/proxy?url=${encodeURIComponent(rawWebviewUrl)}&mode=${themeMode}`)
 		: '';
 	// Check for iframe config height override
 	const iframeConfig = widgetIframeConfigMap.get(wKey);
@@ -10924,12 +10903,8 @@ function swapChartIframe(iframe, newSrc, baseUrl) {
 		newIframe.setAttribute('allowfullscreen', iframe.getAttribute('allowfullscreen'));
 	}
 	newIframe.dataset.chartUrl = baseUrl || iframe.dataset.chartUrl || newSrc;
-	if (state.isSlim) {
-		newIframe.style.opacity = '1';
-	} else {
-		newIframe.style.opacity = '0';
-		newIframe.style.transition = `opacity ${CHART_IFRAME_CROSSFADE_MS}ms ease-out`;
-	}
+	newIframe.style.opacity = '0';
+	newIframe.style.transition = `opacity ${CHART_IFRAME_CROSSFADE_MS}ms ease-out`;
 	newIframe.style.position = 'absolute';
 	newIframe.style.top = '0';
 	newIframe.style.left = '0';
@@ -10958,7 +10933,6 @@ function swapChartIframe(iframe, newSrc, baseUrl) {
 		// Crossfade: fade in new iframe
 		newIframe.style.opacity = '1';
 		// After transition completes, remove old iframe and reset positioning
-		const cleanupDelay = state.isSlim ? 0 : CHART_IFRAME_CROSSFADE_MS;
 		setTimeout(() => {
 			if (container.contains(iframe)) iframe.remove();
 			newIframe.style.position = '';
@@ -10967,7 +10941,7 @@ function swapChartIframe(iframe, newSrc, baseUrl) {
 			newIframe.style.width = '';
 			newIframe.style.height = '';
 			newIframe.style.transition = '';
-		}, cleanupDelay);
+		}, CHART_IFRAME_CROSSFADE_MS);
 	}, { once: true });
 }
 
@@ -11821,7 +11795,7 @@ function restoreNormalPolling() {
 	window.addEventListener('scroll', scheduleImageScrollRefresh, { passive: true });
 	window.addEventListener('touchstart', noteActivity, { passive: true });
 	window.addEventListener('touchstart', handleBounceTouchStart, { passive: true });
-	window.addEventListener('touchmove', handleBounceTouchMove, { passive: state.isSlim });
+	window.addEventListener('touchmove', handleBounceTouchMove, { passive: false });
 	window.addEventListener('touchend', handleBounceTouchEnd, { passive: true });
 	window.addEventListener('touchcancel', handleBounceTouchEnd, { passive: true });
 	window.addEventListener('click', noteActivity, { passive: true });
@@ -11889,7 +11863,6 @@ function restoreNormalPolling() {
 	}
 	document.addEventListener('touchstart', (e) => {
 		if (e.touches.length !== 2) { clearTwoFingerHold(); return; }
-		if (state.isSlim) return;
 		if (getUserRole() !== 'admin') return;
 		const card = e.target.closest('#grid > .glass[data-widget-key]');
 		if (!card) return;
