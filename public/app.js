@@ -6851,7 +6851,12 @@ function updateWidgetState(widget, nextState) {
 	if (widget.label && widget.label.includes('[') && widget.label.includes(']')) {
 		const parts = splitLabelState(widget.label);
 		if (parts.state && parts.title && parts.state === prevState) {
-			widget.label = `${parts.title} [${nextState}]`;
+			// Preserve unit suffix from label when new state is a bare number
+			const unitMatch = parts.state.match(/^-?\d[\d.,]*(\s+.+)$/);
+			const newState = (unitMatch && /^-?\d[\d.,]*$/.test(nextState))
+				? nextState + unitMatch[1]
+				: nextState;
+			widget.label = `${parts.title} [${newState}]`;
 		}
 	}
 }
@@ -7017,7 +7022,10 @@ function syncItemsToAllCachedPages(changes) {
 					// Only update label for numeric states (group counts like "0", "1", "2")
 					// Don't update for raw states like "OPEN"/"CLOSED" which have transformers
 					if (w.label && w.label.includes('[') && /^\d+$/.test(change.state)) {
-						w.label = w.label.replace(/\[[^\]]*\]/, `[${change.state}]`);
+						w.label = w.label.replace(/\[([^\]]*)\]/, (_match, inner) => {
+							const unitMatch = inner.match(/^-?\d[\d.,]*(\s+.+)$/);
+							return unitMatch ? `[${change.state}${unitMatch[1]}]` : `[${change.state}]`;
+						});
 						}
 					}
 				}
