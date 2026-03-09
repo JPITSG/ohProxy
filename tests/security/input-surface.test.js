@@ -90,6 +90,7 @@ describe('Input Surface Coverage', () => {
 			/if\s*\(rawEncoding\s*!==\s*undefined\s*&&\s*typeof\s+rawEncoding\s*!==\s*'string'\s*\)/,
 			/if\s*\(startVideoProxyStream\(req,\s*res,\s*target,\s*req\.query\?\.encoding\)\)\s*return;/,
 			/const\s+key\s*=\s*req\.query\.key\s*;/,
+			/const\s+slim\s*=\s*req\.query\?\.slim\s*===\s*'true'\s*;/,
 		];
 
 		const unexpected = inputLines.filter((line) => !allowedPatterns.some((pattern) => pattern.test(line)));

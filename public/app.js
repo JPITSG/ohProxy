@@ -234,6 +234,7 @@ async function softReset() {
 	_lastSoftResetAt = Date.now();
 	_softResetRunning = true;
 	beginResumeTransition();
+	stopGpsTracking();
 	closeImageViewer();
 	exitVideoFullscreen();
 	exitIframeFullscreen();
@@ -241,7 +242,6 @@ async function softReset() {
 	closeAdminConfigModal();
 	closeSitemapSelectModal({ skipHistory: true });
 	hideStatusTooltip();
-	reportGps();
 
 	try {
 		// Show cached home snapshot behind the blur (if available)
@@ -334,6 +334,7 @@ async function softReset() {
 	} finally {
 		endResumeTransition();
 		_softResetRunning = false;
+		syncGpsTracking();
 	}
 }
 
@@ -500,37 +501,140 @@ function getMapviewRenderingMode() {
 state.proxyAuth = typeof AUTH_INFO.auth === 'string' ? AUTH_INFO.auth.toLowerCase() : '';
 state.proxyUser = typeof AUTH_INFO.user === 'string' ? AUTH_INFO.user : '';
 
-function reportGps() {
+const GPS_REPORT_INTERVAL_MS = 30000;
+let gpsWatchId = null;
+let gpsSendTimer = null;
+let gpsLatestPosition = null;
+let gpsHasLock = false;
+let gpsSessionToken = 0;
+
+function clearGpsSendTimer() {
+	if (gpsSendTimer !== null) {
+		clearInterval(gpsSendTimer);
+		gpsSendTimer = null;
+	}
+}
+
+function clearGpsWatch() {
+	if (gpsWatchId === null) return;
 	try {
-		if (!OH_CONFIG.trackGps) return;
-		if (!isTouchDevice()) return;
-		if (state.proxyAuth !== 'authenticated') return;
-		if (!navigator.geolocation) return;
-		navigator.geolocation.getCurrentPosition(
-			async (pos) => {
-				try {
-					const payload = {
-						lat: pos.coords.latitude,
-						lon: pos.coords.longitude,
-						accuracy: pos.coords.accuracy,
-					};
-					try {
-						if (navigator.getBattery) {
-							const battery = await navigator.getBattery();
-							payload.batt = Math.round(battery.level * 100);
-						}
-					} catch (_) {}
-					fetch('/api/gps', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify(payload),
-					}).catch(() => {});
-				} catch (_) {}
-			},
-			() => {},
-			{ enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
-		);
+		if (navigator.geolocation && typeof navigator.geolocation.clearWatch === 'function') {
+			navigator.geolocation.clearWatch(gpsWatchId);
+		}
 	} catch (_) {}
+	gpsWatchId = null;
+}
+
+function clearGpsLock() {
+	gpsLatestPosition = null;
+	gpsHasLock = false;
+}
+
+function isGpsTrackingEligible() {
+	try {
+		if (!OH_CONFIG.trackGps) return false;
+		if (!isTouchDevice()) return false;
+		if (state.proxyAuth !== 'authenticated') return false;
+		if (!navigator.geolocation || typeof navigator.geolocation.watchPosition !== 'function') return false;
+		if (_softResetRunning) return false;
+		if (!isClientFocused()) return false;
+		return true;
+	} catch (_) {
+		return false;
+	}
+}
+
+async function buildGpsPayload(position) {
+	const payload = {
+		lat: position.coords.latitude,
+		lon: position.coords.longitude,
+		accuracy: position.coords.accuracy,
+	};
+	try {
+		if (navigator.getBattery) {
+			const battery = await navigator.getBattery();
+			payload.batt = Math.round(battery.level * 100);
+		}
+	} catch (_) {}
+	return payload;
+}
+
+async function sendGpsPosition(sessionToken = gpsSessionToken) {
+	if (sessionToken !== gpsSessionToken) return;
+	if (!gpsHasLock || !gpsLatestPosition) return;
+	try {
+		const payload = await buildGpsPayload(gpsLatestPosition);
+		if (sessionToken !== gpsSessionToken) return;
+		fetch('/api/gps', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload),
+		}).catch(() => {});
+	} catch (_) {}
+}
+
+function armGpsSendTimer(sessionToken) {
+	clearGpsSendTimer();
+	gpsSendTimer = setInterval(() => {
+		if (sessionToken !== gpsSessionToken) return;
+		if (!gpsHasLock || !gpsLatestPosition) return;
+		void sendGpsPosition(sessionToken);
+	}, GPS_REPORT_INTERVAL_MS);
+}
+
+function handleGpsPosition(position, sessionToken) {
+	if (sessionToken !== gpsSessionToken) return;
+	gpsLatestPosition = position;
+	const hadLock = gpsHasLock;
+	gpsHasLock = true;
+	if (hadLock) return;
+	armGpsSendTimer(sessionToken);
+	void sendGpsPosition(sessionToken);
+}
+
+function handleGpsPositionError(error, sessionToken) {
+	if (sessionToken !== gpsSessionToken) return;
+	clearGpsSendTimer();
+	clearGpsLock();
+	if (error && error.code === 1) {
+		stopGpsTracking();
+	}
+}
+
+function stopGpsTracking() {
+	gpsSessionToken += 1;
+	clearGpsSendTimer();
+	clearGpsWatch();
+	clearGpsLock();
+}
+
+function startGpsTracking() {
+	if (!isGpsTrackingEligible()) {
+		stopGpsTracking();
+		return;
+	}
+	if (gpsWatchId !== null) return;
+	clearGpsSendTimer();
+	clearGpsLock();
+	const sessionToken = ++gpsSessionToken;
+	try {
+		gpsWatchId = navigator.geolocation.watchPosition(
+			(position) => handleGpsPosition(position, sessionToken),
+			(error) => handleGpsPositionError(error, sessionToken),
+			{ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+		);
+	} catch (_) {
+		if (sessionToken !== gpsSessionToken) return;
+		stopGpsTracking();
+	}
+}
+
+function syncGpsTracking() {
+	if (!isGpsTrackingEligible()) {
+		stopGpsTracking();
+		return;
+	}
+	startGpsTracking();
 }
 
 function configNumber(value, fallback) {
@@ -11509,6 +11613,7 @@ function sendFocusState() {
 		}
 	}
 	syncWakeLock();
+	syncGpsTracking();
 }
 
 function initFocusTracking() {
@@ -11953,6 +12058,7 @@ function restoreNormalPolling() {
 	}
 
 	function markPageHidden() {
+		stopGpsTracking();
 		if (resumeReloadArmed) return;
 		resumeReloadArmed = true;
 		lastHiddenTime = Date.now();
@@ -11985,6 +12091,7 @@ function restoreNormalPolling() {
 			refresh(false);
 			if (!wsConnection) connectWs();
 			startPingDelayed();
+			syncGpsTracking();
 		}
 		if (state.connectionOk) showStatusNotification();
 	}
@@ -12014,6 +12121,8 @@ function restoreNormalPolling() {
 			const hiddenDuration = getHiddenDuration();
 			if (hiddenDuration >= minHiddenMs) {
 				softReset();
+			} else {
+				syncGpsTracking();
 			}
 		}
 	});
@@ -12595,8 +12704,6 @@ function restoreNormalPolling() {
 		startPolling();
 		connectWs();
 		startPingDelayed();
-
-		reportGps();
 	} catch (e) {
 		console.error(e);
 		logJsError('init bootstrap failed', e);
@@ -12613,4 +12720,5 @@ function restoreNormalPolling() {
 			setConnectionStatus(false, e.message);
 		}
 	}
+	syncGpsTracking();
 })();

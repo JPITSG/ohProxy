@@ -371,3 +371,9 @@ body.chart-fs-rotated .chart-card {
 		font-size: .5625rem;
 	}
 }
+
+/* Slim mode - disable expensive effects */
+.slim .chart-line-glow { display: none; }
+.slim .data-point { transition: none !important; }
+.slim .tooltip { transition: none !important; }
+.slim body { transition: none !important; }

@@ -4589,7 +4589,7 @@ function renderLoginHtml() {
 	return html;
 }
 
-function renderWeatherWidget(forecastData, mode) {
+function renderWeatherWidget(forecastData, mode, slim) {
 	const isDark = mode === 'dark';
 	const textColor = isDark ? '#ffffff' : '#000000';
 	const rainColor = '#3498db';
@@ -4761,6 +4761,18 @@ html, body {
 	box-sizing: content-box;
 }
 .forecast-dot.active { opacity: 0.8; }
+${slim ? `
+.forecast-track {
+	transition: none !important;
+	will-change: auto !important;
+}
+.forecast-dot {
+	transition: none !important;
+}
+.forecast-container {
+	scroll-snap-type: x mandatory;
+}
+` : ''}
 </style>
 </head>
 <body>
@@ -4775,6 +4787,7 @@ html, body {
 </div>
 <script>
 (function() {
+  var isSlim = ${slim ? 'true' : 'false'};
   var container = document.querySelector('.forecast-container');
   if (!container) return;
   var track = container.querySelector('.forecast-track');
@@ -4803,10 +4816,10 @@ html, body {
   }
 
   function applyTrackOffset(animate) {
-    if (!animate) track.style.transition = 'none';
+    if (!animate || isSlim) track.style.transition = 'none';
     var offsetX = startIndex * (cardWidth + CARD_GAP);
     track.style.transform = 'translate3d(' + (-offsetX) + 'px,0,0)';
-    if (!animate) {
+    if (!animate || isSlim) {
       track.getBoundingClientRect();
       track.style.transition = '';
     }
@@ -8771,6 +8784,7 @@ app.get('/weather', (req, res) => {
 
 	const rawMode = typeof req.query?.mode === 'string' ? req.query.mode : '';
 	const mode = (rawMode && !hasAnyControlChars(rawMode) && rawMode.trim().toLowerCase() === 'dark') ? 'dark' : 'light';
+	const slim = req.query?.slim === 'true';
 
 	// Read cached weather data
 	let weatherData = null;
@@ -8791,7 +8805,7 @@ app.get('/weather', (req, res) => {
 
 	res.setHeader('Content-Type', 'text/html; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	res.send(renderWeatherWidget(forecast, mode));
+	res.send(renderWeatherWidget(forecast, mode, slim));
 });
 
 app.get(['/', '/index.html'], (req, res) => {

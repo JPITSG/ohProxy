@@ -14,8 +14,12 @@
 	}
 	// Enable animations only when parent iframe has not opted out
 	var noAnim = window.name === 'noanim' || (window.frameElement && window.frameElement.name === 'noanim');
+	var isSlim = params.get('slim') === 'true' || noAnim;
 	if (!noAnim) {
 		document.documentElement.classList.add('chart-animated');
+	}
+	if (isSlim) {
+		document.documentElement.classList.add('slim');
 	}
 
 	var CHART_DATE_FMT = window._chartDateFormat || 'MMM Do, YYYY';
