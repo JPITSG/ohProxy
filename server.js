@@ -387,6 +387,7 @@ const PREVIEW_CONFIG = SERVER_CONFIG.videoPreview || {};
 const VIDEO_PREVIEW_INTERVAL_MS = configNumber(PREVIEW_CONFIG.intervalMs, 900000);
 const VIDEO_PREVIEW_PRUNE_HOURS = configNumber(PREVIEW_CONFIG.pruneAfterHours, 24);
 const VIDEO_PREVIEW_DIR = path.join(__dirname, 'video-previews');
+const VIDEO_PREVIEW_CACHE_MAX_AGE_SEC = 31536000;
 const BINARIES_CONFIG = SERVER_CONFIG.binaries || {};
 const BIN_FFMPEG = safeText(BINARIES_CONFIG.ffmpeg) || '/usr/bin/ffmpeg';
 const BIN_CONVERT = safeText(BINARIES_CONFIG.convert) || '/usr/bin/convert';
@@ -3082,6 +3083,12 @@ function extractVideoUrls(data, results = new Map()) {
 // Hash video URL to generate filename
 function videoUrlHash(url) {
 	return crypto.createHash('md5').update(url).digest('hex').substring(0, 16);
+}
+
+function normalizeVideoPreviewVersionToken(rawVersion) {
+	const version = safeText(rawVersion).trim();
+	if (!/^\d{1,20}$/.test(version)) return '';
+	return version;
 }
 
 // Resolve video encoding from explicit param or auto-detect from URL
@@ -9140,6 +9147,14 @@ app.get('/video-preview', (req, res) => {
 	if (typeof rawUrl !== 'string') {
 		return res.status(400).type('text/plain').send('Missing URL');
 	}
+	const rawVersion = req.query?.v;
+	if (rawVersion !== undefined && typeof rawVersion !== 'string') {
+		return res.status(400).type('text/plain').send('Invalid preview version');
+	}
+	const requestedVersion = rawVersion === undefined ? '' : normalizeVideoPreviewVersionToken(rawVersion);
+	if (rawVersion !== undefined && !requestedVersion) {
+		return res.status(400).type('text/plain').send('Invalid preview version');
+	}
 	const url = rawUrl.trim();
 	if (!url || url.length > 2048 || hasAnyControlChars(url)) {
 		return res.status(400).type('text/plain').send('Missing URL');
@@ -9181,10 +9196,16 @@ app.get('/video-preview', (req, res) => {
 		return res.status(404).type('text/plain').send('Preview not available');
 	}
 
+	const previewVersion = String(Math.trunc(stats.mtimeMs));
 	res.type('image/jpeg');
-	res.set('Cache-Control', 'no-cache, must-revalidate');
-	res.set('ETag', `"${stats.mtimeMs}"`);
+	res.set('X-Preview-Version', previewVersion);
+	res.set('ETag', `"${hash}.${previewVersion}"`);
 	res.set('Last-Modified', stats.mtime.toUTCString());
+	if (requestedVersion && requestedVersion === previewVersion) {
+		res.set('Cache-Control', `public, max-age=${VIDEO_PREVIEW_CACHE_MAX_AGE_SEC}, immutable`);
+	} else {
+		res.set('Cache-Control', 'no-store');
+	}
 	res.sendFile(filePath);
 });
 

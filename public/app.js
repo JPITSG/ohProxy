@@ -739,6 +739,7 @@ let videoFsEscHandler = null;
 let videoFsPlaceholder = null;
 let videosPausedForVisibility = false;
 const videoZoomStateMap = new WeakMap();
+const videoPreviewVersionRequests = new Map();
 
 let iframeFsActive = false;
 let iframeFsContainer = null;
@@ -2268,6 +2269,88 @@ function applyHeaderSmallLayout() {
 
 function safeText(v) {
 	return (v === null || v === undefined) ? '' : String(v);
+}
+
+function normalizeVideoPreviewVersion(value) {
+	const version = safeText(value).trim();
+	if (!/^\d{1,20}$/.test(version)) return '';
+	return version;
+}
+
+function buildVideoPreviewBaseUrl(rawVideoUrl) {
+	const trimmed = safeText(rawVideoUrl).trim();
+	if (!trimmed) return '';
+	return `/video-preview?url=${encodeURIComponent(trimmed)}`;
+}
+
+function buildVideoPreviewUrl(rawVideoUrl, version) {
+	const previewBaseUrl = buildVideoPreviewBaseUrl(rawVideoUrl);
+	if (!previewBaseUrl) return '';
+	const normalizedVersion = normalizeVideoPreviewVersion(version);
+	return normalizedVersion ? `${previewBaseUrl}&v=${encodeURIComponent(normalizedVersion)}` : previewBaseUrl;
+}
+
+function applyVideoPreviewUrl(previewDiv, previewUrl) {
+	if (!previewDiv) return;
+	const resolvedUrl = safeText(previewUrl).trim();
+	if (!resolvedUrl) {
+		previewDiv.style.backgroundImage = '';
+		previewDiv.dataset.previewUrl = '';
+		previewDiv.classList.add('hidden');
+		return;
+	}
+	if (previewDiv.dataset.previewUrl !== resolvedUrl) {
+		previewDiv.style.backgroundImage = `url('${resolvedUrl}')`;
+		previewDiv.dataset.previewUrl = resolvedUrl;
+	}
+	previewDiv.classList.remove('hidden');
+}
+
+function resolveVideoPreviewVersion(rawVideoUrl) {
+	const trimmed = safeText(rawVideoUrl).trim();
+	if (!trimmed) return Promise.resolve('');
+	const existing = videoPreviewVersionRequests.get(trimmed);
+	if (existing) return existing;
+	const previewBaseUrl = buildVideoPreviewBaseUrl(trimmed);
+	const request = fetch(previewBaseUrl, {
+		method: 'HEAD',
+		cache: 'no-store',
+		credentials: 'same-origin',
+	}).then((response) => {
+		if (!response.ok) return '';
+		return normalizeVideoPreviewVersion(response.headers.get('x-preview-version'));
+	}).catch((error) => {
+		logJsError('resolveVideoPreviewVersion failed', error);
+		return null;
+	}).finally(() => {
+		videoPreviewVersionRequests.delete(trimmed);
+	});
+	videoPreviewVersionRequests.set(trimmed, request);
+	return request;
+}
+
+function setVideoPreviewBackground(previewDiv, rawVideoUrl) {
+	if (!previewDiv) return;
+	const trimmed = safeText(rawVideoUrl).trim();
+	const previousRawUrl = safeText(previewDiv.dataset.previewRawUrl).trim();
+	previewDiv.dataset.previewRawUrl = trimmed;
+	const requestId = String((parseInt(previewDiv.dataset.previewRequestId || '0', 10) || 0) + 1);
+	previewDiv.dataset.previewRequestId = requestId;
+	if (!trimmed) {
+		applyVideoPreviewUrl(previewDiv, '');
+		return;
+	}
+	if (previousRawUrl && previousRawUrl !== trimmed) {
+		applyVideoPreviewUrl(previewDiv, '');
+	}
+	resolveVideoPreviewVersion(trimmed).then((version) => {
+		if (version === null) return;
+		if (!previewDiv.isConnected) return;
+		if (previewDiv.dataset.previewRequestId !== requestId) return;
+		if (previewDiv.dataset.previewRawUrl !== trimmed) return;
+		const previewUrl = version ? buildVideoPreviewUrl(trimmed, version) : '';
+		applyVideoPreviewUrl(previewDiv, previewUrl);
+	});
 }
 
 function buildCompactSearchPlaceholder(fullPlaceholder) {
@@ -8852,14 +8935,7 @@ function updateCard(card, w, info) {
 			previewDiv.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background-size:cover;background-position:center;opacity:0.75;z-index:10;';
 			videoContainer.appendChild(previewDiv);
 		}
-		// Set preview background if video URL available
-		if (rawVideoUrl) {
-			const previewUrl = `/video-preview?url=${encodeURIComponent(rawVideoUrl)}`;
-			previewDiv.style.backgroundImage = `url('${previewUrl}')`;
-			previewDiv.classList.remove('hidden');
-		} else {
-			previewDiv.classList.add('hidden');
-		}
+		setVideoPreviewBackground(previewDiv, rawVideoUrl);
 
 		// Get or create spinner overlay
 		let spinner = videoContainer.querySelector('.video-spinner');
