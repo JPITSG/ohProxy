@@ -1448,6 +1448,8 @@ function normalizeSnapshotSitemapName(value) {
 function getPreferredSnapshotSitemapName() {
 	const active = normalizeSnapshotSitemapName(state.sitemapName);
 	if (active) return active;
+	const pending = normalizeSnapshotSitemapName(getPendingSelectedSitemapName());
+	if (pending) return pending;
 	return normalizeSnapshotSitemapName(getStoredSelectedSitemapName());
 }
 
@@ -2748,6 +2750,30 @@ function isSitemapSelectionEnabled() {
 	return isAuthenticatedSession() && Array.isArray(state.sitemapOptions) && state.sitemapOptions.length > 1;
 }
 
+const PENDING_SELECTED_SITEMAP_STORAGE_KEY = 'ohPendingSelectedSitemap';
+
+function getPendingSelectedSitemapName() {
+	try {
+		return safeText(sessionStorage.getItem(PENDING_SELECTED_SITEMAP_STORAGE_KEY)).trim();
+	} catch (_) {
+		return '';
+	}
+}
+
+function setPendingSelectedSitemapName(name) {
+	const trimmed = safeText(name).trim();
+	if (!trimmed) return;
+	try {
+		sessionStorage.setItem(PENDING_SELECTED_SITEMAP_STORAGE_KEY, trimmed);
+	} catch (_) {}
+}
+
+function clearPendingSelectedSitemapName() {
+	try {
+		sessionStorage.removeItem(PENDING_SELECTED_SITEMAP_STORAGE_KEY);
+	} catch (_) {}
+}
+
 function getStoredSelectedSitemapName() {
 	if (!window.__OH_SESSION__ || typeof window.__OH_SESSION__ !== 'object') return '';
 	const value = safeText(window.__OH_SESSION__.selectedSitemap).trim();
@@ -2872,6 +2898,14 @@ async function resolvePreferredSitemapOption(opts = {}) {
 	if (!options.length) {
 		throw new Error('Could not determine sitemap name. Check /rest/sitemaps?type=json output.');
 	}
+	const pending = getPendingSelectedSitemapName();
+	const pendingSelected = pending ? options.find((entry) => entry.name === pending) : null;
+	if (pendingSelected) {
+		setStoredSelectedSitemapName(pendingSelected.name);
+		clearPendingSelectedSitemapName();
+		return pendingSelected;
+	}
+	if (pending) clearPendingSelectedSitemapName();
 	const preferred = getStoredSelectedSitemapName();
 	let selected = preferred ? options.find((entry) => entry.name === preferred) : null;
 	const hadInvalidStoredValue = !!preferred && !selected;
@@ -5201,6 +5235,7 @@ async function selectSitemapAndReload(sitemapName) {
 	try {
 		const saved = await persistSelectedSitemapName(target, { throwOnError: true });
 		if (!saved) throw new Error('Failed to save selected sitemap');
+		setPendingSelectedSitemapName(target);
 		const reloadUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
 		window.location.assign(reloadUrl);
 	} catch (err) {
