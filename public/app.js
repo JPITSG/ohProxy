@@ -351,6 +351,7 @@ const els = {
 	back: document.getElementById('backBtn'),
 	voice: document.getElementById('voiceBtn'),
 	home: document.getElementById('homeBtn'),
+	adminConfig: document.getElementById('adminConfigBtn'),
 	logout: document.getElementById('logoutBtn'),
 	themeToggle: document.getElementById('themeToggleBtn'),
 	lightMode: document.getElementById('lightModeBtn'),
@@ -6379,7 +6380,7 @@ async function logoutAndRedirectToLogin() {
 }
 
 function updateAdminConfigBtnVisibility() {
-	const btn = document.getElementById('adminConfigBtn');
+	const btn = els.adminConfig;
 	if (!btn) return;
 	const userRole = getUserRole();
 	if (userRole) {
@@ -10579,6 +10580,8 @@ function updateNavButtons() {
 	els.back.disabled = (state.stack.length === 0 && !hasSearch) || !state.connectionOk;
 	els.home.disabled = !state.rootPageUrl || (!hasSearch && state.pageUrl === state.rootPageUrl) || !state.connectionOk;
 	if (els.voice) els.voice.disabled = !state.connectionOk;
+	if (els.adminConfig) els.adminConfig.disabled = !state.connectionOk;
+	if (els.logout) els.logout.disabled = !state.connectionOk;
 }
 
 function clearSearchFilter() {
@@ -12423,7 +12426,7 @@ function restoreNormalPolling() {
 		queueScrollTop();
 		refresh(true);
 	});
-	const adminConfigBtn = document.getElementById('adminConfigBtn');
+	const adminConfigBtn = els.adminConfig;
 	if (adminConfigBtn) {
 		adminConfigBtn.addEventListener('click', () => {
 			haptic();

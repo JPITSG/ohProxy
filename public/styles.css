@@ -1076,6 +1076,12 @@ body.theme-dark #backBtn svg {
 #adminConfigBtn {
 	width: auto !important;
 }
+#logoutBtn:disabled {
+	opacity: .4;
+}
+#adminConfigBtn:disabled {
+	opacity: .4;
+}
 #backBtn:disabled {
 	opacity: .4;
 }
