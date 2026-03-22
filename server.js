@@ -5692,7 +5692,7 @@ function buildSnapshot(page) {
 	const structureParts = [];
 
 	for (const w of list) {
-		if (w && w.__frame) {
+		if (w && w.__section) {
 			structureParts.push(`frame:${safeText(w.label)}`);
 			continue;
 		}
