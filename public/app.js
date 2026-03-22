@@ -11560,6 +11560,23 @@ function clearWsConnectTimer() {
 
 let wsRefreshTimer = null;
 const WS_REFRESH_DEBOUNCE_MS = 300;
+const WS_VISIBILITY_REFRESH_DEBOUNCE_MS = 1200;
+
+function queueWsRefresh(delayMs = WS_REFRESH_DEBOUNCE_MS, { reset = true } = {}) {
+	if (state.suppressRefreshCount > 0) {
+		state.pendingRefresh = true;
+		return;
+	}
+	const delay = Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : WS_REFRESH_DEBOUNCE_MS;
+	if (wsRefreshTimer) {
+		if (!reset) return;
+		clearTimeout(wsRefreshTimer);
+	}
+	wsRefreshTimer = setTimeout(() => {
+		wsRefreshTimer = null;
+		refresh(false);
+	}, delay);
+}
 
 function applyWsUpdate(data) {
 	if (!data || data.type !== 'items' || !Array.isArray(data.changes)) return;
@@ -11580,13 +11597,13 @@ function applyWsUpdate(data) {
 			return;
 		}
 		render();
-		// Debounced refresh to catch visibility-triggered sitemap changes
-		if (wsRefreshTimer) clearTimeout(wsRefreshTimer);
-		wsRefreshTimer = setTimeout(() => {
-			wsRefreshTimer = null;
-			refresh(false);
-		}, WS_REFRESH_DEBOUNCE_MS);
+		queueWsRefresh(WS_REFRESH_DEBOUNCE_MS);
+		return;
 	}
+	// A pushed item may only affect sitemap visibility or which alternate widget variant
+	// is returned for the current page. Queue one slower refresh without extending an
+	// existing timer so unrelated item chatter cannot postpone the page re-fetch forever.
+	if (deltaChanges.length > 0) queueWsRefresh(WS_VISIBILITY_REFRESH_DEBOUNCE_MS, { reset: false });
 }
 
 function handleWsPong(_data) {
