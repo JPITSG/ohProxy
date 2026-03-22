@@ -652,6 +652,22 @@ function logJsError(message) {
 	writeLogLine(liveConfig.jsLogFile, message);
 }
 
+function formatActiveVideoStreamLog(now = Date.now()) {
+	const count = activeVideoStreams.size;
+	if (count < 1) return '';
+	const details = [];
+	for (const [id, stream] of activeVideoStreams.entries()) {
+		const url = safeText(stream?.url).trim() || 'unknown';
+		const client = safeText(stream?.user).trim() || 'anonymous';
+		const ip = safeText(stream?.ip).trim() || 'unknown';
+		const encoding = safeText(stream?.encoding).trim() || 'unknown';
+		const startedAt = Number.isFinite(stream?.startTime) ? stream.startTime : now;
+		const elapsedSec = Math.max(0, Math.floor((now - startedAt) / 1000));
+		details.push(`#${id} ${encoding} url=${url} client=${client} ip=${ip} age=${elapsedSec}s`);
+	}
+	return `[Video] ${count} stream${count === 1 ? '' : 's'} active: ${details.join('; ')}`;
+}
+
 function getLockoutKey(ip) {
 	return ip || 'unknown';
 }
@@ -11450,10 +11466,8 @@ registerBackgroundTask('chart-cache-prune', 24 * 60 * 60 * 1000, pruneChartCache
 
 // Periodic video stream status logging (every 10 seconds, only if streams active)
 setInterval(() => {
-	const count = activeVideoStreams.size;
-	if (count > 0) {
-		logMessage(`[Video] ${count} stream${count === 1 ? '' : 's'} active`);
-	}
+	const activeStreamLog = formatActiveVideoStreamLog();
+	if (activeStreamLog) logMessage(activeStreamLog);
 }, 10000);
 
 // Periodic auth lockout pruning to prevent unbounded growth
