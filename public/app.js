@@ -389,6 +389,7 @@ const state = {
 	pollInterval: 0,
 	isSlim: false,
 	headerMode: 'full',
+	selectionModeOverride: null,
 	forcedMode: null,
 	connectionOk: false,
 	connectionReady: false,
@@ -1307,7 +1308,120 @@ function resetVideoZoom(videoEl) {
 	}
 }
 
+function getVideoControlContainer(videoEl) {
+	if (!videoEl) return null;
+	return videoEl.closest('.video-container') || videoEl.__videoContainer || null;
+}
+
+function getVideoMuteButton(videoEl) {
+	if (!videoEl) return null;
+	const videoContainer = getVideoControlContainer(videoEl);
+	return videoContainer?.querySelector('.video-mute-btn') || null;
+}
+
+function setVideoMuteButtonState(videoEl, state) {
+	const muteBtn = getVideoMuteButton(videoEl);
+	if (!muteBtn) return;
+	muteBtn.dataset.audioState = state;
+	if (state === 'enabled') {
+		muteBtn.disabled = false;
+		muteBtn.style.opacity = '1';
+		muteBtn.style.pointerEvents = 'auto';
+		return;
+	}
+	muteBtn.disabled = true;
+	muteBtn.style.opacity = '';
+	muteBtn.style.pointerEvents = '';
+}
+
+function getVideoFullscreenButton(videoEl) {
+	if (!videoEl) return null;
+	const videoContainer = getVideoControlContainer(videoEl);
+	return videoContainer?.querySelector('.video-fullscreen-btn') || null;
+}
+
+function setVideoFullscreenButtonState(videoEl, state) {
+	const fsBtn = getVideoFullscreenButton(videoEl);
+	if (!fsBtn) return;
+	if (state === 'enabled') {
+		fsBtn.disabled = false;
+		fsBtn.style.opacity = '1';
+		fsBtn.style.pointerEvents = 'auto';
+		return;
+	}
+	fsBtn.disabled = true;
+	fsBtn.style.opacity = '';
+	fsBtn.style.pointerEvents = '';
+}
+
+function resetVideoAudioTrackProbe(videoEl) {
+	if (!videoEl) return;
+	videoEl.__audioTrackResolved = false;
+	videoEl.__hasAudioTrack = null;
+	setVideoMuteButtonState(videoEl, 'pending');
+}
+
+function resetVideoControlButtonStates(videoEl) {
+	resetVideoAudioTrackProbe(videoEl);
+	setVideoFullscreenButtonState(videoEl, 'pending');
+}
+
+function detectVideoHasAudio(videoEl, { allowCaptureStream = false } = {}) {
+	if (!videoEl) return null;
+	try {
+		const audioTracks = videoEl.audioTracks;
+		if (audioTracks && typeof audioTracks.length === 'number') {
+			return audioTracks.length > 0;
+		}
+	} catch {}
+	if (typeof videoEl.mozHasAudio === 'boolean') {
+		return videoEl.mozHasAudio;
+	}
+	if (allowCaptureStream) {
+		const captureStream = videoEl.captureStream || videoEl.mozCaptureStream;
+		if (typeof captureStream === 'function') {
+			let capturedStream = null;
+			try {
+				capturedStream = captureStream.call(videoEl);
+				if (capturedStream && typeof capturedStream.getAudioTracks === 'function') {
+					const audioTrackCount = capturedStream.getAudioTracks().length;
+					if (audioTrackCount > 0) return true;
+					const totalTrackCount = typeof capturedStream.getTracks === 'function'
+						? capturedStream.getTracks().length
+						: 0;
+					if (totalTrackCount > 0) return false;
+				}
+			} catch {}
+			finally {
+				if (capturedStream && typeof capturedStream.getTracks === 'function') {
+					for (const track of capturedStream.getTracks()) {
+						try { track.stop(); } catch {}
+					}
+				}
+			}
+		}
+	}
+	if (typeof videoEl.webkitAudioDecodedByteCount === 'number' && videoEl.webkitAudioDecodedByteCount > 0) {
+		return true;
+	}
+	return null;
+}
+
+function syncVideoMuteButtonForAudioTrack(videoEl, options) {
+	if (!videoEl || videoEl.__audioTrackResolved) return videoEl?.__hasAudioTrack ?? null;
+	const hasAudioTrack = detectVideoHasAudio(videoEl, options);
+	if (hasAudioTrack === null) {
+		setVideoMuteButtonState(videoEl, 'pending');
+		return null;
+	}
+	videoEl.__audioTrackResolved = true;
+	videoEl.__hasAudioTrack = hasAudioTrack;
+	setVideoMuteButtonState(videoEl, hasAudioTrack ? 'enabled' : 'hidden');
+	return hasAudioTrack;
+}
+
 function restartVideoStream(videoEl) {
+	resetVideoControlButtonStates(videoEl);
 	setVideoZoomReady(videoEl, false);
 	resetVideoZoom(videoEl);
 	const src = videoEl.src;
@@ -1575,6 +1689,7 @@ function applyHomeSnapshot(snapshot) {
 function stopAllVideoStreams() {
 	const videos = document.querySelectorAll('video.video-stream');
 	for (const video of videos) {
+		resetVideoControlButtonStates(video);
 		setVideoZoomReady(video, false);
 		resetVideoZoom(video);
 		if (video.src) {
@@ -1587,6 +1702,7 @@ function stopAllVideoStreams() {
 function pauseVideoStreamsForVisibility() {
 	const videos = document.querySelectorAll('video.video-stream');
 	for (const video of videos) {
+		resetVideoControlButtonStates(video);
 		setVideoZoomReady(video, false);
 		resetVideoZoom(video);
 		if (video.src) {
@@ -1610,6 +1726,7 @@ function resumeVideoStreamsFromVisibility() {
 	videosPausedForVisibility = false;
 	const videos = document.querySelectorAll('video.video-stream');
 	for (const video of videos) {
+		resetVideoControlButtonStates(video);
 		setVideoZoomReady(video, false);
 		resetVideoZoom(video);
 		if (video.dataset.savedSrc) {
@@ -8722,6 +8839,7 @@ function updateCard(card, w, info) {
 	// Stop any active video stream to terminate FFmpeg process
 	const existingVideo = card.querySelector('video.video-stream');
 	if (existingVideo && existingVideo.src) {
+		resetVideoControlButtonStates(existingVideo);
 		setVideoZoomReady(existingVideo, false);
 		resetVideoZoom(existingVideo);
 		existingVideo.src = '';
@@ -8941,6 +9059,7 @@ function updateCard(card, w, info) {
 			if (staleContainer) {
 				const staleVideo = staleContainer.querySelector('video.video-stream');
 				if (staleVideo && staleVideo.src) {
+					resetVideoControlButtonStates(staleVideo);
 					setVideoZoomReady(staleVideo, false);
 					resetVideoZoom(staleVideo);
 					staleVideo.src = '';
@@ -9015,6 +9134,7 @@ function updateCard(card, w, info) {
 			}
 			videoEl.muted = shouldMute;
 		}
+		videoEl.__videoContainer = videoContainer;
 
 		// Video z-15 covers preview z-10 and spinner z-12 when playing
 
@@ -9065,21 +9185,24 @@ function updateCard(card, w, info) {
 				}
 			}, 3000);
 
-			// Create mute/unmute button (hidden until video plays)
+			// Create mute/unmute button (pending until audio track detection resolves)
 			const muteBtn = document.createElement('button');
 			muteBtn.type = 'button';
 			muteBtn.className = 'video-mute-btn';
-			muteBtn.innerHTML = '<img src="icons/video-unmute.svg" alt="Unmute" />';
+			muteBtn.innerHTML = '<img src="icons/video-mute.svg" alt="" aria-hidden="true" />';
 			muteBtn.title = 'Unmute';
+			muteBtn.setAttribute('aria-label', 'Unmute');
 			videoContainer.appendChild(muteBtn);
 
 			const updateMuteBtn = () => {
 				const isMuted = videoEl.muted;
-				// Show action icon: unmute (green) when muted, mute (red) when playing sound
+				const actionLabel = isMuted ? 'Unmute' : 'Mute';
+				// Show the current sound state: muted (red) vs sound on (green).
 				muteBtn.innerHTML = isMuted
-					? '<img src="icons/video-unmute.svg" alt="Unmute" />'
-					: '<img src="icons/video-mute.svg" alt="Mute" />';
-				muteBtn.title = isMuted ? 'Unmute' : 'Mute';
+					? '<img src="icons/video-mute.svg" alt="" aria-hidden="true" />'
+					: '<img src="icons/video-unmute.svg" alt="" aria-hidden="true" />';
+				muteBtn.title = actionLabel;
+				muteBtn.setAttribute('aria-label', actionLabel);
 			};
 
 			muteBtn.addEventListener('click', (e) => {
@@ -9091,12 +9214,18 @@ function updateCard(card, w, info) {
 
 			// Set initial button state to match video muted state
 			updateMuteBtn();
+			resetVideoControlButtonStates(videoEl);
 
-			// Show mute button when video starts playing
+			videoEl.addEventListener('loadedmetadata', () => {
+				updateMuteBtn();
+				syncVideoMuteButtonForAudioTrack(videoEl);
+			});
+
+			// Resolve audio-track presence once playback is actually flowing
 			videoEl.addEventListener('playing', () => {
 				setVideoZoomReady(videoEl, true);
-				muteBtn.style.opacity = '1';
-				muteBtn.style.pointerEvents = 'auto';
+				updateMuteBtn();
+				syncVideoMuteButtonForAudioTrack(videoEl, { allowCaptureStream: true });
 			});
 
 			// Create fullscreen button (hidden until video plays)
@@ -9106,6 +9235,7 @@ function updateCard(card, w, info) {
 			fsBtn.innerHTML = '<img src="icons/video-fullscreen.svg" alt="Fullscreen" />';
 			fsBtn.title = 'Fullscreen';
 			videoContainer.appendChild(fsBtn);
+			setVideoFullscreenButtonState(videoEl, 'pending');
 
 			fsBtn.addEventListener('click', (e) => {
 				haptic();
@@ -9118,8 +9248,7 @@ function updateCard(card, w, info) {
 			// Show fullscreen button when video starts playing
 			videoEl.addEventListener('playing', () => {
 				setVideoZoomReady(videoEl, true);
-				fsBtn.style.opacity = '1';
-				fsBtn.style.pointerEvents = 'auto';
+				setVideoFullscreenButtonState(videoEl, 'enabled');
 			});
 
 		}
@@ -9145,6 +9274,7 @@ function updateCard(card, w, info) {
 		// Defer to next frame so container has layout dimensions
 		if (videoEl.dataset.baseUrl !== videoUrl) {
 			videoEl.dataset.baseUrl = videoUrl;
+			resetVideoControlButtonStates(videoEl);
 			setVideoZoomReady(videoEl, false);
 			resetVideoZoom(videoEl);
 			requestAnimationFrame(() => {
@@ -9172,8 +9302,12 @@ function updateCard(card, w, info) {
 		if (!mapping.length) {
 			showUnavailableMessage(controls, 'No selection options available');
 		} else {
-			// Slim/small-header/touch use native overlay; all others use custom dropdown
-			const useOverlay = state.isSlim || state.headerMode === 'small' || isTouchDevice();
+			// selection=native|custom query param is a hard override; otherwise preserve the existing heuristic
+			const useOverlay = state.selectionModeOverride === 'native'
+				? true
+				: state.selectionModeOverride === 'custom'
+					? false
+					: state.isSlim || state.headerMode === 'small' || isTouchDevice();
 			card.classList.add('selection-card');
 			const inlineControls = createInlineControls(labelRow, navHint);
 
@@ -11979,6 +12113,8 @@ function restoreNormalPolling() {
 		state.isSlim = params.get('slim') === 'true';
 		const headerParam = (params.get('header') || '').toLowerCase();
 		state.headerMode = (headerParam === 'small' || headerParam === 'none') ? headerParam : 'full';
+		const selectionParam = (params.get('selection') || '').toLowerCase();
+		state.selectionModeOverride = (selectionParam === 'native' || selectionParam === 'custom') ? selectionParam : null;
 		const modeParam = params.get('mode');
 		state.forcedMode = (modeParam === 'dark' || modeParam === 'light') ? modeParam : null;
 		if (!supportsFlexGap) document.documentElement.classList.add('no-flex-gap');
