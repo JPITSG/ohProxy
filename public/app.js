@@ -8644,7 +8644,8 @@ function getWidgetRenderInfo(w) {
 	const rawVideoUrl = isVideo ? mediaWidgetSourceUrl(w) : '';
 	const videoEncoding = isVideo ? safeText(w?.encoding || '').toLowerCase() : '';
 	const encodingParam = videoEncoding ? `&encoding=${encodeURIComponent(videoEncoding)}` : '';
-	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}&mode=${themeMode}${encodingParam}` : '';
+	// Keep the live stream URL theme-stable so dark/light toggles do not restart playback.
+	const videoUrl = rawVideoUrl ? `/proxy?url=${encodeURIComponent(rawVideoUrl)}${encodingParam}` : '';
 	const videoHeight = isVideo ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const chartHeight = isChart ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const mappingSig = mapping.map((m) => `${m.command}:${m.releaseCommand || ''}:${m.label}:${m.icon || ''}`).join('|');
@@ -8836,9 +8837,9 @@ function updateCard(card, w, info) {
 	// Reset map/webview/video inline styles
 	card.style.padding = '';
 	card.style.overflow = '';
-	// Stop any active video stream to terminate FFmpeg process
+	// Stop the active stream only when this card stops rendering a video widget.
 	const existingVideo = card.querySelector('video.video-stream');
-	if (existingVideo && existingVideo.src) {
+	if (!isVideo && existingVideo && existingVideo.src) {
 		resetVideoControlButtonStates(existingVideo);
 		setVideoZoomReady(existingVideo, false);
 		resetVideoZoom(existingVideo);
