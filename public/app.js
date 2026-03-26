@@ -242,6 +242,7 @@ async function softReset() {
 	closeAdminConfigModal();
 	closeSitemapSelectModal({ skipHistory: true });
 	hideStatusTooltip();
+	resetSearchUiForSoftReset();
 
 	try {
 		// Show cached home snapshot behind the blur (if available)
@@ -253,8 +254,6 @@ async function softReset() {
 		}
 
 		// Clear transient state for fresh start
-		state.filter = '';
-		if (els.search) els.search.value = '';
 		state.searchWidgets = null;
 		state.searchIndexReady = false;
 		state.searchFrames = [];
@@ -2565,6 +2564,30 @@ function setSearchFocusedLayout(enabled) {
 
 function syncSearchFocusedLayout() {
 	setSearchFocusedLayout(shouldExpandSearchOnFocus());
+}
+
+function resetSearchUiForSoftReset() {
+	const hadSearchHistoryEntry = searchFocusHistoryPushed || searchFilterHistoryPushed;
+	state.filter = '';
+	if (els.search) els.search.value = '';
+	state.searchStateToken += 1;
+	cancelSearchStateRequests();
+	if (searchDebounceTimer) {
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = null;
+	}
+	searchFocusHistoryPushed = false;
+	searchFilterHistoryPushed = false;
+	document.documentElement.classList.remove('search-focus-expanded');
+	scheduleSearchPlaceholderUpdate();
+	if (els.search && document.activeElement === els.search) {
+		els.search.blur();
+	}
+	if (hadSearchHistoryEntry) {
+		searchBlurNavPending = true;
+		history.back();
+	}
+	updateNavButtons();
 }
 
 function escapeHtml(v) {

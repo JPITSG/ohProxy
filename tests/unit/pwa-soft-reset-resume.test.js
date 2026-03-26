@@ -43,4 +43,10 @@ describe('PWA Soft Reset Resume', () => {
 		assert.doesNotMatch(app, /state\.pageUrl = state\.rootPageUrl;\s*setConnectionStatus\(true\);\s*const refreshed = await refresh\(true\);/);
 		assert.doesNotMatch(app, /applySitemapOption\(selected\);\s*\/\/ Success - now refresh to get widgets\s*setConnectionStatus\(true\);\s*const refreshed = await refresh\(true\);/);
 	});
+
+	it('clears and defocuses the mobile search UI during soft reset', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		assert.match(app, /function resetSearchUiForSoftReset\(\) \{\s*const hadSearchHistoryEntry = searchFocusHistoryPushed \|\| searchFilterHistoryPushed;\s*state\.filter = '';\s*if \(els\.search\) els\.search\.value = '';\s*state\.searchStateToken \+= 1;\s*cancelSearchStateRequests\(\);[\s\S]*?document\.documentElement\.classList\.remove\('search-focus-expanded'\);\s*scheduleSearchPlaceholderUpdate\(\);\s*if \(els\.search && document\.activeElement === els\.search\) \{\s*els\.search\.blur\(\);\s*\}\s*if \(hadSearchHistoryEntry\) \{\s*searchBlurNavPending = true;\s*history\.back\(\);\s*\}\s*updateNavButtons\(\);\s*\}/);
+		assert.match(app, /hideStatusTooltip\(\);\s*resetSearchUiForSoftReset\(\);\s*try \{/);
+	});
 });
