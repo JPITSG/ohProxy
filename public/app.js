@@ -7454,6 +7454,24 @@ function searchWidgetKey(widget) {
 	return `${base}|${path}|${frame}`;
 }
 
+function parseSearchQuery(rawQuery) {
+	const text = safeText(rawQuery).trim().toLowerCase();
+	if (!text) return { text: '', branches: null };
+	if (!text.includes('||')) return { text, branches: null };
+	const branches = text.split('||').map((part) => part.trim()).filter(Boolean);
+	if (!branches.length) return { text, branches: null };
+	return { text, branches };
+}
+
+function matchesSearchQuery(haystack, query) {
+	const hay = safeText(haystack).toLowerCase();
+	if (!query?.text) return true;
+	if (!Array.isArray(query.branches) || !query.branches.length) {
+		return hay.includes(query.text);
+	}
+	return query.branches.some((branch) => hay.includes(branch));
+}
+
 function isButtongridButtonVisible(button) {
 	if (button?.visibility === false || button?.visibility === 0) return false;
 	const raw = safeText(button?.visibility).trim().toLowerCase();
@@ -10577,7 +10595,8 @@ function patchWidgets(widgets, nodes) {
 }
 
 function render() {
-	const q = state.filter.trim().toLowerCase();
+	const searchQuery = parseSearchQuery(state.filter);
+	const q = searchQuery.text;
 	const rawSource = q ? (state.searchWidgets || state.rawWidgets) : state.rawWidgets;
 
 	// Filter by visibility - sections can be hidden, and their children follow
@@ -10596,7 +10615,7 @@ function render() {
 	const matches = source.filter(w => {
 		if (!q) return true;
 		const hay = `${widgetLabel(w)} ${widgetState(w)} ${widgetType(w)} ${w?.item?.name || ''}`.toLowerCase();
-		return hay.includes(q);
+		return matchesSearchQuery(hay, searchQuery);
 	});
 
 	let widgets = matches;
@@ -10605,7 +10624,7 @@ function render() {
 		for (const f of state.searchFrames || []) {
 			const frameLabel = safeText(f?.label || '');
 			if (!frameLabel) continue;
-			if (!frameLabel.toLowerCase().includes(q)) continue;
+			if (!matchesSearchQuery(frameLabel, searchQuery)) continue;
 			frameKeys.add(frameKeyFor(f.path, frameLabel));
 		}
 
@@ -10637,7 +10656,7 @@ function render() {
 		for (const f of state.searchFrames || []) {
 			const frameLabel = safeText(f?.label || '');
 			if (!frameLabel) continue;
-			if (!frameLabel.toLowerCase().includes(q)) continue;
+			if (!matchesSearchQuery(frameLabel, searchQuery)) continue;
 			const groupLabel = searchGroupLabel({ __path: f.path, __frame: frameLabel });
 			frameMatches.push(groupLabel);
 		}
