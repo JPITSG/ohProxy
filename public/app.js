@@ -3561,6 +3561,7 @@ let historyMappings = [];
 let historyCursorStack = [];
 let historyGlowColor = null;
 let historyAbort = null;
+let historyWheelNavUntil = 0;
 let cardConfigInitialStateJson = null;
 
 let alertModal = null;
@@ -4028,6 +4029,15 @@ function ensureCardConfigModal() {
 	`;
 	document.body.appendChild(wrap);
 	cardConfigModal = wrap;
+	const historyEntries = wrap.querySelector('.history-entries');
+	if (historyEntries) {
+		historyEntries.addEventListener('wheel', e => {
+			if (!e.deltaY || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+			const section = historyEntries.closest('.history-section');
+			if (!section || section.style.display === 'none') return;
+			if (triggerHistoryNavFromWheel(section, e.deltaY)) e.preventDefault();
+		}, { passive: false });
+	}
 	const cardUsersVisibilityRadio = wrap.querySelector('input[name="visibility"][value="users"]');
 	const cardUsersVisibilityLabel = cardUsersVisibilityRadio?.closest('.item-config-radio') || null;
 	cardVisibilityUsersPicker = createVisibilityUsersPicker(
@@ -4530,6 +4540,7 @@ function openCardConfigModal(widget, card) {
 			historySection.style.display = '';
 			historyOffsetStack = [];
 			historyCursorStack = [];
+			historyWheelNavUntil = 0;
 			// Clear previous entries so loading state shows correctly
 			const hContainer = historySection.querySelector('.history-entries');
 			const hNav = historySection.querySelector('.history-nav');
@@ -4583,6 +4594,16 @@ function formatHistoryTime(isoString) {
 
 function formatRawState(rawState) {
 	return /^[A-Z][A-Z_]+$/.test(rawState) ? rawState.split('_').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ') : rawState;
+}
+
+function triggerHistoryNavFromWheel(section, deltaY) {
+	const btn = section?.querySelector(deltaY > 0 ? '.history-older' : '.history-newer');
+	if (!btn) return false;
+	const now = Date.now();
+	if (now < historyWheelNavUntil) return true;
+	historyWheelNavUntil = now + 180;
+	btn.click();
+	return true;
 }
 
 async function loadHistoryEntriesShared(itemName, token, config) {
@@ -5463,6 +5484,7 @@ function closeCardConfigModal() {
 	cardVisibilityPreviousBeforeUsers = 'all';
 	cardVisibilityUsersTouched = false;
 	historyGlowColor = null;
+	historyWheelNavUntil = 0;
 	cardConfigInitialStateJson = null;
 }
 

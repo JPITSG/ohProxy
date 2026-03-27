@@ -10504,9 +10504,9 @@ loadDay(m,d,y);
 });
 
 var ctxMenu=document.getElementById('ctx-menu');
-var ctxLat=0,ctxLon=0,ctxOffset=0,ctxRadius=100;
+var ctxLat=0,ctxLon=0,ctxOffset=0,ctxRadius=100,ctxWheelNavUntil=0;
 
-function closeCtxMenu(){ctxMenu.style.display='none';previewLayer.removeAllFeatures();hidePreviewTooltip();document.getElementById('map').style.cursor=''}
+function closeCtxMenu(){ctxMenu.style.display='none';ctxWheelNavUntil=0;previewLayer.removeAllFeatures();hidePreviewTooltip();document.getElementById('map').style.cursor=''}
 
 var radiusCtx=document.createElement('canvas').getContext('2d');
 function sizeRadius(inp){
@@ -10549,9 +10549,29 @@ bindCtxDrag();
 bindCtxClose();
 }
 
+function bindCtxBody(){
+var body=ctxMenu.querySelector('.ctx-body');
+if(!body)return;
+body.addEventListener('wheel',function(e){
+if(!e.deltaY||Math.abs(e.deltaY)<=Math.abs(e.deltaX))return;
+if(triggerCtxNavFromWheel(e.deltaY))e.preventDefault();
+},{passive:false});
+}
+
+function triggerCtxNavFromWheel(deltaY){
+var btn=ctxMenu.querySelector(deltaY>0?'.ctx-older':'.ctx-newer');
+if(!btn)return false;
+var now=Date.now();
+if(now<ctxWheelNavUntil)return true;
+ctxWheelNavUntil=now+180;
+btn.click();
+return true;
+}
+
 function renderCtxMenuBody(bodyHtml){
-ctxMenu.innerHTML=ctxHeader()+bodyHtml;
+ctxMenu.innerHTML=ctxHeader()+'<div class="ctx-body">'+bodyHtml+'</div>';
 bindCtxHeaderControls();
+bindCtxBody();
 }
 
 function ctxHeader(){return '<div class="ctx-header"><span class="ctx-drag-handle">NEARBY DAYS</span><span class="ctx-actions"><span class="ctx-radius-wrap"><input class="ctx-radius" type="text" value="'+ctxRadius+'" maxlength="5">m</span><button class="ctx-close" type="button" aria-label="Close nearby days">X</button></span></div>'}
@@ -10590,8 +10610,9 @@ ctxMenu.style.top=Math.max(minY,Math.min(maxY,newY))+'px';
 },true);
 document.addEventListener('mouseup',function(){ctxDragActive=false},true)
 
-function loadNearbyDays(){
-if(!ctxDragging){
+function loadNearbyDays(options){
+options=options||{};
+if(!options.preserveEntries&&!ctxDragging){
 renderCtxMenuBody('<div class="ctx-loading">Loading\\u2026</div>');
 }
 ctxMenu.style.display='block';
@@ -10627,9 +10648,9 @@ loadDayFromCtx(parseInt(el.dataset.month,10),parseInt(el.dataset.day,10),parseIn
 });
 });
 var newerBtn=ctxMenu.querySelector('.ctx-newer');
-if(newerBtn)newerBtn.addEventListener('click',function(e){e.stopPropagation();ctxOffset=Math.max(0,ctxOffset-5);loadNearbyDays()});
+if(newerBtn)newerBtn.addEventListener('click',function(e){e.stopPropagation();ctxOffset=Math.max(0,ctxOffset-5);loadNearbyDays({preserveEntries:true})});
 var olderBtn=ctxMenu.querySelector('.ctx-older');
-if(olderBtn)olderBtn.addEventListener('click',function(e){e.stopPropagation();ctxOffset+=5;loadNearbyDays()});
+if(olderBtn)olderBtn.addEventListener('click',function(e){e.stopPropagation();ctxOffset+=5;loadNearbyDays({preserveEntries:true})});
 clampCtxMenu();
 }).catch(function(){renderCtxMenuBody('<div class="ctx-empty">Request failed</div>');previewLayer.removeAllFeatures()});
 }
