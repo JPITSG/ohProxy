@@ -10073,9 +10073,15 @@ vector.addFeatures(feature);
 	positionTooltipForFeature(hoverTooltip,blueTooltipFeature,tooltipOffsets.blueAnchor);
 	}
 
+	function updateCtxMenuAnchor(){
+	if(!ctxMenu||ctxMenu.style.display!=='block'||ctxDragActive||ctxDragging)return;
+	positionCtxMenuFromAnchor();
+	}
+
 	function updateAnchoredTooltips(){
 	updateRedTooltip();
 	updateBluePinnedTooltip();
+	updateCtxMenuAnchor();
 	}
 
 	function resetBlueTooltip(){
@@ -10547,8 +10553,40 @@ loadDay(m,d,y);
 
 var ctxMenu=document.getElementById('ctx-menu');
 var ctxLat=0,ctxLon=0,ctxOffset=0,ctxRadius=100,ctxWheelNavUntil=0;
+var ctxMenuOffsetX=0,ctxMenuOffsetY=0;
 
 function closeCtxMenu(){ctxMenu.style.display='none';ctxWheelNavUntil=0;previewLayer.removeAllFeatures();hidePreviewTooltip();document.getElementById('map').style.cursor=''}
+
+function getCtxMenuPosition(){return{x:parseInt(ctxMenu.style.left,10)||0,y:parseInt(ctxMenu.style.top,10)||0}}
+
+function setCtxMenuPosition(x,y){
+ctxMenu.style.left=Math.round(x)+'px';
+ctxMenu.style.top=Math.round(y)+'px';
+}
+
+function getCtxAnchorPixel(){
+if(!isFinite(ctxLat)||!isFinite(ctxLon))return null;
+var lonlat=new OpenLayers.LonLat(ctxLon,ctxLat).transform(wgs84,proj);
+return map.getPixelFromLonLat(lonlat);
+}
+
+function syncCtxMenuOffsetToAnchor(){
+var px=getCtxAnchorPixel();
+if(!px)return false;
+var pos=getCtxMenuPosition();
+ctxMenuOffsetX=pos.x-px.x;
+ctxMenuOffsetY=pos.y-px.y;
+return true;
+}
+
+function positionCtxMenuFromAnchor(){
+if(!ctxMenu||ctxMenu.style.display!=='block')return false;
+var px=getCtxAnchorPixel();
+if(!px)return false;
+setCtxMenuPosition(px.x+ctxMenuOffsetX,px.y+ctxMenuOffsetY);
+clampCtxMenu();
+return true;
+}
 
 var radiusCtx=document.createElement('canvas').getContext('2d');
 function sizeRadius(inp){
@@ -10624,14 +10662,15 @@ var handle=ctxMenu.querySelector('.ctx-drag-handle');
 if(!handle)return;
 handle.addEventListener('mousedown',function(e){
 if(e.button!==0)return;
-e.preventDefault();
-e.stopPropagation();
-ctxDragActive=true;
-ctxDragStartX=e.clientX;
-ctxDragStartY=e.clientY;
-ctxMenuStartX=parseInt(ctxMenu.style.left)||0;
-ctxMenuStartY=parseInt(ctxMenu.style.top)||0;
-});
+	e.preventDefault();
+	e.stopPropagation();
+	ctxDragActive=true;
+	ctxDragStartX=e.clientX;
+	ctxDragStartY=e.clientY;
+	syncCtxMenuOffsetToAnchor();
+	ctxMenuStartX=parseInt(ctxMenu.style.left,10)||0;
+	ctxMenuStartY=parseInt(ctxMenu.style.top,10)||0;
+	});
 }
 document.addEventListener('mousemove',function(e){
 if(!ctxDragActive)return;
@@ -10641,14 +10680,9 @@ var dx=e.clientX-ctxDragStartX;
 var dy=e.clientY-ctxDragStartY;
 var newX=ctxMenuStartX+dx;
 var newY=ctxMenuStartY+dy;
-var mapRect=document.getElementById('map').getBoundingClientRect();
-var menuRect=ctxMenu.getBoundingClientRect();
-var minX=8;
-var minY=8;
-var maxX=mapRect.width-menuRect.width-8;
-var maxY=mapRect.height-menuRect.height-8;
-ctxMenu.style.left=Math.max(minX,Math.min(maxX,newX))+'px';
-ctxMenu.style.top=Math.max(minY,Math.min(maxY,newY))+'px';
+setCtxMenuPosition(newX,newY);
+clampCtxMenu();
+syncCtxMenuOffsetToAnchor();
 },true);
 document.addEventListener('mouseup',function(){ctxDragActive=false},true)
 
@@ -10658,10 +10692,11 @@ if(!options.preserveEntries&&!ctxDragging){
 renderCtxMenuBody('<div class="ctx-loading">Loading\\u2026</div>');
 }
 ctxMenu.style.display='block';
+positionCtxMenuFromAnchor();
 fetch('/api/presence/nearby-days?lat='+ctxLat+'&lon='+ctxLon+'&offset='+ctxOffset+'&radius='+ctxRadius).then(function(r){return r.json()}).then(function(data){
-if(!data.ok){renderCtxMenuBody('<div class="ctx-empty">'+(data.error||'Request failed')+'</div>');previewLayer.removeAllFeatures();return}
+if(!data.ok){renderCtxMenuBody('<div class="ctx-empty">'+(data.error||'Request failed')+'</div>');positionCtxMenuFromAnchor();previewLayer.removeAllFeatures();return}
 var html='';
-if(!data.days.length){renderCtxMenuBody('<div class="ctx-empty">No entries nearby</div>');previewLayer.removeAllFeatures();return}
+if(!data.days.length){renderCtxMenuBody('<div class="ctx-empty">No entries nearby</div>');positionCtxMenuFromAnchor();previewLayer.removeAllFeatures();return}
 data.days.forEach(function(d){
 html+='<div class="ctx-day" data-month="'+d.month+'" data-day="'+d.day+'" data-year="'+d.year+'"><span>'+d.label+'</span><span class="ctx-count">'+d.count+'</span></div>';
 });
@@ -10693,8 +10728,8 @@ var newerBtn=ctxMenu.querySelector('.ctx-newer');
 if(newerBtn)newerBtn.addEventListener('click',function(e){e.stopPropagation();ctxOffset=Math.max(0,ctxOffset-5);loadNearbyDays({preserveEntries:true})});
 var olderBtn=ctxMenu.querySelector('.ctx-older');
 if(olderBtn)olderBtn.addEventListener('click',function(e){e.stopPropagation();ctxOffset+=5;loadNearbyDays({preserveEntries:true})});
-clampCtxMenu();
-}).catch(function(){renderCtxMenuBody('<div class="ctx-empty">Request failed</div>');previewLayer.removeAllFeatures()});
+positionCtxMenuFromAnchor();
+}).catch(function(){renderCtxMenuBody('<div class="ctx-empty">Request failed</div>');positionCtxMenuFromAnchor();previewLayer.removeAllFeatures()});
 }
 
 function loadDayFromCtx(month,day,year){
@@ -10709,16 +10744,19 @@ loadDay(month,day,year);
 var ctxDragging=false;
 function clampCtxMenu(){var r=ctxMenu.getBoundingClientRect();var mapR=mapEl.getBoundingClientRect();if(r.left<mapR.left)ctxMenu.style.left='8px';if(r.top<mapR.top)ctxMenu.style.top='8px';if(r.right>mapR.right)ctxMenu.style.left=Math.max(0,parseInt(ctxMenu.style.left)-r.right+mapR.right-8)+'px';if(r.bottom>mapR.bottom)ctxMenu.style.top=Math.max(0,parseInt(ctxMenu.style.top)-r.bottom+mapR.bottom-8)+'px'}
 
-function ctxUpdatePos(e){
-var rect=mapEl.getBoundingClientRect();
+function ctxUpdatePos(e,persistOffset){
 var px=clientToMapPixel(e.clientX,e.clientY);
 var lonlat=map.getLonLatFromPixel(px);
 if(!lonlat)return false;
 lonlat=lonlat.transform(proj,wgs84);
 ctxLat=lonlat.lat;ctxLon=lonlat.lon;
-ctxMenu.style.left=(e.clientX-rect.left)+'px';
-ctxMenu.style.top=(e.clientY-rect.top)+'px';
-if(ctxMenu.style.display==='block')clampCtxMenu();
+ctxMenuOffsetX=0;
+ctxMenuOffsetY=0;
+setCtxMenuPosition(px.x,px.y);
+if(ctxMenu.style.display==='block'){
+clampCtxMenu();
+if(persistOffset)syncCtxMenuOffsetToAnchor();
+}
 return true;
 }
 
@@ -10730,6 +10768,7 @@ ctxDragging=true;
 renderCtxMenuBody('<div class="ctx-loading">Release to search</div>');
 ctxMenu.style.display='block';
 ctxMenu.style.pointerEvents='none';
+positionCtxMenuFromAnchor();
 },true);
 
 var ctxThrottle=0;
@@ -10746,7 +10785,7 @@ if(!ctxDragging)return;
 ctxDragging=false;
 ctxDragEnded=true;
 ctxMenu.style.pointerEvents='';
-if(ctxUpdatePos(e)){loadNearbyDays()}else{closeCtxMenu()}
+if(ctxUpdatePos(e,true)){loadNearbyDays()}else{closeCtxMenu()}
 }
 document.addEventListener('mouseup',function(e){
 if(e.button===2)endCtxDrag(e);
