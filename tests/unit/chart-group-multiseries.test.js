@@ -16,12 +16,12 @@ describe('Chart Group Multi-Series Wiring', () => {
 		assert.match(server, /function parseChartForceAsItem\(rawForceAsItem\) \{/);
 		assert.match(server, /const rawForceAsItem = req\.query\?\.forceasitem \?\? req\.query\?\.forceAsItem;/);
 		assert.match(server, /const forceAsItem = forceAsItemParsed === true;/);
-		assert.match(server, /function fetchChartSeriesData\(item, periodWindow = 86400, service = '', forceAsItem = false, preloadedItemDefinition = null\) \{/);
+		assert.match(server, /function fetchChartSeriesData\(item, periodWindow = 86400, service = '', forceAsItem = false, preloadedItemDefinition = null, periodOffset = 0\) \{/);
 		assert.match(server, /const isGroupItem = !forceAsItem && isGroupItemType\(itemDefinition\?\.type\);/);
 		assert.match(server, /const showLegend = !isMultiSeries && shouldShowChartLegend\(legend, seriesCount \|\| 1\);/);
 		assert.match(server, /window\._chartSeries=\$\{inlineJson\(chartSeries\)\};/);
 		assert.match(server, /window\._chartIsMultiSeries=\$\{inlineJson\(isMultiSeries\)\};/);
-		assert.match(server, /getChartCachePath\([\s\S]*forceAsItem/);
+		assert.match(server, /getChartCachePath\([\s\S]*forceAsItem[\s\S]*periodOffset/);
 	});
 
 	it('client chart URL/hash cache includes forceasitem', () => {
@@ -30,7 +30,7 @@ describe('Chart Group Multi-Series Wiring', () => {
 		assert.match(app, /const forceAsItem = normalizeChartForceAsItem\(widget\?\.forceasitem \?\? widget\?\.forceAsItem\);/);
 		assert.match(app, /if \(forceAsItem\) url \+= `&forceasitem=\$\{forceAsItem\}`;/);
 		assert.match(app, /const forceAsItem = normalizeChartForceAsItem\(urlObj\.searchParams\.get\('forceasitem'\) \|\| urlObj\.searchParams\.get\('forceAsItem'\)\);/);
-		assert.match(app, /const cacheKey = `\$\{item\}\|\$\{period\}\|\$\{mode\}\|\$\{assetVersion\}\|\$\{title\}\|\$\{legend\}\|\$\{forceAsItem\}\|\$\{yAxisDecimalPattern\}\|\$\{interpolation\}\|\$\{service\}`;/);
+		assert.match(app, /const cacheKey = `\$\{item\}\|\$\{period\}\|\$\{mode\}\|\$\{assetVersion\}\|\$\{title\}\|\$\{legend\}\|\$\{forceAsItem\}\|\$\{yAxisDecimalPattern\}\|\$\{interpolation\}\|\$\{service\}\|\$\{periodOffset\}`;/);
 		assert.match(app, /\(forceAsItem \? `&forceasitem=\$\{forceAsItem\}` : ''\)/);
 	});
 

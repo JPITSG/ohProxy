@@ -51,6 +51,7 @@ function parseOptionalInt(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}
 // Period parser (mirrors server.js)
 const MAX_PERIOD_SEC = 10 * 365.25 * 86400;
 const CHART_PERIOD_MAX_LEN = 64;
+const CHART_PERIOD_OFFSET_MAX = 10000;
 function parseBasePeriodToSeconds(period) {
 	const simpleMatch = period.match(/^(\d*)([hDWMY])$/);
 	if (simpleMatch) {
@@ -301,29 +302,34 @@ function createValidationTestApp() {
 	});
 
 	// Chart endpoint with strict validation
-		app.get('/chart', (req, res) => {
-			const rawItem = req.query?.item;
-			const rawPeriod = req.query?.period;
-			const rawMode = req.query?.mode;
-			const rawTitle = req.query?.title;
-			const rawInterpolation = req.query?.interpolation;
-			if (typeof rawItem !== 'string') {
-				return res.status(400).send('Invalid item parameter');
-			}
+	app.get('/chart', (req, res) => {
+		const rawItem = req.query?.item;
+		const rawPeriod = req.query?.period;
+		const rawMode = req.query?.mode;
+		const rawTitle = req.query?.title;
+		const rawInterpolation = req.query?.interpolation;
+		const rawOffset = req.query?.offset;
+		if (typeof rawItem !== 'string') {
+			return res.status(400).send('Invalid item parameter');
+		}
 			if (rawPeriod !== undefined && typeof rawPeriod !== 'string') {
 				return res.status(400).send('Invalid period parameter');
 			}
 			if ((rawMode !== undefined && typeof rawMode !== 'string') || (rawTitle !== undefined && typeof rawTitle !== 'string')) {
 				return res.status(400).send('Invalid mode parameter');
 			}
-			if (rawInterpolation !== undefined && typeof rawInterpolation !== 'string') {
-				return res.status(400).send('Invalid interpolation parameter');
-			}
-			const item = rawItem.trim();
-			const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
-			const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
-			const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
-			const interpolation = typeof rawInterpolation === 'string' ? rawInterpolation.trim().toLowerCase() : 'linear';
+		if (rawInterpolation !== undefined && typeof rawInterpolation !== 'string') {
+			return res.status(400).send('Invalid interpolation parameter');
+		}
+		if (rawOffset !== undefined && typeof rawOffset !== 'string') {
+			return res.status(400).send('Invalid offset parameter');
+		}
+		const item = rawItem.trim();
+		const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
+		const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
+		const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+		const interpolation = typeof rawInterpolation === 'string' ? rawInterpolation.trim().toLowerCase() : 'linear';
+		const offset = rawOffset === undefined ? 0 : parseOptionalInt(rawOffset, { min: 0, max: CHART_PERIOD_OFFSET_MAX });
 		if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 			return res.status(400).send('Invalid parameters');
 		}
@@ -332,6 +338,9 @@ function createValidationTestApp() {
 		}
 		if (!['linear', 'step'].includes(interpolation)) {
 			return res.status(400).send('Invalid interpolation parameter');
+		}
+		if (!Number.isFinite(offset)) {
+			return res.status(400).send('Invalid offset parameter');
 		}
 
 		if (!item || !/^[a-zA-Z0-9_-]{1,50}$/.test(item)) {
@@ -345,7 +354,7 @@ function createValidationTestApp() {
 			return res.status(400).send('Invalid mode parameter');
 		}
 
-		res.json({ item, period, mode, title, interpolation });
+		res.json({ item, period, mode, title, interpolation, offset });
 	});
 
 	// Video preview with allowlist validation
@@ -784,6 +793,38 @@ describe('Parameter Validation Security Tests', () => {
 			assert.strictEqual(res.status, 200);
 			const body = await res.json();
 			assert.strictEqual(body.interpolation, 'linear');
+		});
+
+		it('defaults offset to 0 when omitted', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=h&mode=dark`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+			const body = await res.json();
+			assert.strictEqual(body.offset, 0);
+		});
+
+		it('accepts offset=3', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=h&mode=dark&offset=3`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 200);
+			const body = await res.json();
+			assert.strictEqual(body.offset, 3);
+		});
+
+		it('rejects non-numeric offset', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=h&mode=dark&offset=later`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 400);
+		});
+
+		it('rejects negative offset', async () => {
+			const res = await fetch(`${baseUrl}/chart?item=Test_Item&period=h&mode=dark&offset=-1`, {
+				headers: { 'Authorization': authHeader },
+			});
+			assert.strictEqual(res.status, 400);
 		});
 	});
 

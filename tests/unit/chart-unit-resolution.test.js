@@ -38,11 +38,12 @@ function resolveDisplayedSeriesUnitSymbol(seriesList) {
 describe('Chart Unit Resolution Hardening', () => {
 	it('server cache key and data hash include unit signature', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(server, /function chartCacheKey\(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service, forceAsItem = false, unitSignature = ''\) \{/);
+		assert.match(server, /function chartCacheKey\(item, period, mode, title, legend, yAxisDecimalPattern, interpolation, service, forceAsItem = false, periodOffset = 0, unitSignature = ''\) \{/);
+		assert.match(server, /offset:\$\{offset\}/);
 		assert.match(server, /\|\$\{normalizeChartUnitSymbol\(unitSignature\)\}`\)/);
 		assert.match(server, /const cacheUnitSignature = deriveChartUnitSignatureFromItemDefinition\(preloadedItemDefinition, item, forceAsItem\);/);
-		assert.match(server, /const \{ series: rawSeriesList, unitSymbol, cacheUnitSignature \} = await fetchChartSeriesData\(item, periodWindow, service, forceAsItem\);/);
-		assert.match(server, /function computeChartSeriesDataHash\(rawSeriesList, periodWindow, unitSymbol = ''\) \{/);
+		assert.match(server, /const \{ series: rawSeriesList, unitSymbol, cacheUnitSignature \} = await fetchChartSeriesData\(item, periodWindow, service, forceAsItem, null, periodOffset\);/);
+		assert.match(server, /function computeChartSeriesDataHash\(rawSeriesList, periodWindow, unitSymbol = '', periodOffset = 0\) \{/);
 		assert.match(server, /const unitSig = normalizeChartUnitSymbol\(unitSymbol\);/);
 		assert.match(server, /update\(`\$\{baseHash\}\|u:\$\{unitSig\}`\)/);
 	});

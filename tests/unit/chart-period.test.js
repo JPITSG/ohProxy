@@ -91,6 +91,25 @@ function chartShowCurStat(durationSec) {
 	return durationSec <= 14400;
 }
 
+function normalizeChartPeriodOffsetValue(periodOffset) {
+	if (!Number.isFinite(periodOffset) || periodOffset < 0) return 0;
+	return Math.floor(periodOffset);
+}
+
+function periodWindowBounds(periodWindow, periodOffset = 0, nowSec = 1_700_000_000) {
+	const window = typeof periodWindow === 'number'
+		? { pastSec: periodWindow, futureSec: 0, totalSec: periodWindow }
+		: periodWindow;
+	const offset = normalizeChartPeriodOffsetValue(periodOffset);
+	const shiftSec = window.totalSec * offset;
+	return {
+		startSec: nowSec - window.pastSec - shiftSec,
+		endSec: nowSec + window.futureSec - shiftSec,
+		window,
+		periodOffset: offset,
+	};
+}
+
 // ── Replicate client-side periodDurationTier ────────────────────────────
 
 function periodDurationTier(p) {
@@ -265,6 +284,28 @@ describe('chartShowCurStat', () => {
 	});
 	it('false for W (604800)', () => {
 		assert.strictEqual(chartShowCurStat(604800), false);
+	});
+});
+
+describe('periodWindowBounds', () => {
+	it('shifts simple past-only windows backward by full periods', () => {
+		const bounds = periodWindowBounds({ pastSec: 86400, futureSec: 0, totalSec: 86400 }, 1, 200000);
+		assert.deepStrictEqual(bounds, {
+			startSec: 27200,
+			endSec: 113600,
+			window: { pastSec: 86400, futureSec: 0, totalSec: 86400 },
+			periodOffset: 1,
+		});
+	});
+
+	it('shifts past-future windows by the combined total duration', () => {
+		const bounds = periodWindowBounds({ pastSec: 7200, futureSec: 3600, totalSec: 10800 }, 2, 500000);
+		assert.deepStrictEqual(bounds, {
+			startSec: 471200,
+			endSec: 482000,
+			window: { pastSec: 7200, futureSec: 3600, totalSec: 10800 },
+			periodOffset: 2,
+		});
 	});
 });
 

@@ -850,7 +850,7 @@ let imageLoadQueue = [];
 let imageLoadProcessing = false;
 let searchDebounceTimer = null;
 let chartHashTimer = null;
-const chartHashes = new Map(); // item|period|mode|assetVersion|title|legendMode|forceAsItem|pattern|interpolation|service -> hash
+const chartHashes = new Map(); // item|period|mode|assetVersion|title|legendMode|forceAsItem|pattern|interpolation|service|offset -> hash
 let searchStateAbort = null;
 let searchStateActiveToken = 0;
 let resumeReloadArmed = false;
@@ -1192,6 +1192,18 @@ window.addEventListener('message', function (e) {
 	} else if (e.data.type === 'ohproxy-fullscreen-exit') {
 		if (iframeFsActive && iframeFsIframe && iframeFsIframe.contentWindow === e.source) {
 			exitIframeFullscreen();
+		}
+	} else if (e.data.type === 'ohproxy-chart-url-state') {
+		const match = findIframeBySource(e.source);
+		if (!match?.iframe || !match.iframe.classList.contains('chart-frame')) return;
+		const normalizedUrl = normalizeChartRuntimeUrl(e.data.chartUrl);
+		if (!normalizedUrl) return;
+		match.iframe.dataset.chartUrl = normalizedUrl;
+		match.iframe.dataset.lastHashCheck = '0';
+		if (iframeFsIframe === match.iframe) {
+			try {
+				match.iframe.contentWindow.postMessage({ type: 'ohproxy-fullscreen-state', active: !!iframeFsActive }, '*');
+			} catch (_) {}
 		}
 	}
 });
@@ -3161,6 +3173,33 @@ function normalizeChartForceAsItem(value) {
 	if (['true', '1', 'yes', 'on'].includes(raw)) return 'true';
 	if (['false', '0', 'no', 'off'].includes(raw)) return 'false';
 	return '';
+}
+
+function normalizeChartPeriodOffset(value) {
+	const raw = safeText(value).trim();
+	if (!raw) return 0;
+	if (!/^\d+$/.test(raw)) return 0;
+	const parsed = parseInt(raw, 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function normalizeChartRuntimeUrl(chartUrl) {
+	if (!chartUrl) return '';
+	try {
+		const url = new URL(chartUrl, window.location.origin);
+		if (url.pathname !== '/chart') return '';
+		url.searchParams.delete('_t');
+		const periodOffset = normalizeChartPeriodOffset(url.searchParams.get('offset'));
+		if (periodOffset > 0) {
+			url.searchParams.set('offset', String(periodOffset));
+		} else {
+			url.searchParams.delete('offset');
+		}
+		return url.pathname + url.search;
+	} catch (err) {
+		logJsError(`normalizeChartRuntimeUrl failed for ${chartUrl}`, err);
+		return '';
+	}
 }
 
 function chartWidgetUrl(widget) {
@@ -11296,7 +11335,8 @@ function readIframeChartHash(iframe) {
 
 function buildChartReloadUrl(chartUrl, dataHash) {
 	try {
-		const url = new URL(chartUrl, window.location.origin);
+		const url = new URL(normalizeChartRuntimeUrl(chartUrl) || chartUrl, window.location.origin);
+		url.searchParams.delete('_t');
 		if (dataHash) url.searchParams.set('_t', dataHash);
 		return url.pathname + url.search;
 	} catch (err) {
@@ -11311,9 +11351,10 @@ function buildChartReloadUrl(chartUrl, dataHash) {
 function swapChartIframe(iframe, newSrc, baseUrl) {
 	if (!iframe || !newSrc) return;
 	const container = iframe.parentElement;
+	const normalizedBaseUrl = normalizeChartRuntimeUrl(baseUrl || iframe.dataset.chartUrl || newSrc) || baseUrl || iframe.dataset.chartUrl || newSrc;
 	if (!container) {
-		iframe.dataset.chartUrl = baseUrl || newSrc;
-		setChartIframeAnimState(iframe, baseUrl || newSrc);
+		iframe.dataset.chartUrl = normalizedBaseUrl;
+		setChartIframeAnimState(iframe, normalizedBaseUrl);
 		iframe.src = newSrc;
 		return;
 	}
@@ -11321,13 +11362,13 @@ function swapChartIframe(iframe, newSrc, baseUrl) {
 
 	const newIframe = document.createElement('iframe');
 	newIframe.className = iframe.className;
-	setChartIframeAnimState(newIframe, baseUrl || newSrc);
+	setChartIframeAnimState(newIframe, normalizedBaseUrl);
 	newIframe.setAttribute('frameborder', iframe.getAttribute('frameborder') || '0');
 	newIframe.setAttribute('scrolling', iframe.getAttribute('scrolling') || 'no');
 	if (iframe.getAttribute('allowfullscreen')) {
 		newIframe.setAttribute('allowfullscreen', iframe.getAttribute('allowfullscreen'));
 	}
-	newIframe.dataset.chartUrl = baseUrl || iframe.dataset.chartUrl || newSrc;
+	newIframe.dataset.chartUrl = normalizedBaseUrl;
 	newIframe.style.opacity = '0';
 	newIframe.style.transition = `opacity ${CHART_IFRAME_CROSSFADE_MS}ms ease-out`;
 	newIframe.style.position = 'absolute';
@@ -11394,9 +11435,11 @@ async function checkChartHashes() {
 			iframe.dataset.lastHashCheck = String(now);
 
 			// Parse item, period, title from URL: /chart?item=X&period=Y&title=Z&...
-			const urlObj = new URL(chartUrl, window.location.origin);
+			const normalizedChartUrl = normalizeChartRuntimeUrl(chartUrl) || chartUrl;
+			const urlObj = new URL(normalizedChartUrl, window.location.origin);
 			const item = urlObj.searchParams.get('item') || '';
 			const period = urlObj.searchParams.get('period') || '';
+			const periodOffset = normalizeChartPeriodOffset(urlObj.searchParams.get('offset'));
 			const title = urlObj.searchParams.get('title') || '';
 			const legend = normalizeChartLegendMode(urlObj.searchParams.get('legend'));
 			const forceAsItem = normalizeChartForceAsItem(urlObj.searchParams.get('forceasitem') || urlObj.searchParams.get('forceAsItem'));
@@ -11404,9 +11447,10 @@ async function checkChartHashes() {
 			const interpolation = (urlObj.searchParams.get('interpolation') || 'linear').toLowerCase();
 			const service = urlObj.searchParams.get('service') || '';
 			if (!item || !period) continue;
+			if (periodOffset > 0) continue;
 
 			// Cache key includes assetVersion to match server
-			const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${forceAsItem}|${yAxisDecimalPattern}|${interpolation}|${service}`;
+			const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${forceAsItem}|${yAxisDecimalPattern}|${interpolation}|${service}|${periodOffset}`;
 			const prevHash = chartHashes.get(cacheKey) || null;
 
 					try {
@@ -11823,7 +11867,8 @@ function handleWsChartHashResponse(data) {
 	const yAxisDecimalPattern = safeText(data.yAxisDecimalPattern || '');
 	const interpolation = safeText(data.interpolation || 'linear').toLowerCase() === 'step' ? 'step' : 'linear';
 	const service = safeText(data.service || '');
-	const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${forceAsItem}|${yAxisDecimalPattern}|${interpolation}|${service}`;
+	const periodOffset = normalizeChartPeriodOffset(data.offset);
+	const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${forceAsItem}|${yAxisDecimalPattern}|${interpolation}|${service}|${periodOffset}`;
 	if (MAX_CHART_HASHES > 0) {
 		setBoundedCache(chartHashes, cacheKey, hash, MAX_CHART_HASHES);
 	}

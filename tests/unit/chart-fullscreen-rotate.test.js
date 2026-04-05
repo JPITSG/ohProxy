@@ -11,10 +11,37 @@ const CHART_JS_FILE = path.join(PROJECT_ROOT, 'public', 'chart.js');
 const CHART_CSS_FILE = path.join(PROJECT_ROOT, 'public', 'chart.css');
 
 describe('Chart Fullscreen Rotate', () => {
-	it('adds a rotate button before the fullscreen button in chart header controls', () => {
+	it('adds period navigation buttons before rotate/fullscreen in chart header controls', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /id="chartPeriodBack"/);
+		assert.match(server, /id="chartPeriodForward"/);
+		assert.match(server, /id="chartPeriodLatest"/);
+		assert.match(server, /id="chartPeriodLatest"[\s\S]*M20 22L4 22/);
+		assert.match(server, /id="chartPeriodLatest"[\s\S]*stroke-width="1\.2"/);
 		assert.match(server, /id="chartRotate"/);
-		assert.match(server, /id="chartRotate"[\s\S]*id="chartFullscreen"/);
+		assert.match(server, /id="chartPeriodBack"[\s\S]*id="chartPeriodForward"[\s\S]*id="chartPeriodLatest"[\s\S]*id="chartRotate"[\s\S]*id="chartFullscreen"/);
+	});
+
+	it('wires chart period navigation and parent URL sync', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		const chartJs = fs.readFileSync(CHART_JS_FILE, 'utf8');
+		const chartCss = fs.readFileSync(CHART_CSS_FILE, 'utf8');
+		assert.match(server, /window\._chartPeriodOffset=\$\{inlineJson\(normalizeChartPeriodOffsetValue\(periodOffset\)\)\};/);
+		assert.match(chartJs, /var CHART_PERIOD_OFFSET = normalizeChartPeriodOffset\(window\._chartPeriodOffset\);/);
+		assert.match(chartJs, /function buildChartUrlForOffset\(nextOffset\) \{/);
+		assert.match(chartJs, /url\.searchParams\.delete\('_t'\);/);
+		assert.match(chartJs, /if \(normalizedOffset > 0\) \{\s*url\.searchParams\.set\('offset', String\(normalizedOffset\)\);\s*\} else \{\s*url\.searchParams\.delete\('offset'\);\s*\}/);
+		assert.match(chartJs, /window\.parent\.postMessage\(\{\s*type: 'ohproxy-chart-url-state',/);
+		assert.match(chartJs, /forwardBtn\.style\.display = CHART_PERIOD_OFFSET > 0 \? 'flex' : 'none';/);
+		assert.match(chartJs, /latestBtn\.style\.display = CHART_PERIOD_OFFSET > 0 \? 'flex' : 'none';/);
+		assert.match(chartJs, /function navigateChartOffset\(nextOffset\) \{/);
+		assert.match(chartJs, /latestBtn\.addEventListener\('click', function\(\) \{\s*navigateChartOffset\(0\);\s*\}\);/);
+		assert.match(chartCss, /\.chart-nav-btn::after \{/);
+		assert.match(chartCss, /width: 15\.5px;/);
+		assert.match(chartCss, /height: 15\.5px;/);
+		assert.match(chartCss, /-webkit-mask-image: url\("data:image\/svg\+xml,%3Csvg xmlns='http:\/\/www\.w3\.org\/2000\/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7\.41 8\.59 12 13\.17l4\.59-4\.58L18 10l-6 6-6-6z'\/%3E%3C\/svg%3E"\);/);
+		assert.match(chartCss, /\.chart-nav-prev::after \{\s*transform: rotate\(90deg\);/);
+		assert.match(chartCss, /\.chart-nav-next::after \{\s*transform: rotate\(270deg\);/);
 	});
 
 	it('gates rotate visibility to touch fullscreen and resets rotation when fullscreen exits', () => {

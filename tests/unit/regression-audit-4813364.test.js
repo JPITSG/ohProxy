@@ -71,12 +71,14 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		assert.doesNotMatch(server, /window\._chartYAxisPattern=\$\{JSON\.stringify\(yAxisDecimalPattern \|\| null\)\};/);
 	});
 
-	it('chart hash polling includes interpolation and forceasitem in request URL and cache key', () => {
+	it('chart hash polling includes interpolation, forceasitem, and historical offset suppression', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /const interpolation = \(urlObj\.searchParams\.get\('interpolation'\) \|\| 'linear'\)\.toLowerCase\(\);/);
 		assert.match(app, /const service = urlObj\.searchParams\.get\('service'\) \|\| '';/);
+		assert.match(app, /const periodOffset = normalizeChartPeriodOffset\(urlObj\.searchParams\.get\('offset'\)\);/);
+		assert.match(app, /if \(periodOffset > 0\) continue;/);
 		assert.match(app, /const forceAsItem = normalizeChartForceAsItem\(urlObj\.searchParams\.get\('forceasitem'\) \|\| urlObj\.searchParams\.get\('forceAsItem'\)\);/);
-		assert.match(app, /const cacheKey = `\$\{item\}\|\$\{period\}\|\$\{mode\}\|\$\{assetVersion\}\|\$\{title\}\|\$\{legend\}\|\$\{forceAsItem\}\|\$\{yAxisDecimalPattern\}\|\$\{interpolation\}\|\$\{service\}`;/);
+		assert.match(app, /const cacheKey = `\$\{item\}\|\$\{period\}\|\$\{mode\}\|\$\{assetVersion\}\|\$\{title\}\|\$\{legend\}\|\$\{forceAsItem\}\|\$\{yAxisDecimalPattern\}\|\$\{interpolation\}\|\$\{service\}\|\$\{periodOffset\}`;/);
 		assert.match(app, /\(forceAsItem \? `&forceasitem=\$\{forceAsItem\}` : ''\)/);
 		assert.match(app, /\(interpolation === 'step' \? '&interpolation=step' : ''\)/);
 		assert.match(app, /\(service \? `&service=\$\{encodeURIComponent\(service\)\}` : ''\)/);
@@ -103,6 +105,17 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		assert.match(app, /if \(preserveFullscreen && iframeFsActive\) \{/);
 		assert.match(app, /iframeFsIframe = newIframe;/);
 		assert.match(app, /newIframe\.contentWindow\.postMessage\(\{ type: 'ohproxy-fullscreen-state', active: true \}, '\*'\);/);
+	});
+
+	it('chart iframe period navigation syncs canonical URL state back to the parent', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		const chart = fs.readFileSync(CHART_FILE, 'utf8');
+		assert.match(app, /function normalizeChartRuntimeUrl\(chartUrl\) \{/);
+		assert.match(app, /e\.data\.type === 'ohproxy-chart-url-state'/);
+		assert.match(app, /match\.iframe\.dataset\.chartUrl = normalizedUrl;/);
+		assert.match(app, /match\.iframe\.dataset\.lastHashCheck = '0';/);
+		assert.match(chart, /type: 'ohproxy-chart-url-state',/);
+		assert.match(chart, /chartUrl: buildChartUrlForOffset\(normalizedOffset\),/);
 	});
 
 	it('buttongrid allows button-level item binding when parent item is missing', () => {

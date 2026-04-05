@@ -321,7 +321,7 @@ body.chart-fs-rotated .chart-card {
 }
 
 .chart-fs-divider {
-	display: none;
+	display: block;
 	width: 1px;
 	height: 1rem;
 	background: var(--border-light);
@@ -352,6 +352,37 @@ body.chart-fs-rotated .chart-card {
 	width: 14px;
 	height: 14px;
 	fill: currentColor;
+}
+
+.chart-nav-btn {
+	display: flex;
+}
+
+.chart-nav-btn::after {
+	content: '';
+	position: relative;
+	width: 15.5px;
+	height: 15.5px;
+	display: inline-block;
+	background-color: currentColor;
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z'/%3E%3C/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z'/%3E%3C/svg%3E");
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+	mask-position: center;
+	-webkit-mask-size: contain;
+	mask-size: contain;
+	opacity: .75;
+	pointer-events: none;
+}
+
+.chart-nav-prev::after {
+	transform: rotate(90deg);
+}
+
+.chart-nav-next::after {
+	transform: rotate(270deg);
 }
 
 @media (max-width: 600px) {

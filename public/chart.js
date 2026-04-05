@@ -27,6 +27,17 @@
 	var CHART_PERIOD = window._chartPeriod || 'D';
 	var CHART_Y_PATTERN = window._chartYAxisPattern || null;
 	var CHART_INTERP = window._chartInterpolation || 'linear';
+	function normalizeChartPeriodOffset(value) {
+		if (value === null || value === undefined || value === '') return 0;
+		if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+			return Math.floor(value);
+		}
+		var raw = String(value).trim();
+		if (!/^\d+$/.test(raw)) return 0;
+		var parsed = parseInt(raw, 10);
+		return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+	}
+	var CHART_PERIOD_OFFSET = normalizeChartPeriodOffset(window._chartPeriodOffset);
 	var CHART_SERIES = Array.isArray(window._chartSeries) ? window._chartSeries : [];
 	var CHART_IS_MULTI_SERIES = window._chartIsMultiSeries === true || CHART_SERIES.length > 1;
 	if (!CHART_SERIES.length && Array.isArray(window._chartData)) {
@@ -1271,6 +1282,64 @@
 	if (window.visualViewport) {
 		window.visualViewport.addEventListener('resize', scheduleChartReflow);
 	}
+
+	function buildChartUrlForOffset(nextOffset) {
+		var normalizedOffset = normalizeChartPeriodOffset(nextOffset);
+		var url = new URL(window.location.href);
+		url.searchParams.delete('_t');
+		if (normalizedOffset > 0) {
+			url.searchParams.set('offset', String(normalizedOffset));
+		} else {
+			url.searchParams.delete('offset');
+		}
+		return url.pathname + url.search + url.hash;
+	}
+
+	function syncParentChartUrlState(nextOffset) {
+		if (window === window.top || !window.parent) return;
+		var normalizedOffset = normalizeChartPeriodOffset(nextOffset);
+		window.parent.postMessage({
+			type: 'ohproxy-chart-url-state',
+			chartUrl: buildChartUrlForOffset(normalizedOffset),
+			offset: normalizedOffset,
+		}, '*');
+	}
+
+	(function() {
+		var backBtn = document.getElementById('chartPeriodBack');
+		var forwardBtn = document.getElementById('chartPeriodForward');
+		var latestBtn = document.getElementById('chartPeriodLatest');
+		var fsDivider = document.getElementById('fsDivider');
+		if (!backBtn || !forwardBtn || !latestBtn) return;
+
+		if (fsDivider) fsDivider.style.display = 'block';
+		backBtn.style.display = 'flex';
+		forwardBtn.style.display = CHART_PERIOD_OFFSET > 0 ? 'flex' : 'none';
+		latestBtn.style.display = CHART_PERIOD_OFFSET > 0 ? 'flex' : 'none';
+		syncParentChartUrlState(CHART_PERIOD_OFFSET);
+
+		function navigateChartOffset(nextOffset) {
+			nextOffset = Math.max(0, normalizeChartPeriodOffset(nextOffset));
+			if (nextOffset === CHART_PERIOD_OFFSET) return;
+			haptic();
+			syncParentChartUrlState(nextOffset);
+			window.location.assign(buildChartUrlForOffset(nextOffset));
+		}
+
+		function navigateChartPeriod(delta) {
+			navigateChartOffset(CHART_PERIOD_OFFSET + delta);
+		}
+
+		backBtn.addEventListener('click', function() {
+			navigateChartPeriod(1);
+		});
+		forwardBtn.addEventListener('click', function() {
+			navigateChartPeriod(-1);
+		});
+		latestBtn.addEventListener('click', function() {
+			navigateChartOffset(0);
+		});
+	})();
 
 	// Fullscreen toggle (only when embedded in an iframe)
 	(function() {

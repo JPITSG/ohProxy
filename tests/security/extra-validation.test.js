@@ -431,6 +431,7 @@ function createExtraValidationTestApp() {
 		const rawTitle = req.query?.title;
 		const rawLegend = req.query?.legend;
 		const rawForceAsItem = req.query?.forceasitem ?? req.query?.forceAsItem;
+		const rawOffset = req.query?.offset;
 		if (typeof rawItem !== 'string') {
 			return res.status(400).send('Invalid item parameter');
 		}
@@ -446,17 +447,24 @@ function createExtraValidationTestApp() {
 		if (rawForceAsItem !== undefined && typeof rawForceAsItem !== 'string') {
 			return res.status(400).send('Invalid forceasitem parameter');
 		}
+		if (rawOffset !== undefined && typeof rawOffset !== 'string') {
+			return res.status(400).send('Invalid offset parameter');
+		}
 		const item = rawItem.trim();
 		const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 		const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
 		const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
 		const legend = rawLegend === undefined ? 'auto' : rawLegend.trim().toLowerCase();
 		const forceAsItemParsed = parseChartForceAsItem(rawForceAsItem);
+		const offset = rawOffset === undefined ? 0 : parseOptionalInt(rawOffset, { min: 0, max: 10000 });
 		if (rawLegend !== undefined && !['true', 'false'].includes(legend)) {
 			return res.status(400).send('Invalid legend parameter');
 		}
 		if (rawForceAsItem !== undefined && forceAsItemParsed === null) {
 			return res.status(400).send('Invalid forceasitem parameter');
+		}
+		if (!Number.isFinite(offset)) {
+			return res.status(400).send('Invalid offset parameter');
 		}
 		if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 			return res.status(400).send('Invalid parameters');
@@ -483,6 +491,7 @@ function createExtraValidationTestApp() {
 		const rawTitle = req.query?.title;
 		const rawLegend = req.query?.legend;
 		const rawForceAsItem = req.query?.forceasitem ?? req.query?.forceAsItem;
+		const rawOffset = req.query?.offset;
 		if (typeof rawItem !== 'string') {
 			return res.status(400).json({ error: 'Invalid item' });
 		}
@@ -498,17 +507,24 @@ function createExtraValidationTestApp() {
 		if (rawForceAsItem !== undefined && typeof rawForceAsItem !== 'string') {
 			return res.status(400).json({ error: 'Invalid forceasitem' });
 		}
+		if (rawOffset !== undefined && typeof rawOffset !== 'string') {
+			return res.status(400).json({ error: 'Invalid offset' });
+		}
 		const item = rawItem.trim();
 		const period = typeof rawPeriod === 'string' ? rawPeriod.trim() : 'h';
 		const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : 'dark';
 		const title = (typeof rawTitle === 'string' ? rawTitle.trim() : '') || item;
 		const legend = rawLegend === undefined ? 'auto' : rawLegend.trim().toLowerCase();
 		const forceAsItemParsed = parseChartForceAsItem(rawForceAsItem);
+		const offset = rawOffset === undefined ? 0 : parseOptionalInt(rawOffset, { min: 0, max: 10000 });
 		if (rawLegend !== undefined && !['true', 'false'].includes(legend)) {
 			return res.status(400).json({ error: 'Invalid legend' });
 		}
 		if (rawForceAsItem !== undefined && forceAsItemParsed === null) {
 			return res.status(400).json({ error: 'Invalid forceasitem' });
+		}
+		if (!Number.isFinite(offset)) {
+			return res.status(400).json({ error: 'Invalid offset' });
 		}
 		if (hasAnyControlChars(item) || hasAnyControlChars(period) || hasAnyControlChars(mode) || (title && hasAnyControlChars(title))) {
 			return res.status(400).json({ error: 'Invalid parameters' });
@@ -971,6 +987,16 @@ describe('Extra Validation Coverage', () => {
 			assert.strictEqual(res.status, 200);
 		});
 
+		it('accepts chart offset=2', async () => {
+			const res = await get('/chart?item=Temp_Sensor&period=h&offset=2');
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('rejects chart invalid offset', async () => {
+			const res = await get('/chart?item=Temp_Sensor&period=h&offset=older');
+			assert.strictEqual(res.status, 400);
+		});
+
 		it('rejects chart-hash empty item', async () => {
 			const res = await get('/api/chart-hash?item=&period=h');
 			assert.strictEqual(res.status, 400);
@@ -1019,6 +1045,16 @@ describe('Extra Validation Coverage', () => {
 		it('defaults chart-hash period to h when omitted', async () => {
 			const res = await get('/api/chart-hash?item=Temp_Sensor&mode=light');
 			assert.strictEqual(res.status, 200);
+		});
+
+		it('accepts chart-hash offset=4', async () => {
+			const res = await get('/api/chart-hash?item=Temp_Sensor&period=D&offset=4');
+			assert.strictEqual(res.status, 200);
+		});
+
+		it('rejects chart-hash invalid offset', async () => {
+			const res = await get('/api/chart-hash?item=Temp_Sensor&period=D&offset=-1');
+			assert.strictEqual(res.status, 400);
 		});
 	});
 
