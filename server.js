@@ -5170,8 +5170,16 @@ function sendServiceWorker(res) {
 function styledErrorPage(message, req) {
 	const rawMode = typeof req.query?.mode === 'string' ? req.query.mode.trim().toLowerCase() : '';
 	const dark = rawMode === 'dark';
-	const bg = dark ? '#1e1e1e' : '#f5f6fa';
-	const fg = dark ? 'rgba(234,235,238,0.98)' : 'rgba(19,21,54,0.98)';
+	const isChartRequest = req?.path === '/chart';
+	let bg;
+	let fg;
+	if (isChartRequest) {
+		bg = dark ? '#080b28' : '#f1f2f9';
+		fg = dark ? '#fafafa' : '#0f172a';
+	} else {
+		bg = dark ? '#1e1e1e' : '#f5f6fa';
+		fg = dark ? 'rgba(234,235,238,0.98)' : 'rgba(19,21,54,0.98)';
+	}
 	return '<!DOCTYPE html><html><head><meta charset="utf-8">'
 		+ '<meta name="viewport" content="width=device-width,initial-scale=1">'
 		+ '<style>@font-face{font-family:Rubik;src:url(/fonts/rubik-300.woff2) format("woff2");font-weight:300;font-display:swap}'
