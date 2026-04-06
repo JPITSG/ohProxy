@@ -10,6 +10,9 @@ const { basicAuthHeader } = require('../test-helpers');
 function createPresenceTestApp(config = {}) {
 	const app = express();
 	const USERS = config.users || {};
+	const SECURITY_HEADERS_ENABLED = config.securityHeadersEnabled !== false;
+	const REFERRER_POLICY = config.referrerPolicy || 'same-origin';
+	const PRESENCE_REFERRER_POLICY = config.presenceReferrerPolicy || 'origin';
 
 	function parseBasicAuthHeader(value) {
 		if (!value) return [null, null];
@@ -31,6 +34,13 @@ function createPresenceTestApp(config = {}) {
 		const payload = message ? { error: message } : {};
 		return res.status(status).json(payload);
 	}
+
+	app.use((req, res, next) => {
+		if (SECURITY_HEADERS_ENABLED && REFERRER_POLICY) {
+			res.setHeader('Referrer-Policy', REFERRER_POLICY);
+		}
+		next();
+	});
 
 	app.use((req, res, next) => {
 		const [username, password] = parseBasicAuthHeader(req.headers.authorization);
@@ -93,6 +103,7 @@ function createPresenceTestApp(config = {}) {
 			return sendStyledError(res, req, 403);
 		}
 
+		res.setHeader('Referrer-Policy', PRESENCE_REFERRER_POLICY);
 		return res.status(200).type('text/html').send('<!DOCTYPE html><html><body>Presence</body></html>');
 	});
 
@@ -109,6 +120,8 @@ describe('Presence TrackGPS Integration', () => {
 				withgps: { password: 'gps-pass', trackgps: true },
 				nogps: { password: 'nogps-pass', trackgps: false },
 			},
+			referrerPolicy: 'same-origin',
+			presenceReferrerPolicy: 'origin',
 		});
 		server = http.createServer(app);
 		await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -139,5 +152,15 @@ describe('Presence TrackGPS Integration', () => {
 		});
 		assert.strictEqual(res.status, 200);
 		assert.match(res.headers.get('content-type') || '', /text\/html/i);
+	});
+
+	it('overrides the referrer policy for /presence so OSM tiles receive an origin referrer', async () => {
+		const res = await fetch(`${baseUrl}/presence`, {
+			headers: {
+				'Authorization': basicAuthHeader('withgps', 'gps-pass'),
+			},
+		});
+		assert.strictEqual(res.status, 200);
+		assert.strictEqual(res.headers.get('referrer-policy'), 'origin');
 	});
 });

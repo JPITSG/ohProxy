@@ -366,6 +366,7 @@ const SECURITY_HEADERS_ENABLED = SECURITY_HEADERS.enabled !== false;
 const SECURITY_HSTS = SECURITY_HEADERS.hsts || {};
 const SECURITY_CSP = SECURITY_HEADERS.csp || {};
 const SECURITY_REFERRER_POLICY = safeText(SECURITY_HEADERS.referrerPolicy || '');
+const PRESENCE_TILE_REFERRER_POLICY = 'origin';
 const TASK_CONFIG = SERVER_CONFIG.backgroundTasks || {};
 const SITEMAP_REFRESH_MS = configNumber(TASK_CONFIG.sitemapRefreshMs);
 const STRUCTURE_MAP_REFRESH_MS = configNumber(TASK_CONFIG.structureMapRefreshMs);
@@ -10867,6 +10868,8 @@ else if(ctxDragEnded){e.preventDefault();ctxDragEnded=false}
 </body>
 </html>`;
 
+	// OSM tiles require a Referer; use origin-only on /presence so tile requests are accepted.
+	res.setHeader('Referrer-Policy', PRESENCE_TILE_REFERRER_POLICY);
 	res.setHeader('Content-Type', 'text/html; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-store');
 	res.send(html);
