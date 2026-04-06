@@ -37,8 +37,11 @@ describe('Chart Fullscreen Rotate', () => {
 		assert.match(chartJs, /function navigateChartOffset\(nextOffset\) \{/);
 		assert.match(chartJs, /latestBtn\.addEventListener\('click', function\(\) \{\s*navigateChartOffset\(0\);\s*\}\);/);
 		assert.match(chartCss, /\.chart-nav-btn::after \{/);
-		assert.match(chartCss, /width: 15\.5px;/);
-		assert.match(chartCss, /height: 15\.5px;/);
+		assert.match(chartCss, /width: 16px;/);
+		assert.match(chartCss, /height: 16px;/);
+		assert.match(chartCss, /#chartPeriodLatest svg \{/);
+		assert.match(chartCss, /#chartPeriodLatest svg \{\s*width: 15px;/);
+		assert.match(chartCss, /#chartPeriodLatest svg \{[\s\S]*height: 15px;/);
 		assert.match(chartCss, /-webkit-mask-image: url\("data:image\/svg\+xml,%3Csvg xmlns='http:\/\/www\.w3\.org\/2000\/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7\.41 8\.59 12 13\.17l4\.59-4\.58L18 10l-6 6-6-6z'\/%3E%3C\/svg%3E"\);/);
 		assert.match(chartCss, /\.chart-nav-prev::after \{\s*transform: rotate\(90deg\);/);
 		assert.match(chartCss, /\.chart-nav-next::after \{\s*transform: rotate\(270deg\);/);

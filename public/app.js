@@ -10755,7 +10755,8 @@ function render() {
 	const sitemapTitle = getActiveSitemapTitle();
 	const siteName = CLIENT_CONFIG.siteName || sitemapTitle || state.rootPageTitle || state.pageTitle || 'openHAB';
 	const isRoot = state.rootPageUrl && state.pageUrl && state.rootPageUrl === state.pageUrl;
-	const pageLabel = isRoot ? 'Home' : (state.pageTitle || sitemapTitle || siteName);
+	const isSearchResultsView = !!q;
+	const pageLabel = isSearchResultsView ? 'Search Results' : (isRoot ? 'Home' : (state.pageTitle || sitemapTitle || siteName));
 	const pageParts = splitLabelState(pageLabel);
 	const pageTitleText = `${siteName} · ${pageParts.title || pageLabel}`;
 	if (els.title) {
