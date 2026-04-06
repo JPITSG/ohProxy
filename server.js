@@ -3233,7 +3233,7 @@ function chartCacheKey(item, period, mode, title, legend, yAxisDecimalPattern, i
 	const timeFmt = liveConfig.clientConfig?.timeFormat || '';
 	const offset = normalizeChartPeriodOffsetValue(periodOffset);
 	return crypto.createHash('md5')
-		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}|${legend}|${yAxisDecimalPattern || ''}|${interpolation || 'linear'}|${service || ''}|${forceAsItem ? 'forceasitem' : 'groupmode'}|offset:${offset}|${normalizeChartUnitSymbol(unitSignature)}`)
+		.update(`${item}|${period}|${mode || 'dark'}|${assetVersion}|${title || ''}|${dateFmt}|${timeFmt}|${legend}|${yAxisDecimalPattern || ''}|${interpolation || 'linear'}|${service || ''}|${forceAsItem ? 'forceasitem' : 'groupmode'}|offset:${offset}|prevnav:v2|${normalizeChartUnitSymbol(unitSignature)}`)
 		.digest('hex')
 		.substring(0, 16);
 }
@@ -3805,7 +3805,7 @@ function prepareChartSeriesRenderData(rawSeriesList, periodWindow, periodOffset 
 	};
 }
 
-function generateChartHtml(chartSeries, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern, durationSec, interpolation, isMultiSeries = false, periodOffset = 0) {
+function generateChartHtml(chartSeries, xLabels, yMin, yMax, dataMin, dataMax, title, unit, mode, dataHash, dataAvg, dataCur, period, legend, yAxisDecimalPattern, durationSec, interpolation, isMultiSeries = false, periodOffset = 0, hasPreviousPeriod = true) {
 	const theme = mode === 'dark' ? 'dark' : 'light';
 	const safeTitle = escapeHtml(title);
 	const unitDisplay = unit ? escapeHtml(unit) : '';
@@ -3844,7 +3844,7 @@ function generateChartHtml(chartSeries, xLabels, yMin, yMax, dataMin, dataMax, t
 <div class="chart-card">
 <div class="chart-header">
 <div class="chart-title-group"><h2 class="chart-title" id="chartTitle">${safeTitle}</h2></div>
-<div class="chart-header-right" id="chartStats">${statsHtml}${legendHtml}<span class="chart-fs-divider" id="fsDivider"></span><button class="chart-fs-btn chart-nav-btn chart-nav-prev" id="chartPeriodBack" type="button" aria-label="Previous period" title="Previous period"></button><button class="chart-fs-btn chart-nav-btn chart-nav-next" id="chartPeriodForward" type="button" aria-label="Next period" title="Next period"></button><button class="chart-fs-btn" id="chartPeriodLatest" type="button" aria-label="Latest period" title="Latest period"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 22L4 22" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M2 11L10.1259 4.49931C11.2216 3.62279 12.7784 3.62279 13.8741 4.49931L22 11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M15.5 5.5V3.5C15.5 3.22386 15.7239 3 16 3H18.5C18.7761 3 19 3.22386 19 3.5V8.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M4 22V9.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M20 22V9.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M15 22V17C15 15.5858 15 14.8787 14.5607 14.4393C14.1213 14 13.4142 14 12 14C10.5858 14 9.87868 14 9.43934 14.4393C9 14.8787 9 15.5858 9 17V22" fill="none" stroke="currentColor" stroke-width="1.2"></path><path d="M14 9.5C14 10.6046 13.1046 11.5 12 11.5C10.8954 11.5 10 10.6046 10 9.5C10 8.39543 10.8954 7.5 12 7.5C13.1046 7.5 14 8.39543 14 9.5Z" fill="none" stroke="currentColor" stroke-width="1.2"></path></svg></button><button class="chart-fs-btn" id="chartRotate" type="button"><svg viewBox="0 0 24 24"><path d="M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.96-.7 2.8l1.46 1.46A7.944 7.944 0 0 0 20 13c0-4.42-3.58-8-8-8zM6.7 9.2 5.24 7.74A7.944 7.944 0 0 0 4 13c0 4.42 3.58 8 8 8v3l4-4-4-4v3c-3.31 0-6-2.69-6-6 0-1.01.25-1.96.7-2.8z"/></svg></button><button class="chart-fs-btn" id="chartFullscreen" type="button"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg></button></div>
+<div class="chart-header-right" id="chartStats">${statsHtml}${legendHtml}<span class="chart-fs-divider" id="fsDivider"></span><button class="chart-fs-btn chart-nav-btn chart-nav-prev" id="chartPeriodBack" type="button" aria-label="Previous period" title="Previous period"${hasPreviousPeriod ? '' : ' disabled aria-disabled="true" style="opacity:.35;cursor:default;pointer-events:none"'}></button><button class="chart-fs-btn chart-nav-btn chart-nav-next" id="chartPeriodForward" type="button" aria-label="Next period" title="Next period"></button><button class="chart-fs-btn" id="chartPeriodLatest" type="button" aria-label="Latest period" title="Latest period"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 22L4 22" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M2 11L10.1259 4.49931C11.2216 3.62279 12.7784 3.62279 13.8741 4.49931L22 11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M15.5 5.5V3.5C15.5 3.22386 15.7239 3 16 3H18.5C18.7761 3 19 3.22386 19 3.5V8.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M4 22V9.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M20 22V9.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M15 22V17C15 15.5858 15 14.8787 14.5607 14.4393C14.1213 14 13.4142 14 12 14C10.5858 14 9.87868 14 9.43934 14.4393C9 14.8787 9 15.5858 9 17V22" fill="none" stroke="currentColor" stroke-width="1.2"></path><path d="M14 9.5C14 10.6046 13.1046 11.5 12 11.5C10.8954 11.5 10 10.6046 10 9.5C10 8.39543 10.8954 7.5 12 7.5C13.1046 7.5 14 8.39543 14 9.5Z" fill="none" stroke="currentColor" stroke-width="1.2"></path></svg></button><button class="chart-fs-btn" id="chartRotate" type="button"><svg viewBox="0 0 24 24"><path d="M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.96-.7 2.8l1.46 1.46A7.944 7.944 0 0 0 20 13c0-4.42-3.58-8-8-8zM6.7 9.2 5.24 7.74A7.944 7.944 0 0 0 4 13c0 4.42 3.58 8 8 8v3l4-4-4-4v3c-3.31 0-6-2.69-6-6 0-1.01.25-1.96.7-2.8z"/></svg></button><button class="chart-fs-btn" id="chartFullscreen" type="button"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg></button></div>
 </div>
 <div class="chart-container" id="chartContainer">
 <svg class="chart-svg" id="chartSvg"></svg>
@@ -3875,7 +3875,7 @@ window._chartInterpolation=${inlineJson(interpolation || 'linear')};
 </html>`;
 }
 
-function renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, precomputedDataHash = '', unitSymbol = '', periodOffset = 0) {
+function renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, precomputedDataHash = '', unitSymbol = '', periodOffset = 0, hasPreviousPeriod = true) {
 	const window = normalizePeriodWindow(periodWindow) || periodWindowFromPeriodString(period, 86400);
 	const normalizedOffset = normalizeChartPeriodOffsetValue(periodOffset);
 	const prepared = prepareChartSeriesRenderData(rawSeriesList, window, normalizedOffset);
@@ -3909,7 +3909,8 @@ function renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxis
 		prepared.durationSec,
 		interpolation,
 		prepared.isMultiSeries,
-		normalizedOffset
+		normalizedOffset,
+		hasPreviousPeriod
 	);
 	return {
 		html,
@@ -3917,12 +3918,24 @@ function renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxis
 	};
 }
 
+async function chartHasPreviousPeriodData(item, periodWindow, service = '', forceAsItem = false, preloadedItemDefinition = null, periodOffset = 0) {
+	const nextOffset = normalizeChartPeriodOffsetValue(periodOffset) + 1;
+	try {
+		const { series: previousSeriesList } = await fetchChartSeriesData(item, periodWindow, service, forceAsItem, preloadedItemDefinition, nextOffset);
+		return Array.isArray(previousSeriesList) && previousSeriesList.length > 0;
+	} catch (err) {
+		logMessage(`[Chart] Previous period availability lookup failed for "${item}" at offset ${nextOffset}: ${err.message || err}`);
+		return true;
+	}
+}
+
 async function generateChart(item, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, service = '', forceAsItem = false, preloadedItemDefinition = null, periodOffset = 0) {
 	const window = normalizePeriodWindow(periodWindow) || periodWindowFromPeriodString(period, 86400);
 	const normalizedOffset = normalizeChartPeriodOffsetValue(periodOffset);
 	const { series: rawSeriesList, unitSymbol, cacheUnitSignature } = await fetchChartSeriesData(item, window, service, forceAsItem, preloadedItemDefinition, normalizedOffset);
 	if (!rawSeriesList || !rawSeriesList.length) return null;
-	const rendered = renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, window, interpolation, '', unitSymbol, normalizedOffset);
+	const hasPreviousPeriod = await chartHasPreviousPeriodData(item, window, service, forceAsItem, preloadedItemDefinition, normalizedOffset);
+	const rendered = renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, window, interpolation, '', unitSymbol, normalizedOffset, hasPreviousPeriod);
 	if (!rendered?.html) return null;
 	return {
 		html: rendered.html,
@@ -9568,7 +9581,8 @@ app.get('/api/chart-hash', async (req, res) => {
 			return res.json({ hash: dataHash });
 		}
 
-		const rendered = renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, dataHash, unitSymbol, periodOffset);
+		const hasPreviousPeriod = await chartHasPreviousPeriodData(item, periodWindow, service, forceAsItem, null, periodOffset);
+		const rendered = renderChartFromSeries(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, dataHash, unitSymbol, periodOffset, hasPreviousPeriod);
 		if (!rendered?.html) {
 			res.setHeader('Cache-Control', 'no-cache');
 			return res.json({ hash: null, error: 'Generation failed' });

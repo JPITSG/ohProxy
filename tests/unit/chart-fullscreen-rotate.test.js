@@ -14,6 +14,7 @@ describe('Chart Fullscreen Rotate', () => {
 	it('adds period navigation buttons before rotate/fullscreen in chart header controls', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /id="chartPeriodBack"/);
+		assert.match(server, /id="chartPeriodBack"[\s\S]*hasPreviousPeriod \? '' : ' disabled aria-disabled="true" style="opacity:\.35;cursor:default;pointer-events:none"'/);
 		assert.match(server, /id="chartPeriodForward"/);
 		assert.match(server, /id="chartPeriodLatest"/);
 		assert.match(server, /id="chartPeriodLatest"[\s\S]*M20 22L4 22/);
@@ -45,6 +46,17 @@ describe('Chart Fullscreen Rotate', () => {
 		assert.match(chartCss, /-webkit-mask-image: url\("data:image\/svg\+xml,%3Csvg xmlns='http:\/\/www\.w3\.org\/2000\/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7\.41 8\.59 12 13\.17l4\.59-4\.58L18 10l-6 6-6-6z'\/%3E%3C\/svg%3E"\);/);
 		assert.match(chartCss, /\.chart-nav-prev::after \{\s*transform: rotate\(90deg\);/);
 		assert.match(chartCss, /\.chart-nav-next::after \{\s*transform: rotate\(270deg\);/);
+	});
+
+	it('checks previous-period availability during chart generation and invalidates old chart html cache entries', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /function chartHasPreviousPeriodData\(item, periodWindow, service = '', forceAsItem = false, preloadedItemDefinition = null, periodOffset = 0\) \{/);
+		assert.match(server, /const nextOffset = normalizeChartPeriodOffsetValue\(periodOffset\) \+ 1;/);
+		assert.match(server, /return Array\.isArray\(previousSeriesList\) && previousSeriesList\.length > 0;/);
+		assert.match(server, /const hasPreviousPeriod = await chartHasPreviousPeriodData\(item, window, service, forceAsItem, preloadedItemDefinition, normalizedOffset\);/);
+		assert.match(server, /const hasPreviousPeriod = await chartHasPreviousPeriodData\(item, periodWindow, service, forceAsItem, null, periodOffset\);/);
+		assert.match(server, /const rendered = renderChartFromSeries\(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, dataHash, unitSymbol, periodOffset, hasPreviousPeriod\);/);
+		assert.match(server, /\|prevnav:v2\|/);
 	});
 
 	it('gates rotate visibility to touch fullscreen and resets rotation when fullscreen exits', () => {
