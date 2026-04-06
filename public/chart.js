@@ -1310,6 +1310,9 @@
 		var forwardBtn = document.getElementById('chartPeriodForward');
 		var latestBtn = document.getElementById('chartPeriodLatest');
 		var fsDivider = document.getElementById('fsDivider');
+		var navTooltip = document.getElementById('chartNavTooltip');
+		var navTooltipFrom = document.getElementById('chartNavTooltipFrom');
+		var navTooltipTo = document.getElementById('chartNavTooltipTo');
 		if (!backBtn || !forwardBtn || !latestBtn) return;
 
 		if (fsDivider) fsDivider.style.display = 'block';
@@ -1317,6 +1320,85 @@
 		forwardBtn.style.display = CHART_PERIOD_OFFSET > 0 ? 'flex' : 'none';
 		latestBtn.style.display = CHART_PERIOD_OFFSET > 0 ? 'flex' : 'none';
 		syncParentChartUrlState(CHART_PERIOD_OFFSET);
+
+		function isNavButtonDisabled(btn) {
+			return !!btn && btn.getAttribute('aria-disabled') === 'true';
+		}
+
+		function getNavTooltipData(btn) {
+			if (!btn) return null;
+			var message = btn.getAttribute('data-tooltip-message') || '';
+			if (message) return { message: message };
+			var from = btn.getAttribute('data-range-from') || '';
+			var to = btn.getAttribute('data-range-to') || '';
+			if (!from || !to) return null;
+			return { from: from, to: to };
+		}
+
+		function positionNavTooltipAtPoint(clientX, clientY) {
+			if (!navTooltip) return;
+			var tw = navTooltip.offsetWidth;
+			var th = navTooltip.offsetHeight;
+			var x = Math.max(4, Math.min(clientX - tw - 16, window.innerWidth - tw - 4));
+			var y = Math.max(4, Math.min(clientY - th / 2 + 8, window.innerHeight - th - 4));
+			navTooltip.style.left = x + 'px';
+			navTooltip.style.top = y + 'px';
+		}
+
+		function positionNavTooltipForButton(btn) {
+			if (!navTooltip || !btn) return;
+			var rect = btn.getBoundingClientRect();
+			var tw = navTooltip.offsetWidth;
+			var th = navTooltip.offsetHeight;
+			var x = Math.max(4, Math.min(rect.left - tw - 8, window.innerWidth - tw - 4));
+			var y = Math.max(4, Math.min(rect.top + rect.height / 2 - th / 2, window.innerHeight - th - 4));
+			navTooltip.style.left = x + 'px';
+			navTooltip.style.top = y + 'px';
+		}
+
+		function showNavTooltip(btn, e) {
+			var tooltipData = getNavTooltipData(btn);
+			if (!navTooltip || !navTooltipFrom || !navTooltipTo || !tooltipData) return;
+			if (tooltipData.message) {
+				navTooltipFrom.textContent = tooltipData.message;
+				navTooltipTo.textContent = '';
+				navTooltip.classList.add('chart-nav-tooltip-single');
+			} else {
+				navTooltipFrom.textContent = tooltipData.from;
+				navTooltipTo.textContent = tooltipData.to;
+				navTooltip.classList.remove('chart-nav-tooltip-single');
+			}
+			if (e && e.clientX !== undefined && e.clientY !== undefined) {
+				positionNavTooltipAtPoint(e.clientX, e.clientY);
+			} else {
+				positionNavTooltipForButton(btn);
+			}
+			navTooltip.classList.add('visible');
+		}
+
+		function moveNavTooltip(e) {
+			if (!navTooltip || !navTooltip.classList.contains('visible')) return;
+			if (!e || e.clientX === undefined || e.clientY === undefined) return;
+			positionNavTooltipAtPoint(e.clientX, e.clientY);
+		}
+
+		function hideNavTooltip() {
+			if (!navTooltip) return;
+			navTooltip.classList.remove('visible');
+		}
+
+		function bindNavTooltip(btn) {
+			if (!btn || !getNavTooltipData(btn)) return;
+			btn.addEventListener('mouseenter', function(e) {
+				showNavTooltip(btn, e);
+			});
+			btn.addEventListener('mousemove', moveNavTooltip);
+			btn.addEventListener('mouseleave', hideNavTooltip);
+			btn.addEventListener('focus', function() {
+				showNavTooltip(btn);
+			});
+			btn.addEventListener('blur', hideNavTooltip);
+		}
 
 		function navigateChartOffset(nextOffset) {
 			nextOffset = Math.max(0, normalizeChartPeriodOffset(nextOffset));
@@ -1330,13 +1412,25 @@
 			navigateChartOffset(CHART_PERIOD_OFFSET + delta);
 		}
 
-		backBtn.addEventListener('click', function() {
+		bindNavTooltip(backBtn);
+		bindNavTooltip(forwardBtn);
+		bindNavTooltip(latestBtn);
+		window.addEventListener('resize', hideNavTooltip);
+		window.addEventListener('orientationchange', hideNavTooltip);
+
+		backBtn.addEventListener('click', function(e) {
+			if (isNavButtonDisabled(backBtn)) {
+				e.preventDefault();
+				return;
+			}
 			navigateChartPeriod(1);
 		});
 		forwardBtn.addEventListener('click', function() {
+			hideNavTooltip();
 			navigateChartPeriod(-1);
 		});
 		latestBtn.addEventListener('click', function() {
+			hideNavTooltip();
 			navigateChartOffset(0);
 		});
 	})();

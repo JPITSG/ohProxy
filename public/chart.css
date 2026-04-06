@@ -240,6 +240,63 @@ body.chart-fs-rotated .chart-card {
 	margin-top: 0.125rem;
 }
 
+.chart-nav-tooltip {
+	position: fixed;
+	top: 0;
+	left: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.2rem;
+	background: var(--bg-primary);
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	padding: 0.5rem 0.75rem;
+	box-shadow: var(--shadow-lg);
+	pointer-events: none;
+	opacity: 0;
+	transform: translateY(8px);
+	transition: opacity .4s ease, transform .4s ease;
+	z-index: 120;
+	white-space: nowrap;
+}
+
+.chart-nav-tooltip.visible {
+	opacity: 1;
+	transform: translateY(0);
+}
+
+.chart-nav-tooltip.chart-nav-tooltip-single .chart-nav-tooltip-arrow,
+.chart-nav-tooltip.chart-nav-tooltip-single .chart-nav-tooltip-line-secondary {
+	display: none;
+}
+
+[data-theme="dark"] .chart-nav-tooltip {
+	background: var(--bg-card);
+}
+
+.chart-nav-tooltip-line {
+	font-size: .7rem;
+	font-weight: 500;
+	color: var(--text-primary);
+	line-height: 1.35;
+}
+
+.chart-nav-tooltip-arrow {
+	width: 16px;
+	height: 16px;
+	background-color: var(--text-primary);
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http:\/\/www.w3.org\/2000\/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z'\/%3E%3C\/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http:\/\/www.w3.org\/2000\/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z'\/%3E%3C\/svg%3E");
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+	mask-position: center;
+	-webkit-mask-size: contain;
+	mask-size: contain;
+	opacity: .75;
+}
+
 .chart-container {
 	position: relative;
 	flex: 1;
@@ -346,6 +403,15 @@ body.chart-fs-rotated .chart-card {
 
 .chart-fs-btn:hover {
 	background: var(--bg-tertiary);
+}
+
+.chart-fs-btn[aria-disabled="true"] {
+	opacity: .35;
+	cursor: default;
+}
+
+.chart-fs-btn[aria-disabled="true"]:hover {
+	background: transparent;
 }
 
 .chart-fs-btn svg {

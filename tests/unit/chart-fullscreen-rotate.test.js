@@ -14,16 +14,23 @@ describe('Chart Fullscreen Rotate', () => {
 	it('adds period navigation buttons before rotate/fullscreen in chart header controls', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /id="chartPeriodBack"/);
-		assert.match(server, /id="chartPeriodBack"[\s\S]*hasPreviousPeriod \? '' : ' disabled aria-disabled="true" style="opacity:\.35;cursor:default;pointer-events:none"'/);
+		assert.match(server, /const backTooltipAttrs = hasPreviousPeriod[\s\S]*data-range-from="\$\{escapeHtml\(safeNavTooltipData\.back\?\.from \|\| ''\)\}" data-range-to="\$\{escapeHtml\(safeNavTooltipData\.back\?\.to \|\| ''\)\}"[\s\S]*' data-tooltip-message="No data available"';/);
+		assert.match(server, /id="chartPeriodBack"[\s\S]*\$\{backTooltipAttrs\}[\s\S]*hasPreviousPeriod \? '' : ' aria-disabled="true" data-nav-disabled="true"'/);
 		assert.match(server, /id="chartPeriodForward"/);
+		assert.match(server, /const forwardTooltipAttrs = safeNavTooltipData\.forward[\s\S]*data-range-from="\$\{escapeHtml\(safeNavTooltipData\.forward\.from\)\}" data-range-to="\$\{escapeHtml\(safeNavTooltipData\.forward\.to\)\}"/);
+		assert.match(server, /id="chartPeriodForward"[\s\S]*\$\{forwardTooltipAttrs\}/);
 		assert.match(server, /id="chartPeriodLatest"/);
+		assert.match(server, /const latestTooltipAttrs = safeNavTooltipData\.latest[\s\S]*data-range-from="\$\{escapeHtml\(safeNavTooltipData\.latest\.from\)\}" data-range-to="\$\{escapeHtml\(safeNavTooltipData\.latest\.to\)\}"/);
+		assert.match(server, /id="chartPeriodLatest"[\s\S]*\$\{latestTooltipAttrs\}/);
 		assert.match(server, /id="chartPeriodLatest"[\s\S]*M20 22L4 22/);
 		assert.match(server, /id="chartPeriodLatest"[\s\S]*stroke-width="1\.2"/);
+		assert.match(server, /id="chartNavTooltip"/);
+		assert.match(server, /chart-nav-tooltip-line chart-nav-tooltip-line-secondary/);
 		assert.match(server, /id="chartRotate"/);
 		assert.match(server, /id="chartPeriodBack"[\s\S]*id="chartPeriodForward"[\s\S]*id="chartPeriodLatest"[\s\S]*id="chartRotate"[\s\S]*id="chartFullscreen"/);
 	});
 
-	it('wires chart period navigation and parent URL sync', () => {
+	it('wires chart period navigation, custom range tooltips, and parent URL sync', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		const chartJs = fs.readFileSync(CHART_JS_FILE, 'utf8');
 		const chartCss = fs.readFileSync(CHART_CSS_FILE, 'utf8');
@@ -35,9 +42,25 @@ describe('Chart Fullscreen Rotate', () => {
 		assert.match(chartJs, /window\.parent\.postMessage\(\{\s*type: 'ohproxy-chart-url-state',/);
 		assert.match(chartJs, /forwardBtn\.style\.display = CHART_PERIOD_OFFSET > 0 \? 'flex' : 'none';/);
 		assert.match(chartJs, /latestBtn\.style\.display = CHART_PERIOD_OFFSET > 0 \? 'flex' : 'none';/);
+		assert.match(chartJs, /var navTooltip = document\.getElementById\('chartNavTooltip'\);/);
+		assert.match(chartJs, /function getNavTooltipData\(btn\) \{/);
+		assert.match(chartJs, /var message = btn\.getAttribute\('data-tooltip-message'\) \|\| '';/);
+		assert.match(chartJs, /if \(message\) return \{ message: message \};/);
+		assert.match(chartJs, /btn\.addEventListener\('mouseenter', function\(e\) \{\s*showNavTooltip\(btn, e\);\s*\}\);/);
+		assert.match(chartJs, /btn\.addEventListener\('focus', function\(\) \{\s*showNavTooltip\(btn\);\s*\}\);/);
+		assert.match(chartJs, /bindNavTooltip\(forwardBtn\);/);
+		assert.match(chartJs, /if \(isNavButtonDisabled\(backBtn\)\) \{\s*e\.preventDefault\(\);\s*return;\s*\}/);
+		assert.match(chartJs, /function hideNavTooltip\(\) \{\s*if \(!navTooltip\) return;\s*navTooltip\.classList\.remove\('visible'\);\s*\}/);
+		assert.match(chartJs, /window\.addEventListener\('resize', hideNavTooltip\);/);
 		assert.match(chartJs, /function navigateChartOffset\(nextOffset\) \{/);
-		assert.match(chartJs, /latestBtn\.addEventListener\('click', function\(\) \{\s*navigateChartOffset\(0\);\s*\}\);/);
+		assert.match(chartJs, /forwardBtn\.addEventListener\('click', function\(\) \{\s*hideNavTooltip\(\);\s*navigateChartPeriod\(-1\);\s*\}\);/);
+		assert.match(chartJs, /latestBtn\.addEventListener\('click', function\(\) \{\s*hideNavTooltip\(\);\s*navigateChartOffset\(0\);\s*\}\);/);
 		assert.match(chartCss, /\.chart-nav-btn::after \{/);
+		assert.match(chartCss, /\.chart-nav-tooltip \{/);
+		assert.match(chartCss, /\.chart-nav-tooltip\.chart-nav-tooltip-single \.chart-nav-tooltip-arrow,/);
+		assert.match(chartCss, /\.chart-nav-tooltip-line \{\s*font-size: \.7rem;\s*font-weight: 500;/);
+		assert.match(chartCss, /\.chart-nav-tooltip-arrow \{/);
+		assert.match(chartCss, /\.chart-fs-btn\[aria-disabled="true"\] \{/);
 		assert.match(chartCss, /width: 16px;/);
 		assert.match(chartCss, /height: 16px;/);
 		assert.match(chartCss, /#chartPeriodLatest svg \{/);
@@ -51,10 +74,15 @@ describe('Chart Fullscreen Rotate', () => {
 	it('checks previous-period availability during chart generation and invalidates old chart html cache entries', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /function chartHasPreviousPeriodData\(item, periodWindow, service = '', forceAsItem = false, preloadedItemDefinition = null, periodOffset = 0\) \{/);
+		assert.match(server, /function buildChartNavigationTooltipData\(periodWindow, periodOffset = 0\) \{/);
+		assert.match(server, /from: formatChartPeriodTooltipTimestamp\(start\),/);
+		assert.match(server, /to: formatChartPeriodTooltipTimestamp\(end\),/);
+		assert.match(server, /forward: normalizedOffset > 0 \? formatRange\(Math\.max\(0, normalizedOffset - 1\)\) : null,/);
 		assert.match(server, /const nextOffset = normalizeChartPeriodOffsetValue\(periodOffset\) \+ 1;/);
 		assert.match(server, /return Array\.isArray\(previousSeriesList\) && previousSeriesList\.length > 0;/);
 		assert.match(server, /const hasPreviousPeriod = await chartHasPreviousPeriodData\(item, window, service, forceAsItem, preloadedItemDefinition, normalizedOffset\);/);
 		assert.match(server, /const hasPreviousPeriod = await chartHasPreviousPeriodData\(item, periodWindow, service, forceAsItem, null, periodOffset\);/);
+		assert.match(server, /const navTooltipData = buildChartNavigationTooltipData\(window, normalizedOffset\);/);
 		assert.match(server, /const rendered = renderChartFromSeries\(rawSeriesList, period, mode, title, legend, yAxisDecimalPattern, periodWindow, interpolation, dataHash, unitSymbol, periodOffset, hasPreviousPeriod\);/);
 		assert.match(server, /\|prevnav:v2\|/);
 	});
