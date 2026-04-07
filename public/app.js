@@ -669,6 +669,7 @@ function formatDT(date, fmt) {
 
 const PAGE_FADE_OUT_MS = configNumber(CLIENT_CONFIG.pageFadeOutMs, 250);
 const PAGE_FADE_IN_MS = configNumber(CLIENT_CONFIG.pageFadeInMs, 250);
+const PAGE_TITLE_SEPARATOR = ' · ';
 const LOADING_DELAY_MS = configNumber(CLIENT_CONFIG.loadingDelayMs, 1000);
 const MIN_IMAGE_REFRESH_MS = configNumber(CLIENT_CONFIG.minImageRefreshMs, 5000);
 const IMAGE_LOAD_TIMEOUT_MS = configNumber(CLIENT_CONFIG.imageLoadTimeoutMs, 15000);
@@ -857,6 +858,10 @@ let resumeReloadArmed = false;
 let resumePingPending = false;
 let lastHiddenTime = 0;
 let pageFadeToken = 0;
+const headerTitleTransition = {
+	token: 0,
+	animatePageLabel: false,
+};
 let loadingTimer = null;
 let loadingToken = 0;
 
@@ -1770,6 +1775,7 @@ function beginPageFadeOut() {
 	if (!els.grid || state.isSlim) return null;
 	pageFadeToken += 1;
 	const token = pageFadeToken;
+	beginPageTitleFadeOut(token);
 	els.grid.classList.remove('page-fade-in');
 	els.grid.classList.add('page-fade-out');
 	return { token, promise: delay(PAGE_FADE_OUT_MS) };
@@ -1779,6 +1785,7 @@ function runPageFadeIn(token) {
 	if (!els.grid || state.isSlim) return;
 	if (token !== pageFadeToken) return;
 	els.grid.classList.remove('page-fade-out');
+	runPageTitleFadeIn(token);
 	// Double rAF ensures browser has painted before starting fade-in
 	requestAnimationFrame(() => {
 		requestAnimationFrame(() => {
@@ -10655,7 +10662,171 @@ function patchWidgets(widgets, nodes) {
 	}
 }
 
-function render() {
+function buildHeaderTitleState(searchText = '') {
+	const sitemapTitle = getActiveSitemapTitle();
+	const siteName = CLIENT_CONFIG.siteName || sitemapTitle || state.rootPageTitle || state.pageTitle || 'openHAB';
+	const isRoot = state.rootPageUrl && state.pageUrl && state.rootPageUrl === state.pageUrl;
+	const isSearchResultsView = !!searchText;
+	const pageLabel = isSearchResultsView ? 'Search Results' : (isRoot ? 'Home' : (state.pageTitle || sitemapTitle || siteName));
+	const pageParts = splitLabelState(pageLabel);
+	const pageText = pageParts.title || pageLabel;
+	const pageTitleText = `${siteName}${PAGE_TITLE_SEPARATOR}${pageText}`;
+	return {
+		isRoot,
+		isSearchResultsView,
+		pageLabel,
+		pageParts,
+		pageText,
+		pageTitleText,
+		siteName,
+		siteText: sitemapTitle || siteName,
+		sitemapTitle,
+	};
+}
+
+function ensurePageTitleParts() {
+	if (!els.title) return {};
+	let siteSpan = els.title.querySelector('.page-title-site');
+	let separatorSpan = els.title.querySelector('.page-title-separator');
+	let pageSpan = els.title.querySelector('.page-title-label');
+	if (siteSpan && separatorSpan && pageSpan) return { siteSpan, separatorSpan, pageSpan };
+
+	els.title.innerHTML = '';
+
+	siteSpan = document.createElement('span');
+	siteSpan.className = 'font-semibold page-title-site';
+	siteSpan.addEventListener('click', () => {
+		if (isSitemapSelectionEnabled()) openSitemapSelectModal();
+	});
+	siteSpan.addEventListener('keydown', (e) => {
+		if (!isSitemapSelectionEnabled()) return;
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			openSitemapSelectModal();
+		}
+	});
+	els.title.appendChild(siteSpan);
+
+	separatorSpan = document.createElement('span');
+	separatorSpan.className = 'font-light text-slate-300 page-title-separator';
+	els.title.appendChild(separatorSpan);
+
+	pageSpan = document.createElement('span');
+	pageSpan.className = 'font-light text-slate-300 page-title-label';
+	els.title.appendChild(pageSpan);
+
+	return { siteSpan, separatorSpan, pageSpan };
+}
+
+function resetPageTitleTransition(pageSpan) {
+	if (pageSpan) {
+		pageSpan.classList.remove('page-title-fade-out', 'page-title-fade-pending', 'page-title-fade-in');
+		pageSpan.style.transition = '';
+	}
+	headerTitleTransition.animatePageLabel = false;
+}
+
+function updatePageTitleSite(siteSpan, siteText) {
+	if (!siteSpan) return;
+	siteSpan.textContent = siteText;
+	if (isSitemapSelectionEnabled()) {
+		siteSpan.classList.add('sitemap-title-selectable');
+		siteSpan.tabIndex = 0;
+		siteSpan.setAttribute('role', 'button');
+		siteSpan.setAttribute('aria-label', ohLang?.sitemapSelect?.triggerAriaLabel || 'Select sitemap');
+		return;
+	}
+	siteSpan.classList.remove('sitemap-title-selectable');
+	siteSpan.removeAttribute('tabindex');
+	siteSpan.removeAttribute('role');
+	siteSpan.removeAttribute('aria-label');
+}
+
+function beginPageTitleFadeOut(token) {
+	const { siteSpan, pageSpan } = ensurePageTitleParts();
+	if (!siteSpan || !pageSpan) {
+		headerTitleTransition.animatePageLabel = false;
+		return;
+	}
+	const nextTitle = buildHeaderTitleState(parseSearchQuery(state.filter).text);
+	const currentSiteText = safeText(siteSpan.textContent);
+	const currentPageText = safeText(pageSpan.textContent);
+	const canAnimatePageLabel = !!currentPageText
+		&& currentSiteText === nextTitle.siteText
+		&& currentPageText !== nextTitle.pageText;
+
+	headerTitleTransition.token = token;
+	if (!canAnimatePageLabel) {
+		resetPageTitleTransition(pageSpan);
+		return;
+	}
+
+	headerTitleTransition.animatePageLabel = true;
+	pageSpan.style.transition = `opacity ${PAGE_FADE_OUT_MS}ms ease`;
+	pageSpan.classList.remove('page-title-fade-pending', 'page-title-fade-in');
+	pageSpan.classList.add('page-title-fade-out');
+}
+
+function runPageTitleFadeIn(token) {
+	const { pageSpan } = ensurePageTitleParts();
+	if (!pageSpan) return;
+	if (token !== pageFadeToken) return;
+	if (!headerTitleTransition.animatePageLabel || headerTitleTransition.token !== token) return;
+
+	pageSpan.style.transition = `opacity ${PAGE_FADE_IN_MS}ms ease`;
+	pageSpan.classList.remove('page-title-fade-out');
+	requestAnimationFrame(() => {
+		requestAnimationFrame(() => {
+			if (token !== pageFadeToken) return;
+			if (!headerTitleTransition.animatePageLabel || headerTitleTransition.token !== token) return;
+			pageSpan.classList.remove('page-title-fade-pending');
+			pageSpan.classList.add('page-title-fade-in');
+			setTimeout(() => {
+				if (token !== pageFadeToken) return;
+				if (headerTitleTransition.token !== token) return;
+				pageSpan.classList.remove('page-title-fade-in');
+				pageSpan.style.transition = '';
+				headerTitleTransition.animatePageLabel = false;
+			}, PAGE_FADE_IN_MS);
+		});
+	});
+}
+
+function renderHeaderTitle(searchText, options = {}) {
+	const headerTitle = buildHeaderTitleState(searchText);
+	if (!els.title) {
+		document.title = headerTitle.pageTitleText;
+		return headerTitle;
+	}
+	const { siteSpan, separatorSpan, pageSpan } = ensurePageTitleParts();
+	if (!siteSpan || !separatorSpan || !pageSpan) {
+		document.title = headerTitle.pageTitleText;
+		return headerTitle;
+	}
+
+	const previousSiteText = safeText(siteSpan.textContent);
+	const shouldAnimatePageLabel = options.animatePageLabel === true
+		&& headerTitleTransition.animatePageLabel
+		&& headerTitleTransition.token === options.fadeToken
+		&& previousSiteText === headerTitle.siteText;
+
+	updatePageTitleSite(siteSpan, headerTitle.siteText);
+	separatorSpan.textContent = PAGE_TITLE_SEPARATOR.trim();
+
+	if (shouldAnimatePageLabel) {
+		pageSpan.textContent = headerTitle.pageText;
+		pageSpan.classList.remove('page-title-fade-in', 'page-title-fade-out');
+		pageSpan.classList.add('page-title-fade-pending');
+	} else {
+		resetPageTitleTransition(pageSpan);
+		pageSpan.textContent = headerTitle.pageText;
+	}
+
+	document.title = headerTitle.pageTitleText;
+	return headerTitle;
+}
+
+function render(options = {}) {
 	const searchQuery = parseSearchQuery(state.filter);
 	const q = searchQuery.text;
 	const rawSource = q ? (state.searchWidgets || state.rawWidgets) : state.rawWidgets;
@@ -10752,40 +10923,7 @@ function render() {
 		widgets._matchCount = combined.length;
 	}
 
-	const sitemapTitle = getActiveSitemapTitle();
-	const siteName = CLIENT_CONFIG.siteName || sitemapTitle || state.rootPageTitle || state.pageTitle || 'openHAB';
-	const isRoot = state.rootPageUrl && state.pageUrl && state.rootPageUrl === state.pageUrl;
-	const isSearchResultsView = !!q;
-	const pageLabel = isSearchResultsView ? 'Search Results' : (isRoot ? 'Home' : (state.pageTitle || sitemapTitle || siteName));
-	const pageParts = splitLabelState(pageLabel);
-	const pageTitleText = `${siteName} · ${pageParts.title || pageLabel}`;
-	if (els.title) {
-		els.title.innerHTML = '';
-		const siteSpan = document.createElement('span');
-		siteSpan.className = 'font-semibold';
-		siteSpan.textContent = sitemapTitle || siteName;
-		if (isSitemapSelectionEnabled()) {
-			siteSpan.classList.add('sitemap-title-selectable');
-			siteSpan.tabIndex = 0;
-			siteSpan.setAttribute('role', 'button');
-			siteSpan.setAttribute('aria-label', ohLang?.sitemapSelect?.triggerAriaLabel || 'Select sitemap');
-			siteSpan.addEventListener('click', () => openSitemapSelectModal());
-			siteSpan.addEventListener('keydown', (e) => {
-				if (e.key === 'Enter' || e.key === ' ') {
-					e.preventDefault();
-					openSitemapSelectModal();
-				}
-			});
-		}
-		els.title.appendChild(siteSpan);
-
-		const pageSpan = document.createElement('span');
-		pageSpan.className = 'font-light text-slate-300';
-		pageSpan.textContent = ` · ${pageParts.title || pageLabel}`;
-		els.title.appendChild(pageSpan);
-
-	}
-	document.title = pageTitleText;
+	renderHeaderTitle(q, options);
 
 	const nodes = Array.from(els.grid.children);
 	const canPatch = nodes.length === widgets.length && widgets.every((w, i) => {
@@ -11109,7 +11247,7 @@ async function applyPageData(page, fade, shouldScroll) {
 	state.lastPageUrl = state.pageUrl;
 	if (fade) await fade.promise;
 	if (shouldScroll) scrollToTop();
-	render();
+	render({ animatePageLabel: !!fade, fadeToken: fade?.token });
 	saveHomeSnapshot();
 	if (fade) runPageFadeIn(fade.token);
 	state.isRefreshing = false;

@@ -1136,9 +1136,33 @@ body.theme-dark #themeToggleBtn svg {
 	min-width: 0;
 }
 #pageTitle {
+	display: flex;
+	align-items: baseline;
+	column-gap: 0.28em;
+	min-width: 0;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+#pageTitle .page-title-site,
+#pageTitle .page-title-separator {
+	flex: 0 0 auto;
+}
+#pageTitle .page-title-label {
+	flex: 1 1 auto;
+	display: block;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	opacity: 1;
+}
+#pageTitle .page-title-label.page-title-fade-pending,
+#pageTitle .page-title-label.page-title-fade-out {
+	opacity: 0;
+}
+#pageTitle .page-title-label.page-title-fade-in {
+	opacity: 1;
 }
 #pageTitle .sitemap-title-selectable {
 	cursor: pointer;

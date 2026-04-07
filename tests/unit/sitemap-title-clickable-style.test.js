@@ -13,7 +13,7 @@ describe('Sitemap Title Clickable Styling', () => {
 	it('keeps sitemap title clickable in app wiring when sitemap selection is enabled', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /siteSpan\.classList\.add\('sitemap-title-selectable'\);/);
-		assert.match(app, /siteSpan\.addEventListener\('click', \(\) => openSitemapSelectModal\(\)\);/);
+		assert.match(app, /siteSpan\.addEventListener\('click', \(\) => \{\s*if \(isSitemapSelectionEnabled\(\)\) openSitemapSelectModal\(\);\s*\}\);/);
 		assert.match(app, /siteSpan\.addEventListener\('keydown', \(e\) => \{/);
 	});
 
