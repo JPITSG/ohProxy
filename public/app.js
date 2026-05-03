@@ -5827,6 +5827,7 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'server.cmdapi.enabled', type: 'toggle' },
 			{ key: 'server.cmdapi.allowedSubnets', type: 'list', allowEmpty: true },
 			{ key: 'server.cmdapi.allowedItems', type: 'list', allowEmpty: true },
+			{ key: 'server.cmdapi.verifypost', type: 'toggle' },
 		],
 	},
 	{

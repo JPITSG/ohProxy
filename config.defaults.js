@@ -213,6 +213,8 @@ module.exports = {
 			allowedSubnets: [],
 			// Allowed items for /CMD requests (item names; '*' allows all; empty blocks all).
 			allowedItems: [],
+			// Verify /POST target state first and skip unchanged OpenHAB updates.
+			verifypost: true,
 		},
 
 		// === GPS ===

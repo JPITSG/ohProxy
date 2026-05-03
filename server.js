@@ -667,6 +667,7 @@ const CMDAPI_ALLOWED_SUBNETS = Array.isArray(CMDAPI_CONFIG.allowedSubnets)
 const CMDAPI_ALLOWED_ITEMS = Array.isArray(CMDAPI_CONFIG.allowedItems)
 	? CMDAPI_CONFIG.allowedItems
 	: [];
+const CMDAPI_VERIFY_POST = CMDAPI_CONFIG.verifypost !== false;
 const CMDAPI_TIMEOUT_MS = 10000;
 let mysqlConnection = null;
 let mysqlConnecting = false;
@@ -1108,6 +1109,7 @@ function validateConfig() {
 
 	if (ensureObject(SERVER_CONFIG.cmdapi, 'server.cmdapi', errors)) {
 		ensureBoolean(CMDAPI_CONFIG.enabled, 'server.cmdapi.enabled', errors);
+		ensureBoolean(CMDAPI_CONFIG.verifypost, 'server.cmdapi.verifypost', errors);
 		ensureCidrList(CMDAPI_ALLOWED_SUBNETS, 'server.cmdapi.allowedSubnets', { allowEmpty: true }, errors);
 		if (ensureArray(CMDAPI_ALLOWED_ITEMS, 'server.cmdapi.allowedItems', { allowEmpty: true }, errors)) {
 			CMDAPI_ALLOWED_ITEMS.forEach((entry, index) => {
@@ -1397,6 +1399,7 @@ function validateAdminConfig(config) {
 	// CMD API
 	if (isPlainObject(s.cmdapi)) {
 		ensureBoolean(s.cmdapi.enabled, 'server.cmdapi.enabled', errors);
+		ensureBoolean(s.cmdapi.verifypost, 'server.cmdapi.verifypost', errors);
 		if (Array.isArray(s.cmdapi.allowedSubnets)) {
 			ensureCidrList(s.cmdapi.allowedSubnets, 'server.cmdapi.allowedSubnets', { allowEmpty: true, maxItems: 100 }, errors);
 		}
@@ -2025,6 +2028,7 @@ const liveConfig = {
 	cmdapiEnabled: CMDAPI_ENABLED,
 	cmdapiAllowedSubnets: CMDAPI_ALLOWED_SUBNETS,
 	cmdapiAllowedItems: CMDAPI_ALLOWED_ITEMS,
+	cmdapiVerifyPost: CMDAPI_VERIFY_POST,
 	jsLogEnabled: JS_LOG_ENABLED,
 	logFile: LOG_FILE,
 	accessLog: ACCESS_LOG,
@@ -2206,6 +2210,7 @@ function reloadLiveConfig() {
 	liveConfig.cmdapiAllowedItems = Array.isArray(newServer.cmdapi?.allowedItems)
 		? newServer.cmdapi.allowedItems
 		: [];
+	liveConfig.cmdapiVerifyPost = newServer.cmdapi?.verifypost !== false;
 
 	// Logging config
 	liveConfig.jsLogEnabled = newServer.jsLogEnabled === true;
@@ -6363,12 +6368,45 @@ function sendItemCommand(itemName, command, { timeoutMs = 0, timeoutLabel = 'req
 	});
 }
 
+function fetchItemState(itemName, { timeoutMs = 0, timeoutLabel = 'request' } = {}) {
+	const client = getOpenhabClient();
+	return client.get(`/rest/items/${encodeURIComponent(itemName)}/state`, {
+		timeoutMs,
+		timeoutLabel,
+		headers: {
+			'Accept': 'text/plain',
+		},
+	});
+}
+
+function postItemState(itemName, state, { timeoutMs = 0, timeoutLabel = 'request' } = {}) {
+	const client = getOpenhabClient();
+	return client.request(`/rest/items/${encodeURIComponent(itemName)}/state`, {
+		method: 'PUT',
+		body: String(state),
+		timeoutMs,
+		timeoutLabel,
+		headers: {
+			'Content-Type': 'text/plain',
+			'Accept': 'application/json',
+		},
+	});
+}
+
 function sendOpenhabCommand(itemName, command) {
 	return sendItemCommand(itemName, command, { timeoutMs: liveConfig.ohTimeoutMs, timeoutLabel: 'openHAB command' });
 }
 
 function sendCmdApiCommand(itemName, command) {
 	return sendItemCommand(itemName, command, { timeoutMs: CMDAPI_TIMEOUT_MS, timeoutLabel: 'CMD API request' });
+}
+
+function fetchCmdApiItemState(itemName) {
+	return fetchItemState(itemName, { timeoutMs: CMDAPI_TIMEOUT_MS, timeoutLabel: 'POST API verify request' });
+}
+
+function sendCmdApiPostUpdate(itemName, state) {
+	return postItemState(itemName, state, { timeoutMs: CMDAPI_TIMEOUT_MS, timeoutLabel: 'POST API request' });
 }
 
 function callAnthropicApi(requestBody) {
@@ -6935,66 +6973,68 @@ app.use((req, res, next) => {
 	next();
 });
 
-// /CMD endpoint - send commands to OpenHAB items (restricted to cmdapi.allowedSubnets)
-app.get('/CMD', async (req, res) => {
-	// Check if cmdapi is enabled
+function parseCmdApiRequest(req, res, endpointName) {
 	if (!liveConfig.cmdapiEnabled) {
 		res.status(404).json({ result: 'failed', error: 'CMD API not enabled' });
-		return;
+		return null;
 	}
 
-	// Check IP allowlist (separate from main allowSubnets)
 	const clientIp = getRemoteIp(req);
 	if (!clientIp || !ipInAnySubnet(clientIp, liveConfig.cmdapiAllowedSubnets)) {
-		logMessage(`[CMD] Blocked request from ${clientIp || 'unknown'} - not in allowed subnets`);
+		logMessage(`[${endpointName}] Blocked request from ${clientIp || 'unknown'} - not in allowed subnets`);
 		res.status(403).json({ result: 'failed', error: 'IP not allowed' });
-		return;
+		return null;
 	}
 
-	// Parse query string: /CMD?Item=state
 	if (!isPlainObject(req.query)) {
 		res.status(400).json({ result: 'failed', error: 'Invalid query format' });
-		return;
+		return null;
 	}
 	const queryKeys = Object.keys(req.query);
 	if (queryKeys.length !== 1) {
 		res.status(400).json({ result: 'failed', error: 'Invalid query format - expected ?Item=state' });
-		return;
+		return null;
 	}
 
 	const itemName = queryKeys[0];
 	const rawState = req.query[itemName];
 	if (typeof rawState !== 'string') {
 		res.status(400).json({ result: 'failed', error: 'Invalid state value' });
-		return;
+		return null;
 	}
 	const state = rawState;
 
-	// Validate item name (alphanumeric, underscore, hyphen, 1-100 chars)
 	if (!itemName || !/^[a-zA-Z0-9_-]{1,100}$/.test(itemName)) {
 		res.status(400).json({ result: 'failed', error: 'Invalid item name' });
-		return;
+		return null;
 	}
 
-	// Check if item is in allowlist
 	const allowedItems = liveConfig.cmdapiAllowedItems;
 	const itemAllowed = Array.isArray(allowedItems) && allowedItems.length > 0 &&
 		(allowedItems.includes('*') || allowedItems.includes(itemName));
 	if (!itemAllowed) {
-		logMessage(`[CMD] Blocked request for item ${itemName} - not in allowed items`);
+		logMessage(`[${endpointName}] Blocked request for item ${itemName} - not in allowed items`);
 		res.status(403).json({ result: 'failed', error: 'Item not allowed' });
-		return;
+		return null;
 	}
 
-	// Validate state (non-empty, max 500 chars, no control characters)
 	if (!state || state.length > 500) {
 		res.status(400).json({ result: 'failed', error: 'Invalid state value' });
-		return;
+		return null;
 	}
 	if (hasAnyControlChars(state)) {
 		res.status(400).json({ result: 'failed', error: 'Invalid characters in state' });
-		return;
+		return null;
 	}
+
+	return { clientIp, itemName, state };
+}
+
+// /CMD endpoint - send commands to OpenHAB items (restricted to cmdapi.allowedSubnets)
+app.get('/CMD', async (req, res) => {
+	const parsed = parseCmdApiRequest(req, res, 'CMD');
+	if (!parsed) return;
+	const { clientIp, itemName, state } = parsed;
 
 	try {
 		const result = await sendCmdApiCommand(itemName, state);
@@ -7007,6 +7047,43 @@ app.get('/CMD', async (req, res) => {
 		}
 	} catch (err) {
 		logMessage(`[CMD] ${clientIp} -> ${itemName}=${state} -> error: ${err.message}`);
+		res.json({ result: 'failed', error: 'Request failed' });
+	}
+});
+
+// /POST endpoint - post updates to OpenHAB item state (restricted to cmdapi.allowedSubnets)
+app.get('/POST', async (req, res) => {
+	const parsed = parseCmdApiRequest(req, res, 'POST');
+	if (!parsed) return;
+	const { clientIp, itemName, state } = parsed;
+
+	if (liveConfig.cmdapiVerifyPost) {
+		try {
+			const current = await fetchCmdApiItemState(itemName);
+			if (current.ok && current.body === state) {
+				logMessage(`[POST] ${clientIp} -> ${itemName}=${state} -> skipped unchanged`);
+				res.json({ result: 'success' });
+				return;
+			}
+			if (!current.ok) {
+				logMessage(`[POST] ${clientIp} -> ${itemName}=${state} -> verify failed (${current.status}), updating`);
+			}
+		} catch (err) {
+			logMessage(`[POST] ${clientIp} -> ${itemName}=${state} -> verify error: ${err.message}, updating`);
+		}
+	}
+
+	try {
+		const result = await sendCmdApiPostUpdate(itemName, state);
+		if (result.ok) {
+			logMessage(`[POST] ${clientIp} -> ${itemName}=${state} -> success`);
+			res.json({ result: 'success' });
+		} else {
+			logMessage(`[POST] ${clientIp} -> ${itemName}=${state} -> failed (${result.status})`);
+			res.json({ result: 'failed', error: `OpenHAB returned ${result.status}` });
+		}
+	} catch (err) {
+		logMessage(`[POST] ${clientIp} -> ${itemName}=${state} -> error: ${err.message}`);
 		res.json({ result: 'failed', error: 'Request failed' });
 	}
 });

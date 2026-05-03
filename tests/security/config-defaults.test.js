@@ -200,6 +200,12 @@ describe('Config Defaults: Security Settings', () => {
 
 		assert.ok(hasEmptyAllowlist, 'Proxy allowlist should default to empty (deny all)');
 	});
+
+	it('cmdapi verifies POST updates by default', () => {
+		const defaultsContent = readFile(DEFAULTS_FILE);
+		const verifyPostDefault = /cmdapi\s*:\s*\{[\s\S]*?verifypost\s*:\s*true/.test(defaultsContent);
+		assert.ok(verifyPostDefault, 'CMD API /POST verification should default to true');
+	});
 });
 
 describe('Config Defaults: No Sensitive Values', () => {

@@ -14,6 +14,7 @@ function createCmdApiTestApp(config = {}) {
 		enabled: config.enabled !== false,
 		allowedSubnets: config.allowedSubnets || ['192.168.1.0/24'],
 		allowedItems: config.allowedItems || ['*'],
+		verifypost: config.verifypost !== false,
 	};
 
 	// OpenHAB mock server config
@@ -55,61 +56,122 @@ function createCmdApiTestApp(config = {}) {
 		return false;
 	}
 
-	// CMD API endpoint
-	app.get('/CMD', async (req, res) => {
-		// Check if cmdapi is enabled
+	function parseCmdApiRequest(req, res) {
 		if (!cmdapiConfig.enabled) {
 			res.status(404).json({ result: 'failed', error: 'CMD API not enabled' });
-			return;
+			return null;
 		}
 
-		// Check IP allowlist
 		const clientIp = getRemoteIp(req);
 		if (!clientIp || !ipInAnySubnet(clientIp, cmdapiConfig.allowedSubnets)) {
 			res.status(403).json({ result: 'failed', error: 'IP not allowed' });
-			return;
+			return null;
 		}
 
-		// Parse query string: /CMD?Item=state
 		const queryKeys = Object.keys(req.query);
 		if (queryKeys.length !== 1) {
 			res.status(400).json({ result: 'failed', error: 'Invalid query format - expected ?Item=state' });
-			return;
+			return null;
 		}
 
 		const itemName = queryKeys[0];
-		const state = safeText(req.query[itemName]);
+		const rawState = req.query[itemName];
+		if (typeof rawState !== 'string') {
+			res.status(400).json({ result: 'failed', error: 'Invalid state value' });
+			return null;
+		}
+		const state = safeText(rawState);
 
-		// Validate item name (alphanumeric, underscore, hyphen, 1-100 chars)
 		if (!itemName || !/^[a-zA-Z0-9_-]{1,100}$/.test(itemName)) {
 			res.status(400).json({ result: 'failed', error: 'Invalid item name' });
-			return;
+			return null;
 		}
 
-		// Check if item is in allowlist
 		const allowedItems = cmdapiConfig.allowedItems;
 		const itemAllowed = Array.isArray(allowedItems) && allowedItems.length > 0 &&
 			(allowedItems.includes('*') || allowedItems.includes(itemName));
 		if (!itemAllowed) {
 			res.status(403).json({ result: 'failed', error: 'Item not allowed' });
-			return;
+			return null;
 		}
 
-		// Validate state (non-empty, max 500 chars, no control characters)
 		if (!state || state.length > 500) {
 			res.status(400).json({ result: 'failed', error: 'Invalid state value' });
-			return;
+			return null;
 		}
 		if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(state)) {
 			res.status(400).json({ result: 'failed', error: 'Invalid characters in state' });
-			return;
+			return null;
 		}
 
-		// Simulate OpenHAB response
+		return { clientIp, itemName, state };
+	}
+
+	function recordOpenhabCall(call) {
+		if (Array.isArray(ohMock.calls)) {
+			ohMock.calls.push(call);
+		}
+	}
+
+	function sendMockCommand(itemName, state) {
+		recordOpenhabCall({ method: 'POST', path: `/rest/items/${itemName}`, body: state });
 		if (ohMock.statusCode >= 200 && ohMock.statusCode < 300) {
+			return { ok: true, status: ohMock.statusCode };
+		}
+		return { ok: false, status: ohMock.statusCode };
+	}
+
+	function fetchMockState(itemName) {
+		recordOpenhabCall({ method: 'GET', path: `/rest/items/${itemName}/state` });
+		if (ohMock.verifyError) {
+			throw new Error(ohMock.verifyError);
+		}
+		const status = ohMock.stateStatusCode || 200;
+		return { ok: status >= 200 && status < 300, status, body: safeText(ohMock.currentState) };
+	}
+
+	function sendMockPostUpdate(itemName, state) {
+		recordOpenhabCall({ method: 'PUT', path: `/rest/items/${itemName}/state`, body: state });
+		const status = ohMock.updateStatusCode || ohMock.statusCode || 200;
+		return { ok: status >= 200 && status < 300, status };
+	}
+
+	// CMD API endpoint
+	app.get('/CMD', async (req, res) => {
+		const parsed = parseCmdApiRequest(req, res);
+		if (!parsed) return;
+		const { itemName, state } = parsed;
+		const result = sendMockCommand(itemName, state);
+		if (result.ok) {
 			res.json({ result: 'success' });
 		} else {
-			res.json({ result: 'failed', error: `OpenHAB returned ${ohMock.statusCode}` });
+			res.json({ result: 'failed', error: `OpenHAB returned ${result.status}` });
+		}
+	});
+
+	// POST API endpoint
+	app.get('/POST', async (req, res) => {
+		const parsed = parseCmdApiRequest(req, res);
+		if (!parsed) return;
+		const { itemName, state } = parsed;
+
+		if (cmdapiConfig.verifypost) {
+			try {
+				const current = fetchMockState(itemName);
+				if (current.ok && current.body === state) {
+					res.json({ result: 'success' });
+					return;
+				}
+			} catch {
+				// Verification failures still attempt the update.
+			}
+		}
+
+		const result = sendMockPostUpdate(itemName, state);
+		if (result.ok) {
+			res.json({ result: 'success' });
+		} else {
+			res.json({ result: 'failed', error: `OpenHAB returned ${result.status}` });
 		}
 	});
 
@@ -689,6 +751,182 @@ describe('CMD API', () => {
 			assert.strictEqual(res.status, 200); // Endpoint returns 200, but result is failed
 			assert.strictEqual(res.body.result, 'failed');
 			assert.strictEqual(res.body.error, 'OpenHAB returned 404');
+		});
+	});
+
+	describe('POST API', () => {
+		it('returns 404 when CMD API is disabled', async () => {
+			const app = createCmdApiTestApp({ enabled: false });
+			const server = http.createServer(app);
+			await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+			const port = server.address().port;
+			try {
+				const res = await httpRequest({
+					hostname: '127.0.0.1',
+					port,
+					path: '/POST?Test_Item=ON',
+					method: 'GET',
+					headers: { 'X-Forwarded-For': '192.168.1.100' },
+				});
+				assert.strictEqual(res.status, 404);
+				assert.strictEqual(res.body.result, 'failed');
+				assert.strictEqual(res.body.error, 'CMD API not enabled');
+			} finally {
+				await new Promise(resolve => server.close(resolve));
+			}
+		});
+
+		it('uses CMD API subnet and item allowlists', async () => {
+			const app = createCmdApiTestApp({
+				enabled: true,
+				allowedSubnets: ['192.168.1.0/24'],
+				allowedItems: ['Allowed_Item'],
+			});
+			const server = http.createServer(app);
+			await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+			const port = server.address().port;
+			try {
+				const blockedIp = await httpRequest({
+					hostname: '127.0.0.1',
+					port,
+					path: '/POST?Allowed_Item=ON',
+					method: 'GET',
+					headers: { 'X-Forwarded-For': '10.0.0.100' },
+				});
+				assert.strictEqual(blockedIp.status, 403);
+				assert.strictEqual(blockedIp.body.error, 'IP not allowed');
+
+				const blockedItem = await httpRequest({
+					hostname: '127.0.0.1',
+					port,
+					path: '/POST?Other_Item=ON',
+					method: 'GET',
+					headers: { 'X-Forwarded-For': '192.168.1.100' },
+				});
+				assert.strictEqual(blockedItem.status, 403);
+				assert.strictEqual(blockedItem.body.error, 'Item not allowed');
+			} finally {
+				await new Promise(resolve => server.close(resolve));
+			}
+		});
+
+		it('skips OpenHAB update when verifypost finds an unchanged state', async () => {
+			const calls = [];
+			const app = createCmdApiTestApp({
+				enabled: true,
+				allowedSubnets: ['192.168.1.0/24'],
+				allowedItems: ['*'],
+				ohMock: { currentState: 'ON', calls },
+			});
+			const server = http.createServer(app);
+			await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+			const port = server.address().port;
+			try {
+				const res = await httpRequest({
+					hostname: '127.0.0.1',
+					port,
+					path: '/POST?Test_Item=ON',
+					method: 'GET',
+					headers: { 'X-Forwarded-For': '192.168.1.100' },
+				});
+				assert.strictEqual(res.status, 200);
+				assert.strictEqual(res.body.result, 'success');
+				assert.deepStrictEqual(calls, [
+					{ method: 'GET', path: '/rest/items/Test_Item/state' },
+				]);
+			} finally {
+				await new Promise(resolve => server.close(resolve));
+			}
+		});
+
+		it('updates OpenHAB state when verifypost finds a different state', async () => {
+			const calls = [];
+			const app = createCmdApiTestApp({
+				enabled: true,
+				allowedSubnets: ['192.168.1.0/24'],
+				allowedItems: ['*'],
+				ohMock: { currentState: 'OFF', calls },
+			});
+			const server = http.createServer(app);
+			await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+			const port = server.address().port;
+			try {
+				const res = await httpRequest({
+					hostname: '127.0.0.1',
+					port,
+					path: '/POST?Test_Item=ON',
+					method: 'GET',
+					headers: { 'X-Forwarded-For': '192.168.1.100' },
+				});
+				assert.strictEqual(res.status, 200);
+				assert.strictEqual(res.body.result, 'success');
+				assert.deepStrictEqual(calls, [
+					{ method: 'GET', path: '/rest/items/Test_Item/state' },
+					{ method: 'PUT', path: '/rest/items/Test_Item/state', body: 'ON' },
+				]);
+			} finally {
+				await new Promise(resolve => server.close(resolve));
+			}
+		});
+
+		it('still updates OpenHAB state when verification fails', async () => {
+			const calls = [];
+			const app = createCmdApiTestApp({
+				enabled: true,
+				allowedSubnets: ['192.168.1.0/24'],
+				allowedItems: ['*'],
+				ohMock: { verifyError: 'verify failed', calls },
+			});
+			const server = http.createServer(app);
+			await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+			const port = server.address().port;
+			try {
+				const res = await httpRequest({
+					hostname: '127.0.0.1',
+					port,
+					path: '/POST?Test_Item=ON',
+					method: 'GET',
+					headers: { 'X-Forwarded-For': '192.168.1.100' },
+				});
+				assert.strictEqual(res.status, 200);
+				assert.strictEqual(res.body.result, 'success');
+				assert.deepStrictEqual(calls, [
+					{ method: 'GET', path: '/rest/items/Test_Item/state' },
+					{ method: 'PUT', path: '/rest/items/Test_Item/state', body: 'ON' },
+				]);
+			} finally {
+				await new Promise(resolve => server.close(resolve));
+			}
+		});
+
+		it('updates without reading current state when verifypost is disabled', async () => {
+			const calls = [];
+			const app = createCmdApiTestApp({
+				enabled: true,
+				allowedSubnets: ['192.168.1.0/24'],
+				allowedItems: ['*'],
+				verifypost: false,
+				ohMock: { currentState: 'ON', calls },
+			});
+			const server = http.createServer(app);
+			await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+			const port = server.address().port;
+			try {
+				const res = await httpRequest({
+					hostname: '127.0.0.1',
+					port,
+					path: '/POST?Test_Item=ON',
+					method: 'GET',
+					headers: { 'X-Forwarded-For': '192.168.1.100' },
+				});
+				assert.strictEqual(res.status, 200);
+				assert.strictEqual(res.body.result, 'success');
+				assert.deepStrictEqual(calls, [
+					{ method: 'PUT', path: '/rest/items/Test_Item/state', body: 'ON' },
+				]);
+			} finally {
+				await new Promise(resolve => server.close(resolve));
+			}
 		});
 	});
 });
