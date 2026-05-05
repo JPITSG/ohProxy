@@ -398,6 +398,7 @@ const state = {
 	proxyUser: '',
 	isRefreshing: false,
 	pendingScrollTop: false,
+	searchScrollResetPending: false,
 	initialStatusText: '',
 	resumeInProgress: false,
 	resumePhase: 'idle',
@@ -1688,6 +1689,7 @@ function applyHomeSnapshot(snapshot) {
 	state.stack = [];
 	state.filter = '';
 	if (els.search) els.search.value = '';
+	clearSearchScrollReset();
 	// Restore icon caches for this sitemap snapshot.
 	iconCache.clear();
 	if (snapshot.iconCache && typeof snapshot.iconCache === 'object') {
@@ -1811,6 +1813,21 @@ function scrollToTop() {
 		window.scrollTo({ top: 0, behavior });
 	} catch {
 		window.scrollTo(0, 0);
+	}
+}
+
+function queueSearchScrollReset() {
+	state.searchScrollResetPending = true;
+}
+
+function clearSearchScrollReset() {
+	state.searchScrollResetPending = false;
+}
+
+function finishSearchScrollReset() {
+	scrollToTop();
+	if (typeof requestAnimationFrame === 'function') {
+		requestAnimationFrame(scrollToTop);
 	}
 }
 
@@ -2544,6 +2561,55 @@ function scheduleSearchPlaceholderUpdate() {
 let searchFocusHistoryPushed = false;
 let searchBlurNavPending = false;
 let searchFilterHistoryPushed = false;
+const SEARCH_SCROLL_BLUR_MOVE_THRESHOLD_PX = 8;
+let searchFocusTouchStart = null;
+
+function isSearchInputFocused() {
+	return !!els.search && document.activeElement === els.search;
+}
+
+function blurSearchForScrollIntent() {
+	if (!isSearchInputFocused()) return false;
+	els.search.blur();
+	searchFocusTouchStart = null;
+	return true;
+}
+
+function handleSearchFocusScrollTouchStart(e) {
+	if (!isSearchInputFocused()) {
+		searchFocusTouchStart = null;
+		return;
+	}
+	const touch = e.touches && e.touches.length === 1 ? e.touches[0] : null;
+	searchFocusTouchStart = touch ? { x: touch.clientX, y: touch.clientY } : null;
+}
+
+function handleSearchFocusScrollTouchMove(e) {
+	if (!isSearchInputFocused()) {
+		searchFocusTouchStart = null;
+		return;
+	}
+	const touch = e.touches && e.touches.length === 1 ? e.touches[0] : null;
+	if (!touch || !searchFocusTouchStart) {
+		blurSearchForScrollIntent();
+		return;
+	}
+	const dx = Math.abs(touch.clientX - searchFocusTouchStart.x);
+	const dy = Math.abs(touch.clientY - searchFocusTouchStart.y);
+	if (dy >= SEARCH_SCROLL_BLUR_MOVE_THRESHOLD_PX && dy >= dx) {
+		blurSearchForScrollIntent();
+	}
+}
+
+function clearSearchFocusScrollTouch() {
+	searchFocusTouchStart = null;
+}
+
+function handleSearchFocusScrollWheel(e) {
+	if (!isSearchInputFocused()) return;
+	if (Math.abs(e.deltaY || 0) < 1 && Math.abs(e.deltaX || 0) < 1) return;
+	blurSearchForScrollIntent();
+}
 
 function isSmallSearchViewport() {
 	return window.matchMedia('(max-width: 639px)').matches;
@@ -2589,6 +2655,7 @@ function resetSearchUiForSoftReset() {
 	const hadSearchHistoryEntry = searchFocusHistoryPushed || searchFilterHistoryPushed;
 	state.filter = '';
 	if (els.search) els.search.value = '';
+	clearSearchScrollReset();
 	state.searchStateToken += 1;
 	cancelSearchStateRequests();
 	if (searchDebounceTimer) {
@@ -10831,6 +10898,11 @@ function render(options = {}) {
 	const searchQuery = parseSearchQuery(state.filter);
 	const q = searchQuery.text;
 	const rawSource = q ? (state.searchWidgets || state.rawWidgets) : state.rawWidgets;
+	const shouldResetSearchScroll = !!q && state.searchScrollResetPending;
+	if (shouldResetSearchScroll) {
+		clearSearchScrollReset();
+		scrollToTop();
+	}
 
 	// Filter by visibility - sections can be hidden, and their children follow
 	const source = [];
@@ -10985,6 +11057,7 @@ function render(options = {}) {
 
 	// Recalculate stretch card spans after grid is populated
 	recalculateStretchCards();
+	if (shouldResetSearchScroll) finishSearchScrollReset();
 }
 
 // --- Navigation / Data ---
@@ -11001,6 +11074,7 @@ function clearSearchFilter() {
 	if (!state.filter.trim()) return false;
 	state.filter = '';
 	if (els.search) els.search.value = '';
+	clearSearchScrollReset();
 	state.searchStateToken += 1;
 	cancelSearchStateRequests();
 	if (searchDebounceTimer) {
@@ -11040,6 +11114,7 @@ async function pushPage(pageUrl, pageTitle) {
 	if (state.filter.trim()) {
 		state.filter = '';
 		if (els.search) els.search.value = '';
+		clearSearchScrollReset();
 	}
 	if (state.pageUrl) state.stack.push({ pageUrl: state.pageUrl, pageTitle: state.pageTitle });
 	state.pageUrl = ensureJsonParam(toRelativeRestLink(pageUrl));
@@ -12424,10 +12499,15 @@ function restoreNormalPolling() {
 	window.addEventListener('scroll', noteActivity, { passive: true });
 	window.addEventListener('scroll', scheduleImageScrollRefresh, { passive: true });
 	window.addEventListener('touchstart', noteActivity, { passive: true });
+	window.addEventListener('touchstart', handleSearchFocusScrollTouchStart, { passive: true, capture: true });
 	window.addEventListener('touchstart', handleBounceTouchStart, { passive: true });
+	window.addEventListener('touchmove', handleSearchFocusScrollTouchMove, { passive: true, capture: true });
 	window.addEventListener('touchmove', handleBounceTouchMove, { passive: false });
 	window.addEventListener('touchend', handleBounceTouchEnd, { passive: true });
+	window.addEventListener('touchend', clearSearchFocusScrollTouch, { passive: true, capture: true });
 	window.addEventListener('touchcancel', handleBounceTouchEnd, { passive: true });
+	window.addEventListener('touchcancel', clearSearchFocusScrollTouch, { passive: true, capture: true });
+	window.addEventListener('wheel', handleSearchFocusScrollWheel, { passive: true, capture: true });
 	window.addEventListener('click', noteActivity, { passive: true });
 	// Status tooltip interactions
 	if (els.statusDotWrap) {
@@ -12734,6 +12814,7 @@ function restoreNormalPolling() {
 			if (state.filter.trim()) {
 				state.filter = '';
 				if (els.search) els.search.value = '';
+				clearSearchScrollReset();
 				state.searchStateToken += 1;
 				cancelSearchStateRequests();
 				if (searchDebounceTimer) {
@@ -12750,6 +12831,7 @@ function restoreNormalPolling() {
 		if (state.filter.trim()) {
 			state.filter = '';
 			if (els.search) els.search.value = '';
+			clearSearchScrollReset();
 			state.searchStateToken += 1;
 			cancelSearchStateRequests();
 			if (searchDebounceTimer) {
@@ -12816,6 +12898,11 @@ function restoreNormalPolling() {
 	});
 	els.search.addEventListener('input', () => {
 		state.filter = els.search.value;
+		if (state.filter.trim()) {
+			queueSearchScrollReset();
+		} else {
+			clearSearchScrollReset();
+		}
 		updateNavButtons();
 		state.searchStateToken += 1;
 		cancelSearchStateRequests();
@@ -12841,6 +12928,7 @@ function restoreNormalPolling() {
 		}
 	});
 	els.search.addEventListener('blur', () => {
+		clearSearchFocusScrollTouch();
 		syncSearchFocusedLayout();
 	});
 
@@ -12856,6 +12944,7 @@ function restoreNormalPolling() {
 		if (searchFilterHistoryPushed) searchFilterHistoryPushed = false;
 		els.search.value = '';
 		state.filter = '';
+		clearSearchScrollReset();
 		state.stack = [];
 		state.pageUrl = state.rootPageUrl;
 		state.pageTitle = state.rootPageTitle || state.pageTitle;
