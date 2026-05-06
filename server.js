@@ -19,7 +19,7 @@ const sessions = require('./sessions');
 const { generateStructureMap } = require('./lib/structure-map');
 const {
 	widgetType, widgetLink, widgetPageLink, widgetIconName,
-	deltaKey, splitLabelState, widgetKey, normalizeMapping, normalizeButtongridButtons,
+	deltaKey, splitLabelState, widgetKey, filterVisibleSearchEntries, normalizeMapping, normalizeButtongridButtons,
 } = require('./lib/widget-normalizer');
 const {
 	getCookieValueFromHeader,
@@ -5004,14 +5004,15 @@ const HOMEPAGE_DATA_TIMEOUT_MS = 500;
 const SITEMAP_CACHE_TIMEOUT_MS = 2000;
 const HOMEPAGE_INLINE_ICON_LIMIT = 80;
 
-async function getFullSitemapData(sitemapName) {
+async function getFullSitemapData(sitemapName, userRole = '', username = '') {
 	if (!sitemapName) return null;
 
 	const rootPath = `/rest/sitemaps/${encodeURIComponent(sitemapName)}/${encodeURIComponent(sitemapName)}?type=json`;
-	const queue = [rootPath];
+	const queue = [{ url: rootPath, path: [] }];
 	const seenPages = new Set();
 	const pages = {};
 	const startTime = Date.now();
+	const visibilityMap = buildVisibilityMap();
 
 	while (queue.length) {
 		// Check timeout
@@ -5019,9 +5020,9 @@ async function getFullSitemapData(sitemapName) {
 			break;
 		}
 
-		const rawUrl = queue.shift();
-		if (!rawUrl) continue;
-		const normalized = normalizeOpenhabPath(rawUrl);
+		const next = queue.shift();
+		const pagePath = Array.isArray(next?.path) ? next.path : [];
+		const normalized = normalizeOpenhabPath(next?.url || '');
 		if (!normalized) continue;
 		const url = ensureJsonParam(normalized);
 		if (!url || !url.includes('/rest/sitemaps/')) continue;
@@ -5043,33 +5044,14 @@ async function getFullSitemapData(sitemapName) {
 		// Store the page data indexed by URL
 		pages[url] = page;
 
-		// Find linked pages and add to queue
-		const findLinks = (widgets) => {
-			if (!widgets) return;
-			let list;
-			if (Array.isArray(widgets)) {
-				list = widgets;
-			} else if (Array.isArray(widgets.item)) {
-				list = widgets.item;
-			} else if (widgets.item) {
-				list = [widgets.item];
-			} else {
-				list = [widgets];
-			}
-			for (const w of list) {
-				if (!w) continue;
-				const link = w?.linkedPage?.link || w?.link;
-				if (link && typeof link === 'string' && link.includes('/rest/sitemaps/')) {
-					const rel = normalizeOpenhabPath(link);
-					if (rel && !seenPages.has(ensureJsonParam(rel))) {
-						queue.push(rel);
-					}
-				}
-				if (w?.widget) findLinks(w.widget);
-				if (w?.widgets) findLinks(w.widgets);
-			}
-		};
-		findLinks(page?.widgets || page?.widget);
+		const visibleEntries = visibleSearchEntriesForRole(
+			page,
+			{ path: pagePath, sitemapName },
+			userRole,
+			username,
+			visibilityMap
+		);
+		queueLinkedSearchPages(visibleEntries, queue, seenPages, pagePath);
 	}
 
 	if (Object.keys(pages).length === 0) return null;
@@ -5200,12 +5182,12 @@ async function sendIndex(req, res) {
 		if (sitemapName) {
 			const selectedSitemap = getVisibleBackgroundSitemapsForRequest(req).find((entry) => entry?.name === sitemapName);
 			status.selectedSitemapTitle = safeText(selectedSitemap?.title || selectedSitemap?.name || '').trim();
-			const [homepageData, sitemapCache] = await Promise.all([
-				getHomepageData(req, sitemapName),
-				getFullSitemapData(sitemapName),
-			]);
 			const userRole = getRequestUserRole(req);
 			const username = getRequestUsername(req);
+			const [homepageData, sitemapCache] = await Promise.all([
+				getHomepageData(req, sitemapName),
+				getFullSitemapData(sitemapName, userRole, username),
+			]);
 			status.homepageData = homepageData;
 			status.homepagePageTitle = safeText(homepageData?.pageTitle || '').trim();
 			status.sitemapCache = filterSitemapCacheVisibility(sitemapCache, userRole, username);
@@ -5424,6 +5406,36 @@ function normalizeSearchWidgets(page, ctx) {
 
 	walk(w, '', []);
 	return out;
+}
+
+function isSearchEntryVisibleForRole(entry, userRole, username, visibilityMap) {
+	if (safeText(userRole || '').trim().toLowerCase() === 'admin') return true;
+	const wKey = widgetKey(entry);
+	const rule = visibilityMap.get(wKey) || { visibility: 'all', visibilityUsers: [] };
+	return isVisibilityAllowedForUser(rule, userRole, username);
+}
+
+function visibleSearchEntriesForRole(page, ctx, userRole, username, visibilityMap) {
+	const normalized = normalizeSearchWidgets(page, ctx);
+	return filterVisibleSearchEntries(normalized, (entry) => (
+		isSearchEntryVisibleForRole(entry, userRole, username, visibilityMap)
+	));
+}
+
+function queueLinkedSearchPages(entries, queue, seenPages, pagePath) {
+	const parentPath = Array.isArray(pagePath) ? pagePath : [];
+	for (const w of entries || []) {
+		if (!w || w.__section) continue;
+		const link = widgetPageLink(w);
+		if (!link) continue;
+		const rel = normalizeOpenhabPath(link);
+		if (!rel || !rel.includes('/rest/sitemaps/')) continue;
+		if (seenPages.has(ensureJsonParam(rel))) continue;
+		const label = widgetLabel(w);
+		const segs = labelPathSegments(label);
+		const nextPath = parentPath.concat(segs.length ? segs : [label]).filter(s => s && s !== '-');
+		queue.push({ url: rel, path: nextPath });
+	}
 }
 
 function extractSitemaps(data) {
@@ -8762,6 +8774,7 @@ app.get('/search-index', async (req, res) => {
 	const seenFrames = new Set();
 	const widgets = [];
 	const frames = [];
+	const visibilityMap = buildVisibilityMap();
 
 	while (queue.length) {
 		const next = queue.shift();
@@ -8782,8 +8795,15 @@ app.get('/search-index', async (req, res) => {
 		}
 
 		await applyGroupStateOverrides(page);
-		const normalized = normalizeSearchWidgets(page, { path: pagePath, sitemapName: searchSitemapName });
-		for (const f of normalized) {
+		const visibleEntries = visibleSearchEntriesForRole(
+			page,
+			{ path: pagePath, sitemapName: searchSitemapName },
+			userRole,
+			username,
+			visibilityMap
+		);
+
+		for (const f of visibleEntries) {
 			if (!f || !f.__section) continue;
 			const frameLabel = safeText(f.label);
 			if (!frameLabel) continue;
@@ -8798,18 +8818,11 @@ app.get('/search-index', async (req, res) => {
 			});
 		}
 
-		for (const w of normalized) {
+		queueLinkedSearchPages(visibleEntries, queue, seenPages, pagePath);
+
+		for (const w of visibleEntries) {
 			if (!w || w.__section) continue;
 			const link = widgetPageLink(w);
-			if (link) {
-				const rel = normalizeOpenhabPath(link);
-				if (rel && rel.includes('/rest/sitemaps/')) {
-					const label = widgetLabel(w);
-					const segs = labelPathSegments(label);
-					const nextPath = pagePath.concat(segs.length ? segs : [label]).filter(s => s && s !== '-');
-					queue.push({ url: rel, path: nextPath });
-				}
-			}
 			const key = w?.widgetId || `${safeText(w?.item?.name || '')}|${safeText(w?.label || '')}|${safeText(link || '')}`;
 			if (seenWidgets.has(key)) continue;
 			seenWidgets.add(key);
@@ -8817,26 +8830,8 @@ app.get('/search-index', async (req, res) => {
 		}
 	}
 
-	// Filter widgets/frames by visibility for the current role.
-	const visibilityMap = buildVisibilityMap();
-
-	const filteredWidgets = widgets.filter(w => isWidgetVisibleForRole(w, userRole, username, visibilityMap));
-
-	const filteredFrames = frames.filter(f => {
-		const label = safeText(f.label);
-		const sectionPath = Array.isArray(f.path) ? f.path.concat([label]) : [label];
-		const fKey = widgetKey({
-			__section: true,
-			label,
-			__sectionPath: sectionPath,
-			__sitemapName: searchSitemapName,
-		});
-		const visibilityRule = visibilityMap.get(fKey) || { visibility: 'all', visibilityUsers: [] };
-		return isVisibilityAllowedForUser(visibilityRule, userRole, username);
-	});
-
 	res.setHeader('Cache-Control', 'no-store');
-	return res.json({ widgets: filteredWidgets, frames: filteredFrames });
+	return res.json({ widgets, frames });
 });
 
 // Return full sitemap structure with all pages indexed by URL
@@ -8869,14 +8864,15 @@ app.get('/sitemap-full', async (req, res) => {
 			return res.status(403).json({ error: 'Sitemap access denied' });
 		}
 
-		const queue = [rootPath];
+		const queue = [{ url: rootPath, path: [] }];
 		const seenPages = new Set();
 		const pages = {};
+		const visibilityMap = buildVisibilityMap();
 
 		while (queue.length) {
-			const rawUrl = queue.shift();
-			if (!rawUrl) continue;
-			const normalized = normalizeOpenhabPath(rawUrl);
+			const next = queue.shift();
+			const pagePath = Array.isArray(next?.path) ? next.path : [];
+			const normalized = normalizeOpenhabPath(next?.url || '');
 			if (!normalized) continue;
 			const url = ensureJsonParam(normalized);
 			if (!url || !url.includes('/rest/sitemaps/')) continue;
@@ -8898,35 +8894,14 @@ app.get('/sitemap-full', async (req, res) => {
 			// Store the page data indexed by URL
 			pages[url] = page;
 
-			// Find linked pages and add to queue
-			const findLinks = (widgets) => {
-				if (!widgets) return;
-				let list;
-				if (Array.isArray(widgets)) {
-					list = widgets;
-				} else if (Array.isArray(widgets.item)) {
-					list = widgets.item;
-				} else if (widgets.item) {
-					list = [widgets.item];
-				} else {
-					list = [widgets];
-				}
-				for (const w of list) {
-					if (!w) continue;
-					const link = w?.linkedPage?.link || w?.link;
-					if (link && typeof link === 'string' && link.includes('/rest/sitemaps/')) {
-						const rel = normalizeOpenhabPath(link);
-						if (rel && !seenPages.has(ensureJsonParam(rel))) {
-							queue.push(rel);
-						}
-					}
-					// Recurse into nested widgets (Frames) - support both OH 1.x and 3.x+
-					if (w?.widget) findLinks(w.widget);
-					if (w?.widgets) findLinks(w.widgets);
-				}
-			};
-			// Support both OH 1.x 'widget' and OH 3.x+ 'widgets'
-			findLinks(page?.widgets || page?.widget);
+			const visibleEntries = visibleSearchEntriesForRole(
+				page,
+				{ path: pagePath, sitemapName: targetSitemapName },
+				userRole,
+				username,
+				visibilityMap
+			);
+			queueLinkedSearchPages(visibleEntries, queue, seenPages, pagePath);
 		}
 
 		const filtered = filterSitemapCacheVisibility({ pages, root: rootPath }, userRole, username);

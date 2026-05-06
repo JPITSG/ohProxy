@@ -57,8 +57,10 @@ describe('Multi-Sitemap Atmosphere and Bootstrap Wiring', () => {
 		assert.match(server, /const sitemapName = resolveRequestSitemapName\(req\);/);
 		assert.match(server, /const selectedSitemap = getVisibleBackgroundSitemapsForRequest\(req\)\.find\(\(entry\) => entry\?\.name === sitemapName\);/);
 		assert.match(server, /status\.selectedSitemapTitle = safeText\(selectedSitemap\?\.title \|\| selectedSitemap\?\.name \|\| ''\)\.trim\(\);/);
+		assert.match(server, /const userRole = getRequestUserRole\(req\);/);
+		assert.match(server, /const username = getRequestUsername\(req\);/);
 		assert.match(server, /getHomepageData\(req, sitemapName\),/);
-		assert.match(server, /getFullSitemapData\(sitemapName\),/);
+		assert.match(server, /getFullSitemapData\(sitemapName, userRole, username\),/);
 		assert.match(server, /status\.homepagePageTitle = safeText\(homepageData\?\.pageTitle \|\| ''\)\.trim\(\);/);
 	});
 

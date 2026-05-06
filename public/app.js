@@ -45,7 +45,7 @@
 /* Shared widget helpers (loaded from widget-normalizer.js before this script) */
 const {
 	widgetType, widgetLink, widgetPageLink, widgetIconName,
-	deltaKey, splitLabelState, widgetKey, normalizeMapping, normalizeButtongridButtons,
+	deltaKey, splitLabelState, widgetKey, filterVisibleSearchEntries, normalizeMapping, normalizeButtongridButtons,
 } = window.WidgetNormalizer;
 
 function logJsError(message, error) {
@@ -11280,7 +11280,8 @@ async function buildSearchIndex() {
 		}
 
 		const normalized = normalizeWidgets(page, { path: pagePath, sitemapName: state.sitemapName || '' });
-		for (const f of normalized) {
+		const visibleEntries = filterVisibleSearchEntries(normalized, isWidgetVisible);
+		for (const f of visibleEntries) {
 			if (!f || !f.__section) continue;
 			const frameLabel = safeText(f.label);
 			if (!frameLabel) continue;
@@ -11295,7 +11296,7 @@ async function buildSearchIndex() {
 			});
 		}
 
-		const widgets = normalized.filter(w => !w.__section);
+		const widgets = visibleEntries.filter(w => !w.__section);
 		for (const w of widgets) {
 			const link = widgetPageLink(w);
 			if (link) {
