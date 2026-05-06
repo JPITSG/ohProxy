@@ -7190,6 +7190,29 @@ app.post('/api/auth/login', jsonParserSmall, (req, res) => {
 	res.json({ success: true });
 });
 
+// Direct login page entry point - must be before auth middleware so logout
+// can bypass the service worker's cached app-shell navigation for /.
+app.get('/login', (req, res) => {
+	if (liveConfig.authMode !== 'html') {
+		res.redirect('/');
+		return;
+	}
+	if (liveConfig.authCookieKey && liveConfig.authCookieName) {
+		const { users, disabledUsers } = loadAuthUsers();
+		const cookieResult = users && getAuthCookieUser(req, users, liveConfig.authCookieKey);
+		if (cookieResult && !disabledUsers.has(cookieResult.user)) {
+			res.redirect('/');
+			return;
+		}
+	}
+	const csrfToken = generateCsrfToken();
+	setCsrfCookie(res, csrfToken);
+	applySecurityHeaders(req, res);
+	res.setHeader('Content-Type', 'text/html; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-store');
+	res.send(renderLoginHtml());
+});
+
 app.use((req, res, next) => {
 	const clientIp = getRemoteIp(req);
 	if (clientIp) req.ohProxyClientIp = clientIp;
@@ -8964,11 +8987,6 @@ app.get('/weather', (req, res) => {
 
 app.get(['/', '/index.html'], (req, res) => {
 	sendIndex(req, res);
-});
-
-// Redirect /login to / (single entry point)
-app.get('/login', (req, res) => {
-	res.redirect('/');
 });
 
 // Logout endpoint - CSRF-protected for HTML auth mode

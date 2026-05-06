@@ -6687,7 +6687,7 @@ async function logoutAndRedirectToLogin() {
 	} catch (err) {
 		logJsError('logoutAndRedirectToLogin failed', err);
 	}
-	window.location.href = '/';
+	window.location.href = '/login?logout=1';
 }
 
 function updateAdminConfigBtnVisibility() {

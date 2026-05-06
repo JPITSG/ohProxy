@@ -46,6 +46,6 @@ describe('Admin password settings wiring', () => {
 		assert.match(app, /dismissOnEscape:\s*false/, 'password changed alert should disable escape dismissal');
 		assert.match(app, /logoutAndRedirectToLogin\(\)/, 'missing password changed logout redirect handler');
 		assert.match(app, /window\.location\.href = '\/api\/logout';/, 'missing basic-auth logout redirect');
-		assert.match(app, /window\.location\.href = '\/';/, 'missing HTML-auth login redirect');
+		assert.match(app, /window\.location\.href = '\/login\?logout=1';/, 'missing HTML-auth login redirect');
 	});
 });
