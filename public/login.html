@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="theme-light">
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-	<meta name="theme-color" content="#1e1e1e" />
+	<meta name="theme-color" content="#f5f6fa" />
 	<title>Login</title>
 	<script>
 		(function() {
@@ -11,14 +11,9 @@
 				if (new URLSearchParams(location.search).get('slim') === 'true') {
 					document.documentElement.classList.add('slim');
 				}
-				var saved;
-				try { saved = localStorage.getItem('ohTheme'); } catch (e) {}
-				var mode = (saved === 'dark' || saved === 'light')
-					? saved
-					: (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-				if (mode === 'light') document.documentElement.classList.add('theme-light');
+				document.documentElement.classList.add('theme-light');
 				var metaTheme = document.querySelector('meta[name="theme-color"]');
-				if (metaTheme) metaTheme.setAttribute('content', mode === 'light' ? '#f5f6fa' : '#1e1e1e');
+				if (metaTheme) metaTheme.setAttribute('content', '#f5f6fa');
 			} catch (e) {}
 		})();
 	</script>

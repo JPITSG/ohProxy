@@ -8,6 +8,7 @@ const path = require('path');
 const {
 	buildHistoryStateFormatter,
 	extractNumericStateSuffix,
+	formatDateStateLikeDisplay,
 	formatStateWithPattern,
 } = require('../../lib/widget-normalizer');
 
@@ -36,6 +37,30 @@ describe('Card Config History State Formatting', () => {
 		assert.strictEqual(formatter('25.24'), '25.2 \u00B0C');
 		assert.strictEqual(formatter('25'), '25.0 \u00B0C');
 		assert.strictEqual(formatStateWithPattern('42', '%d %%'), '42 %');
+	});
+
+	it('formats DateTime history values from openHAB time patterns', () => {
+		const raw = 'Thu May 07 2026 20:11:29 GMT+0200 (Central European Summer Time)';
+		const formatter = buildHistoryStateFormatter(
+			{ item: { stateDescription: { pattern: '%1$tH:%1$tM' } } },
+			[],
+			String
+		);
+
+		assert.strictEqual(formatter(raw), '20:11');
+		assert.strictEqual(formatStateWithPattern(raw, '%1$tH:%1$tM:%1$tS'), '20:11:29');
+	});
+
+	it('formats DateTime history values like the displayed card time', () => {
+		const raw = 'Thu May 07 2026 20:11:29 GMT+0200 (Central European Summer Time)';
+		const formatter = buildHistoryStateFormatter(
+			{ label: 'Sunset [20:11]' },
+			[],
+			String
+		);
+
+		assert.strictEqual(formatter(raw), '20:11');
+		assert.strictEqual(formatDateStateLikeDisplay(raw, '20:11:29'), '20:11:29');
 	});
 
 	it('keeps explicit sitemap mappings ahead of numeric unit formatting', () => {
