@@ -46,6 +46,7 @@
 const {
 	widgetType, widgetLink, widgetPageLink, widgetIconName,
 	deltaKey, splitLabelState, widgetKey, filterVisibleSearchEntries, normalizeMapping, normalizeButtongridButtons,
+	buildHistoryStateFormatter,
 } = window.WidgetNormalizer;
 
 function logJsError(message, error) {
@@ -3673,6 +3674,7 @@ let historyOffsetStack = [];
 let historyMappings = [];
 let historyCursorStack = [];
 let historyGlowColor = null;
+let historyStateFormatter = null;
 let historyAbort = null;
 let historyWheelNavUntil = 0;
 let cardConfigInitialStateJson = null;
@@ -4662,13 +4664,16 @@ function openCardConfigModal(widget, card) {
 			if (historyAbort) historyAbort.abort();
 			if (GROUP_ITEMS_SET.has(itemName)) {
 				historyMappings = [];
+				historyStateFormatter = null;
 				loadGroupHistoryEntries(itemName, null);
 			} else {
 				historyMappings = normalizeMapping(widget?.mappings || widget?.mapping);
+				historyStateFormatter = buildHistoryStateFormatter(widget, historyMappings, formatRawState);
 				loadHistoryEntries(itemName, 0);
 			}
 		} else {
 			historySection.style.display = 'none';
+			historyStateFormatter = null;
 		}
 	}
 
@@ -4815,8 +4820,7 @@ function loadHistoryEntries(itemName, offset) {
 			return url;
 		},
 		formatState: (entry, raw) => {
-			const mapped = historyMappings.length ? historyMappings.find(m => m.command === raw) : null;
-			return mapped ? (mapped.label || mapped.command) : formatRawState(raw);
+			return historyStateFormatter ? historyStateFormatter(raw) : formatRawState(raw);
 		},
 		stack: historyOffsetStack,
 		nextTokenKey: 'nextOffset',
