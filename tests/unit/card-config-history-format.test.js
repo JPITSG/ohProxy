@@ -39,6 +39,20 @@ describe('Card Config History State Formatting', () => {
 		assert.strictEqual(formatStateWithPattern('42', '%d %%'), '42 %');
 	});
 
+	it('keeps the displayed card unit when the item pattern only controls precision', () => {
+		const formatter = buildHistoryStateFormatter(
+			{
+				label: 'Current Watts [123.4 W]',
+				item: { stateDescription: { pattern: '%.1f' } },
+			},
+			[],
+			String
+		);
+
+		assert.strictEqual(formatter('123.44'), '123.4 W');
+		assert.strictEqual(formatter('5'), '5.0 W');
+	});
+
 	it('formats DateTime history values from openHAB time patterns', () => {
 		const raw = 'Thu May 07 2026 20:11:29 GMT+0200 (Central European Summer Time)';
 		const formatter = buildHistoryStateFormatter(

@@ -599,16 +599,6 @@
 							}
 						}
 
-						// Add min/max points
-						var delays = ['0.5s', '0.55s'];
-						[this.minPoint, this.maxPoint].forEach((pt, idx) => {
-							var circle = $('circle', { class: 'data-point', cx: pt.x, cy: pt.y, r: 5 });
-							circle.style.animationDelay = delays[idx];
-							circle.dataset.idx = this.circleData.length;
-							this.circleData.push(pt);
-							pointsGroup.appendChild(circle);
-						});
-
 						// Add interpolated points at grid lines (two-pointer, O(n+m))
 						var gridIdx = 0;
 						for (var i = 1; i < this.points.length; i++) {
@@ -634,37 +624,57 @@
 										interpValue = prev.value + t * (curr.value - prev.value);
 									}
 									var interpTime = prev.t + t * (curr.t - prev.t);
-									var circle = $('circle', { class: 'data-point', cx: gd.x, cy: interpY, r: 5 });
-									circle.style.animationDelay = gd.delay + 's';
-									circle.dataset.idx = this.circleData.length;
-									this.circleData.push({ x: gd.x, y: interpY, value: interpValue, t: interpTime });
-									pointsGroup.appendChild(circle);
+									this.appendDataPointCircle(pointsGroup, { x: gd.x, y: interpY, value: interpValue, t: interpTime }, gd.delay + 's', 'data-point-interval');
 								}
 								gridIdx++;
 							}
 						}
 
+						// Add min/max points last so extreme markers remain the top hover target.
+						var delays = ['0.5s', '0.55s'];
+						[
+							{ point: this.minPoint, cls: 'data-point-min' },
+							{ point: this.maxPoint, cls: 'data-point-max' }
+						].forEach((entry, idx) => {
+							this.appendDataPointCircle(pointsGroup, entry.point, delays[idx], entry.cls);
+						});
+
 						// Event listeners for desktop tooltips
-						pointsGroup.addEventListener('mouseenter', e => {
-							if (e.target.classList.contains('data-point')) {
-								this.showTooltip(e, this.circleData[e.target.dataset.idx]);
-							}
-						}, true);
-						pointsGroup.addEventListener('mouseleave', e => {
-							if (e.target.classList.contains('data-point')) {
+						pointsGroup.addEventListener('mouseover', e => {
+							var point = this.getPointForEventTarget(e.target);
+							if (point) this.showTooltip(e, point);
+						});
+						pointsGroup.addEventListener('mousemove', e => {
+							var point = this.getPointForEventTarget(e.target);
+							if (point) this.showTooltip(e, point);
+						});
+						pointsGroup.addEventListener('mouseout', e => {
+							var pointEl = this.getDataPointElement(e.target);
+							if (pointEl && !this.getDataPointElement(e.relatedTarget)) {
 								this.hideTooltip();
 							}
-						}, true);
+						});
 
 						g.appendChild(pointsGroup);
 					}
 				}
 
-			this.svg.appendChild(g);
-			if (w > 0 && h > 0) {
-				this.hasRenderedOnce = true;
+				this.svg.appendChild(g);
+				if (w > 0 && h > 0) {
+					this.hasRenderedOnce = true;
+				}
 			}
-		}
+
+			appendDataPointCircle(group, pt, delay, extraClass) {
+				if (!group || !pt) return null;
+				var className = 'data-point' + (extraClass ? ' ' + extraClass : '');
+				var circle = this.svg$('circle', { class: className, cx: pt.x, cy: pt.y, r: 5 });
+				if (delay) circle.style.animationDelay = delay;
+				circle.dataset.idx = this.circleData.length;
+				this.circleData.push(pt);
+				group.appendChild(circle);
+				return circle;
+			}
 
 		createPath(pts) {
 			if (!pts || pts.length === 0) return '';
@@ -895,6 +905,24 @@
 				return best;
 			}
 
+			getDataPointElement(target) {
+				var el = target;
+				while (el && el !== this.svg) {
+					if (el.classList && el.classList.contains('data-point') && el.dataset && el.dataset.idx !== undefined) {
+						return el;
+					}
+					el = el.parentNode;
+				}
+				return null;
+			}
+
+			getPointForEventTarget(target) {
+				var pointEl = this.getDataPointElement(target);
+				if (!pointEl) return null;
+				var idx = parseInt(pointEl.dataset.idx, 10);
+				return Number.isFinite(idx) ? (this.circleData[idx] || null) : null;
+			}
+
 			getLineYAtX(plotX, cursorY) {
 				if (this.points.length === 0) return null;
 			if (this.points.length === 1) return this.points[0].y;
@@ -1023,6 +1051,17 @@
 				// Skip on mobile or during touch interaction
 				if (this.layout.sm || this.isTouching || this.seriesSets.length === 0) return;
 
+				var hoveredPoint = this.getPointForEventTarget(e.target);
+				if (hoveredPoint) {
+					if (this.hideTimer) clearTimeout(this.hideTimer);
+					if (this.tapCircle) {
+						this.tapCircle.remove();
+						this.tapCircle = null;
+					}
+					this.showTooltip(e, hoveredPoint);
+					return;
+				}
+
 				var plotPoint = this.clientToPlotPoint(e.clientX, e.clientY);
 				if (!plotPoint) {
 					this.hideTooltip();
@@ -1082,18 +1121,20 @@
 				circle.setAttribute('cy', pt.y + this.layout.pad.top);
 				circle.setAttribute('r', '5');
 				circle.setAttribute('class', 'data-point');
-				circle.style.opacity = '1';
-				if (pt.seriesColor) {
-					circle.style.stroke = pt.seriesColor;
-					circle.style.filter = 'none';
+					circle.style.opacity = '1';
+					if (pt.seriesColor) {
+						circle.style.stroke = pt.seriesColor;
+						circle.style.filter = 'none';
 				}
 				this.svg.appendChild(circle);
+				circle.style.pointerEvents = 'none';
 				this.tapCircle = circle;
 			}
 
-		showTooltip(e, pt) {
-			// Refresh rect in case iframe scrolled/repositioned
-			var rect = this.layout.containerRect = this.container.getBoundingClientRect();
+			showTooltip(e, pt) {
+				if (!pt) return;
+				// Refresh rect in case iframe scrolled/repositioned
+				var rect = this.layout.containerRect = this.container.getBoundingClientRect();
 				var x = e.clientX - rect.left;
 				var y = e.clientY - rect.top;
 
