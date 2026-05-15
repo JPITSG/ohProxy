@@ -4173,7 +4173,7 @@ function ensureCardConfigModal() {
 			<div class="card-config-footer oh-modal-footer">
 				<span class="card-config-status"></span>
 				<button type="button" class="card-config-cancel">${cc.closeBtn}</button>
-				<button type="button" class="card-config-save">${cc.saveBtn}</button>
+				<button type="button" class="card-config-save" disabled>${cc.saveBtn}</button>
 			</div>
 		</div>
 	`;
@@ -4200,6 +4200,7 @@ function ensureCardConfigModal() {
 			labelEl: wrap.querySelector('.card-visibility-users-label'),
 			onSelectionTouched: () => {
 				cardVisibilityUsersTouched = true;
+				updateCardConfigSaveState();
 			},
 			onMenuClosed: ({ reason }) => {
 				if (!cardConfigModal || cardConfigModal.classList.contains('hidden')) return;
@@ -4217,6 +4218,7 @@ function ensureCardConfigModal() {
 				cardVisibilityUsersTouched = false;
 				syncRadioClasses(wrap, 'visibility');
 				cardVisibilityUsersPicker?.showForVisibility(fallbackVisibility);
+				updateCardConfigSaveState();
 			},
 		}
 	);
@@ -4238,6 +4240,11 @@ function ensureCardConfigModal() {
 		await saveCardConfig();
 	});
 	wrap.querySelector('.card-config-add').addEventListener('click', () => { haptic(); addGlowRuleRow(); });
+	wrap.querySelector('.card-config-body').addEventListener('input', updateCardConfigSaveState);
+	wrap.querySelector('.card-config-body').addEventListener('change', (e) => {
+		if (e.target?.type === 'radio') return;
+		updateCardConfigSaveState();
+	});
 	// Sync checked class on radio labels for browsers without :has() support
 	wrap.addEventListener('change', (e) => {
 		if (e.target.type !== 'radio') return;
@@ -4272,6 +4279,7 @@ function ensureCardConfigModal() {
 					cardVisibilityUsersPicker.setSelected([]);
 				}
 			}
+			updateCardConfigSaveState();
 		});
 	attachModalDismissListeners(wrap, cardConfigModal, closeCardConfigModal);
 	makeFrameDraggable(wrap.querySelector('.card-config-frame'), wrap.querySelector('.card-config-header h2'));
@@ -4305,9 +4313,11 @@ function createSelect(options, initialValue, config) {
 			haptic();
 			const val = nativeSelect.value;
 			const selectedOpt = options.find(o => getValue(o) === val) || options[0];
+			const changed = wrap.dataset.value !== val;
 			wrap.dataset.value = val;
 			fakeSelect.textContent = getLabel(selectedOpt);
 			if (colorMode) fakeSelect.dataset.color = val;
+			if (changed) wrap.dispatchEvent(new Event('change', { bubbles: true }));
 		};
 		wrap.style.position = 'relative';
 		wrap.appendChild(fakeSelect);
@@ -4352,12 +4362,14 @@ function createSelect(options, initialValue, config) {
 			haptic();
 			e.preventDefault();
 			e.stopPropagation();
+			const changed = wrap.dataset.value !== val;
 			wrap.dataset.value = val;
 			fakeSelect.textContent = label;
 			if (colorMode) fakeSelect.dataset.color = val;
 			menu.querySelectorAll('.glow-select-option').forEach(b => b.classList.remove('active'));
 			optBtn.classList.add('active');
 			closeMenu();
+			if (changed) wrap.dispatchEvent(new Event('change', { bubbles: true }));
 		};
 		(scrollInner || menu).appendChild(optBtn);
 	}
@@ -4475,6 +4487,7 @@ function createGlowRuleRow(rule = {}) {
 			if (w._glowMenu) { w._glowMenu.remove(); w._glowMenu = null; }
 		});
 		row.remove();
+		updateCardConfigSaveState();
 	};
 
 	row.appendChild(operatorSelect);
@@ -4488,6 +4501,7 @@ function createGlowRuleRow(rule = {}) {
 function addGlowRuleRow() {
 	const rulesContainer = cardConfigModal.querySelector('.card-config-rules');
 	rulesContainer.appendChild(createGlowRuleRow());
+	updateCardConfigSaveState();
 }
 
 function collectCardConfigValues() {
@@ -4554,6 +4568,19 @@ function collectCardConfigValues() {
 	return { widgetId: cardConfigWidgetKey, rules, visibility, visibilityUsers, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth };
 }
 
+function isCardConfigDirty() {
+	if (cardConfigInitialStateJson === null) return false;
+	const current = collectCardConfigValues();
+	if (!current) return false;
+	return JSON.stringify(current) !== cardConfigInitialStateJson;
+}
+
+function updateCardConfigSaveState() {
+	if (!cardConfigModal) return;
+	const saveBtn = cardConfigModal.querySelector('.card-config-save');
+	if (saveBtn) saveBtn.disabled = !isCardConfigDirty();
+}
+
 function openCardConfigModal(widget, card) {
 	if (state.isSlim) return;
 	if (getUserRole() !== 'admin') return;
@@ -4562,6 +4589,8 @@ function openCardConfigModal(widget, card) {
 	const wKey = widgetKey(widget);
 	cardConfigWidgetKey = wKey;
 	cardConfigWidgetLabel = widget?.label || widget?.item?.label || widget?.item?.name || wKey;
+	const saveBtn = cardConfigModal.querySelector('.card-config-save');
+	if (saveBtn) saveBtn.disabled = true;
 
 	// Load existing visibility
 	const visibilityRule = normalizeVisibilityRule(widgetVisibilityMap.get(wKey) || { visibility: 'all', visibilityUsers: [] });
@@ -4719,6 +4748,7 @@ function openCardConfigModal(widget, card) {
 	}
 	const initialCardConfig = collectCardConfigValues();
 	cardConfigInitialStateJson = initialCardConfig ? JSON.stringify(initialCardConfig) : null;
+	updateCardConfigSaveState();
 
 	const titleEl = cardConfigModal.querySelector('.card-config-header h2');
 	if (titleEl) {
@@ -5649,7 +5679,7 @@ async function saveCardConfig() {
 	if (saveBtn) saveBtn.disabled = true;
 	const payload = collectCardConfigValues();
 	if (!payload) {
-		if (saveBtn) saveBtn.disabled = false;
+		updateCardConfigSaveState();
 		return false;
 	}
 	const payloadJson = JSON.stringify(payload);
@@ -5658,7 +5688,7 @@ async function saveCardConfig() {
 			statusEl.className = 'card-config-status success';
 			statusEl.textContent = ohLang.cardConfig.noChanges;
 		}
-		if (saveBtn) saveBtn.disabled = false;
+		updateCardConfigSaveState();
 		return false;
 	}
 	const { visibility, visibilityUsers, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth, rules } = payload;
@@ -5675,7 +5705,7 @@ async function saveCardConfig() {
 			try { const body = await resp.json(); if (body.error) msg = body.error; } catch (e) {}
 			if (statusEl) { statusEl.className = 'card-config-status error'; statusEl.textContent = msg; }
 			shakeElement(cardConfigModal.querySelector('.card-config-frame'));
-			if (saveBtn) saveBtn.disabled = false;
+			updateCardConfigSaveState();
 			return false;
 		}
 
@@ -5765,13 +5795,13 @@ async function saveCardConfig() {
 		render();
 		cardConfigInitialStateJson = payloadJson;
 		if (statusEl) { statusEl.className = 'card-config-status success'; statusEl.textContent = ohLang.cardConfig.savedOk; }
-		if (saveBtn) saveBtn.disabled = false;
+		updateCardConfigSaveState();
 		return true;
 	} catch (e) {
 		logJsError('applyGlowConfig failed', e);
 		if (statusEl) { statusEl.className = 'card-config-status error'; statusEl.textContent = ohLang.cardConfig.saveFailed; }
 		shakeElement(cardConfigModal.querySelector('.card-config-frame'));
-		if (saveBtn) saveBtn.disabled = false;
+		updateCardConfigSaveState();
 		return false;
 	}
 }
@@ -6218,6 +6248,7 @@ function createAdminListRow(value, placeholder, wrap) {
 		if (!wrap.querySelector('.admin-list-row')) {
 			wrap.insertBefore(createAdminListRow('', placeholder, wrap), wrap.querySelector('.admin-list-add'));
 		}
+		updateAdminConfigSaveState();
 	});
 	row.appendChild(del);
 	return row;
@@ -6389,6 +6420,7 @@ function createAdminField(field, value) {
 			const newRow = createAdminListRow('', fieldPlaceholder, wrap);
 			wrap.insertBefore(newRow, addBtn);
 			newRow.querySelector('.admin-list-input').focus();
+			updateAdminConfigSaveState();
 		});
 		wrap.appendChild(addBtn);
 		control.appendChild(wrap);
@@ -6540,7 +6572,7 @@ function ensureAdminConfigModal() {
 			<div class="admin-config-footer oh-modal-footer">
 				<div class="admin-config-status"></div>
 				<button type="button" class="admin-config-cancel">${ohLang.adminConfig.closeBtn}</button>
-				<button type="button" class="admin-config-save">${ohLang.adminConfig.saveBtn}</button>
+				<button type="button" class="admin-config-save" disabled>${ohLang.adminConfig.saveBtn}</button>
 			</div>
 		</div>
 	`;
@@ -6550,6 +6582,8 @@ function ensureAdminConfigModal() {
 	wrap.querySelector('.admin-config-close').addEventListener('click', () => { haptic(); closeAdminConfigModal(); });
 	wrap.querySelector('.admin-config-cancel').addEventListener('click', () => { haptic(); closeAdminConfigModal(); });
 	wrap.querySelector('.admin-config-save').addEventListener('click', () => { haptic(); saveAdminConfig(); });
+	wrap.querySelector('.admin-config-sections').addEventListener('input', updateAdminConfigSaveState);
+	wrap.querySelector('.admin-config-sections').addEventListener('change', updateAdminConfigSaveState);
 	const searchInput = wrap.querySelector('.admin-config-search-input');
 	searchInput.addEventListener('input', filterAdminConfigSections);
 	searchInput.addEventListener('keydown', (e) => {
@@ -6637,8 +6671,7 @@ async function openAdminConfigModal() {
 	sectionsEl.appendChild(emptyEl);
 	filterAdminConfigSections();
 	adminConfigInitialStateJson = JSON.stringify(collectAdminConfigValues());
-
-	saveBtn.disabled = false;
+	updateAdminConfigSaveState();
 }
 
 function closeAdminConfigModal({ skipHistory } = {}) {
@@ -6715,6 +6748,17 @@ function collectAdminConfigValues() {
 	return config;
 }
 
+function isAdminConfigDirty() {
+	if (!adminConfigModal || adminConfigInitialStateJson === null) return false;
+	return JSON.stringify(collectAdminConfigValues()) !== adminConfigInitialStateJson;
+}
+
+function updateAdminConfigSaveState() {
+	if (!adminConfigModal) return;
+	const saveBtn = adminConfigModal.querySelector('.admin-config-save');
+	if (saveBtn) saveBtn.disabled = !isAdminConfigDirty();
+}
+
 async function saveAdminConfig() {
 	const statusEl = adminConfigModal.querySelector('.admin-config-status');
 	const saveBtn = adminConfigModal.querySelector('.admin-config-save');
@@ -6732,7 +6776,7 @@ async function saveAdminConfig() {
 			statusEl.className = 'admin-config-status error';
 			statusEl.textContent = ohLang.adminConfig.passwordConfirmRequired;
 			shakeElement(adminConfigModal.querySelector('.admin-config-frame'));
-			saveBtn.disabled = false;
+			updateAdminConfigSaveState();
 			return;
 		}
 		const invalidPassword = ADMIN_PASSWORD_CONTROL_CHARS_RE.test(password) || password.length > ADMIN_PASSWORD_MAX_LEN;
@@ -6741,14 +6785,14 @@ async function saveAdminConfig() {
 			statusEl.className = 'admin-config-status error';
 			statusEl.textContent = ohLang.adminConfig.passwordInvalid;
 			shakeElement(adminConfigModal.querySelector('.admin-config-frame'));
-			saveBtn.disabled = false;
+			updateAdminConfigSaveState();
 			return;
 		}
 		if (password !== confirm) {
 			statusEl.className = 'admin-config-status error';
 			statusEl.textContent = ohLang.adminConfig.passwordMismatch;
 			shakeElement(adminConfigModal.querySelector('.admin-config-frame'));
-			saveBtn.disabled = false;
+			updateAdminConfigSaveState();
 			return;
 		}
 	}
@@ -6757,7 +6801,7 @@ async function saveAdminConfig() {
 	if (adminConfigInitialStateJson !== null && configJson === adminConfigInitialStateJson) {
 		statusEl.className = 'admin-config-status warning';
 		statusEl.textContent = ohLang.adminConfig.noChanges;
-		saveBtn.disabled = false;
+		updateAdminConfigSaveState();
 		return;
 	}
 
@@ -6774,7 +6818,7 @@ async function saveAdminConfig() {
 			statusEl.className = 'admin-config-status error';
 			statusEl.textContent = msg;
 			shakeElement(adminConfigModal.querySelector('.admin-config-frame'));
-			saveBtn.disabled = false;
+			updateAdminConfigSaveState();
 			return;
 		}
 
@@ -6830,7 +6874,7 @@ async function saveAdminConfig() {
 		shakeElement(adminConfigModal.querySelector('.admin-config-frame'));
 	}
 
-	saveBtn.disabled = false;
+	updateAdminConfigSaveState();
 }
 
 async function restartServer() {

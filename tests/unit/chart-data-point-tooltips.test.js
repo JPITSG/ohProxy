@@ -26,13 +26,14 @@ describe('Chart Data Point Tooltips', () => {
 		assert.ok(extremaIdx > intervalIdx, 'min/max markers should be appended after interval markers');
 	});
 
-	it('uses bubbling SVG pointer events and exact marker data on desktop hover', () => {
+	it('uses bubbling SVG pointer events and point-based tooltip placement on desktop hover', () => {
 		const chartJs = fs.readFileSync(CHART_JS_FILE, 'utf8');
 
-		assert.match(chartJs, /pointsGroup\.addEventListener\('mouseover', e => \{[\s\S]*?var point = this\.getPointForEventTarget\(e\.target\);[\s\S]*?if \(point\) this\.showTooltip\(e, point\);[\s\S]*?\}\);/);
-		assert.match(chartJs, /pointsGroup\.addEventListener\('mousemove', e => \{[\s\S]*?var point = this\.getPointForEventTarget\(e\.target\);[\s\S]*?if \(point\) this\.showTooltip\(e, point\);[\s\S]*?\}\);/);
-		assert.match(chartJs, /var hoveredPoint = this\.getPointForEventTarget\(e\.target\);[\s\S]*?if \(hoveredPoint\) \{[\s\S]*?this\.showTooltip\(e, hoveredPoint\);[\s\S]*?return;[\s\S]*?\}/);
+		assert.match(chartJs, /pointsGroup\.addEventListener\('mouseover', e => \{[\s\S]*?var point = this\.getPointForEventTarget\(e\.target\);[\s\S]*?if \(point\) this\.showMobileTooltip\(point\);[\s\S]*?\}\);/);
+		assert.match(chartJs, /pointsGroup\.addEventListener\('mousemove', e => \{[\s\S]*?var point = this\.getPointForEventTarget\(e\.target\);[\s\S]*?if \(point\) this\.showMobileTooltip\(point\);[\s\S]*?\}\);/);
+		assert.match(chartJs, /var hoveredPoint = this\.getPointForEventTarget\(e\.target\);[\s\S]*?if \(hoveredPoint\) \{[\s\S]*?this\.showMobileTooltip\(hoveredPoint\);[\s\S]*?return;[\s\S]*?\}/);
 		assert.doesNotMatch(chartJs, /pointsGroup\.addEventListener\('mouseenter'/);
+		assert.doesNotMatch(chartJs, /showTooltip\(e, /);
 	});
 
 	it('prevents temporary line-hover circles from intercepting marker hover events', () => {

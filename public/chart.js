@@ -642,11 +642,11 @@
 						// Event listeners for desktop tooltips
 						pointsGroup.addEventListener('mouseover', e => {
 							var point = this.getPointForEventTarget(e.target);
-							if (point) this.showTooltip(e, point);
+							if (point) this.showMobileTooltip(point);
 						});
 						pointsGroup.addEventListener('mousemove', e => {
 							var point = this.getPointForEventTarget(e.target);
-							if (point) this.showTooltip(e, point);
+							if (point) this.showMobileTooltip(point);
 						});
 						pointsGroup.addEventListener('mouseout', e => {
 							var pointEl = this.getDataPointElement(e.target);
@@ -1058,7 +1058,7 @@
 						this.tapCircle.remove();
 						this.tapCircle = null;
 					}
-					this.showTooltip(e, hoveredPoint);
+					this.showMobileTooltip(hoveredPoint);
 					return;
 				}
 
@@ -1121,36 +1121,15 @@
 				circle.setAttribute('cy', pt.y + this.layout.pad.top);
 				circle.setAttribute('r', '5');
 				circle.setAttribute('class', 'data-point');
-					circle.style.opacity = '1';
-					if (pt.seriesColor) {
-						circle.style.stroke = pt.seriesColor;
-						circle.style.filter = 'none';
+				circle.style.opacity = '1';
+				if (pt.seriesColor) {
+					circle.style.stroke = pt.seriesColor;
+					circle.style.filter = 'none';
 				}
 				this.svg.appendChild(circle);
 				circle.style.pointerEvents = 'none';
 				this.tapCircle = circle;
 			}
-
-			showTooltip(e, pt) {
-				if (!pt) return;
-				// Refresh rect in case iframe scrolled/repositioned
-				var rect = this.layout.containerRect = this.container.getBoundingClientRect();
-				var x = e.clientX - rect.left;
-				var y = e.clientY - rect.top;
-
-				var decimals = this.layout.yDecimals;
-				this.tooltipValue.textContent = this.formatTooltipValue(pt, decimals);
-				this.tooltipLabel.textContent = pt.t ? this.fmtTimestamp(pt.t) : '';
-
-			var tx = x + 15;
-			var ty = y - 15;
-			if (tx + 120 > rect.width) tx = x - 120;
-			if (ty < 10) ty = y + 15;
-
-			this.tooltip.style.left = tx + 'px';
-			this.tooltip.style.top = ty + 'px';
-			this.tooltip.classList.add('visible');
-		}
 
 			showMobileTooltip(pt) {
 				var decimals = this.layout.yDecimals;
