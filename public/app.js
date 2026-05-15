@@ -409,6 +409,7 @@ const state = {
 	searchIndexReady: false,
 	searchIndexBuilding: false,
 	searchStateToken: 0,
+	lastGlowSearchStateToken: -1,
 	deltaTokens: new Map(),
 	searchFrames: [],
 	searchStateInFlight: false,
@@ -7279,11 +7280,12 @@ async function fetchJson(url) {
 	}
 }
 
-async function refreshSearchStates(matches) {
+async function refreshSearchStates(matches, options = {}) {
 	if (!state.filter.trim() || !state.searchIndexReady) return false;
 	const now = Date.now();
 	const minInterval = state.isSlim ? SEARCH_STATE_MIN_SLIM_MS : SEARCH_STATE_MIN_DEFAULT_MS;
-	if (now - state.lastSearchStateSync < minInterval) return false;
+	const force = options?.force === true;
+	if (!force && now - state.lastSearchStateSync < minInterval) return false;
 	const token = state.searchStateToken;
 	if (state.searchStateInFlight) {
 		if (searchStateActiveToken === token) return false;
@@ -7853,22 +7855,66 @@ function searchWidgetKey(widget) {
 	return `${base}|${path}|${frame}`;
 }
 
-function parseSearchQuery(rawQuery) {
-	const text = safeText(rawQuery).trim().toLowerCase();
-	if (!text) return { text: '', branches: null };
-	if (!text.includes('||')) return { text, branches: null };
-	const branches = text.split('||').map((part) => part.trim()).filter(Boolean);
-	if (!branches.length) return { text, branches: null };
-	return { text, branches };
+const MAIN_SEARCH_GLOW_COLORS = new Set(['red', 'green', 'orange']);
+
+function normalizeMainSearchGlowColor(value) {
+	const color = safeText(value).trim().toLowerCase();
+	return MAIN_SEARCH_GLOW_COLORS.has(color) ? color : '';
 }
 
-function matchesSearchQuery(haystack, query) {
+function widgetGlowStateValue(widget) {
+	const labelParts = splitLabelState(widgetLabel(widget));
+	return labelParts.state || widgetState(widget);
+}
+
+function matchesMainSearchGlowColor(widget, color) {
+	const glowColor = normalizeMainSearchGlowColor(color);
+	if (!glowColor || !widget || widget.__section) return false;
+	const currentGlowColor = normalizeMainSearchGlowColor(
+		getWidgetGlowOverride(widgetKey(widget), widgetGlowStateValue(widget))
+	);
+	return currentGlowColor === glowColor;
+}
+
+function widgetHasMainSearchGlowRules(widget) {
+	if (!widget || widget.__section) return false;
+	const rules = widgetGlowRulesMap.get(widgetKey(widget));
+	return Array.isArray(rules) && rules.length > 0;
+}
+
+function parseSearchQuery(rawQuery) {
+	const text = safeText(rawQuery).trim().toLowerCase();
+	if (!text) return { text: '', branches: null, glowColor: '' };
+	if (!text.includes('||')) return { text, branches: null, glowColor: normalizeMainSearchGlowColor(text) };
+	const branches = text.split('||').map((part) => part.trim()).filter(Boolean);
+	if (!branches.length) return { text, branches: null, glowColor: normalizeMainSearchGlowColor(text) };
+	return { text, branches, glowColor: '' };
+}
+
+function searchQueryUsesMainSearchGlow(query) {
+	if (query?.glowColor) return true;
+	return Array.isArray(query?.branches) && query.branches.some((branch) => normalizeMainSearchGlowColor(branch));
+}
+
+function shouldForceMainSearchGlowStateRefresh(query) {
+	if (!searchQueryUsesMainSearchGlow(query)) return false;
+	if (state.lastGlowSearchStateToken === state.searchStateToken) return false;
+	state.lastGlowSearchStateToken = state.searchStateToken;
+	return true;
+}
+
+function matchesSearchQuery(haystack, query, widget = null) {
 	const hay = safeText(haystack).toLowerCase();
 	if (!query?.text) return true;
 	if (!Array.isArray(query.branches) || !query.branches.length) {
+		if (query.glowColor) return matchesMainSearchGlowColor(widget, query.glowColor);
 		return hay.includes(query.text);
 	}
-	return query.branches.some((branch) => hay.includes(branch));
+	return query.branches.some((branch) => {
+		const glowColor = normalizeMainSearchGlowColor(branch);
+		if (glowColor) return matchesMainSearchGlowColor(widget, glowColor);
+		return hay.includes(branch);
+	});
 }
 
 function isButtongridButtonVisible(button) {
@@ -11183,7 +11229,7 @@ function render(options = {}) {
 	const matches = source.filter(w => {
 		if (!q) return true;
 		const hay = `${widgetLabel(w)} ${widgetState(w)} ${widgetType(w)} ${w?.item?.name || ''}`.toLowerCase();
-		return matchesSearchQuery(hay, searchQuery);
+		return matchesSearchQuery(hay, searchQuery, w);
 	});
 
 	let widgets = matches;
@@ -11313,7 +11359,9 @@ function render(options = {}) {
 	}
 
 	if (q && state.searchIndexReady) {
-		refreshSearchStates(widgets).then((updated) => {
+		const usesGlowSearch = searchQueryUsesMainSearchGlow(searchQuery);
+		const refreshTargets = usesGlowSearch ? source.filter(widgetHasMainSearchGlowRules) : widgets;
+		refreshSearchStates(refreshTargets, { force: shouldForceMainSearchGlowStateRefresh(searchQuery) }).then((updated) => {
 			if (updated) render();
 		});
 	}
