@@ -52,4 +52,17 @@ describe('System settings modal role visibility wiring', () => {
 		assert.match(styles, /\.admin-config-footer \{[\s\S]*border-top: 1px solid var\(--glass-border-color\);/, 'footer should keep its top divider');
 		assert.match(styles, /\.admin-config-sections > \.admin-config-section:last-of-type:not\(\.collapsed\) \.admin-config-section-body \{\s*border-bottom: none;/, 'last expanded section should drop its bottom border to prevent a double divider');
 	});
+
+	it('adds a compact client-side search box to the settings modal header', () => {
+		const app = read('public/app.js');
+		const styles = read('public/styles.css');
+		const lang = read('public/lang.js');
+		assert.match(app, /class="admin-config-header-actions"[\s\S]*class="admin-config-search-input"[\s\S]*class="admin-config-close oh-modal-close"/, 'search input should sit beside the close button in the header');
+		assert.match(app, /function filterAdminConfigSections\(\)/, 'settings modal should filter sections client-side');
+		assert.match(app, /fieldEl\.hidden = !visible;/, 'nonmatching fields should be hidden inside matching sections');
+		assert.match(app, /groupHeader\.hidden = hasQuery && !visibleGroups\.has/, 'group headers should only remain when they contain matches');
+		assert.match(lang, /searchPlaceholder:\s*'Search settings\\u2026'/, 'missing settings search placeholder text');
+		assert.match(styles, /\.admin-config-search-input \{[\s\S]*height: 30px;[\s\S]*background: rgba\(30, 33, 54, 0\.7\);/, 'settings search should use compact main-header search styling');
+		assert.match(styles, /\.admin-config-header h2 \{[\s\S]*text-overflow: ellipsis;[\s\S]*white-space: nowrap;/, 'header title should shrink without increasing header height');
+	});
 });

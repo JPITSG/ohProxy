@@ -2465,6 +2465,11 @@ body.theme-light .admin-config-frame {
 	border-bottom: 1px solid var(--glass-border-color);
 	flex-shrink: 0;
 }
+.admin-config-header {
+	gap: 10px;
+	padding-top: 13px;
+	padding-bottom: 11px;
+}
 body.theme-light .card-config-header,
 body.theme-light .admin-config-header,
 body.theme-light .admin-config-group-header,
@@ -2481,6 +2486,62 @@ body.theme-light .admin-config-section:not(.collapsed) .admin-config-section-bod
 	color: var(--color-text-primary);
 	cursor: move;
 	touch-action: none;
+}
+.admin-config-header h2 {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.admin-config-header-actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+	flex: 0 1 auto;
+	min-width: 0;
+}
+html.no-flex-gap .admin-config-header > * + * {
+	margin-left: 10px;
+}
+html.no-flex-gap .admin-config-header-actions > * + * {
+	margin-left: 8px;
+}
+.admin-config-search-input {
+	box-sizing: border-box;
+	width: clamp(128px, 28vw, 220px);
+	height: 30px;
+	min-width: 0;
+	padding: 0 10px;
+	font-size: .75rem;
+	line-height: 28px;
+	color: var(--color-text-primary);
+	background: rgba(30, 33, 54, 0.7);
+	backdrop-filter: blur(6px);
+	-webkit-backdrop-filter: blur(6px);
+	border: 1px solid var(--glass-border-color);
+	border-radius: 10px;
+	outline: none;
+	box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.5), inset 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.admin-config-search-input::placeholder {
+	color: rgba(255, 255, 255, 0.35);
+}
+.admin-config-search-input:focus {
+	border-color: rgba(118, 214, 152, 0.5);
+	box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.5), inset 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 10px rgba(118, 214, 152, 0.4);
+}
+body.theme-light .admin-config-search-input {
+	background: rgba(255, 255, 255, 0.7);
+	box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.2), inset 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+body.theme-light .admin-config-search-input::placeholder {
+	color: rgba(150, 155, 170, 0.8);
+}
+body.theme-light .admin-config-search-input:focus {
+	border-color: rgba(78, 183, 128, 0.45);
+	box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.2), inset 0 1px 3px rgba(0, 0, 0, 0.15), 0 0 10px rgba(78, 183, 128, 0.35);
 }
 .card-config-close,
 .admin-config-close {
@@ -3316,6 +3377,12 @@ body.theme-light .admin-config-sections {
 }
 .admin-config-section:not(.collapsed) + .admin-config-group-header {
 	border-top: none;
+}
+.admin-config-search-empty {
+	padding: 18px 20px;
+	font-size: .75rem;
+	color: var(--color-text-muted);
+	text-align: center;
 }
 .admin-config-section {
 }

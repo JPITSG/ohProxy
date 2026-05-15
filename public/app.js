@@ -6018,6 +6018,43 @@ function getAdminConfigModalTitleForRole(role) {
 	return ohLang.adminConfig.userTitle || 'User Settings';
 }
 
+function normalizeAdminConfigSearchText(value) {
+	return safeText(value).toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function adminConfigSearchMatches(text, rawQuery) {
+	const query = normalizeAdminConfigSearchText(rawQuery);
+	if (!query) return true;
+	const haystack = normalizeAdminConfigSearchText(text);
+	if (!haystack) return false;
+	if (haystack.includes(query)) return true;
+	return query.split(' ').filter(Boolean).every(part => haystack.includes(part));
+}
+
+function getAdminConfigGroupLabel(group) {
+	const groupLabelKey = ADMIN_CONFIG_GROUP_LABELS[group];
+	return (groupLabelKey && ohLang.adminConfig[groupLabelKey]) || group || '';
+}
+
+function getAdminConfigSectionTitle(section) {
+	return ohLang.adminConfig.sectionTitles[section.id] || section.id;
+}
+
+function buildAdminConfigFieldSearchText(field) {
+	const parts = [
+		field.key,
+		ohLang.adminConfig.fieldLabels[field.key],
+		ohLang.adminConfig.fieldDescs[field.key],
+		ohLang.adminConfig.fieldPlaceholders[field.key],
+	];
+	if (Array.isArray(field.options)) {
+		for (const option of field.options) {
+			parts.push(adminSelectOptionValue(option), adminSelectOptionLabel(option));
+		}
+	}
+	return parts.filter(Boolean).join(' ');
+}
+
 let adminConfigModal = null;
 let adminConfigAbort = null;
 const adminSelectMenus = [];
@@ -6106,6 +6143,8 @@ function createAdminField(field, value) {
 	const isStacked = field.type === 'list';
 	const row = document.createElement('div');
 	row.className = 'admin-config-field' + (isStacked ? ' stacked' : '');
+	row.dataset.fieldKey = field.key;
+	row.dataset.searchText = buildAdminConfigFieldSearchText(field);
 
 	const fieldLabel = ohLang.adminConfig.fieldLabels[field.key] || field.key;
 	const fieldDesc = ohLang.adminConfig.fieldDescs[field.key];
@@ -6278,6 +6317,13 @@ function renderAdminConfigSection(section, config) {
 	const sectionEl = document.createElement('div');
 	sectionEl.className = 'admin-config-section collapsed';
 	sectionEl.dataset.sectionId = section.id;
+	sectionEl.dataset.group = section.group || '';
+	sectionEl.dataset.searchText = [
+		getAdminConfigGroupLabel(section.group),
+		getAdminConfigSectionTitle(section),
+		section.group,
+		section.id,
+	].filter(Boolean).join(' ');
 
 	const header = document.createElement('div');
 	header.className = 'admin-config-section-header';
@@ -6294,7 +6340,7 @@ function renderAdminConfigSection(section, config) {
 
 	const title = document.createElement('span');
 	title.className = 'admin-config-section-title';
-	title.textContent = ohLang.adminConfig.sectionTitles[section.id] || section.id;
+	title.textContent = getAdminConfigSectionTitle(section);
 	header.appendChild(title);
 
 	if (section.restartRequired) {
@@ -6335,6 +6381,41 @@ function renderAdminConfigSection(section, config) {
 	return sectionEl;
 }
 
+function filterAdminConfigSections() {
+	if (!adminConfigModal) return;
+	const input = adminConfigModal.querySelector('.admin-config-search-input');
+	const sectionsEl = adminConfigModal.querySelector('.admin-config-sections');
+	if (!sectionsEl) return;
+	const query = input ? input.value : '';
+	const hasQuery = !!normalizeAdminConfigSearchText(query);
+	const visibleGroups = new Set();
+	let visibleCount = 0;
+
+	sectionsEl.classList.toggle('search-active', hasQuery);
+	sectionsEl.querySelectorAll('.admin-config-section').forEach(sectionEl => {
+		const sectionMatches = hasQuery && adminConfigSearchMatches(sectionEl.dataset.searchText || '', query);
+		let fieldVisible = false;
+		sectionEl.querySelectorAll('.admin-config-field').forEach(fieldEl => {
+			const visible = !hasQuery || sectionMatches || adminConfigSearchMatches(fieldEl.dataset.searchText || '', query);
+			fieldEl.hidden = !visible;
+			if (visible) fieldVisible = true;
+		});
+		const sectionVisible = !hasQuery || sectionMatches || fieldVisible;
+		sectionEl.hidden = !sectionVisible;
+		if (sectionVisible) {
+			visibleCount += 1;
+			visibleGroups.add(sectionEl.dataset.group || '');
+		}
+	});
+
+	sectionsEl.querySelectorAll('.admin-config-group-header').forEach(groupHeader => {
+		groupHeader.hidden = hasQuery && !visibleGroups.has(groupHeader.dataset.group || '');
+	});
+
+	const emptyEl = sectionsEl.querySelector('.admin-config-search-empty');
+	if (emptyEl) emptyEl.hidden = !hasQuery || visibleCount > 0;
+}
+
 function ensureAdminConfigModal() {
 	if (adminConfigModal) return;
 	const wrap = document.createElement('div');
@@ -6344,11 +6425,14 @@ function ensureAdminConfigModal() {
 		<div class="admin-config-frame oh-modal-frame glass">
 			<div class="admin-config-header oh-modal-header">
 				<h2>${getAdminConfigModalTitleForRole(getUserRole())}</h2>
-				<button type="button" class="admin-config-close oh-modal-close">
-					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<path d="M18 6L6 18M6 6l12 12"/>
-					</svg>
-				</button>
+				<div class="admin-config-header-actions">
+					<input type="search" class="admin-config-search-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="search" aria-label="${ohLang.adminConfig.searchLabel || 'Search settings'}" placeholder="${ohLang.adminConfig.searchPlaceholder || 'Search settings\u2026'}" />
+					<button type="button" class="admin-config-close oh-modal-close">
+						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M18 6L6 18M6 6l12 12"/>
+						</svg>
+					</button>
+				</div>
 			</div>
 			<div class="admin-config-sections"></div>
 			<div class="admin-config-footer oh-modal-footer">
@@ -6364,6 +6448,15 @@ function ensureAdminConfigModal() {
 	wrap.querySelector('.admin-config-close').addEventListener('click', () => { haptic(); closeAdminConfigModal(); });
 	wrap.querySelector('.admin-config-cancel').addEventListener('click', () => { haptic(); closeAdminConfigModal(); });
 	wrap.querySelector('.admin-config-save').addEventListener('click', () => { haptic(); saveAdminConfig(); });
+	const searchInput = wrap.querySelector('.admin-config-search-input');
+	searchInput.addEventListener('input', filterAdminConfigSections);
+	searchInput.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape' && searchInput.value) {
+			e.stopPropagation();
+			searchInput.value = '';
+			filterAdminConfigSections();
+		}
+	});
 	attachModalDismissListeners(wrap, adminConfigModal, closeAdminConfigModal);
 	makeFrameDraggable(wrap.querySelector('.admin-config-frame'), wrap.querySelector('.admin-config-header h2'));
 }
@@ -6374,7 +6467,9 @@ async function openAdminConfigModal() {
 	const statusEl = adminConfigModal.querySelector('.admin-config-status');
 	const sectionsEl = adminConfigModal.querySelector('.admin-config-sections');
 	const saveBtn = adminConfigModal.querySelector('.admin-config-save');
+	const searchInput = adminConfigModal.querySelector('.admin-config-search-input');
 	if (titleEl) titleEl.textContent = getAdminConfigModalTitleForRole(getUserRole());
+	if (searchInput) searchInput.value = '';
 
 	statusEl.className = 'admin-config-status';
 	statusEl.textContent = '';
@@ -6426,12 +6521,19 @@ async function openAdminConfigModal() {
 			currentGroup = section.group;
 			const groupHeader = document.createElement('div');
 			groupHeader.className = 'admin-config-group-header';
-			const groupLabelKey = ADMIN_CONFIG_GROUP_LABELS[currentGroup];
-			groupHeader.textContent = (groupLabelKey && ohLang.adminConfig[groupLabelKey]) || currentGroup;
+			groupHeader.dataset.group = currentGroup || '';
+			groupHeader.dataset.searchText = getAdminConfigGroupLabel(currentGroup);
+			groupHeader.textContent = getAdminConfigGroupLabel(currentGroup);
 			sectionsEl.appendChild(groupHeader);
 		}
 		sectionsEl.appendChild(renderAdminConfigSection(section, config));
 	}
+	const emptyEl = document.createElement('div');
+	emptyEl.className = 'admin-config-search-empty';
+	emptyEl.textContent = ohLang.adminConfig.searchEmpty || 'No settings found';
+	emptyEl.hidden = true;
+	sectionsEl.appendChild(emptyEl);
+	filterAdminConfigSections();
 	adminConfigInitialStateJson = JSON.stringify(collectAdminConfigValues());
 
 	saveBtn.disabled = false;
