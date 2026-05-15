@@ -51,8 +51,9 @@ describe('System settings modal role visibility wiring', () => {
 		const app = read('public/app.js');
 		const styles = read('public/styles.css');
 		assert.match(styles, /\.admin-config-footer \{[\s\S]*border-top: 1px solid var\(--glass-border-color\);/, 'footer should keep its top divider');
-		assert.match(app, /lastSectionEl = renderAdminConfigSection\(section, config\);[\s\S]*if \(lastSectionEl\) lastSectionEl\.classList\.add\('last-rendered-section'\);/, 'rendered settings should explicitly mark the last real section');
-		assert.match(styles, /\.admin-config-section\.last-rendered-section:not\(\.collapsed\) \.admin-config-section-body \{\s*border-bottom: none;/, 'last expanded section should drop its bottom border to prevent a double divider');
+		assert.match(app, /let lastVisibleSectionEl = null;[\s\S]*lastVisibleSectionEl = sectionEl;[\s\S]*if \(lastVisibleSectionEl\) lastVisibleSectionEl\.classList\.add\('last-visible-section'\);/, 'settings filter should mark the last visible section after search filtering');
+		assert.match(app, /querySelectorAll\('\.admin-config-section\.last-visible-section'\)[\s\S]*classList\.remove\('last-visible-section'\);/, 'settings filter should clear the previous last visible marker before recalculating');
+		assert.match(styles, /\.admin-config-section\.last-visible-section:not\(\.collapsed\) \.admin-config-section-body \{\s*border-bottom: none;/, 'last visible expanded section should drop its bottom border to prevent a double divider');
 	});
 
 	it('adds a compact client-side search box to the settings modal header', () => {

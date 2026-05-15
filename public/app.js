@@ -6420,11 +6420,15 @@ function filterAdminConfigSections() {
 	const hasQuery = !!normalizeAdminConfigSearchText(query);
 	const visibleGroups = new Set();
 	let visibleCount = 0;
+	let lastVisibleSectionEl = null;
 
 	adminConfigModal.querySelectorAll('.admin-select-wrap.menu-open').forEach(wrap => {
 		if (typeof wrap._closeMenu === 'function') wrap._closeMenu();
 	});
 	sectionsEl.classList.toggle('search-active', hasQuery);
+	sectionsEl.querySelectorAll('.admin-config-section.last-visible-section').forEach(sectionEl => {
+		sectionEl.classList.remove('last-visible-section');
+	});
 	sectionsEl.querySelectorAll('.admin-config-section').forEach(sectionEl => {
 		const sectionMatches = hasQuery && adminConfigSearchMatches(sectionEl.dataset.searchText || '', query);
 		let fieldVisible = false;
@@ -6438,8 +6442,10 @@ function filterAdminConfigSections() {
 		if (sectionVisible) {
 			visibleCount += 1;
 			visibleGroups.add(sectionEl.dataset.group || '');
+			lastVisibleSectionEl = sectionEl;
 		}
 	});
+	if (lastVisibleSectionEl) lastVisibleSectionEl.classList.add('last-visible-section');
 
 	sectionsEl.querySelectorAll('.admin-config-group-header').forEach(groupHeader => {
 		groupHeader.hidden = hasQuery && !visibleGroups.has(groupHeader.dataset.group || '');
@@ -6549,7 +6555,6 @@ async function openAdminConfigModal() {
 	const sectionGroups = Array.from(new Set(schema.map(section => section.group).filter(Boolean)));
 	const showGroupHeaders = sectionGroups.length > 1;
 	let currentGroup = '';
-	let lastSectionEl = null;
 	for (const section of schema) {
 		if (showGroupHeaders && section.group && section.group !== currentGroup) {
 			currentGroup = section.group;
@@ -6560,10 +6565,8 @@ async function openAdminConfigModal() {
 			groupHeader.textContent = getAdminConfigGroupLabel(currentGroup);
 			sectionsEl.appendChild(groupHeader);
 		}
-		lastSectionEl = renderAdminConfigSection(section, config);
-		sectionsEl.appendChild(lastSectionEl);
+		sectionsEl.appendChild(renderAdminConfigSection(section, config));
 	}
-	if (lastSectionEl) lastSectionEl.classList.add('last-rendered-section');
 	const emptyEl = document.createElement('div');
 	emptyEl.className = 'admin-config-search-empty';
 	emptyEl.textContent = ohLang.adminConfig.searchEmpty || 'No settings found';

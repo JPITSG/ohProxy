@@ -3397,7 +3397,7 @@ body.theme-light .admin-config-sections {
 	border-bottom: 1px solid var(--glass-border-color);
 }
 /* Keep a single divider at the modal footer junction. */
-.admin-config-section.last-rendered-section:not(.collapsed) .admin-config-section-body {
+.admin-config-section.last-visible-section:not(.collapsed) .admin-config-section-body {
 	border-bottom: none;
 }
 .admin-config-section-header {
