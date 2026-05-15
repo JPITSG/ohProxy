@@ -6549,6 +6549,7 @@ async function openAdminConfigModal() {
 	const sectionGroups = Array.from(new Set(schema.map(section => section.group).filter(Boolean)));
 	const showGroupHeaders = sectionGroups.length > 1;
 	let currentGroup = '';
+	let lastSectionEl = null;
 	for (const section of schema) {
 		if (showGroupHeaders && section.group && section.group !== currentGroup) {
 			currentGroup = section.group;
@@ -6559,8 +6560,10 @@ async function openAdminConfigModal() {
 			groupHeader.textContent = getAdminConfigGroupLabel(currentGroup);
 			sectionsEl.appendChild(groupHeader);
 		}
-		sectionsEl.appendChild(renderAdminConfigSection(section, config));
+		lastSectionEl = renderAdminConfigSection(section, config);
+		sectionsEl.appendChild(lastSectionEl);
 	}
+	if (lastSectionEl) lastSectionEl.classList.add('last-rendered-section');
 	const emptyEl = document.createElement('div');
 	emptyEl.className = 'admin-config-search-empty';
 	emptyEl.textContent = ohLang.adminConfig.searchEmpty || 'No settings found';
