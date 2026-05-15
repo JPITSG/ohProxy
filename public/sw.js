@@ -2,6 +2,7 @@
 
 const CACHE_NAME = 'ohproxy-shell-__JS_VERSION__-__CSS_VERSION__';
 const ICON_CACHE_NAME = 'ohproxy-icons-v1';
+const APP_SHELL_FRESH_NAVIGATION_WINDOW_MS = 30000;
 const PRECACHE_URLS = [
 	'./',
 	'./index.html',
@@ -20,6 +21,62 @@ const PRECACHE_URLS = [
 	'./icons/icon.svg',
 	'./icons/image-viewer-close.svg',
 ];
+let freshAppShellNavigationUntil = 0;
+const freshAppShellNavigationClientExpiries = new Map();
+
+function offlineResponse() {
+	return new Response('Offline', {
+		status: 503,
+		statusText: 'Service Unavailable',
+		headers: { 'Content-Type': 'text/plain' },
+	});
+}
+
+function cacheAppShellResponse(response) {
+	if (!response || !response.ok) return Promise.resolve();
+	const copy = response.clone();
+	return caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', copy));
+}
+
+function fetchAndCacheAppShell(request, options) {
+	return fetch(request, options).then((response) => {
+		return cacheAppShellResponse(response).catch(() => {}).then(() => response);
+	});
+}
+
+function freshAppShellClientIdFromEvent(event) {
+	if (event?.clientId) return String(event.clientId);
+	const source = event?.source;
+	return source && typeof source.id === 'string' ? source.id : '';
+}
+
+function shouldUseFreshAppShellNavigation(event) {
+	const now = Date.now();
+	const clientId = freshAppShellClientIdFromEvent(event);
+	if (clientId && freshAppShellNavigationClientExpiries.has(clientId)) {
+		const expiry = freshAppShellNavigationClientExpiries.get(clientId) || 0;
+		freshAppShellNavigationClientExpiries.delete(clientId);
+		if (now <= expiry) return true;
+	}
+	if (!freshAppShellNavigationUntil) return false;
+	if (now > freshAppShellNavigationUntil) {
+		freshAppShellNavigationUntil = 0;
+		return false;
+	}
+	freshAppShellNavigationUntil = 0;
+	return true;
+}
+
+function replyToMessage(event, payload) {
+	const port = event?.ports && event.ports[0];
+	if (port && typeof port.postMessage === 'function') {
+		port.postMessage(payload);
+		return;
+	}
+	if (event?.source && typeof event.source.postMessage === 'function') {
+		event.source.postMessage(payload);
+	}
+}
 
 self.addEventListener('install', (event) => {
 	event.waitUntil(
@@ -76,50 +133,42 @@ self.addEventListener('fetch', (event) => {
 		const isAppShell = navPath === '/' || navPath.endsWith('/index.html') ||
 			navPath === self.registration.scope.replace(url.origin, '');
 		if (isAppShell) {
-			event.respondWith(
-				caches.match('./index.html').then((cachedShell) => {
-					if (cachedShell) {
-						fetch(request)
-							.then((response) => {
-								if (response && response.ok) {
-									const copy = response.clone();
-									caches.open(CACHE_NAME).then((cache) => {
-										cache.put('./index.html', copy);
-									});
-								}
-							})
-							.catch(() => {});
-						return cachedShell;
-					}
-					return fetch(request)
+			let appShellRefresh = null;
+			const responsePromise = caches.match('./index.html').then((cachedShell) => {
+				const forceFresh = shouldUseFreshAppShellNavigation(event);
+				if (forceFresh) {
+					return fetchAndCacheAppShell(request, { cache: 'reload' })
 						.then((response) => {
-							if (response && response.ok) {
-								const copy = response.clone();
-								caches.open(CACHE_NAME).then((cache) => {
-									cache.put('./index.html', copy);
-								});
-								return response;
-							}
+							if (response && response.ok) return response;
 							if (response.status >= 500 && response.status < 600) {
 								return caches.match('./index.html').then((cached) => cached || response);
 							}
 							return response;
 						})
-						.catch(() => caches.match('./index.html')
-							.then(cached => cached || new Response('Offline', {
-								status: 503, statusText: 'Service Unavailable',
-								headers: { 'Content-Type': 'text/plain' },
-							})));
-				})
-			);
+						.catch(() => cachedShell || offlineResponse());
+				}
+				if (cachedShell) {
+					appShellRefresh = fetchAndCacheAppShell(request).catch(() => {});
+					return cachedShell;
+				}
+				return fetchAndCacheAppShell(request)
+					.then((response) => {
+						if (response && response.ok) return response;
+						if (response.status >= 500 && response.status < 600) {
+							return caches.match('./index.html').then((cached) => cached || response);
+						}
+						return response;
+					})
+					.catch(() => caches.match('./index.html')
+						.then(cached => cached || offlineResponse()));
+			});
+			event.respondWith(responsePromise);
+			event.waitUntil(responsePromise.then(() => appShellRefresh).catch(() => {}));
 			return;
 		}
 
 		event.respondWith(
-			fetch(request).catch(() => new Response('Offline', {
-				status: 503, statusText: 'Service Unavailable',
-				headers: { 'Content-Type': 'text/plain' },
-			}))
+			fetch(request).catch(() => offlineResponse())
 		);
 		return;
 	}
@@ -460,6 +509,17 @@ self.addEventListener('message', (event) => {
 		if (data.type === 'transport-http-request') {
 			void pruneStaleTransportClients();
 			await handleTransportHttpRequest(event, data);
+			return;
+		}
+		if (data.type === 'asset-reload-next-navigation') {
+			const clientId = freshAppShellClientIdFromEvent(event);
+			const expiry = Date.now() + APP_SHELL_FRESH_NAVIGATION_WINDOW_MS;
+			if (clientId) {
+				freshAppShellNavigationClientExpiries.set(clientId, expiry);
+			} else {
+				freshAppShellNavigationUntil = expiry;
+			}
+			replyToMessage(event, { type: 'asset-reload-next-navigation-ready' });
 			return;
 		}
 		if (data.type !== 'statusUpdate') return;

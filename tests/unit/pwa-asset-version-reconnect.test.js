@@ -36,4 +36,13 @@ describe('PWA reconnect asset version handling', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /if \(msg\.event === 'assetVersionChanged'\) \{\s*\/\/ Server assets updated - reload to get new version\s*console\.log\('Asset version changed, reloading\.\.\.'\);\s*promptAssetReload\(\);/);
 	});
+
+	it('asks the service worker for a fresh app shell before explicit asset reloads', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		assert.match(app, /function prepareFreshAppShellReload\(\) \{/);
+		assert.match(app, /navigator\.serviceWorker\.controller\.postMessage\(\{ type: 'asset-reload-next-navigation' \}, \[channel\.port2\]\);/);
+		assert.match(app, /event\?\.data\?\.type === 'asset-reload-next-navigation-ready'/);
+		assert.match(app, /async function reloadForUpdatedAssets\(\) \{\s*showResumeSpinner\(true\);[\s\S]*await prepareFreshAppShellReload\(\);[\s\S]*window\.location\.reload\(\);/);
+		assert.match(app, /text: ohLang\.adminConfig\.reloadBtn, onClick: \(\) => \{ dismissAllAlerts\(\); void reloadForUpdatedAssets\(\); \}/);
+	});
 });

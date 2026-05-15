@@ -3375,6 +3375,9 @@ body.theme-light .admin-config-sections {
 .admin-config-group-header:not(:first-child) {
 	border-top: 1px solid var(--glass-border-color);
 }
+.admin-config-group-header.first-visible-group-header {
+	border-top: none;
+}
 .admin-config-section:not(.collapsed) + .admin-config-group-header {
 	border-top: none;
 }

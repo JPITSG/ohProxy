@@ -156,6 +156,41 @@ function triggerReload() {
 	window.location.reload();
 }
 
+const ASSET_RELOAD_SW_TIMEOUT_MS = 1200;
+
+function prepareFreshAppShellReload() {
+	if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller || typeof MessageChannel === 'undefined') {
+		return Promise.resolve(false);
+	}
+	return new Promise((resolve) => {
+		let settled = false;
+		const finish = (ok) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve(ok === true);
+		};
+		const timer = setTimeout(() => finish(false), ASSET_RELOAD_SW_TIMEOUT_MS);
+		const channel = new MessageChannel();
+		channel.port1.onmessage = (event) => {
+			finish(event?.data?.type === 'asset-reload-next-navigation-ready');
+		};
+		try {
+			navigator.serviceWorker.controller.postMessage({ type: 'asset-reload-next-navigation' }, [channel.port2]);
+		} catch (_) {
+			finish(false);
+		}
+	});
+}
+
+async function reloadForUpdatedAssets() {
+	showResumeSpinner(true);
+	try {
+		await prepareFreshAppShellReload();
+	} catch (_) {}
+	window.location.reload();
+}
+
 function promptAssetReload() {
 	showAlert({
 		header: ohLang.adminConfig.reloadBadge,
@@ -163,7 +198,7 @@ function promptAssetReload() {
 		bodyIsHtml: true,
 		buttons: [
 			{ text: ohLang.adminConfig.closeBtn },
-			{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); window.location.reload(); } },
+			{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); void reloadForUpdatedAssets(); } },
 		],
 	});
 }
@@ -6032,13 +6067,20 @@ function tokenizeAdminConfigSearchText(value) {
 	return normalized ? normalized.split(/\s+/) : [];
 }
 
-function adminConfigTokensContainPhrase(haystackTokens, queryTokens) {
+function adminConfigTokensContainPhrase(haystackTokens, queryTokens, options = {}) {
 	if (!queryTokens.length) return true;
 	if (haystackTokens.length < queryTokens.length) return false;
+	const allowLastTokenPrefix = options.allowLastTokenPrefix === true;
 	for (let i = 0; i <= haystackTokens.length - queryTokens.length; i++) {
 		let matched = true;
 		for (let j = 0; j < queryTokens.length; j++) {
-			if (haystackTokens[i + j] !== queryTokens[j]) {
+			const queryToken = queryTokens[j];
+			const haystackToken = haystackTokens[i + j];
+			const isLastQueryToken = j === queryTokens.length - 1;
+			const tokenMatches = allowLastTokenPrefix && isLastQueryToken
+				? haystackToken.startsWith(queryToken)
+				: haystackToken === queryToken;
+			if (!tokenMatches) {
 				matched = false;
 				break;
 			}
@@ -6048,7 +6090,7 @@ function adminConfigTokensContainPhrase(haystackTokens, queryTokens) {
 	return false;
 }
 
-function adminConfigSearchMatches(text, rawQuery) {
+function adminConfigSearchMatches(text, rawQuery, options = {}) {
 	const query = normalizeAdminConfigSearchText(rawQuery);
 	if (!query) return true;
 	const haystack = normalizeAdminConfigSearchText(text);
@@ -6058,7 +6100,7 @@ function adminConfigSearchMatches(text, rawQuery) {
 	if (queryTokens.length === 1) {
 		return haystackTokens.some(token => token.includes(queryTokens[0]));
 	}
-	return adminConfigTokensContainPhrase(haystackTokens, queryTokens);
+	return adminConfigTokensContainPhrase(haystackTokens, queryTokens, options);
 }
 
 function getAdminConfigGroupLabel(group) {
@@ -6073,6 +6115,13 @@ function getAdminConfigSectionTitle(section) {
 function buildAdminConfigFieldSearchText(field) {
 	const parts = [
 		field.key,
+		buildAdminConfigFieldDisplaySearchText(field),
+	];
+	return parts.filter(Boolean).join(' ');
+}
+
+function buildAdminConfigFieldDisplaySearchText(field) {
+	const parts = [
 		ohLang.adminConfig.fieldLabels[field.key],
 		ohLang.adminConfig.fieldDescs[field.key],
 		ohLang.adminConfig.fieldPlaceholders[field.key],
@@ -6083,6 +6132,11 @@ function buildAdminConfigFieldSearchText(field) {
 		}
 	}
 	return parts.filter(Boolean).join(' ');
+}
+
+function adminConfigFieldSearchMatches(fieldEl, query) {
+	return adminConfigSearchMatches(fieldEl.dataset.displaySearchText || '', query, { allowLastTokenPrefix: true })
+		|| adminConfigSearchMatches(fieldEl.dataset.keySearchText || '', query);
 }
 
 let adminConfigModal = null;
@@ -6175,6 +6229,8 @@ function createAdminField(field, value) {
 	row.className = 'admin-config-field' + (isStacked ? ' stacked' : '');
 	row.dataset.fieldKey = field.key;
 	row.dataset.searchText = buildAdminConfigFieldSearchText(field);
+	row.dataset.displaySearchText = buildAdminConfigFieldDisplaySearchText(field);
+	row.dataset.keySearchText = field.key;
 
 	const fieldLabel = ohLang.adminConfig.fieldLabels[field.key] || field.key;
 	const fieldDesc = ohLang.adminConfig.fieldDescs[field.key];
@@ -6421,6 +6477,7 @@ function filterAdminConfigSections() {
 	const visibleGroups = new Set();
 	let visibleCount = 0;
 	let lastVisibleSectionEl = null;
+	let firstVisibleGroupHeaderEl = null;
 
 	adminConfigModal.querySelectorAll('.admin-select-wrap.menu-open').forEach(wrap => {
 		if (typeof wrap._closeMenu === 'function') wrap._closeMenu();
@@ -6429,11 +6486,14 @@ function filterAdminConfigSections() {
 	sectionsEl.querySelectorAll('.admin-config-section.last-visible-section').forEach(sectionEl => {
 		sectionEl.classList.remove('last-visible-section');
 	});
+	sectionsEl.querySelectorAll('.admin-config-group-header.first-visible-group-header').forEach(groupHeader => {
+		groupHeader.classList.remove('first-visible-group-header');
+	});
 	sectionsEl.querySelectorAll('.admin-config-section').forEach(sectionEl => {
 		const sectionMatches = hasQuery && adminConfigSearchMatches(sectionEl.dataset.searchText || '', query);
 		let fieldVisible = false;
 		sectionEl.querySelectorAll('.admin-config-field').forEach(fieldEl => {
-			const visible = !hasQuery || adminConfigSearchMatches(fieldEl.dataset.searchText || '', query);
+			const visible = !hasQuery || adminConfigFieldSearchMatches(fieldEl, query);
 			fieldEl.hidden = !visible;
 			if (visible) fieldVisible = true;
 		});
@@ -6448,8 +6508,11 @@ function filterAdminConfigSections() {
 	if (lastVisibleSectionEl) lastVisibleSectionEl.classList.add('last-visible-section');
 
 	sectionsEl.querySelectorAll('.admin-config-group-header').forEach(groupHeader => {
-		groupHeader.hidden = hasQuery && !visibleGroups.has(groupHeader.dataset.group || '');
+		const visible = !hasQuery || visibleGroups.has(groupHeader.dataset.group || '');
+		groupHeader.hidden = !visible;
+		if (visible && !firstVisibleGroupHeaderEl) firstVisibleGroupHeaderEl = groupHeader;
 	});
+	if (firstVisibleGroupHeaderEl) firstVisibleGroupHeaderEl.classList.add('first-visible-group-header');
 
 	const emptyEl = sectionsEl.querySelector('.admin-config-search-empty');
 	if (emptyEl) emptyEl.hidden = !hasQuery || visibleCount > 0;
@@ -6753,7 +6816,7 @@ async function saveAdminConfig() {
 				bodyIsHtml: true,
 				buttons: [
 					{ text: ohLang.adminConfig.closeBtn },
-					{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); window.location.reload(); } },
+					{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); void reloadForUpdatedAssets(); } },
 				],
 			});
 		} else {
@@ -6817,7 +6880,7 @@ async function restartServer() {
 		showAlert({
 			body: ohLang.adminConfig.restartSuccess,
 			buttons: [
-				{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); window.location.reload(); } },
+				{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); void reloadForUpdatedAssets(); } },
 			],
 		});
 	} else {
@@ -6826,7 +6889,7 @@ async function restartServer() {
 			bodyIsHtml: true,
 			buttons: [
 				{ text: ohLang.adminConfig.closeBtn },
-				{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); window.location.reload(); } },
+				{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); void reloadForUpdatedAssets(); } },
 			],
 		});
 	}

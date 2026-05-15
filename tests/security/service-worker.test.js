@@ -185,15 +185,26 @@ describe('Service Worker: Cache Strategy', () => {
 
 	it('only updates cached app shell from successful navigation responses', () => {
 		const content = readFile(SW_FILE);
-		assert.match(content, /if \(response && response\.ok\) \{/);
-		assert.match(content, /cache\.put\('\.\/index\.html', copy\);/);
+		assert.match(content, /function cacheAppShellResponse\(response\) \{/);
+		assert.match(content, /if \(!response \|\| !response\.ok\) return Promise\.resolve\(\);/);
+		assert.match(content, /cache\.put\('\.\/index\.html', copy\)/);
 	});
 
 	it('serves cached app shell immediately and revalidates app-shell navigations in background', () => {
 		const content = readFile(SW_FILE);
-		assert.match(content, /if \(isAppShell\) \{\s*event\.respondWith\(\s*caches\.match\('\.\/index\.html'\)\.then\(\(cachedShell\) => \{/);
-		assert.match(content, /if \(cachedShell\) \{\s*fetch\(request\)\s*\.then\(\(response\) => \{/);
+		assert.match(content, /if \(isAppShell\) \{\s*let appShellRefresh = null;\s*const responsePromise = caches\.match\('\.\/index\.html'\)\.then\(\(cachedShell\) => \{/);
+		assert.match(content, /if \(cachedShell\) \{\s*appShellRefresh = fetchAndCacheAppShell\(request\)\.catch\(\(\) => \{\}\);/);
 		assert.match(content, /return cachedShell;/);
+		assert.match(content, /event\.waitUntil\(responsePromise\.then\(\(\) => appShellRefresh\)\.catch\(\(\) => \{\}\)\);/);
+	});
+
+	it('can force a one-shot network app-shell navigation for explicit asset reloads', () => {
+		const content = readFile(SW_FILE);
+		assert.match(content, /const APP_SHELL_FRESH_NAVIGATION_WINDOW_MS = 30000;/);
+		assert.match(content, /const freshAppShellNavigationClientExpiries = new Map\(\);/);
+		assert.match(content, /const clientId = freshAppShellClientIdFromEvent\(event\);[\s\S]*freshAppShellNavigationClientExpiries\.set\(clientId, expiry\);[\s\S]*freshAppShellNavigationUntil = expiry;/);
+		assert.match(content, /replyToMessage\(event, \{ type: 'asset-reload-next-navigation-ready' \}\);/);
+		assert.match(content, /const forceFresh = shouldUseFreshAppShellNavigation\(event\);[\s\S]*if \(forceFresh\) \{\s*return fetchAndCacheAppShell\(request, \{ cache: 'reload' \}\)/);
 	});
 });
 
@@ -214,7 +225,7 @@ describe('Service Worker: Security Headers', () => {
 });
 
 describe('Service Worker: Status Messaging', () => {
-	it('accepts only statusUpdate for status-notification control messages', () => {
+	it('keeps status-notification handling scoped to statusUpdate messages', () => {
 		const content = readFile(SW_FILE);
 		assert.doesNotMatch(content, /notification-heartbeat/);
 		assert.match(content, /if \(data\.type !== 'statusUpdate'\) return;/);

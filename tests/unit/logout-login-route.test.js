@@ -29,7 +29,7 @@ describe('logout login navigation', () => {
 	});
 
 	it('keeps normal app-shell navigations local-first in the service worker', () => {
-		assert.match(swJs, /if \(cachedShell\) \{\s*fetch\(request\)/);
+		assert.match(swJs, /if \(cachedShell\) \{\s*appShellRefresh = fetchAndCacheAppShell\(request\)\.catch\(\(\) => \{\}\);/);
 		assert.match(swJs, /return cachedShell;/);
 	});
 });
