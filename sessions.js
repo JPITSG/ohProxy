@@ -130,6 +130,23 @@ function initDb() {
 		);
 	`);
 
+	// Create IP blacklist table for unauthenticated client guard.
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS ip_blacklist (
+			ip TEXT PRIMARY KEY,
+			reason TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT 'manual',
+			created_at INTEGER NOT NULL,
+			expires_at INTEGER DEFAULT NULL,
+			first_seen INTEGER DEFAULT NULL,
+			last_seen INTEGER DEFAULT NULL,
+			path TEXT NOT NULL DEFAULT '',
+			user_agent TEXT NOT NULL DEFAULT ''
+		);
+		CREATE INDEX IF NOT EXISTS idx_ip_blacklist_expires_at ON ip_blacklist(expires_at);
+		CREATE INDEX IF NOT EXISTS idx_ip_blacklist_source ON ip_blacklist(source);
+	`);
+
 	// Run cleanup on startup
 	cleanupSessions();
 
@@ -896,6 +913,108 @@ function setServerSetting(key, value) {
 	db.prepare('INSERT OR REPLACE INTO server_settings (key, value) VALUES (?, ?)').run(key, String(value));
 }
 
+// ============================================
+// IP Blacklist Functions
+// ============================================
+
+function nowSeconds() {
+	return Math.floor(Date.now() / 1000);
+}
+
+function normalizeIpBlacklistRow(row) {
+	if (!row) return null;
+	return {
+		ip: row.ip,
+		reason: row.reason || '',
+		source: row.source || 'manual',
+		createdAt: row.created_at || 0,
+		expiresAt: row.expires_at === null || row.expires_at === undefined ? null : row.expires_at,
+		firstSeen: row.first_seen === null || row.first_seen === undefined ? null : row.first_seen,
+		lastSeen: row.last_seen === null || row.last_seen === undefined ? null : row.last_seen,
+		path: row.path || '',
+		userAgent: row.user_agent || '',
+	};
+}
+
+function deleteExpiredIpBlacklistEntries(now = nowSeconds()) {
+	if (!db) initDb();
+	const result = db.prepare('DELETE FROM ip_blacklist WHERE expires_at IS NOT NULL AND expires_at <= ?').run(now);
+	return result.changes;
+}
+
+function getIpBlacklistEntry(ip, now = nowSeconds()) {
+	if (!db) initDb();
+	const key = String(ip || '').trim();
+	if (!key) return null;
+	const row = db.prepare('SELECT * FROM ip_blacklist WHERE ip = ?').get(key);
+	if (!row) return null;
+	if (row.expires_at !== null && row.expires_at !== undefined && row.expires_at <= now) {
+		db.prepare('DELETE FROM ip_blacklist WHERE ip = ?').run(key);
+		return null;
+	}
+	return normalizeIpBlacklistRow(row);
+}
+
+function listIpBlacklistEntries({ includeExpired = false } = {}) {
+	if (!db) initDb();
+	const now = nowSeconds();
+	if (!includeExpired) {
+		deleteExpiredIpBlacklistEntries(now);
+	}
+	const rows = includeExpired
+		? db.prepare('SELECT * FROM ip_blacklist ORDER BY created_at DESC, ip ASC').all()
+		: db.prepare('SELECT * FROM ip_blacklist WHERE expires_at IS NULL OR expires_at > ? ORDER BY created_at DESC, ip ASC').all(now);
+	return rows.map(normalizeIpBlacklistRow).filter(Boolean);
+}
+
+function addIpBlacklistEntry(ip, options = {}) {
+	if (!db) initDb();
+	const key = String(ip || '').trim();
+	if (!key) return false;
+	const createdAt = Number.isInteger(options.createdAt) ? options.createdAt : nowSeconds();
+	const expiresAt = Number.isInteger(options.expiresAt) ? options.expiresAt : null;
+	const firstSeen = Number.isInteger(options.firstSeen) ? options.firstSeen : null;
+	const lastSeen = Number.isInteger(options.lastSeen) ? options.lastSeen : null;
+	const source = String(options.source || 'manual').trim() || 'manual';
+	const reason = String(options.reason || '').trim();
+	const path = String(options.path || '').trim().slice(0, 2048);
+	const userAgent = String(options.userAgent || '').trim().slice(0, 512);
+	db.prepare(`
+		INSERT INTO ip_blacklist (ip, reason, source, created_at, expires_at, first_seen, last_seen, path, user_agent)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(ip) DO UPDATE SET
+			reason = excluded.reason,
+			source = excluded.source,
+			created_at = excluded.created_at,
+			expires_at = excluded.expires_at,
+			first_seen = excluded.first_seen,
+			last_seen = excluded.last_seen,
+			path = excluded.path,
+			user_agent = excluded.user_agent
+	`).run(key, reason, source, createdAt, expiresAt, firstSeen, lastSeen, path, userAgent);
+	return true;
+}
+
+function removeIpBlacklistEntry(ip) {
+	if (!db) initDb();
+	const key = String(ip || '').trim();
+	if (!key) return false;
+	const result = db.prepare('DELETE FROM ip_blacklist WHERE ip = ?').run(key);
+	return result.changes > 0;
+}
+
+function clearIpBlacklistEntries({ expiredOnly = false, source = '' } = {}) {
+	if (!db) initDb();
+	if (expiredOnly) return deleteExpiredIpBlacklistEntries();
+	const cleanSource = String(source || '').trim();
+	if (cleanSource) {
+		const result = db.prepare('DELETE FROM ip_blacklist WHERE source = ?').run(cleanSource);
+		return result.changes;
+	}
+	const result = db.prepare('DELETE FROM ip_blacklist').run();
+	return result.changes;
+}
+
 module.exports = {
 	initDb,
 	generateSessionId,
@@ -947,4 +1066,11 @@ module.exports = {
 	// Server settings
 	getServerSetting,
 	setServerSetting,
+	// IP blacklist
+	getIpBlacklistEntry,
+	listIpBlacklistEntries,
+	addIpBlacklistEntry,
+	removeIpBlacklistEntry,
+	clearIpBlacklistEntries,
+	deleteExpiredIpBlacklistEntries,
 };

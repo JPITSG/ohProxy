@@ -5816,6 +5816,17 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'server.allowSubnets', type: 'list' },
 			{ key: 'server.trustProxy', type: 'toggle' },
 			{ key: 'server.denyXFFSubnets', type: 'list', allowEmpty: true },
+			{ key: 'server.trustedProxySubnets', type: 'list', allowEmpty: true },
+		],
+	},
+	{
+		id: 'unauthenticated-ip-guard', group: 'server',
+		fields: [
+			{ key: 'server.unauthenticatedIpGuard.enabled', type: 'toggle' },
+			{ key: 'server.unauthenticatedIpGuard.graceSeconds', type: 'number', min: 1, max: 86400 },
+			{ key: 'server.unauthenticatedIpGuard.exemptSubnets', type: 'list', allowEmpty: true },
+			{ key: 'server.unauthenticatedIpGuard.autoBlacklistTtlSeconds', type: 'number', min: 0, max: 315360000 },
+			{ key: 'server.unauthenticatedIpGuard.maxPending', type: 'number', min: 1, max: 1000000 },
 		],
 	},
 	{

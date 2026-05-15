@@ -81,6 +81,22 @@ module.exports = {
 		// Block requests when X-Forwarded-For header contains an IP in these subnets (IPv4 CIDR list).
 		// Only checked when trustProxy is enabled and X-Forwarded-For header is present.
 		denyXFFSubnets: [],
+		// Proxy socket subnets whose X-Forwarded-For / X-Real-IP headers may identify the client.
+		// Empty preserves legacy trustProxy behavior and trusts proxy headers from any socket peer.
+		trustedProxySubnets: [],
+		// Guard unauthenticated clients by IP. Non-exempt clients must authenticate within the grace window.
+		unauthenticatedIpGuard: {
+			// Enable unauthenticated IP guard (true/false).
+			enabled: false,
+			// Seconds allowed between first unauthenticated request and successful authentication.
+			graceSeconds: 60,
+			// Client IP subnets skipped by this guard (resolved after trusted proxy headers).
+			exemptSubnets: [],
+			// Lifetime for automatically-created blacklist entries in seconds (0 = never expire).
+			autoBlacklistTtlSeconds: 86400,
+			// Maximum in-memory pending unauthenticated IPs.
+			maxPending: 10000,
+		},
 
 		// === Security Headers ===
 		securityHeaders: {

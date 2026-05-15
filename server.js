@@ -27,6 +27,7 @@ const {
 	parseAuthCookieValue,
 } = require('./lib/auth-cookie');
 const { createAuthLockoutManager } = require('./lib/auth-lockout');
+const { createUnauthenticatedIpGuard } = require('./lib/unauthenticated-ip-guard');
 const { buildOpenhabClient } = require('./lib/openhab-client');
 const { getBackendRecoveryDelayMs } = require('./lib/backend-recovery-delay');
 
@@ -318,6 +319,8 @@ const HTTPS_KEY_FILE = safeText(HTTPS_CONFIG.keyFile);
 const ALLOW_SUBNETS = SERVER_CONFIG.allowSubnets;
 const TRUST_PROXY = SERVER_CONFIG.trustProxy === true;
 const DENY_XFF_SUBNETS = SERVER_CONFIG.denyXFFSubnets;
+const TRUSTED_PROXY_SUBNETS = SERVER_CONFIG.trustedProxySubnets;
+const UNAUTHENTICATED_IP_GUARD_CONFIG = SERVER_CONFIG.unauthenticatedIpGuard || {};
 const OH_TARGET = safeText(SERVER_CONFIG.openhab?.target);
 const OH_USER = safeText(SERVER_CONFIG.openhab?.user || '');
 const OH_PASS = safeText(SERVER_CONFIG.openhab?.pass || '');
@@ -362,6 +365,7 @@ const SESSION_MAX_AGE_DAYS = (() => {
 const AUTH_LOCKOUT_MS = 15 * 60 * 1000;
 const AUTH_LOCKOUT_PRUNE_MS = 60 * 1000;
 const AUTH_LOCKOUT_STALE_MS = Math.max(AUTH_LOCKOUT_MS, AUTH_LOCKOUT_WINDOW_MS);
+const UNAUTHENTICATED_IP_GUARD_SWEEP_MS = 5000;
 const SECURITY_HEADERS_ENABLED = SECURITY_HEADERS.enabled !== false;
 const SECURITY_HSTS = SECURITY_HEADERS.hsts || {};
 const SECURITY_CSP = SECURITY_HEADERS.csp || {};
@@ -745,6 +749,11 @@ function pruneAuthFailureNotifyState() {
 	}
 }
 
+function sweepUnauthenticatedIpGuard() {
+	unauthenticatedIpGuard.expirePending();
+	sessions.deleteExpiredIpBlacklistEntries();
+}
+
 function logAccess(message) {
 	if (liveConfig.accessLogLevel === '400+') {
 		const match = safeText(message).match(/\s(\d{3})\s/);
@@ -869,6 +878,26 @@ function ensureAllowSubnets(value, name, errors, options = {}) {
 			errors.push(`${name}[${index}] must be IPv4 CIDR or 0.0.0.0 but currently is ${describeValue(entry)}`);
 		}
 	});
+}
+
+function normalizeUnauthenticatedIpGuardConfig(value) {
+	const cfg = isPlainObject(value) ? value : {};
+	return {
+		enabled: cfg.enabled === true,
+		graceSeconds: Math.max(1, Math.floor(configNumber(cfg.graceSeconds, 60))),
+		exemptSubnets: Array.isArray(cfg.exemptSubnets) ? cfg.exemptSubnets : [],
+		autoBlacklistTtlSeconds: Math.max(0, Math.floor(configNumber(cfg.autoBlacklistTtlSeconds, 86400))),
+		maxPending: Math.max(1, Math.floor(configNumber(cfg.maxPending, 10000))),
+	};
+}
+
+function ensureUnauthenticatedIpGuardConfig(value, name, errors) {
+	if (!ensureObject(value, name, errors)) return;
+	ensureBoolean(value.enabled, `${name}.enabled`, errors);
+	ensureNumber(value.graceSeconds, `${name}.graceSeconds`, { min: 1, max: 86400 }, errors);
+	ensureAllowSubnets(value.exemptSubnets, `${name}.exemptSubnets`, errors, { allowEmpty: true, maxItems: 100 });
+	ensureNumber(value.autoBlacklistTtlSeconds, `${name}.autoBlacklistTtlSeconds`, { min: 0, max: 315360000 }, errors);
+	ensureNumber(value.maxPending, `${name}.maxPending`, { min: 1, max: 1000000 }, errors);
 }
 
 function ensureUrl(value, name, errors) {
@@ -1000,6 +1029,8 @@ function validateConfig() {
 		errors.push(`server.trustProxy must be true or false but currently is ${describeValue(SERVER_CONFIG.trustProxy)}`);
 	}
 	ensureAllowSubnets(DENY_XFF_SUBNETS, 'server.denyXFFSubnets', errors, { allowEmpty: true });
+	ensureAllowSubnets(TRUSTED_PROXY_SUBNETS, 'server.trustedProxySubnets', errors, { allowEmpty: true });
+	ensureUnauthenticatedIpGuardConfig(UNAUTHENTICATED_IP_GUARD_CONFIG, 'server.unauthenticatedIpGuard', errors);
 
 	if (ensureObject(SERVER_CONFIG.openhab, 'server.openhab', errors)) {
 		ensureUrl(OH_TARGET, 'server.openhab.target', errors);
@@ -1285,6 +1316,8 @@ function validateAdminConfig(config) {
 	ensureAllowSubnets(s.allowSubnets, 'server.allowSubnets', errors, { maxItems: 100 });
 	if (s.trustProxy !== undefined) ensureBoolean(s.trustProxy, 'server.trustProxy', errors);
 	if (Array.isArray(s.denyXFFSubnets)) ensureAllowSubnets(s.denyXFFSubnets, 'server.denyXFFSubnets', errors, { allowEmpty: true, maxItems: 100 });
+	if (Array.isArray(s.trustedProxySubnets)) ensureAllowSubnets(s.trustedProxySubnets, 'server.trustedProxySubnets', errors, { allowEmpty: true, maxItems: 100 });
+	if (isPlainObject(s.unauthenticatedIpGuard)) ensureUnauthenticatedIpGuardConfig(s.unauthenticatedIpGuard, 'server.unauthenticatedIpGuard', errors);
 
 	// Security headers
 	if (isPlainObject(s.securityHeaders)) {
@@ -1641,7 +1674,7 @@ function validateAdminUserConfig(userConfig) {
 function normalizeRemoteIp(value) {
 	const raw = safeText(value).trim();
 	if (!raw) return '';
-	// Convert IPv4-mapped IPv6 (::ffff:192.168.1.1) to plain IPv4
+	// Convert IPv4-mapped IPv6 (::ffff:203.0.113.1) to plain IPv4
 	if (raw.startsWith('::ffff:')) return raw.slice(7);
 	// Preserve IPv6 addresses (subnet checks will fail but lockouts will be per-IP)
 	return raw;
@@ -1652,15 +1685,48 @@ function getSocketIp(req) {
 	return normalizeRemoteIp(req?.socket?.remoteAddress || '');
 }
 
-// Returns X-Forwarded-For client IP when trustProxy enabled (for logging, auth tracking)
+function cleanForwardedIpToken(value) {
+	let raw = safeText(value).trim();
+	if (!raw) return '';
+	if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+		raw = raw.slice(1, -1).trim();
+	}
+	if (raw.startsWith('[')) {
+		const end = raw.indexOf(']');
+		if (end > 0) raw = raw.slice(1, end);
+	} else if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(raw)) {
+		raw = raw.slice(0, raw.lastIndexOf(':'));
+	}
+	const ip = normalizeRemoteIp(raw);
+	return net.isIP(ip) ? ip : '';
+}
+
+function getForwardedHeaderIp(req, headerName) {
+	const raw = req?.headers?.[headerName];
+	const headerValue = Array.isArray(raw) ? raw[0] : raw;
+	for (const token of safeText(headerValue).split(',')) {
+		const ip = cleanForwardedIpToken(token);
+		if (ip) return ip;
+	}
+	return '';
+}
+
+function canTrustProxyHeaders(req) {
+	if (!liveConfig.trustProxy) return false;
+	const trusted = Array.isArray(liveConfig.trustedProxySubnets) ? liveConfig.trustedProxySubnets : [];
+	if (trusted.length === 0) return true;
+	if (trusted.some((entry) => isAllowAllSubnet(entry))) return true;
+	const socketIp = getSocketIp(req);
+	return !!(socketIp && ipInAnySubnet(socketIp, trusted));
+}
+
+// Returns trusted proxy client IP when trustProxy enabled (for logging, auth tracking)
 function getRemoteIp(req) {
-	if (liveConfig.trustProxy) {
-		const xff = req?.headers?.['x-forwarded-for'];
-		if (xff) {
-			// X-Forwarded-For: "client, proxy1, proxy2" - take first IP
-			const clientIp = safeText(xff).split(',')[0].trim();
-			if (clientIp) return normalizeRemoteIp(clientIp);
-		}
+	if (canTrustProxyHeaders(req)) {
+		const xffIp = getForwardedHeaderIp(req, 'x-forwarded-for');
+		if (xffIp) return xffIp;
+		const realIp = getForwardedHeaderIp(req, 'x-real-ip');
+		if (realIp) return realIp;
 	}
 	return getSocketIp(req);
 }
@@ -1902,6 +1968,83 @@ function sendAuthRequired(req, res) {
 	res.status(401).type('text/plain').send('Unauthorized');
 }
 
+function isUnauthenticatedIpGuardExempt(ip) {
+	const cfg = liveConfig.unauthenticatedIpGuard || {};
+	const subnets = Array.isArray(cfg.exemptSubnets) ? cfg.exemptSubnets : [];
+	return !!(ip && ipInAnySubnet(ip, subnets));
+}
+
+function getRawHeaderText(req, headerName) {
+	const raw = req?.headers?.[headerName];
+	if (Array.isArray(raw)) return raw.join(', ');
+	return safeText(raw).trim();
+}
+
+function getUnauthenticatedIpGuardAuthContext(req) {
+	const { users, disabledUsers } = loadAuthUsers();
+	if (!users || Object.keys(users).length === 0) {
+		return { authenticated: false, user: '' };
+	}
+	if (liveConfig.authCookieKey && liveConfig.authCookieName) {
+		const cookieResult = getAuthCookieUser(req, users, liveConfig.authCookieKey);
+		if (cookieResult && !disabledUsers.has(cookieResult.user)) {
+			return { authenticated: true, user: cookieResult.user };
+		}
+	}
+	if (liveConfig.authMode === 'basic') {
+		const [user, pass] = getBasicAuthCredentials(req);
+		if (user && Object.prototype.hasOwnProperty.call(users, user) && users[user] === pass && !disabledUsers.has(user)) {
+			return { authenticated: true, user };
+		}
+	}
+	return { authenticated: false, user: '' };
+}
+
+function buildUnauthenticatedIpGuardContext(req) {
+	const clientIp = getRemoteIp(req);
+	const auth = getUnauthenticatedIpGuardAuthContext(req);
+	return {
+		ip: clientIp,
+		authenticated: auth.authenticated,
+		user: auth.user,
+		method: req.method,
+		path: req.originalUrl || req.url || req.path,
+		socketIp: getSocketIp(req),
+		forwardedFor: getRawHeaderText(req, 'x-forwarded-for'),
+		userAgent: getRawHeaderText(req, 'user-agent'),
+	};
+}
+
+function sendUnauthenticatedIpGuardBlocked(req, res) {
+	applySecurityHeaders(req, res);
+	res.setHeader('Cache-Control', 'no-store');
+	const reqPath = getRequestPath(req);
+	const acceptHeader = safeText(req.headers?.accept).toLowerCase();
+	if (!reqPath.startsWith('/api/') && acceptHeader.includes('text/html')) {
+		sendStyledError(res, req, 403, 'Forbidden');
+		return;
+	}
+	if (reqPath.startsWith('/api/') || acceptHeader.includes('application/json')) {
+		res.status(403).json({ error: 'Forbidden' });
+		return;
+	}
+	res.status(403).type('text/plain').send('Forbidden');
+}
+
+function enforceUnauthenticatedIpGuard(req, res) {
+	const decision = unauthenticatedIpGuard.evaluate(buildUnauthenticatedIpGuardContext(req));
+	if (decision.allowed) return true;
+	sendUnauthenticatedIpGuardBlocked(req, res);
+	return false;
+}
+
+function enforceUnauthenticatedIpGuardForWs(req, socket) {
+	const decision = unauthenticatedIpGuard.evaluate(buildUnauthenticatedIpGuardContext(req));
+	if (decision.allowed) return true;
+	sendWsUpgradeError(socket, 403, 'Forbidden');
+	return false;
+}
+
 function getRequestPath(req) {
 	const direct = safeText(req?.path || '').trim();
 	if (direct) return direct;
@@ -1987,6 +2130,8 @@ const liveConfig = {
 	allowSubnets: ALLOW_SUBNETS,
 	trustProxy: TRUST_PROXY,
 	denyXFFSubnets: DENY_XFF_SUBNETS,
+	trustedProxySubnets: TRUSTED_PROXY_SUBNETS,
+	unauthenticatedIpGuard: normalizeUnauthenticatedIpGuardConfig(UNAUTHENTICATED_IP_GUARD_CONFIG),
 	proxyAllowlist: PROXY_ALLOWLIST,
 	webviewNoProxy: WEBVIEW_NO_PROXY,
 	ohTarget: OH_TARGET,
@@ -2052,6 +2197,14 @@ const liveConfig = {
 	gpsHomeLat: Number.isFinite(parseFloat(SERVER_CONFIG.gps?.homeLat)) ? parseFloat(SERVER_CONFIG.gps?.homeLat) : NaN,
 	gpsHomeLon: Number.isFinite(parseFloat(SERVER_CONFIG.gps?.homeLon)) ? parseFloat(SERVER_CONFIG.gps?.homeLon) : NaN,
 };
+
+const unauthenticatedIpGuard = createUnauthenticatedIpGuard({
+	config: liveConfig.unauthenticatedIpGuard,
+	log: (message) => logMessage(message),
+	isExemptIp: (ip) => isUnauthenticatedIpGuardExempt(ip),
+	getBlacklistEntry: (ip) => sessions.getIpBlacklistEntry(ip),
+	addBlacklistEntry: (ip, entry) => sessions.addIpBlacklistEntry(ip, entry),
+});
 
 logMessage('-----');
 logMessage('[Startup] Starting ohProxy instance...');
@@ -2142,6 +2295,9 @@ function reloadLiveConfig() {
 	liveConfig.trustProxy = newServer.trustProxy === true;
 	app.set('trust proxy', liveConfig.trustProxy);
 	liveConfig.denyXFFSubnets = newServer.denyXFFSubnets;
+	liveConfig.trustedProxySubnets = newServer.trustedProxySubnets;
+	liveConfig.unauthenticatedIpGuard = normalizeUnauthenticatedIpGuardConfig(newServer.unauthenticatedIpGuard);
+	unauthenticatedIpGuard.configure(liveConfig.unauthenticatedIpGuard);
 	liveConfig.proxyAllowlist = normalizeProxyAllowlist(newServer.proxyAllowlist);
 	liveConfig.webviewNoProxy = normalizeProxyAllowlist(newServer.webviewNoProxy);
 	liveConfig.ohTarget = safeText(newServer.openhab?.target);
@@ -4518,17 +4674,16 @@ function handleWsUpgrade(req, socket, head) {
 	}
 
 	// Check denyXFFSubnets - only when X-Forwarded-For header is present
-	if (liveConfig.trustProxy && Array.isArray(liveConfig.denyXFFSubnets) && liveConfig.denyXFFSubnets.length > 0) {
-		const xff = req.headers?.['x-forwarded-for'];
-		if (xff) {
-			const xffIp = normalizeRemoteIp(safeText(xff).split(',')[0].trim());
-			if (xffIp && ipInAnySubnet(xffIp, liveConfig.denyXFFSubnets)) {
-				logMessage(`[WS] Blocked upgrade from denied XFF subnet ${xffIp}`);
-				sendWsUpgradeError(socket, 403, 'Forbidden');
-				return;
-			}
+	if (canTrustProxyHeaders(req) && Array.isArray(liveConfig.denyXFFSubnets) && liveConfig.denyXFFSubnets.length > 0) {
+		const xffIp = getForwardedHeaderIp(req, 'x-forwarded-for');
+		if (xffIp && ipInAnySubnet(xffIp, liveConfig.denyXFFSubnets)) {
+			logMessage(`[WS] Blocked upgrade from denied XFF subnet ${xffIp}`);
+			sendWsUpgradeError(socket, 403, 'Forbidden');
+			return;
 		}
 	}
+
+	if (!enforceUnauthenticatedIpGuardForWs(req, socket)) return;
 
 	// Always require authentication
 	{
@@ -4590,6 +4745,7 @@ function handleWsUpgrade(req, socket, head) {
 		}
 
 		clearAuthFailures(lockKey);
+		unauthenticatedIpGuard.clearPending(clientIp, `websocket auth success for ${authenticatedUser}`);
 		logMessage(`[WS] Authenticated user ${authenticatedUser} from ${clientIp || 'unknown'}`);
 		req.ohProxyUser = authenticatedUser;
 	}
@@ -6971,17 +7127,18 @@ app.use((req, res, next) => {
 		}
 	}
 	// Check denyXFFSubnets - only when X-Forwarded-For header is present
-	if (liveConfig.trustProxy && Array.isArray(liveConfig.denyXFFSubnets) && liveConfig.denyXFFSubnets.length > 0) {
-		const xff = req.headers?.['x-forwarded-for'];
-		if (xff) {
-			const xffIp = normalizeRemoteIp(safeText(xff).split(',')[0].trim());
-			if (xffIp && ipInAnySubnet(xffIp, liveConfig.denyXFFSubnets)) {
-				logMessage(`Blocked request from denied XFF subnet ${xffIp} for ${req.method} ${req.originalUrl}`);
-				res.status(403).type('text/plain').send('Forbidden');
-				return;
-			}
+	if (canTrustProxyHeaders(req) && Array.isArray(liveConfig.denyXFFSubnets) && liveConfig.denyXFFSubnets.length > 0) {
+		const xffIp = getForwardedHeaderIp(req, 'x-forwarded-for');
+		if (xffIp && ipInAnySubnet(xffIp, liveConfig.denyXFFSubnets)) {
+			logMessage(`Blocked request from denied XFF subnet ${xffIp} for ${req.method} ${req.originalUrl}`);
+			res.status(403).type('text/plain').send('Forbidden');
+			return;
 		}
 	}
+	next();
+});
+app.use((req, res, next) => {
+	if (!enforceUnauthenticatedIpGuard(req, res)) return;
 	next();
 });
 
@@ -7183,6 +7340,7 @@ app.post('/api/auth/login', jsonParserSmall, (req, res) => {
 
 	// Success - clear failed attempts and set auth cookie
 	clearAuthFailures(lockKey);
+	unauthenticatedIpGuard.clearPending(clientIp, `login success for ${username}`);
 	const sessionId = sessions.generateSessionId();
 	sessions.createSession(sessionId, username, sessions.getDefaultSettings(), clientIp);
 	setAuthCookie(res, username, sessionId, users[username]);
@@ -7360,6 +7518,7 @@ app.use((req, res, next) => {
 		return;
 	}
 	clearAuthFailures(lockKey);
+	unauthenticatedIpGuard.clearPending(clientIp, `basic auth success for ${authenticatedUser}`);
 	// Create or reuse session
 	const cookieResult = req._cookieResult;
 	let sessionId;
@@ -11705,6 +11864,7 @@ setInterval(() => {
 // Periodic auth lockout pruning to prevent unbounded growth
 setInterval(pruneAuthLockouts, AUTH_LOCKOUT_PRUNE_MS);
 setInterval(pruneAuthFailureNotifyState, AUTH_LOCKOUT_PRUNE_MS);
+setInterval(sweepUnauthenticatedIpGuard, UNAUTHENTICATED_IP_GUARD_SWEEP_MS);
 
 // Initialize sessions database
 try {
@@ -12219,6 +12379,22 @@ function handleIpcMessage(msg, client) {
 		}
 		case 'ping': {
 			client.write(JSON.stringify({ ok: true, pong: true }) + '\n');
+			break;
+		}
+		case 'ip-guard-pending-list': {
+			client.write(JSON.stringify({ ok: true, pending: unauthenticatedIpGuard.listPending() }) + '\n');
+			break;
+		}
+		case 'ip-guard-clear-pending': {
+			const ip = safeText(payload?.ip || '').trim();
+			const cleared = ip ? (unauthenticatedIpGuard.clearPending(ip, 'cli clear') ? 1 : 0) : unauthenticatedIpGuard.clearAllPending();
+			client.write(JSON.stringify({ ok: true, cleared }) + '\n');
+			break;
+		}
+		case 'ip-blacklist-updated': {
+			const ip = safeText(payload?.ip || '').trim();
+			if (ip) unauthenticatedIpGuard.clearPending(ip, 'blacklist cli update');
+			client.write(JSON.stringify({ ok: true }) + '\n');
 			break;
 		}
 		default:
