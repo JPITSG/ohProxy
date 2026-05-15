@@ -7298,7 +7298,7 @@ async function refreshSearchStates(matches, options = {}) {
 	for (const w of matches || []) {
 		if (w?.__section) continue;
 		const name = safeText(w?.item?.name || w?.itemName || '');
-		if (name) names.add(name);
+		if (name && !isConfiguredGroupItemName(name)) names.add(name);
 	}
 	if (!names.size) return false;
 
@@ -7575,6 +7575,11 @@ function widgetLabel(widget) {
 
 function widgetState(widget) {
 	return safeText(widget?.item?.state ?? widget?.state ?? '');
+}
+
+function isConfiguredGroupItemName(itemName) {
+	const name = safeText(itemName).trim();
+	return !!name && GROUP_ITEMS_SET.has(name);
 }
 
 function setButtongridButtonState(widget, itemName, nextState) {
