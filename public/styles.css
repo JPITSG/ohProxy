@@ -3384,6 +3384,12 @@ body.theme-light .admin-config-sections {
 	color: var(--color-text-muted);
 	text-align: center;
 }
+.admin-config-group-header[hidden],
+.admin-config-section[hidden],
+.admin-config-field[hidden],
+.admin-config-search-empty[hidden] {
+	display: none !important;
+}
 .admin-config-section {
 }
 .admin-config-section:not(.collapsed) .admin-config-section-header,

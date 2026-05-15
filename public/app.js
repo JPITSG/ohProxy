@@ -6022,13 +6022,43 @@ function normalizeAdminConfigSearchText(value) {
 	return safeText(value).toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+function tokenizeAdminConfigSearchText(value) {
+	const normalized = safeText(value)
+		.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+		.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, ' ')
+		.trim();
+	return normalized ? normalized.split(/\s+/) : [];
+}
+
+function adminConfigTokensContainPhrase(haystackTokens, queryTokens) {
+	if (!queryTokens.length) return true;
+	if (haystackTokens.length < queryTokens.length) return false;
+	for (let i = 0; i <= haystackTokens.length - queryTokens.length; i++) {
+		let matched = true;
+		for (let j = 0; j < queryTokens.length; j++) {
+			if (haystackTokens[i + j] !== queryTokens[j]) {
+				matched = false;
+				break;
+			}
+		}
+		if (matched) return true;
+	}
+	return false;
+}
+
 function adminConfigSearchMatches(text, rawQuery) {
 	const query = normalizeAdminConfigSearchText(rawQuery);
 	if (!query) return true;
 	const haystack = normalizeAdminConfigSearchText(text);
 	if (!haystack) return false;
-	if (haystack.includes(query)) return true;
-	return query.split(' ').filter(Boolean).every(part => haystack.includes(part));
+	const queryTokens = tokenizeAdminConfigSearchText(rawQuery);
+	const haystackTokens = tokenizeAdminConfigSearchText(text);
+	if (queryTokens.length === 1) {
+		return haystackTokens.some(token => token.includes(queryTokens[0]));
+	}
+	return adminConfigTokensContainPhrase(haystackTokens, queryTokens);
 }
 
 function getAdminConfigGroupLabel(group) {
@@ -6391,12 +6421,15 @@ function filterAdminConfigSections() {
 	const visibleGroups = new Set();
 	let visibleCount = 0;
 
+	adminConfigModal.querySelectorAll('.admin-select-wrap.menu-open').forEach(wrap => {
+		if (typeof wrap._closeMenu === 'function') wrap._closeMenu();
+	});
 	sectionsEl.classList.toggle('search-active', hasQuery);
 	sectionsEl.querySelectorAll('.admin-config-section').forEach(sectionEl => {
 		const sectionMatches = hasQuery && adminConfigSearchMatches(sectionEl.dataset.searchText || '', query);
 		let fieldVisible = false;
 		sectionEl.querySelectorAll('.admin-config-field').forEach(fieldEl => {
-			const visible = !hasQuery || sectionMatches || adminConfigSearchMatches(fieldEl.dataset.searchText || '', query);
+			const visible = !hasQuery || adminConfigSearchMatches(fieldEl.dataset.searchText || '', query);
 			fieldEl.hidden = !visible;
 			if (visible) fieldVisible = true;
 		});

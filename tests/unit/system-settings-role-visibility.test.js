@@ -59,10 +59,16 @@ describe('System settings modal role visibility wiring', () => {
 		const lang = read('public/lang.js');
 		assert.match(app, /class="admin-config-header-actions"[\s\S]*class="admin-config-search-input"[\s\S]*class="admin-config-close oh-modal-close"/, 'search input should sit beside the close button in the header');
 		assert.match(app, /function filterAdminConfigSections\(\)/, 'settings modal should filter sections client-side');
+		assert.match(app, /function tokenizeAdminConfigSearchText\(value\)/, 'settings search should tokenize camelCase and dotted keys');
+		assert.match(app, /adminConfigTokensContainPhrase\(haystackTokens, queryTokens\)/, 'multi-word settings searches should require ordered phrase matches');
+		assert.doesNotMatch(app, /query\.split\(' '\)\.filter\(Boolean\)\.every\(part => haystack\.includes\(part\)\)/, 'multi-word settings searches should not match separated query terms anywhere');
+		assert.match(app, /const visible = !hasQuery \|\| adminConfigSearchMatches\(fieldEl\.dataset\.searchText \|\| '', query\);/, 'field visibility should depend on field-level matches only');
 		assert.match(app, /fieldEl\.hidden = !visible;/, 'nonmatching fields should be hidden inside matching sections');
+		assert.match(app, /querySelectorAll\('\.admin-select-wrap\.menu-open'\)[\s\S]*_closeMenu/, 'search should close open settings dropdown menus before hiding rows');
 		assert.match(app, /groupHeader\.hidden = hasQuery && !visibleGroups\.has/, 'group headers should only remain when they contain matches');
 		assert.match(lang, /searchPlaceholder:\s*'Search settings\\u2026'/, 'missing settings search placeholder text');
 		assert.match(styles, /\.admin-config-search-input \{[\s\S]*height: 30px;[\s\S]*background: rgba\(30, 33, 54, 0\.7\);/, 'settings search should use compact main-header search styling');
 		assert.match(styles, /\.admin-config-header h2 \{[\s\S]*text-overflow: ellipsis;[\s\S]*white-space: nowrap;/, 'header title should shrink without increasing header height');
+		assert.match(styles, /\.admin-config-field\[hidden\][\s\S]*display: none !important;/, 'hidden search result fields should override flex display');
 	});
 });
