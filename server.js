@@ -10412,13 +10412,15 @@ vector.addFeatures(feature);
 	return clientToMapPixel(e.clientX,e.clientY);
 	}
 
-	function findBlueFeatureNearPixel(px,maxDistance){
+	function findLayerFeatureNearPixel(layer,px,maxDistance,predicate){
 	if(!px)return null;
+	var features=layer&&Array.isArray(layer.features)?layer.features:[];
 	var maxSq=maxDistance*maxDistance;
 	var nearest=null;
-	for(var i=0;i<vector.features.length;i++){
-	var f=vector.features[i];
-	if(!f||!f.attributes||f.attributes.color!=='blue')continue;
+	for(var i=0;i<features.length;i++){
+	var f=features[i];
+	if(!f||!f.attributes)continue;
+	if(predicate&&!predicate(f))continue;
 	var fp=getFeaturePixel(f);
 	if(!fp)continue;
 	var dx=fp.x-px.x;
@@ -10432,10 +10434,25 @@ vector.addFeatures(feature);
 	return nearest;
 	}
 
+	function findBlueFeatureNearPixel(px,maxDistance){
+	return findLayerFeatureNearPixel(vector,px,maxDistance,function(f){return f.attributes.color==='blue'});
+	}
+
+	function findAnyPresenceFeatureNearPixel(px,maxDistance){
+	return findLayerFeatureNearPixel(vector,px,maxDistance)||findLayerFeatureNearPixel(previewLayer,px,maxDistance);
+	}
+
 	function clearBlueTooltipSelectionState(){
 	resetBlueTooltip();
 	lastClickFeature=null;lastClickTime=0;
 	mapEl.style.cursor='';
+	}
+
+	function clearPresenceMapPopupsFromBlankPixel(px){
+	if(findAnyPresenceFeatureNearPixel(px,36))return false;
+	closeCtxMenu();
+	clearBlueTooltipSelectionState();
+	return true;
 	}
 
 	function showBlueAndHandleClick(f,px,pinToFeature){
@@ -10488,6 +10505,9 @@ showBlueAndHandleClick(f,null,true);
 	map.events.register('mousemove',map,function(e){
 	positionPointerTooltips(e.xy);
 	});
+	map.events.register('click',map,function(e){
+	clearPresenceMapPopupsFromBlankPixel(e.xy);
+	});
 	}
 
 	if(!singlePointMode&&isTouchDevice){
@@ -10519,7 +10539,7 @@ showBlueAndHandleClick(f,null,true);
 	suppressFeatureClickUntil=Date.now()+450;
 	showBlueAndHandleClick(f,endPx,true);
 	}else{
-	clearBlueTooltipSelectionState();
+	clearPresenceMapPopupsFromBlankPixel(endPx);
 	}
 	},{passive:true});
 	mapEl.addEventListener('touchcancel',function(){
@@ -11083,10 +11103,8 @@ else if(ctxDragEnded){e.preventDefault();ctxDragEnded=false}
 },true);
 
 	mapEl.addEventListener('click',function(e){
-	closeCtxMenu();
 	var px=eventToPixel(e);
-	if(findBlueFeatureNearPixel(px,36))return;
-	clearBlueTooltipSelectionState();
+	clearPresenceMapPopupsFromBlankPixel(px);
 	});
 	ctxMenu.addEventListener('click',function(e){e.stopPropagation()});
 	ctxMenu.addEventListener('contextmenu',function(e){e.stopPropagation();e.preventDefault()});
