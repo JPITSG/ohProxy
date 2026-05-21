@@ -10517,14 +10517,14 @@ showBlueAndHandleClick(f,null,true);
 	if(e.touches.length!==1)return;
 	touchStartPx=clientToMapPixel(e.touches[0].clientX,e.touches[0].clientY);
 	touchMoved=false;
-	},{passive:true});
+	},{passive:true,capture:true});
 	mapEl.addEventListener('touchmove',function(e){
 	if(!touchStartPx||e.touches.length!==1)return;
 	var movePx=clientToMapPixel(e.touches[0].clientX,e.touches[0].clientY);
 	var dx=movePx.x-touchStartPx.x;
 	var dy=movePx.y-touchStartPx.y;
 	if(dx*dx+dy*dy>100)touchMoved=true;
-	},{passive:true});
+	},{passive:true,capture:true});
 	mapEl.addEventListener('touchend',function(e){
 	if(!touchStartPx)return;
 	var startPx=touchStartPx;
@@ -10541,11 +10541,11 @@ showBlueAndHandleClick(f,null,true);
 	}else{
 	clearPresenceMapPopupsFromBlankPixel(endPx);
 	}
-	},{passive:true});
+	},{passive:true,capture:true});
 	mapEl.addEventListener('touchcancel',function(){
 	touchStartPx=null;
 	touchMoved=false;
-	},{passive:true});
+	},{passive:true,capture:true});
 	}
 
 	if(!singlePointMode){
