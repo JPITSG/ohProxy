@@ -10222,6 +10222,7 @@ vector.addFeatures(feature);
 	var red=markers.length?markers[markers.length-1]:null;
 	var redTooltip=singlePointMode?null:document.getElementById('red-tooltip');
 	var mapEl=document.getElementById('map');
+	var defaultHomeZoom=null;
 	var isTouchDevice=('ontouchstart' in window)||navigator.maxTouchPoints>0;
 	var presenceFullscreenActive=false;
 	var presenceRotated=false;
@@ -10448,10 +10449,14 @@ vector.addFeatures(feature);
 	mapEl.style.cursor='';
 	}
 
-	function clearPresenceMapPopupsFromBlankPixel(px){
-	if(findAnyPresenceFeatureNearPixel(px,36))return false;
+	function clearPresenceMapPopups(){
 	closeCtxMenu();
 	clearBlueTooltipSelectionState();
+	}
+
+	function clearPresenceMapPopupsFromBlankPixel(px){
+	if(findAnyPresenceFeatureNearPixel(px,36))return false;
+	clearPresenceMapPopups();
 	return true;
 	}
 
@@ -10564,17 +10569,27 @@ extent.top+=50*res;extent.bottom-=15*res;
 map.zoomToExtent(extent);
 }
 
+function captureDefaultHomeZoom(){
+defaultHomeZoom=map.getZoom();
+}
+
+function focusRedMarkerAtDefaultZoom(){
+if(!red)return;
+var zoom=defaultHomeZoom===null?map.getZoom():defaultHomeZoom;
+map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),zoom);
+}
+
 	if(markers.length){
 	zoomToMarkers();
+	captureDefaultHomeZoom();
 	if(!singlePointMode)setTimeout(updateAnchoredTooltips,100);
 	}
 
 document.getElementById('zoom-in').addEventListener('click',function(){map.zoomIn()});
 document.getElementById('zoom-out').addEventListener('click',function(){map.zoomOut()});
 	document.getElementById('zoom-home').addEventListener('click',function(){
-	if(red){
-	map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj));
-	}
+	if(!singlePointMode)clearPresenceMapPopups();
+	focusRedMarkerAtDefaultZoom();
 	});
 
 	(function(){
@@ -10831,6 +10846,7 @@ vector.addFeatures(feature);
 red=markers[markers.length-1];
 setTooltipHtml(redTooltip,red[3]);
 zoomToMarkers();
+captureDefaultHomeZoom();
 setTimeout(updateAnchoredTooltips,100);
 }).catch(function(){searchEmpty.textContent='Request failed';searchEmpty.style.display='block';shakeSearch()});
 }

@@ -37,9 +37,16 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /if\(!singlePointMode\)\{\s*var hoverControl=new OpenLayers\.Control\.SelectFeature/);
 	});
 
-	it('uses current red marker as zoom-home target and keeps current zoom level', () => {
+	it('uses current red marker as zoom-home target, clears overlays, and restores the default zoom level', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(server, /document\.getElementById\('zoom-home'\)\.addEventListener\('click',function\(\)\{\s*if\(red\)\{\s*map\.setCenter\(new OpenLayers\.LonLat\(red\[1\],red\[0\]\)\.transform\(wgs84,proj\)\);/);
+		assert.match(server, /var defaultHomeZoom=null;/);
+		assert.match(server, /function captureDefaultHomeZoom\(\)\{\s*defaultHomeZoom=map\.getZoom\(\);\s*\}/);
+		assert.match(server, /function clearPresenceMapPopups\(\)\{\s*closeCtxMenu\(\);\s*clearBlueTooltipSelectionState\(\);\s*\}/);
+		assert.match(server, /function clearPresenceMapPopupsFromBlankPixel\(px\)\{\s*if\(findAnyPresenceFeatureNearPixel\(px,36\)\)return false;\s*clearPresenceMapPopups\(\);\s*return true;\s*\}/);
+		assert.match(server, /function focusRedMarkerAtDefaultZoom\(\)\{\s*if\(!red\)return;\s*var zoom=defaultHomeZoom===null\?map\.getZoom\(\):defaultHomeZoom;\s*map\.setCenter\(new OpenLayers\.LonLat\(red\[1\],red\[0\]\)\.transform\(wgs84,proj\),zoom\);\s*\}/);
+		assert.match(server, /zoomToMarkers\(\);\s*captureDefaultHomeZoom\(\);\s*if\(!singlePointMode\)setTimeout\(updateAnchoredTooltips,100\);/);
+		assert.match(server, /setTooltipHtml\(redTooltip,red\[3\]\);\s*zoomToMarkers\(\);\s*captureDefaultHomeZoom\(\);\s*setTimeout\(updateAnchoredTooltips,100\);/);
+		assert.match(server, /document\.getElementById\('zoom-home'\)\.addEventListener\('click',function\(\)\{\s*if\(!singlePointMode\)clearPresenceMapPopups\(\);\s*focusRedMarkerAtDefaultZoom\(\);\s*\}\);/);
 	});
 
 	it('adds fullscreen touch rotate control that resets on fullscreen exit', () => {
