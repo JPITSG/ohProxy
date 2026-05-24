@@ -205,6 +205,8 @@ function promptAssetReload() {
 
 const SOFT_RESET_TIMEOUT_MS = 1000; // Short timeout per attempt
 const RESUME_SETTLE_WINDOW_MS = 1200;
+const RESUME_FAST_SETTLE_WINDOW_MS = 250;
+const RESUME_FAST_FETCH_THRESHOLD_MS = 750;
 const RESUME_HARD_TIMEOUT_MS = 8000;
 const RESUME_TRIGGER_DEBOUNCE_MS = 2000;
 let _spinnerLock = false;
@@ -229,10 +231,17 @@ function beginResumeTransition() {
 	updateStatusBar();
 }
 
-function markResumeSettling() {
+function resumeSettleWindowForRefresh(elapsedMs) {
+	return Number.isFinite(elapsedMs) && elapsedMs <= RESUME_FAST_FETCH_THRESHOLD_MS
+		? RESUME_FAST_SETTLE_WINDOW_MS
+		: RESUME_SETTLE_WINDOW_MS;
+}
+
+function markResumeSettling(settleMs = RESUME_SETTLE_WINDOW_MS) {
 	if (!state.resumeInProgress) return;
+	const windowMs = Number.isFinite(settleMs) ? Math.max(0, settleMs) : RESUME_SETTLE_WINDOW_MS;
 	state.resumePhase = 'settling';
-	state.resumeSettleReadyAt = Date.now() + RESUME_SETTLE_WINDOW_MS;
+	state.resumeSettleReadyAt = Date.now() + windowMs;
 }
 
 async function waitForResumeSettleWindow() {
@@ -252,10 +261,10 @@ function endResumeTransition() {
 	updateStatusBar();
 }
 
-async function completeSoftResetSuccess() {
+async function completeSoftResetSuccess(options = {}) {
 	startPolling();
 	resumePingPending = true;
-	markResumeSettling();
+	markResumeSettling(options.settleMs);
 	connectWs();
 	fetchFullSitemap().catch(() => {});
 	await waitForResumeSettleWindow();
@@ -306,9 +315,12 @@ async function softReset() {
 		// Fast path: if snapshot provided valid rootPageUrl, skip sitemap fetch
 		if (snapshotApplied && state.rootPageUrl) {
 			state.pageUrl = state.rootPageUrl;
+			const refreshStartedAt = Date.now();
 			const refreshed = await refresh(true);
 			if (refreshed && state.connectionOk) {
-				await completeSoftResetSuccess();
+				await completeSoftResetSuccess({
+					settleMs: resumeSettleWindowForRefresh(Date.now() - refreshStartedAt),
+				});
 				return; // Done!
 			}
 		}
@@ -349,9 +361,12 @@ async function softReset() {
 				applySitemapOption(selected);
 
 				// Success - now refresh to get widgets
+				const refreshStartedAt = Date.now();
 				const refreshed = await refresh(true);
 				if (refreshed && state.connectionOk) {
-					await completeSoftResetSuccess();
+					await completeSoftResetSuccess({
+						settleMs: resumeSettleWindowForRefresh(Date.now() - refreshStartedAt),
+					});
 					return; // Done!
 				}
 			} catch (e) {
@@ -2185,7 +2200,7 @@ function setConnectionStatus(ok, message) {
 		state.lastError = message || 'Connection issue';
 		invalidatePing();
 	}
-	if (ok && !prevOk && !state.sitemapCacheReady) {
+	if (ok && !prevOk && !state.sitemapCacheReady && !isResumeUiLocked()) {
 		resetSitemapCacheRetry();
 		fetchFullSitemap();
 	}
@@ -7238,6 +7253,30 @@ function pendingUntilAbort(signal) {
 	});
 }
 
+function isPageLifecycleHidden() {
+	return document.visibilityState === 'hidden' || document.hidden === true;
+}
+
+function createHiddenLifecycleAbortError(message) {
+	const err = new Error(message || 'Request aborted while page hidden');
+	err.name = 'HiddenLifecycleAbort';
+	err.lifecycleHiddenAbort = true;
+	return err;
+}
+
+function isTransportPausedAbort(err) {
+	return err?.transportPaused === true
+		|| err?._ohReason === 'Transport paused'
+		|| err?.message === 'Transport paused';
+}
+
+function isHiddenLifecycleAbort(err) {
+	if (!err) return false;
+	if (err.lifecycleHiddenAbort === true || err.name === 'HiddenLifecycleAbort') return true;
+	const isAbort = err.name === 'AbortError' || err.message === 'Fetch timeout';
+	return isTransportPausedAbort(err) || (isAbort && isPageLifecycleHidden());
+}
+
 async function fetchWithAuth(url, options) {
 	const res = await fetch(url, options);
 	syncAuthFromHeaders(res);
@@ -7393,7 +7432,9 @@ async function fetchPage(url, options) {
 	const timeoutPromise = new Promise((_, reject) => {
 		timeoutId = setTimeout(() => {
 			fetchSignal.aborted = true;
-			reject(new Error('Fetch timeout'));
+			reject(isPageLifecycleHidden()
+				? createHiddenLifecycleAbortError('Fetch timed out while page hidden')
+				: new Error('Fetch timeout'));
 		}, FETCH_PAGE_TIMEOUT_MS);
 	});
 
@@ -7462,6 +7503,9 @@ async function fetchPageInternal(url, opts, fetchSignal) {
 		}
 	} catch (err) {
 		if (err?.name === 'AbortError') {
+			if (isPageLifecycleHidden() || isTransportPausedAbort(err)) {
+				throw createHiddenLifecycleAbortError('XHR aborted while page hidden');
+			}
 			throw new Error('XHR delta timeout');
 		}
 		throw err;
@@ -11710,9 +11754,18 @@ async function refresh(showLoading) {
 		setConnectionStatus(true);
 		return true;
 	} catch (e) {
+		clearLoadingStatusTimer();
+		if (isHiddenLifecycleAbort(e)) {
+			state.isRefreshing = false;
+			if (fade) {
+				await fade.promise;
+				runPageFadeIn(fade.token);
+			}
+			return false;
+		}
+
 		console.error(e);
 		logJsError('refresh failed', e);
-		clearLoadingStatusTimer();
 
 		// Try sitemap cache (allows offline navigation)
 		if (state.sitemapCacheReady) {

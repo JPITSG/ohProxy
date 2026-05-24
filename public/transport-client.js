@@ -38,14 +38,18 @@
 	};
 	window.__OH_TRANSPORT__ = state;
 
-	function createAbortError() {
+	function createAbortError(reason) {
+		const message = reason ? String(reason) : 'The operation was aborted.';
+		let err;
 		try {
-			return new DOMException('The operation was aborted.', 'AbortError');
+			err = new DOMException(message, 'AbortError');
 		} catch {
-			const err = new Error('The operation was aborted.');
+			err = new Error(message);
 			err.name = 'AbortError';
-			return err;
 		}
+		if (reason) err._ohReason = message;
+		if (message === 'Transport paused') err.transportPaused = true;
+		return err;
 	}
 
 	function createControllerChangeError() {
@@ -182,9 +186,7 @@
 
 	function abortAllPendingSwRequests(reason) {
 		rejectAllPendingSwRequests(() => {
-			const err = createAbortError();
-			if (reason) err._ohReason = String(reason);
-			return err;
+			return createAbortError(reason);
 		}, { sendCancel: true });
 	}
 
@@ -243,7 +245,7 @@
 
 	async function fetchViaServiceWorker(request) {
 		if (state.transportPaused) {
-			throw createAbortError();
+			throw createAbortError('Transport paused');
 		}
 		const controller = swController();
 		if (!controller) {
@@ -332,13 +334,13 @@
 			if (state.transportPaused) {
 				// Intentional: while hidden/paused, block same-origin SW-candidate fetches.
 				// This pre-empts soft-restart work instead of allowing background churn.
-				throw createAbortError();
+				throw createAbortError('Transport paused');
 			}
 			const fallbackRequest = request.clone();
 			try {
 				return await fetchViaServiceWorker(request);
 			} catch (err) {
-				if (state.transportPaused) throw createAbortError();
+				if (state.transportPaused) throw createAbortError('Transport paused');
 				if (err && err.name === 'AbortError') throw err;
 				return state.nativeFetch(fallbackRequest);
 			}

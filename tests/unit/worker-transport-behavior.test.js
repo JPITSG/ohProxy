@@ -286,7 +286,10 @@ describe('Worker transport behavior', () => {
 
 		await assert.rejects(
 			() => harness.window.fetch('https://app.test/rest/items?hidden=1'),
-			(err) => err?.name === 'AbortError',
+			(err) => err?.name === 'AbortError'
+				&& err?.message === 'Transport paused'
+				&& err?.transportPaused === true
+				&& err?._ohReason === 'Transport paused',
 		);
 
 		// Non-candidate requests still use native fetch while hidden.
