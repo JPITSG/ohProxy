@@ -4844,10 +4844,13 @@ function renderLoginHtml() {
 	return html;
 }
 
-function renderWeatherWidget(forecastData, mode, slim) {
+function renderWeatherWidget(forecastData, mode, slim, updatedAtMs) {
 	const isDark = mode === 'dark';
 	const textColor = isDark ? '#ffffff' : '#000000';
 	const rainColor = '#3498db';
+	const updatedAtAttr = Number.isFinite(updatedAtMs) && updatedAtMs > 0
+		? String(Math.floor(updatedAtMs))
+		: '';
 
 	const days = Array.isArray(forecastData?.data) ? forecastData.data : [];
 	if (!days.length) {
@@ -5002,8 +5005,8 @@ html, body {
 .forecast-dots {
 	display: none;
 	justify-content: center;
+	align-items: center;
 	gap: 4px;
-	padding-top: 12px;
 }
 .forecast-dots.visible { display: flex; }
 .forecast-dot {
@@ -5016,6 +5019,30 @@ html, body {
 	box-sizing: content-box;
 }
 .forecast-dot.active { opacity: 0.8; }
+.forecast-footer {
+	position: relative;
+	min-height: 18px;
+	margin-top: 12px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+}
+.weather-updated {
+	position: absolute;
+	right: 0;
+	top: 50%;
+	transform: translateY(-50%);
+	color: ${textColor};
+	opacity: 0.3;
+	font-size: .7rem;
+	line-height: 1;
+	white-space: nowrap;
+	pointer-events: none;
+}
+.weather-updated[hidden] {
+	display: none;
+}
 ${slim ? `
 .forecast-track {
 	transition: none !important;
@@ -5038,7 +5065,10 @@ ${slim ? `
 			${forecastCards}
 		</div>
 	</div>
-	<div class="forecast-dots"></div>
+	<div class="forecast-footer">
+		<div class="forecast-dots"></div>
+		<div class="weather-updated" data-updated-at="${updatedAtAttr}" aria-live="off"></div>
+	</div>
 </div>
 <script>
 (function() {
@@ -5050,10 +5080,56 @@ ${slim ? `
   var cards = track.querySelectorAll('.forecast-day');
   if (!cards.length) return;
   var dotsEl = document.querySelector('.forecast-dots');
+  var footerEl = document.querySelector('.forecast-footer');
+  var updatedEl = document.querySelector('.weather-updated');
   var startIndex = 0;
   var maxFit = 1;
   var cardWidth = 0;
   var CARD_GAP = 12;
+  var updatedTimer = 0;
+
+  function formatUpdatedAgo(updatedAt) {
+    var diffMs = Math.max(0, Date.now() - updatedAt);
+    var minutes = Math.max(1, Math.floor(diffMs / 60000));
+    var amount = minutes;
+    var unit = 'minute';
+    if (minutes >= 1440) {
+      amount = Math.floor(minutes / 1440);
+      unit = 'day';
+    } else if (minutes >= 60) {
+      amount = Math.floor(minutes / 60);
+      unit = 'hour';
+    }
+    return amount + ' ' + unit + (amount === 1 ? '' : 's') + ' ago';
+  }
+
+  function fitUpdatedText() {
+    if (!updatedEl || !footerEl || !updatedEl.textContent) return;
+    updatedEl.hidden = false;
+    updatedEl.style.visibility = 'hidden';
+    var footerWidth = footerEl.clientWidth;
+    var updatedWidth = Math.ceil(updatedEl.scrollWidth);
+    var dotsVisible = dotsEl && dotsEl.classList.contains('visible');
+    var fits = updatedWidth <= footerWidth;
+    if (dotsVisible) {
+      var dotsWidth = Math.ceil(dotsEl.getBoundingClientRect().width);
+      var rightSpace = Math.floor((footerWidth - dotsWidth) / 2) - 8;
+      fits = updatedWidth <= rightSpace;
+    }
+    updatedEl.hidden = !fits;
+    updatedEl.style.visibility = '';
+  }
+
+  function updateUpdatedText() {
+    if (!updatedEl) return;
+    var updatedAt = Number(updatedEl.getAttribute('data-updated-at') || 0);
+    if (!Number.isFinite(updatedAt) || updatedAt <= 0) {
+      updatedEl.hidden = true;
+      return;
+    }
+    updatedEl.textContent = 'Updated ' + formatUpdatedAgo(updatedAt);
+    fitUpdatedText();
+  }
 
   function updateDots() {
     if (!dotsEl) return;
@@ -5095,6 +5171,7 @@ ${slim ? `
 
     applyTrackOffset(animate);
     updateDots();
+    fitUpdatedText();
   }
 
   // Click on dots to navigate
@@ -5140,6 +5217,11 @@ ${slim ? `
   }, { passive: true });
 
   fitCards(false);
+  updateUpdatedText();
+  updatedTimer = setInterval(updateUpdatedText, 15000);
+  window.addEventListener('pagehide', function() {
+    if (updatedTimer) clearInterval(updatedTimer);
+  }, { once: true });
 
   if (typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(function() {
@@ -9124,7 +9206,10 @@ app.get('/weather', (req, res) => {
 
 	// Read cached weather data
 	let weatherData = null;
+	let weatherUpdatedAtMs = 0;
 	try {
+		const stats = fs.statSync(WEATHERBIT_FORECAST_FILE);
+		weatherUpdatedAtMs = stats.mtimeMs;
 		weatherData = JSON.parse(fs.readFileSync(WEATHERBIT_FORECAST_FILE, 'utf8'));
 	} catch {
 		sendStyledError(res, req, 503, 'Weather data not available');
@@ -9141,7 +9226,7 @@ app.get('/weather', (req, res) => {
 
 	res.setHeader('Content-Type', 'text/html; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	res.send(renderWeatherWidget(forecast, mode, slim));
+	res.send(renderWeatherWidget(forecast, mode, slim, weatherUpdatedAtMs));
 });
 
 app.get(['/', '/index.html'], (req, res) => {

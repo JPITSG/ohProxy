@@ -7454,9 +7454,11 @@ async function fetchPage(url, options) {
 async function fetchPageInternal(url, opts, fetchSignal) {
 	const key = pageCacheKey(url);
 	const since = opts.forceFull ? '' : (state.deltaTokens.get(key) || '');
+	const allowWsDelta = opts.forceFull !== true;
 
-	// Try WebSocket first if connected
-	if (wsConnected && wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+	// Forced page loads are user-visible navigation paths; use XHR directly so a
+	// stalled WS delta request cannot hold the grid in a transition.
+	if (allowWsDelta && wsConnected && wsConnection && wsConnection.readyState === WebSocket.OPEN) {
 		try {
 			const data = await fetchDeltaViaWs(url, since);
 			if (data && data.delta === true) {
@@ -11703,17 +11705,23 @@ async function refresh(showLoading) {
 	const refreshUrl = state.pageUrl; // Capture URL at start to detect stale responses
 	const isPageChange = state.lastPageUrl && state.pageUrl !== state.lastPageUrl;
 	if (isPageChange) stopAllVideoStreams();
-	const fade = (!state.isSlim && isPageChange) ? beginPageFadeOut() : null;
+	const shouldAnimatePageChange = !state.isSlim && isPageChange;
+	let fade = null;
+	const startPageFade = () => {
+		if (!shouldAnimatePageChange) return null;
+		if (!fade) fade = beginPageFadeOut();
+		return fade;
+	};
 	const shouldScroll = state.pendingScrollTop;
 	state.pendingScrollTop = false;
 
 	// For page changes with cache: use cache for instant display, then background refresh
-	// to get fresh transformed labels from the server (skip cache if connection is fast)
-	if (isPageChange && state.sitemapCacheReady && !isFastConnection()) {
+	// to get fresh transformed labels from the server.
+	if (isPageChange && state.sitemapCacheReady) {
 		const cachedPage = getPageFromCache(state.pageUrl);
 		if (cachedPage) {
 			clearLoadingStatusTimer();
-			await applyPageData(cachedPage, fade, shouldScroll);
+			await applyPageData(cachedPage, startPageFade(), shouldScroll);
 			// Background refresh to get fresh transformed labels
 			setTimeout(() => refresh(false), 100);
 			return true;
@@ -11750,7 +11758,7 @@ async function refresh(showLoading) {
 		const page = result.page;
 		updatePageInCache(state.pageUrl, page);
 		clearLoadingStatusTimer();
-		await applyPageData(page, fade, shouldScroll);
+		await applyPageData(page, startPageFade(), shouldScroll);
 		setConnectionStatus(true);
 		return true;
 	} catch (e) {
@@ -11771,7 +11779,7 @@ async function refresh(showLoading) {
 		if (state.sitemapCacheReady) {
 			const cachedPage = getPageFromCache(state.pageUrl);
 			if (cachedPage) {
-				await applyPageData(cachedPage, fade, shouldScroll);
+				await applyPageData(cachedPage, startPageFade(), shouldScroll);
 				setConnectionStatus(false, e.message);
 				return false;
 			}
