@@ -9351,10 +9351,28 @@ const proxyCommon = {
 	ws: false, // Disabled - we handle WebSocket ourselves via wss
 	logLevel: liveConfig.proxyLogLevel,
 	agent: ohDynamicAgent,
-	onProxyReq(proxyReq) {
-		proxyReq.setHeader('User-Agent', liveConfig.userAgent);
-		const ah = authHeader();
-		if (ah) proxyReq.setHeader('Authorization', ah);
+	// http-proxy-middleware v3 exposes request hooks under `on:` (the legacy
+	// top-level `onProxyReq` is silently ignored).
+	on: {
+		proxyReq(proxyReq) {
+			proxyReq.setHeader('User-Agent', liveConfig.userAgent);
+			const ah = authHeader();
+			if (ah) proxyReq.setHeader('Authorization', ah);
+			// openHAB grants anonymous/implicit-role access only to clients it
+			// considers to be on a trusted local network, and it derives the client
+			// IP from these forwarding headers. ohProxy is the authenticating
+			// gateway and reaches openHAB over the local network, so when a remote
+			// user's public IP arrives in X-Forwarded-For it makes openHAB treat
+			// proxied REST commands as untrusted and reject them with 401. (Reads
+			// keep working remotely because they are served via ohProxy's own local
+			// openHAB connections - SSE and fetchOpenhab - not through this request
+			// proxy.) Strip the client forwarding headers so openHAB sees the
+			// trusted local ohProxy connection; user authentication has already been
+			// enforced upstream in ohProxy.
+			proxyReq.removeHeader('X-Forwarded-For');
+			proxyReq.removeHeader('X-Real-IP');
+			proxyReq.removeHeader('Forwarded');
+		},
 	},
 };
 
