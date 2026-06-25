@@ -1007,9 +1007,24 @@ function isTouchDevice() {
 	return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
 
+// Native <select> overlay vs. custom popup menu — shared by the item-grid
+// Selection widgets and the config-modal selects (createSelect) so the two
+// never diverge. Returns true for the native overlay, false for the custom
+// menu. `?selection=native|custom` is a hard override; otherwise native when
+// slim, in small-header mode, or on a touch device.
+function shouldUseNativeSelect() {
+	if (state.selectionModeOverride === 'native') return true;
+	if (state.selectionModeOverride === 'custom') return false;
+	return state.isSlim || state.headerMode === 'small' || isTouchDevice();
+}
+
 function buildNativeSelectOverlay(items, getValue, getLabel, initialValue) {
 	const select = document.createElement('select');
-	select.className = 'select-overlay';
+	// `oh-select` carries the per-theme option colors and color-scheme so the
+	// native option popup matches light/dark mode. Apply it here so every native
+	// overlay (item grid and the settings modal's createSelect) is themed
+	// consistently, not just whichever call site remembers to add it.
+	select.className = 'select-overlay oh-select';
 	for (const item of items) {
 		const opt = document.createElement('option');
 		opt.value = getValue(item);
@@ -4323,7 +4338,7 @@ function createSelect(options, initialValue, config) {
 	fakeSelect.textContent = getLabel(current);
 	if (colorMode) fakeSelect.dataset.color = getValue(current);
 
-	if (isTouchDevice()) {
+	if (shouldUseNativeSelect()) {
 		const nativeSelect = buildNativeSelectOverlay(options, getValue, getLabel, getValue(current));
 		nativeSelect.onchange = () => {
 			haptic();
@@ -9840,12 +9855,8 @@ function updateCard(card, w, info) {
 		if (!mapping.length) {
 			showUnavailableMessage(controls, 'No selection options available');
 		} else {
-			// selection=native|custom query param is a hard override; otherwise preserve the existing heuristic
-			const useOverlay = state.selectionModeOverride === 'native'
-				? true
-				: state.selectionModeOverride === 'custom'
-					? false
-					: state.isSlim || state.headerMode === 'small' || isTouchDevice();
+			// Native overlay vs. custom menu: same decision as the config-modal selects.
+			const useOverlay = shouldUseNativeSelect();
 			card.classList.add('selection-card');
 			const inlineControls = createInlineControls(labelRow, navHint);
 
@@ -9855,7 +9866,6 @@ function updateCard(card, w, info) {
 
 			const current = findMappingByCommand(mapping, st);
 			const select = buildNativeSelectOverlay(mapping, m => m.command, m => m.label || m.command, current ? current.command : '');
-			select.classList.add('oh-select');
 			const fallbackSelectionMapping = () => {
 				const fallbackValue = safeText(select.value || st);
 				return { command: fallbackValue, releaseCommand: '', label: fallbackValue, icon: '' };

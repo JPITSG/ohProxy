@@ -606,6 +606,11 @@ html:not(.slim) .has-meta .labelStack {
 	border: 1px solid var(--color-control-off-border) !important;
 	box-shadow: 0 0 8px var(--color-control-off-shadow) !important;
 	outline: none !important;
+	/* Force the native option popup to match the app theme (dark by default).
+	   Without this, the UA-rendered dropdown on Android/iOS/Safari follows the OS
+	   scheme and ignores the per-theme option colors below. Overridden for light
+	   mode in the body.theme-light rule. */
+	color-scheme: dark;
 	appearance: none;
 	-webkit-appearance: none;
 	text-align: center;
@@ -623,6 +628,9 @@ html:not(.slim) .has-meta .labelStack {
 }
 .oh-select option:disabled {
 	color: var(--color-select-option-disabled);
+}
+body.theme-light .oh-select {
+	color-scheme: light;
 }
 .selection-card.menu-open {
 	z-index: 20;
