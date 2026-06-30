@@ -10190,6 +10190,8 @@ app.get('/presence', async (req, res) => {
 .map-ctrl-btn{width:36px;height:36px;border-radius:10px;border:1px solid rgba(19,21,54,0.2);background:rgba(19,21,54,0.12);color:#0f172a;font-size:18px;font-weight:300;font-family:'Rubik',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;outline:none;transition:background-color .4s ease,border-color .4s ease,box-shadow .4s ease}
 	@media(hover:hover){.map-ctrl-btn:hover{background:rgba(78,183,128,0.12);border-color:rgba(78,183,128,0.45);box-shadow:0 0 10px rgba(78,183,128,0.35)}}
 	@media(pointer:coarse){.map-ctrl-btn:hover{background:rgba(19,21,54,0.12);border-color:rgba(19,21,54,0.2);box-shadow:none}}
+	.map-ctrl-btn:disabled,.map-ctrl-btn.is-disabled{background:rgba(19,21,54,0.05);border-color:rgba(19,21,54,0.12);box-shadow:none;color:rgba(19,21,54,0.32);cursor:default;opacity:.72}
+	@media(hover:hover){.map-ctrl-btn:disabled:hover,.map-ctrl-btn.is-disabled:hover{background:rgba(19,21,54,0.05);border-color:rgba(19,21,54,0.12);box-shadow:none}}
 	.map-ctrl-btn svg{width:16px;height:16px;fill:currentColor}
 	#presence-root{position:fixed;top:0;left:0;width:100vw;height:100vh;overflow:hidden;transform-origin:center center}
 	#presence-root.presence-rotated{top:50%;left:50%;width:100vh;height:100vw;transform:translate(-50%,-50%) rotate(90deg)}
@@ -10325,6 +10327,8 @@ vector.addFeatures(feature);
 	var red=markers.length?markers[markers.length-1]:null;
 	var redTooltip=singlePointMode?null:document.getElementById('red-tooltip');
 	var mapEl=document.getElementById('map');
+	var zoomInBtn=document.getElementById('zoom-in');
+	var zoomOutBtn=document.getElementById('zoom-out');
 	var defaultHomeZoom=null;
 	var isTouchDevice=('ontouchstart' in window)||navigator.maxTouchPoints>0;
 	var presenceFullscreenActive=false;
@@ -10473,6 +10477,32 @@ vector.addFeatures(feature);
 	updateRedTooltip();
 	updateBluePinnedTooltip();
 	updateCtxMenuAnchor();
+	}
+
+	function setMapControlDisabled(btn,disabled){
+	if(!btn)return;
+	btn.disabled=!!disabled;
+	btn.classList.toggle('is-disabled',!!disabled);
+	btn.setAttribute('aria-disabled',disabled?'true':'false');
+	}
+
+	function getMaxZoomLevel(){
+	var levels=typeof map.getNumZoomLevels==='function'?map.getNumZoomLevels():0;
+	return Math.max(0,levels-1);
+	}
+
+	function getMinZoomLevel(){
+	if(typeof map.getMinZoom==='function'){
+	var minZoom=map.getMinZoom();
+	if(typeof minZoom==='number'&&isFinite(minZoom))return minZoom;
+	}
+	return 0;
+	}
+
+	function syncZoomButtonState(){
+	var zoom=map.getZoom();
+	setMapControlDisabled(zoomOutBtn,zoom<=getMinZoomLevel());
+	setMapControlDisabled(zoomInBtn,zoom>=getMaxZoomLevel());
 	}
 
 	function resetBlueTooltip(){
@@ -10661,6 +10691,8 @@ showBlueAndHandleClick(f,null,true);
 	map.events.register('moveend',map,updateAnchoredTooltips);
 	map.events.register('zoomend',map,updateAnchoredTooltips);
 	}
+	map.events.register('zoomend',map,syncZoomButtonState);
+	map.events.register('updatesize',map,syncZoomButtonState);
 
 function zoomToMarkers(){
 var extent=vector.getDataExtent();
@@ -10687,12 +10719,14 @@ map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),zoom);
 	captureDefaultHomeZoom();
 	if(!singlePointMode)setTimeout(updateAnchoredTooltips,100);
 	}
+	syncZoomButtonState();
 
-document.getElementById('zoom-in').addEventListener('click',function(){map.zoomIn()});
-document.getElementById('zoom-out').addEventListener('click',function(){map.zoomOut()});
+zoomInBtn.addEventListener('click',function(){if(zoomInBtn.disabled)return;map.zoomIn();syncZoomButtonState()});
+zoomOutBtn.addEventListener('click',function(){if(zoomOutBtn.disabled)return;map.zoomOut();syncZoomButtonState()});
 	document.getElementById('zoom-home').addEventListener('click',function(){
 	if(!singlePointMode)clearPresenceMapPopups();
 	focusRedMarkerAtDefaultZoom();
+	syncZoomButtonState();
 	});
 
 	(function(){
@@ -10950,6 +10984,7 @@ red=markers[markers.length-1];
 setTooltipHtml(redTooltip,red[3]);
 zoomToMarkers();
 captureDefaultHomeZoom();
+syncZoomButtonState();
 setTimeout(updateAnchoredTooltips,100);
 }).catch(function(){searchEmpty.textContent='Request failed';searchEmpty.style.display='block';shakeSearch()});
 }

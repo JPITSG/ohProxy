@@ -45,8 +45,8 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /function clearPresenceMapPopupsFromBlankPixel\(px\)\{\s*if\(findAnyPresenceFeatureNearPixel\(px,36\)\)return false;\s*clearPresenceMapPopups\(\);\s*return true;\s*\}/);
 		assert.match(server, /function focusRedMarkerAtDefaultZoom\(\)\{\s*if\(!red\)return;\s*var zoom=defaultHomeZoom===null\?map\.getZoom\(\):defaultHomeZoom;\s*map\.setCenter\(new OpenLayers\.LonLat\(red\[1\],red\[0\]\)\.transform\(wgs84,proj\),zoom\);\s*\}/);
 		assert.match(server, /zoomToMarkers\(\);\s*captureDefaultHomeZoom\(\);\s*if\(!singlePointMode\)setTimeout\(updateAnchoredTooltips,100\);/);
-		assert.match(server, /setTooltipHtml\(redTooltip,red\[3\]\);\s*zoomToMarkers\(\);\s*captureDefaultHomeZoom\(\);\s*setTimeout\(updateAnchoredTooltips,100\);/);
-		assert.match(server, /document\.getElementById\('zoom-home'\)\.addEventListener\('click',function\(\)\{\s*if\(!singlePointMode\)clearPresenceMapPopups\(\);\s*focusRedMarkerAtDefaultZoom\(\);\s*\}\);/);
+		assert.match(server, /setTooltipHtml\(redTooltip,red\[3\]\);\s*zoomToMarkers\(\);\s*captureDefaultHomeZoom\(\);\s*syncZoomButtonState\(\);\s*setTimeout\(updateAnchoredTooltips,100\);/);
+		assert.match(server, /document\.getElementById\('zoom-home'\)\.addEventListener\('click',function\(\)\{\s*if\(!singlePointMode\)clearPresenceMapPopups\(\);\s*focusRedMarkerAtDefaultZoom\(\);\s*syncZoomButtonState\(\);\s*\}\);/);
 	});
 
 	it('adds fullscreen touch rotate control that resets on fullscreen exit', () => {
