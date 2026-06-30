@@ -10328,6 +10328,7 @@ vector.addFeatures(feature);
 	var redTooltip=singlePointMode?null:document.getElementById('red-tooltip');
 	var mapEl=document.getElementById('map');
 	var zoomInBtn=document.getElementById('zoom-in');
+	var zoomHomeBtn=document.getElementById('zoom-home');
 	var zoomOutBtn=document.getElementById('zoom-out');
 	var defaultHomeZoom=null;
 	var isTouchDevice=('ontouchstart' in window)||navigator.maxTouchPoints>0;
@@ -10499,10 +10500,39 @@ vector.addFeatures(feature);
 	return 0;
 	}
 
+	function getDefaultHomeZoom(){
+	var zoom=defaultHomeZoom===null?map.getZoom():defaultHomeZoom;
+	if(typeof map.adjustZoom==='function')zoom=map.adjustZoom(zoom);
+	return zoom;
+	}
+
+	function getHomeTarget(){
+	if(!red)return null;
+	return {
+	center:new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),
+	zoom:getDefaultHomeZoom()
+	};
+	}
+
+	function sameMapCenter(a,b){
+	if(!a||!b)return false;
+	var resolution=typeof map.getResolution==='function'?map.getResolution():0;
+	var tolerance=(typeof resolution==='number'&&isFinite(resolution)&&resolution>0)?resolution/2:0.000001;
+	return Math.abs(a.lon-b.lon)<=tolerance&&Math.abs(a.lat-b.lat)<=tolerance;
+	}
+
+	function shouldDisableHomeButton(){
+	var target=getHomeTarget();
+	if(!target)return true;
+	var center=map.getCenter();
+	return !!(center&&sameMapCenter(center,target.center)&&map.getZoom()===target.zoom);
+	}
+
 	function syncZoomButtonState(){
 	var zoom=map.getZoom();
 	setMapControlDisabled(zoomOutBtn,zoom<=getMinZoomLevel());
 	setMapControlDisabled(zoomInBtn,zoom>=getMaxZoomLevel());
+	setMapControlDisabled(zoomHomeBtn,shouldDisableHomeButton());
 	}
 
 	function resetBlueTooltip(){
@@ -10691,6 +10721,7 @@ showBlueAndHandleClick(f,null,true);
 	map.events.register('moveend',map,updateAnchoredTooltips);
 	map.events.register('zoomend',map,updateAnchoredTooltips);
 	}
+	map.events.register('moveend',map,syncZoomButtonState);
 	map.events.register('zoomend',map,syncZoomButtonState);
 	map.events.register('updatesize',map,syncZoomButtonState);
 
@@ -10709,9 +10740,9 @@ defaultHomeZoom=map.getZoom();
 }
 
 function focusRedMarkerAtDefaultZoom(){
-if(!red)return;
-var zoom=defaultHomeZoom===null?map.getZoom():defaultHomeZoom;
-map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),zoom);
+var target=getHomeTarget();
+if(!target)return;
+map.setCenter(target.center,target.zoom);
 }
 
 	if(markers.length){
@@ -10723,10 +10754,12 @@ map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),zoom);
 
 zoomInBtn.addEventListener('click',function(){if(zoomInBtn.disabled)return;map.zoomIn();syncZoomButtonState()});
 zoomOutBtn.addEventListener('click',function(){if(zoomOutBtn.disabled)return;map.zoomOut();syncZoomButtonState()});
-	document.getElementById('zoom-home').addEventListener('click',function(){
+	zoomHomeBtn.addEventListener('click',function(){
+	if(zoomHomeBtn.disabled)return;
 	if(!singlePointMode)clearPresenceMapPopups();
 	focusRedMarkerAtDefaultZoom();
 	syncZoomButtonState();
+	setTimeout(syncZoomButtonState,0);
 	});
 
 	(function(){
