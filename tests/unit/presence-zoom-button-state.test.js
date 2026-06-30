@@ -22,6 +22,7 @@ describe('Presence zoom button state', () => {
 		assert.match(server, /map\.events\.register\('moveend',map,syncZoomButtonState\);/);
 		assert.match(server, /map\.events\.register\('zoomend',map,syncZoomButtonState\);/);
 		assert.match(server, /map\.events\.register\('updatesize',map,syncZoomButtonState\);/);
+		assert.match(server, /zoomToMarkers\(\);\s*captureDefaultHomeZoom\(\);\s*focusRedMarkerAtDefaultZoom\(\);\s*if\(!singlePointMode\)setTimeout\(updateAnchoredTooltips,100\);/);
 		assert.match(server, /zoomInBtn\.addEventListener\('click',function\(\)\{if\(zoomInBtn\.disabled\)return;map\.zoomIn\(\);syncZoomButtonState\(\)\}\);/);
 		assert.match(server, /zoomOutBtn\.addEventListener\('click',function\(\)\{if\(zoomOutBtn\.disabled\)return;map\.zoomOut\(\);syncZoomButtonState\(\)\}\);/);
 		assert.match(server, /zoomHomeBtn\.addEventListener\('click',function\(\)\{\s*if\(zoomHomeBtn\.disabled\)return;\s*if\(!singlePointMode\)clearPresenceMapPopups\(\);[\s\S]*setTimeout\(syncZoomButtonState,0\);/);

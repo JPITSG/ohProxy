@@ -10748,6 +10748,7 @@ map.setCenter(target.center,target.zoom);
 	if(markers.length){
 	zoomToMarkers();
 	captureDefaultHomeZoom();
+	focusRedMarkerAtDefaultZoom();
 	if(!singlePointMode)setTimeout(updateAnchoredTooltips,100);
 	}
 	syncZoomButtonState();
@@ -11017,6 +11018,7 @@ red=markers[markers.length-1];
 setTooltipHtml(redTooltip,red[3]);
 zoomToMarkers();
 captureDefaultHomeZoom();
+focusRedMarkerAtDefaultZoom();
 syncZoomButtonState();
 setTimeout(updateAnchoredTooltips,100);
 }).catch(function(){searchEmpty.textContent='Request failed';searchEmpty.style.display='block';shakeSearch()});

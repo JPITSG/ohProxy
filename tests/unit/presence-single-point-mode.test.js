@@ -45,8 +45,8 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /function clearPresenceMapPopupsFromBlankPixel\(px\)\{\s*if\(findAnyPresenceFeatureNearPixel\(px,36\)\)return false;\s*clearPresenceMapPopups\(\);\s*return true;\s*\}/);
 		assert.match(server, /function getHomeTarget\(\)\{\s*if\(!red\)return null;\s*return \{\s*center:new OpenLayers\.LonLat\(red\[1\],red\[0\]\)\.transform\(wgs84,proj\),\s*zoom:getDefaultHomeZoom\(\)\s*\};\s*\}/);
 		assert.match(server, /function focusRedMarkerAtDefaultZoom\(\)\{\s*var target=getHomeTarget\(\);\s*if\(!target\)return;\s*map\.setCenter\(target\.center,target\.zoom\);\s*\}/);
-		assert.match(server, /zoomToMarkers\(\);\s*captureDefaultHomeZoom\(\);\s*if\(!singlePointMode\)setTimeout\(updateAnchoredTooltips,100\);/);
-		assert.match(server, /setTooltipHtml\(redTooltip,red\[3\]\);\s*zoomToMarkers\(\);\s*captureDefaultHomeZoom\(\);\s*syncZoomButtonState\(\);\s*setTimeout\(updateAnchoredTooltips,100\);/);
+		assert.match(server, /zoomToMarkers\(\);\s*captureDefaultHomeZoom\(\);\s*focusRedMarkerAtDefaultZoom\(\);\s*if\(!singlePointMode\)setTimeout\(updateAnchoredTooltips,100\);/);
+		assert.match(server, /setTooltipHtml\(redTooltip,red\[3\]\);\s*zoomToMarkers\(\);\s*captureDefaultHomeZoom\(\);\s*focusRedMarkerAtDefaultZoom\(\);\s*syncZoomButtonState\(\);\s*setTimeout\(updateAnchoredTooltips,100\);/);
 		assert.match(server, /zoomHomeBtn\.addEventListener\('click',function\(\)\{\s*if\(zoomHomeBtn\.disabled\)return;\s*if\(!singlePointMode\)clearPresenceMapPopups\(\);\s*focusRedMarkerAtDefaultZoom\(\);\s*syncZoomButtonState\(\);\s*setTimeout\(syncZoomButtonState,0\);\s*\}\);/);
 	});
 
