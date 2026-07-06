@@ -11799,6 +11799,13 @@ async function captureVideoPreview(cacheKeyUrl, sourceUrl, encoding) {
 	ensureDir(VIDEO_PREVIEW_DIR);
 	const hash = videoUrlHash(cacheKeyUrl);
 	const outputPath = path.join(VIDEO_PREVIEW_DIR, `${hash}.jpg`);
+	// Capture to a temp file and rename into place on success. This keeps the
+	// stored thumbnail's mtime equal to when the frame was actually captured
+	// (rename preserves the temp file's mtime) and prevents a failed capture
+	// from truncating the previous good thumbnail or bumping its mtime.
+	// The .jpg suffix is kept so ffmpeg can infer the output format and stale
+	// temp files still age out via pruneVideoPreviews.
+	const tempPath = path.join(VIDEO_PREVIEW_DIR, `${hash}.tmp.jpg`);
 
 	const inputArgs = buildFfmpegInputArgs(encoding, sourceUrl);
 
@@ -11808,7 +11815,7 @@ async function captureVideoPreview(cacheKeyUrl, sourceUrl, encoding) {
 			...inputArgs,
 			'-vframes', '1',
 			'-q:v', '2',
-			outputPath,
+			tempPath,
 		], {
 			stdio: ['ignore', 'pipe', 'pipe'],
 		});
@@ -11824,19 +11831,41 @@ async function captureVideoPreview(cacheKeyUrl, sourceUrl, encoding) {
 			ffmpeg.kill('SIGKILL');
 		}, 10000);
 
+		const discardTempFile = () => {
+			try { fs.unlinkSync(tempPath); } catch {}
+		};
+
 		ffmpeg.on('close', (code, signal) => {
 			clearTimeout(timer);
+			let finalized = false;
+			let finalizeError = '';
+			if (!killed && code === 0) {
+				try {
+					const tempStats = fs.statSync(tempPath);
+					if (tempStats.size > 0) {
+						fs.renameSync(tempPath, outputPath);
+						finalized = true;
+					} else {
+						finalizeError = 'empty capture output';
+					}
+				} catch (err) {
+					finalizeError = err.message || String(err);
+				}
+			}
+			if (!finalized) discardTempFile();
 			resolve({
-				ok: !killed && code === 0,
+				ok: finalized,
 				exitCode: Number.isInteger(code) ? code : null,
 				signal: safeText(signal),
 				timedOut: killed,
+				...(finalizeError ? { error: `finalize failed: ${finalizeError}` } : {}),
 				stderr: stderrData.trim().slice(0, 400),
 			});
 		});
 
 		ffmpeg.on('error', (err) => {
 			clearTimeout(timer);
+			discardTempFile();
 			resolve({
 				ok: false,
 				exitCode: null,

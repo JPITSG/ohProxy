@@ -2109,6 +2109,13 @@ body.theme-light .theme-overlay {
 	border-top-color: var(--color-text-primary);
 	border-radius: 50%;
 	animation: resume-spin 1s linear infinite;
+	/* Paused while the overlay is hidden so the infinite animation does not keep
+	   ticking; `.active`/`.fading` (fade-out window) set it running. */
+	animation-play-state: paused;
+}
+.resume-spinner.active .resume-spinner-ring,
+.resume-spinner.fading .resume-spinner-ring {
+	animation-play-state: running;
 }
 body.theme-light .resume-spinner-ring,
 body.theme-light .video-spinner-ring {
@@ -2117,6 +2124,11 @@ body.theme-light .video-spinner-ring {
 }
 .slim .resume-spinner-ring {
 	animation: resume-spin 1s linear infinite !important;
+	animation-play-state: paused !important;
+}
+.slim .resume-spinner.active .resume-spinner-ring,
+.slim .resume-spinner.fading .resume-spinner-ring {
+	animation-play-state: running !important;
 }
 @keyframes resume-spin {
 	to { transform: rotate(360deg); }
@@ -3242,6 +3254,36 @@ html.no-flex-gap .visibility-users-nav > * + * {
 .video-mute-btn img,
 .video-fullscreen-btn img { width: 100%; height: 100%; display: block; }
 
+/* Thumbnail age badge - shown while the preview image is up, before the
+   stream starts playing. Mirrors the control buttons' look: same size row,
+   same rounded-square corners (20% radius like the button icons) and the
+   same .4 opacity the buttons have while the stream is loading. */
+.video-preview-age {
+	position: absolute;
+	bottom: 8px;
+	left: 8px;
+	z-index: 20;
+	height: 32px;
+	display: flex;
+	align-items: center;
+	padding: 0 10px;
+	border: none;
+	border-radius: 6.4px;
+	/* Black reads as dark gray once the .4 opacity is applied. */
+	background: #000000;
+	color: #ffffff;
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 1;
+	white-space: nowrap;
+	opacity: .4;
+	pointer-events: none;
+	transition: opacity .4s ease;
+}
+.video-preview-age.hidden {
+	display: none;
+}
+
 /* Native fullscreen / fake fullscreen: container fills viewport */
 .video-container:fullscreen,
 .video-container:-webkit-full-screen,
@@ -3301,13 +3343,16 @@ html.fs-no-scroll body {
 	border: 5px solid var(--color-text-muted);
 	border-top-color: var(--color-text-primary);
 }
-/* Hide preview/spinner in fullscreen */
+/* Hide preview/spinner/age badge in fullscreen */
 .video-container:fullscreen .video-preview,
 .video-container:fullscreen .video-spinner,
+.video-container:fullscreen .video-preview-age,
 .video-container:-webkit-full-screen .video-preview,
 .video-container:-webkit-full-screen .video-spinner,
+.video-container:-webkit-full-screen .video-preview-age,
 .video-container.fs-active .video-preview,
-.video-container.fs-active .video-spinner {
+.video-container.fs-active .video-spinner,
+.video-container.fs-active .video-preview-age {
 	display: none;
 }
 

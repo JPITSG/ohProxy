@@ -1623,10 +1623,32 @@ function initVideoZoom(videoEl, zoomStage) {
 	});
 }
 
+// The ring animation is paused via CSS while the spinner is hidden so it does
+// not tick the animation timeline forever; the `fading` class keeps it spinning
+// through the opacity fade-out so the pause is not visible.
+const RESUME_SPINNER_FADE_MS = 450;
+let resumeSpinnerFadeTimer = null;
 function showResumeSpinner(show) {
 	if (!els.resumeSpinner) return;
+	const wasActive = els.resumeSpinner.classList.contains('active');
 	els.resumeSpinner.classList.toggle('active', show);
 	document.body.classList.toggle('resume-spinner-active', show);
+	if (show) {
+		if (resumeSpinnerFadeTimer) {
+			clearTimeout(resumeSpinnerFadeTimer);
+			resumeSpinnerFadeTimer = null;
+		}
+		els.resumeSpinner.classList.remove('fading');
+		return;
+	}
+	// Redundant hide calls must not cancel a pending fade cleanup.
+	if (!wasActive) return;
+	els.resumeSpinner.classList.add('fading');
+	if (resumeSpinnerFadeTimer) clearTimeout(resumeSpinnerFadeTimer);
+	resumeSpinnerFadeTimer = setTimeout(() => {
+		resumeSpinnerFadeTimer = null;
+		if (els.resumeSpinner) els.resumeSpinner.classList.remove('fading');
+	}, RESUME_SPINNER_FADE_MS);
 }
 
 
@@ -1903,6 +1925,9 @@ const BOUNCE_SCALE = 0.4;
 const BOUNCE_RETURN_MS = 180;
 const BOUNCE_HOLD_MS = 40;
 const BOUNCE_REFRESH_THRESHOLD = 1.8;
+// Attach the scroll-blocking touchmove listener a little before the finger-travel
+// estimate says a page edge is reached, so estimate drift cannot skip the bounce.
+const BOUNCE_EDGE_ATTACH_MARGIN_PX = 120;
 let bounceResetTimer = null;
 let bounceClearTimer = null;
 const bounceTouch = {
@@ -1910,6 +1935,10 @@ const bounceTouch = {
 	hitMaxAtTop: false,
 	startY: 0,
 	lastY: 0,
+	startScrollY: 0,
+	maxScroll: 0,
+	moveAttached: false,
+	watchAttached: false,
 };
 
 function getScrollState() {
@@ -1960,15 +1989,68 @@ function releaseBounce() {
 	}, BOUNCE_HOLD_MS);
 }
 
+// A non-passive touchmove listener on window forces the browser to wait for the
+// main thread before every scroll update, so it is only attached while a gesture
+// could actually need preventDefault(): gestures that start at a page edge, or
+// reach one mid-gesture (detected by the passive edge watcher below).
+function attachBounceMoveListener() {
+	if (bounceTouch.moveAttached) return;
+	bounceTouch.moveAttached = true;
+	window.addEventListener('touchmove', handleBounceTouchMove, { passive: false });
+	detachBounceEdgeWatch();
+}
+
+function detachBounceMoveListener() {
+	if (!bounceTouch.moveAttached) return;
+	bounceTouch.moveAttached = false;
+	window.removeEventListener('touchmove', handleBounceTouchMove);
+}
+
+function attachBounceEdgeWatch() {
+	if (bounceTouch.moveAttached || bounceTouch.watchAttached) return;
+	bounceTouch.watchAttached = true;
+	window.addEventListener('touchmove', watchBounceEdgeProximity, { passive: true });
+}
+
+function detachBounceEdgeWatch() {
+	if (!bounceTouch.watchAttached) return;
+	bounceTouch.watchAttached = false;
+	window.removeEventListener('touchmove', watchBounceEdgeProximity);
+}
+
+function watchBounceEdgeProximity(e) {
+	if (!bounceTouch.active) {
+		detachBounceEdgeWatch();
+		return;
+	}
+	const touch = e.touches && e.touches[0];
+	if (!touch) return;
+	// Estimate the scroll position from finger travel (touch scrolling tracks the
+	// finger 1:1) — no layout reads on this per-move path.
+	const estimated = bounceTouch.startScrollY - (touch.clientY - bounceTouch.startY);
+	if (estimated <= BOUNCE_EDGE_ATTACH_MARGIN_PX ||
+		estimated >= bounceTouch.maxScroll - BOUNCE_EDGE_ATTACH_MARGIN_PX) {
+		attachBounceMoveListener();
+	}
+}
+
 function handleBounceTouchStart(e) {
 	if (state.isSlim) return;
 	if (!shouldHandleBounce(e.target)) return;
 	const touch = e.touches && e.touches[0];
 	if (!touch) return;
+	const { top, max, atTop, atBottom } = getScrollState();
 	bounceTouch.active = true;
 	bounceTouch.hitMaxAtTop = false;
 	bounceTouch.startY = touch.clientY;
 	bounceTouch.lastY = touch.clientY;
+	bounceTouch.startScrollY = top;
+	bounceTouch.maxScroll = max;
+	if (atTop || atBottom) {
+		attachBounceMoveListener();
+	} else {
+		attachBounceEdgeWatch();
+	}
 }
 
 function handleBounceTouchMove(e) {
@@ -1978,7 +2060,17 @@ function handleBounceTouchMove(e) {
 	if (!touch) return;
 	bounceTouch.lastY = touch.clientY;
 	const delta = bounceTouch.lastY - bounceTouch.startY;
-	const { atTop, atBottom } = getScrollState();
+	const scroller = document.scrollingElement || document.documentElement;
+	const top = scroller ? (scroller.scrollTop || 0) : 0;
+	const atTop = top <= 0;
+	let atBottom = top >= bounceTouch.maxScroll - 1;
+	if (delta < 0 && atBottom && !atTop) {
+		// maxScroll is cached at gesture start; confirm against fresh metrics before
+		// engaging the bottom bounce in case content grew mid-gesture.
+		const fresh = getScrollState();
+		bounceTouch.maxScroll = fresh.max;
+		atBottom = fresh.atBottom;
+	}
 	if (delta > 0 && atTop) {
 		e.preventDefault();
 		const offset = delta * BOUNCE_SCALE;
@@ -1999,6 +2091,8 @@ function handleBounceTouchMove(e) {
 async function handleBounceTouchEnd() {
 	if (state.isSlim) return;
 	if (!bounceTouch.active) return;
+	detachBounceMoveListener();
+	detachBounceEdgeWatch();
 	const shouldRefresh = bounceTouch.hitMaxAtTop;
 	bounceTouch.active = false;
 	bounceTouch.hitMaxAtTop = false;
@@ -2560,10 +2654,12 @@ function setVideoPreviewBackground(previewDiv, rawVideoUrl) {
 	previewDiv.dataset.previewRequestId = requestId;
 	if (!trimmed) {
 		applyVideoPreviewUrl(previewDiv, '');
+		setVideoPreviewCapturedAt(previewDiv, '');
 		return;
 	}
 	if (previousRawUrl && previousRawUrl !== trimmed) {
 		applyVideoPreviewUrl(previewDiv, '');
+		setVideoPreviewCapturedAt(previewDiv, '');
 	}
 	resolveVideoPreviewVersion(trimmed).then((version) => {
 		if (version === null) return;
@@ -2572,7 +2668,85 @@ function setVideoPreviewBackground(previewDiv, rawVideoUrl) {
 		if (previewDiv.dataset.previewRawUrl !== trimmed) return;
 		const previewUrl = version ? buildVideoPreviewUrl(trimmed, version) : '';
 		applyVideoPreviewUrl(previewDiv, previewUrl);
+		setVideoPreviewCapturedAt(previewDiv, version || '');
 	});
+}
+
+// --- Video preview age badge ---
+// While the preview thumbnail is shown (stream not yet playing), a badge next
+// to the video control buttons tells the user how old the thumbnail is. The
+// timestamp comes from the preview version, which is the capture file's mtime.
+function formatVideoPreviewAge(ageMs) {
+	const seconds = Math.max(1, Math.floor(ageMs / 1000));
+	const units = [
+		['year', 31536000],
+		['month', 2592000],
+		['week', 604800],
+		['day', 86400],
+		['hour', 3600],
+		['minute', 60],
+		['second', 1],
+	];
+	for (const [name, span] of units) {
+		if (seconds >= span) {
+			const count = Math.floor(seconds / span);
+			return `${count} ${name}${count === 1 ? '' : 's'} ago`;
+		}
+	}
+	return '1 second ago';
+}
+
+function getVideoPreviewAgeBadge(previewDiv) {
+	return previewDiv?.closest('.video-container')?.querySelector('.video-preview-age') || null;
+}
+
+function setVideoPreviewCapturedAt(previewDiv, version) {
+	const badge = getVideoPreviewAgeBadge(previewDiv);
+	if (!badge) return;
+	const normalized = normalizeVideoPreviewVersion(version);
+	if (normalized) badge.dataset.capturedAt = normalized;
+	else delete badge.dataset.capturedAt;
+	updateVideoPreviewAgeBadge(badge);
+}
+
+// Returns true while the badge is visible (used to keep the ticker alive).
+function updateVideoPreviewAgeBadge(badge) {
+	if (!badge || !badge.isConnected) return false;
+	const capturedAt = Number(badge.dataset.capturedAt || 0);
+	const container = badge.closest('.video-container');
+	const streamLive = container?.dataset.streamLive === '1';
+	const visible = capturedAt > 0 && !streamLive;
+	badge.classList.toggle('hidden', !visible);
+	if (!visible) return false;
+	const text = formatVideoPreviewAge(Date.now() - capturedAt);
+	if (badge.textContent !== text) badge.textContent = text;
+	ensureVideoPreviewAgeTicker();
+	return true;
+}
+
+let videoPreviewAgeTicker = null;
+function ensureVideoPreviewAgeTicker() {
+	if (videoPreviewAgeTicker) return;
+	videoPreviewAgeTicker = setInterval(() => {
+		let anyVisible = false;
+		for (const badge of document.querySelectorAll('.video-preview-age')) {
+			if (updateVideoPreviewAgeBadge(badge)) anyVisible = true;
+		}
+		if (!anyVisible) {
+			clearInterval(videoPreviewAgeTicker);
+			videoPreviewAgeTicker = null;
+		}
+	}, 1000);
+}
+
+// Tracks whether the video element is showing live frames; the age badge is
+// only shown while the preview thumbnail is what the user actually sees.
+function setVideoStreamLive(videoEl, live) {
+	const container = getVideoControlContainer(videoEl);
+	if (!container) return;
+	container.dataset.streamLive = live ? '1' : '';
+	const badge = container.querySelector('.video-preview-age');
+	if (badge) updateVideoPreviewAgeBadge(badge);
 }
 
 function buildCompactSearchPlaceholder(fullPlaceholder) {
@@ -9643,6 +9817,13 @@ function updateCard(card, w, info) {
 			previewDiv.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background-size:cover;background-position:center;opacity:0.75;z-index:10;';
 			videoContainer.appendChild(previewDiv);
 		}
+		// Get or create the thumbnail age badge (shown while the preview is up)
+		let ageBadge = videoContainer.querySelector('.video-preview-age');
+		if (!ageBadge) {
+			ageBadge = document.createElement('div');
+			ageBadge.className = 'video-preview-age hidden';
+			videoContainer.appendChild(ageBadge);
+		}
 		setVideoPreviewBackground(previewDiv, rawVideoUrl);
 
 		// Get or create spinner overlay
@@ -9695,6 +9876,14 @@ function updateCard(card, w, info) {
 			const disableVideoZoom = () => setVideoZoomReady(videoEl, false);
 			for (const evt of ['loadstart','waiting','stalled','pause','ended','emptied','abort','error']) {
 				videoEl.addEventListener(evt, disableVideoZoom);
+			}
+
+			// Thumbnail age badge: visible while the preview is what the user sees,
+			// hidden as soon as live frames are flowing. loadstart/emptied/error mark
+			// load cycles where the element has no frame and the preview shows through.
+			videoEl.addEventListener('playing', () => setVideoStreamLive(videoEl, true));
+			for (const evt of ['loadstart', 'emptied', 'error']) {
+				videoEl.addEventListener(evt, () => setVideoStreamLive(videoEl, false));
 			}
 
 			// Auto-reconnect on error - aggressive retry
@@ -11423,7 +11612,7 @@ function render(options = {}) {
 		const usesGlowSearch = searchQueryUsesMainSearchGlow(searchQuery);
 		const refreshTargets = usesGlowSearch ? source.filter(widgetHasMainSearchGlowRules) : widgets;
 		refreshSearchStates(refreshTargets, { force: shouldForceMainSearchGlowStateRefresh(searchQuery) }).then((updated) => {
-			if (updated) render();
+			if (updated) renderWhenScrollIdle();
 		});
 	}
 
@@ -11702,12 +11891,32 @@ async function applyPageData(page, fade, shouldScroll) {
 	state.isRefreshing = false;
 }
 
+let bgRefreshDeferredSince = 0;
+let bgRefreshRetryTimer = null;
+
 async function refresh(showLoading) {
 	clearLoadingStatusTimer();
 	if (showLoading) scheduleLoadingStatus();
 	if (state.suppressRefreshCount > 0 && !showLoading) {
 		state.pendingRefresh = true;
 		return false;
+	}
+	if (!showLoading) {
+		// Background refresh while the user is scrolling: retry once the gesture
+		// settles instead of fetching + rendering mid-gesture (bounded by
+		// SCROLL_RENDER_DEFER_MAX_MS via bgRefreshDeferredSince).
+		const deferredTooLong = bgRefreshDeferredSince > 0 &&
+			(Date.now() - bgRefreshDeferredSince >= SCROLL_RENDER_DEFER_MAX_MS);
+		if (isScrollGestureActive() && !deferredTooLong) {
+			if (!bgRefreshDeferredSince) bgRefreshDeferredSince = Date.now();
+			if (bgRefreshRetryTimer) clearTimeout(bgRefreshRetryTimer);
+			bgRefreshRetryTimer = setTimeout(() => {
+				bgRefreshRetryTimer = null;
+				refresh(false);
+			}, SCROLL_DEFER_RETRY_MS);
+			return false;
+		}
+		bgRefreshDeferredSince = 0;
 	}
 
 	state.isRefreshing = true;
@@ -12404,6 +12613,86 @@ function clearWsConnectTimer() {
 	}
 }
 
+// --- Scroll-gesture render deferral ---
+// Background-driven work (WebSocket pushes, polling refreshes, search-state
+// refreshes) used to render mid-gesture, dirtying layout between scroll frames
+// and competing with scrolling for the main thread. While the user is actively
+// scrolling, that work is batched and flushed once the gesture goes idle,
+// bounded by SCROLL_RENDER_DEFER_MAX_MS so displayed data can never lag behind
+// by more than that during continuous scrolling.
+const SCROLL_GESTURE_IDLE_MS = 200;
+const SCROLL_RENDER_DEFER_MAX_MS = 1000;
+const SCROLL_DEFER_RETRY_MS = 120;
+let scrollGestureTouchDown = false;
+let lastScrollGestureAt = 0;
+let scrollDeferredRenderPending = false;
+let scrollDeferredWsRefreshPending = false;
+let scrollDeferredSince = 0;
+let scrollDeferredFlushTimer = null;
+
+function noteScrollGestureActivity() {
+	lastScrollGestureAt = Date.now();
+}
+
+function noteScrollGestureTouchStart() {
+	scrollGestureTouchDown = true;
+}
+
+function noteScrollGestureTouchEnd(e) {
+	if (!e.touches || e.touches.length === 0) scrollGestureTouchDown = false;
+}
+
+function isScrollGestureActive() {
+	return scrollGestureTouchDown || (Date.now() - lastScrollGestureAt < SCROLL_GESTURE_IDLE_MS);
+}
+
+function scrollDeferralOverdue() {
+	return scrollDeferredSince > 0 && (Date.now() - scrollDeferredSince >= SCROLL_RENDER_DEFER_MAX_MS);
+}
+
+function scheduleScrollDeferredFlush() {
+	if (scrollDeferredFlushTimer) return;
+	scrollDeferredFlushTimer = setTimeout(() => {
+		scrollDeferredFlushTimer = null;
+		if (isScrollGestureActive() && !scrollDeferralOverdue()) {
+			scheduleScrollDeferredFlush();
+			return;
+		}
+		flushScrollDeferredWork();
+	}, SCROLL_DEFER_RETRY_MS);
+}
+
+function flushScrollDeferredWork() {
+	if (scrollDeferredFlushTimer) {
+		clearTimeout(scrollDeferredFlushTimer);
+		scrollDeferredFlushTimer = null;
+	}
+	scrollDeferredSince = 0;
+	const doRender = scrollDeferredRenderPending;
+	const doWsRefresh = scrollDeferredWsRefreshPending;
+	scrollDeferredRenderPending = false;
+	scrollDeferredWsRefreshPending = false;
+	if (!doRender && !doWsRefresh) return;
+	if (state.suppressRefreshCount > 0) {
+		state.pendingRefresh = true;
+		return;
+	}
+	if (doRender) render();
+	if (doWsRefresh) queueWsRefresh(WS_REFRESH_DEBOUNCE_MS);
+}
+
+// Render immediately when the page is at rest; while the user is actively
+// scrolling, batch renders and flush once the gesture settles.
+function renderWhenScrollIdle() {
+	if (!isScrollGestureActive()) {
+		render();
+		return;
+	}
+	scrollDeferredRenderPending = true;
+	if (!scrollDeferredSince) scrollDeferredSince = Date.now();
+	scheduleScrollDeferredFlush();
+}
+
 let wsRefreshTimer = null;
 const WS_REFRESH_DEBOUNCE_MS = 300;
 const WS_VISIBILITY_REFRESH_DEBOUNCE_MS = 1200;
@@ -12440,6 +12729,12 @@ function applyWsUpdate(data) {
 	if (didUpdate) {
 		if (state.suppressRefreshCount > 0) {
 			state.pendingRefresh = true;
+			return;
+		}
+		if (isScrollGestureActive()) {
+			// Mid-scroll pushes batch into one render once the gesture settles.
+			scrollDeferredWsRefreshPending = true;
+			renderWhenScrollIdle();
 			return;
 		}
 		render();
@@ -12886,13 +13181,19 @@ function restoreNormalPolling() {
 	window.addEventListener('mousemove', noteActivity, { passive: true });
 	window.addEventListener('scroll', noteActivity, { passive: true });
 	window.addEventListener('scroll', scheduleImageScrollRefresh, { passive: true });
+	window.addEventListener('scroll', noteScrollGestureActivity, { passive: true });
 	window.addEventListener('touchstart', noteActivity, { passive: true });
+	window.addEventListener('touchstart', noteScrollGestureTouchStart, { passive: true });
 	window.addEventListener('touchstart', handleSearchFocusScrollTouchStart, { passive: true, capture: true });
 	window.addEventListener('touchstart', handleBounceTouchStart, { passive: true });
 	window.addEventListener('touchmove', handleSearchFocusScrollTouchMove, { passive: true, capture: true });
-	window.addEventListener('touchmove', handleBounceTouchMove, { passive: false });
+	// The bounce touchmove listener is attached dynamically per gesture (see
+	// attachBounceMoveListener) so mid-page scrolling never has a scroll-blocking
+	// non-passive listener on window.
+	window.addEventListener('touchend', noteScrollGestureTouchEnd, { passive: true });
 	window.addEventListener('touchend', handleBounceTouchEnd, { passive: true });
 	window.addEventListener('touchend', clearSearchFocusScrollTouch, { passive: true, capture: true });
+	window.addEventListener('touchcancel', noteScrollGestureTouchEnd, { passive: true });
 	window.addEventListener('touchcancel', handleBounceTouchEnd, { passive: true });
 	window.addEventListener('touchcancel', clearSearchFocusScrollTouch, { passive: true, capture: true });
 	window.addEventListener('wheel', handleSearchFocusScrollWheel, { passive: true, capture: true });
