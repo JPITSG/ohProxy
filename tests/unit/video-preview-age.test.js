@@ -61,6 +61,14 @@ describe('Video preview age badge', () => {
 		assert.match(app, /const visible = capturedAt > 0 && !streamLive;\s*badge\.classList\.toggle\('hidden', !visible\);/);
 	});
 
+	it('marks thumbnails older than the freshness window with the alert background', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		assert.match(app, /const VIDEO_PREVIEW_STALE_MS = 60000;/);
+		// re-evaluated on every badge update, so the 1s ticker flips the state
+		// live as the thumbnail crosses the threshold
+		assert.match(app, /const ageMs = Date\.now\(\) - capturedAt;\s*const text = formatVideoPreviewAge\(ageMs\);\s*if \(badge\.textContent !== text\) badge\.textContent = text;\s*badge\.classList\.toggle\('stale', ageMs > VIDEO_PREVIEW_STALE_MS\);/);
+	});
+
 	it('ticks visible badges and stops the ticker when none remain', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /function ensureVideoPreviewAgeTicker\(\) \{\s*if \(videoPreviewAgeTicker\) return;\s*videoPreviewAgeTicker = setInterval\(\(\) => \{[\s\S]*?if \(!anyVisible\) \{\s*clearInterval\(videoPreviewAgeTicker\);\s*videoPreviewAgeTicker = null;\s*\}\s*\}, 1000\);/);

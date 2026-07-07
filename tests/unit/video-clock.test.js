@@ -22,24 +22,42 @@ describe('Video stream clock', () => {
 	it('drives the clock exclusively from presented video frames', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		const start = app.indexOf('function initVideoClock(videoEl, videoContainer)');
-		assert.ok(start > -1);
-		const body = app.slice(start, start + 2200);
-		// each presented frame stamps the current time and re-arms the callback
+		const end = app.indexOf('function buildCompactSearchPlaceholder');
+		assert.ok(start > -1 && end > start);
+		const body = app.slice(start, end);
+		// each presented frame stamps the current time, clears the stall alert,
+		// re-arms the watchdog and the callback
 		assert.match(body, /const hasFrameCallback = typeof videoEl\.requestVideoFrameCallback === 'function';/);
-		assert.match(body, /const text = formatDT\(new Date\(\), TIME_FORMAT\);\s*if \(clock\.textContent !== text\) clock\.textContent = text;\s*clock\.classList\.remove\('hidden'\);/);
+		assert.match(body, /const text = formatDT\(new Date\(\), TIME_FORMAT\);\s*if \(clock\.textContent !== text\) clock\.textContent = text;\s*clock\.classList\.remove\('stalled'\);\s*clock\.classList\.remove\('hidden'\);\s*armClockStallWatchdog\(\);/);
 		// exactly one armed callback via pending flag; never cancelled from event
 		// handlers (cancelling on 'playing' can starve the chain on live streams)
 		assert.match(body, /if \(!hasFrameCallback \|\| frameCallbackPending\) return;\s*frameCallbackPending = true;\s*videoEl\.requestVideoFrameCallback\(onFrame\);/);
 		assert.doesNotMatch(body, /cancelVideoFrameCallback/);
-		// no wall-clock interval anywhere in the clock: a stalled stream must freeze it
-		assert.doesNotMatch(body, /setInterval|setTimeout|requestAnimationFrame/);
+		// the displayed time is never advanced by wall-clock timers: the only
+		// textContent write sits in the frame callback, and the only timer is
+		// the stall watchdog, which just flags the alert class
+		assert.doesNotMatch(body, /setInterval|requestAnimationFrame/);
+		assert.strictEqual((body.match(/textContent = /g) || []).length, 1);
+		assert.match(body, /stallTimer = setTimeout\(markClockStalled, VIDEO_CLOCK_STALL_MS\);/);
+		assert.match(body, /const markClockStalled = \(\) => \{\s*stallTimer = null;\s*const clock = videoContainer\.querySelector\('\.video-clock'\);\s*if \(clock && !clock\.classList\.contains\('hidden'\)\) clock\.classList\.add\('stalled'\);\s*\};/);
 		// fallback path only advances when currentTime actually moved
 		assert.match(body, /if \(videoEl\.currentTime === lastMediaTime\) return;\s*lastMediaTime = videoEl\.currentTime;\s*onFrame\(\);/);
 	});
 
+	it('flags a stalled stream with the alert background and clears it on reset', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		const css = fs.readFileSync(STYLES_FILE, 'utf8');
+		assert.match(app, /const VIDEO_CLOCK_STALL_MS = 3000;/);
+		// stream reset hides the clock and drops any stall alert
+		assert.match(app, /clock\.classList\.add\('hidden'\);\s*clock\.classList\.remove\('stalled'\);/);
+		// shared alert background for stale thumbnail + stalled clock; only the
+		// background changes, so the clock keeps its .5 opacity while stalled
+		assert.match(css, /\.video-preview-age\.stale,\s*\.video-clock\.stalled \{\s*background: #8b0000;\s*\}/);
+	});
+
 	it('hides the clock whenever the stream resets to the preview state', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
-		assert.match(app, /if \(!live\) \{\s*const clock = container\.querySelector\('\.video-clock'\);\s*if \(clock\) clock\.classList\.add\('hidden'\);\s*\}/);
+		assert.match(app, /if \(!live\) \{\s*const clock = container\.querySelector\('\.video-clock'\);\s*if \(clock\) \{\s*clock\.classList\.add\('hidden'\);\s*clock\.classList\.remove\('stalled'\);\s*\}\s*\}/);
 		// created hidden; only a presented frame reveals it
 		assert.match(app, /streamClock\.className = 'video-clock hidden';/);
 		assert.match(app, /initVideoClock\(videoEl, videoContainer\);/);

@@ -3314,6 +3314,14 @@ html.no-flex-gap .visibility-users-nav > * + * {
 	display: none;
 }
 
+/* Alert background shared by both video badges: a stale preview thumbnail
+   (older than the freshness window) and a stalled stream clock (no new
+   frames). Only the background changes - size and opacity stay as-is. */
+.video-preview-age.stale,
+.video-clock.stalled {
+	background: #8b0000;
+}
+
 /* Native fullscreen / fake fullscreen: container fills viewport */
 .video-container:fullscreen,
 .video-container:-webkit-full-screen,

@@ -2676,6 +2676,9 @@ function setVideoPreviewBackground(previewDiv, rawVideoUrl) {
 // While the preview thumbnail is shown (stream not yet playing), a badge next
 // to the video control buttons tells the user how old the thumbnail is. The
 // timestamp comes from the preview version, which is the capture file's mtime.
+// Thumbnails older than this render the badge with the alert background.
+const VIDEO_PREVIEW_STALE_MS = 60000;
+
 function formatVideoPreviewAge(ageMs) {
 	const seconds = Math.max(1, Math.floor(ageMs / 1000));
 	const units = [
@@ -2718,8 +2721,10 @@ function updateVideoPreviewAgeBadge(badge) {
 	const visible = capturedAt > 0 && !streamLive;
 	badge.classList.toggle('hidden', !visible);
 	if (!visible) return false;
-	const text = formatVideoPreviewAge(Date.now() - capturedAt);
+	const ageMs = Date.now() - capturedAt;
+	const text = formatVideoPreviewAge(ageMs);
 	if (badge.textContent !== text) badge.textContent = text;
+	badge.classList.toggle('stale', ageMs > VIDEO_PREVIEW_STALE_MS);
 	ensureVideoPreviewAgeTicker();
 	return true;
 }
@@ -2751,7 +2756,10 @@ function setVideoStreamLive(videoEl, live) {
 	// the stream resets to the preview state it must disappear immediately.
 	if (!live) {
 		const clock = container.querySelector('.video-clock');
-		if (clock) clock.classList.add('hidden');
+		if (clock) {
+			clock.classList.add('hidden');
+			clock.classList.remove('stalled');
+		}
 	}
 }
 
@@ -2760,6 +2768,10 @@ function setVideoStreamLive(videoEl, live) {
 // by presented video frames (requestVideoFrameCallback): each new frame stamps
 // the badge with the current time, so the moment frames stop arriving - for
 // any reason - the clock freezes, and it resumes with the next frame.
+// If no frame lands within this window while the clock is visible, the badge
+// switches to the alert background until frames resume.
+const VIDEO_CLOCK_STALL_MS = 3000;
+
 function initVideoClock(videoEl, videoContainer) {
 	if (videoEl.__clockInit) return;
 	videoEl.__clockInit = true;
@@ -2769,13 +2781,28 @@ function initVideoClock(videoEl, videoContainer) {
 	// waiting/playing, and cancelling from 'playing' can starve the chain by
 	// repeatedly killing callbacks whose frame was presented but not delivered.
 	let frameCallbackPending = false;
+	// Wall-clock watchdog for the alert state ONLY - the displayed time itself
+	// is never advanced by timers. It fires once when no new frame has landed
+	// within the stall window; the next presented frame clears the state.
+	let stallTimer = null;
+	const markClockStalled = () => {
+		stallTimer = null;
+		const clock = videoContainer.querySelector('.video-clock');
+		if (clock && !clock.classList.contains('hidden')) clock.classList.add('stalled');
+	};
+	const armClockStallWatchdog = () => {
+		if (stallTimer) clearTimeout(stallTimer);
+		stallTimer = setTimeout(markClockStalled, VIDEO_CLOCK_STALL_MS);
+	};
 	const onFrame = () => {
 		frameCallbackPending = false;
 		const clock = videoContainer.querySelector('.video-clock');
 		if (clock) {
 			const text = formatDT(new Date(), TIME_FORMAT);
 			if (clock.textContent !== text) clock.textContent = text;
+			clock.classList.remove('stalled');
 			clock.classList.remove('hidden');
+			armClockStallWatchdog();
 		}
 		schedule();
 	};
