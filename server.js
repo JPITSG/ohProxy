@@ -11333,7 +11333,7 @@ function startVideoProxyStream(req, res, target, rawEncoding) {
 	const username = req.ohProxyUser || 'anonymous';
 	const streamId = ++videoStreamIdCounter;
 
-	// Get viewport width for scaling time overlay (0-10000, invalid = 0)
+	// Get viewport width for stream scaling (0-10000, invalid = 0)
 	if (req.query?.w !== undefined && typeof req.query.w !== 'string') {
 		sendStyledError(res, req, 400, 'Invalid viewport width');
 		return true;
@@ -11344,31 +11344,22 @@ function startVideoProxyStream(req, res, target, rawEncoding) {
 		return true;
 	}
 	const viewportWidth = Number.isFinite(rawWidth) ? rawWidth : 0;
-	// Font size scales with viewport: ~2.5% of width, min 16px, max 48px
-	const fontSize = viewportWidth > 0 ? Math.max(16, Math.min(48, Math.round(viewportWidth / 40))) : 24;
 
 	// Track and log stream start
 	activeVideoStreams.set(streamId, { url: streamUrlLog, user: username, ip: clientIp, startTime: Date.now(), encoding });
 	logMessage(`[Video] Starting ${encoding} stream ${streamUrlLog} to ${username}@${clientIp} (w=${viewportWidth})`);
 
-	// Time overlay filter: top-right, using configured timeFormat (strftime expansion)
-	const timeOverlay = (liveConfig.clientConfig?.timeFormat || 'H:mm:ss')
-		.replace('HH', '%H').replace(/(?<![Dh%])H(?!H)/, '%-H')
-		.replace('hh', '%I').replace(/(?<![Hd%])h(?!h)/, '%-I')
-		.replace('mm', '%M').replace('ss', '%S').replace('A', '%p')
-		.replace(/:/g, '\\:');
-	const drawtext = `drawtext=text='${timeOverlay}':expansion=strftime:x=w-tw-15:y=15:fontsize=${fontSize}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`;
-	// Scale to viewport width if provided - ensure even dimensions for x264
+	// Scale to viewport width if provided - ensure even dimensions for x264.
+	// The time overlay is rendered client-side (frame-driven clock badge), so
+	// no drawtext filter is burned into the stream anymore.
 	const scaleWidth = viewportWidth > 0 ? (viewportWidth % 2 === 0 ? viewportWidth : viewportWidth + 1) : 0;
-	const videoFilter = scaleWidth > 0
-		? `scale=${scaleWidth}:-2,${drawtext}`
-		: drawtext;
+	const scaleArgs = scaleWidth > 0 ? ['-vf', `scale=${scaleWidth}:-2`] : [];
 
 	const inputArgs = buildFfmpegInputArgs(encoding, streamUrl);
 	const ffmpegArgs = [
 		...inputArgs,
 		// Video encoding - low latency
-		'-vf', videoFilter,
+		...scaleArgs,
 		'-c:v', 'libx264',
 		'-preset', 'ultrafast',
 		'-tune', 'zerolatency',

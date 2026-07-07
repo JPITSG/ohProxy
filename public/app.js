@@ -2747,6 +2747,57 @@ function setVideoStreamLive(videoEl, live) {
 	container.dataset.streamLive = live ? '1' : '';
 	const badge = container.querySelector('.video-preview-age');
 	if (badge) updateVideoPreviewAgeBadge(badge);
+	// The clock only ever becomes visible from an actual presented frame; when
+	// the stream resets to the preview state it must disappear immediately.
+	if (!live) {
+		const clock = container.querySelector('.video-clock');
+		if (clock) clock.classList.add('hidden');
+	}
+}
+
+// --- Video stream clock ---
+// Replaces the ffmpeg drawtext time overlay. The clock is driven exclusively
+// by presented video frames (requestVideoFrameCallback): each new frame stamps
+// the badge with the current time, so the moment frames stop arriving - for
+// any reason - the clock freezes, and it resumes with the next frame.
+function initVideoClock(videoEl, videoContainer) {
+	if (videoEl.__clockInit) return;
+	videoEl.__clockInit = true;
+	const hasFrameCallback = typeof videoEl.requestVideoFrameCallback === 'function';
+	// Exactly one callback stays armed via the pending flag. Never cancel a
+	// pending callback from event handlers: live streams can oscillate between
+	// waiting/playing, and cancelling from 'playing' can starve the chain by
+	// repeatedly killing callbacks whose frame was presented but not delivered.
+	let frameCallbackPending = false;
+	const onFrame = () => {
+		frameCallbackPending = false;
+		const clock = videoContainer.querySelector('.video-clock');
+		if (clock) {
+			const text = formatDT(new Date(), TIME_FORMAT);
+			if (clock.textContent !== text) clock.textContent = text;
+			clock.classList.remove('hidden');
+		}
+		schedule();
+	};
+	const schedule = () => {
+		if (!hasFrameCallback || frameCallbackPending) return;
+		frameCallbackPending = true;
+		videoEl.requestVideoFrameCallback(onFrame);
+	};
+	if (hasFrameCallback) {
+		schedule();
+		// Re-arm on playback (re)start; a no-op while the chain is alive.
+		videoEl.addEventListener('playing', schedule);
+		return;
+	}
+	// Fallback without requestVideoFrameCallback: timeupdate only fires while
+	// currentTime advances, so a stalled stream freezes the clock here too.
+	let lastMediaTime = -1;
+	videoEl.addEventListener('timeupdate', () => {
+		if (videoEl.currentTime === lastMediaTime) return;
+		lastMediaTime = videoEl.currentTime;
+		onFrame();
+	});
 }
 
 function buildCompactSearchPlaceholder(fullPlaceholder) {
@@ -9824,6 +9875,14 @@ function updateCard(card, w, info) {
 			ageBadge.className = 'video-preview-age hidden';
 			videoContainer.appendChild(ageBadge);
 		}
+		// Get or create the frame-driven stream clock (top right, replaces the
+		// ffmpeg drawtext overlay; revealed by the first presented frame)
+		let streamClock = videoContainer.querySelector('.video-clock');
+		if (!streamClock) {
+			streamClock = document.createElement('div');
+			streamClock.className = 'video-clock hidden';
+			videoContainer.appendChild(streamClock);
+		}
 		setVideoPreviewBackground(previewDiv, rawVideoUrl);
 
 		// Get or create spinner overlay
@@ -9885,6 +9944,8 @@ function updateCard(card, w, info) {
 			for (const evt of ['loadstart', 'emptied', 'error']) {
 				videoEl.addEventListener(evt, () => setVideoStreamLive(videoEl, false));
 			}
+			// Frame-driven stream clock (replaces the ffmpeg drawtext overlay)
+			initVideoClock(videoEl, videoContainer);
 
 			// Auto-reconnect on error - aggressive retry
 			videoEl.addEventListener('error', () => {
