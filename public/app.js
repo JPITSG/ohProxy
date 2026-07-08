@@ -2676,8 +2676,17 @@ function setVideoPreviewBackground(previewDiv, rawVideoUrl) {
 // While the preview thumbnail is shown (stream not yet playing), a badge next
 // to the video control buttons tells the user how old the thumbnail is. The
 // timestamp comes from the preview version, which is the capture file's mtime.
-// Thumbnails older than this render the badge with the alert background.
-const VIDEO_PREVIEW_STALE_MS = 60000;
+// A thumbnail is stale once it has outlived the capture schedule: older than
+// the configured refresh interval plus this grace. Red therefore means a
+// capture cycle was actually missed, not normal aging between cycles. With
+// captures disabled (interval 0) there is no schedule to miss, so the badge
+// never turns stale.
+const VIDEO_PREVIEW_STALE_GRACE_MS = 60000;
+
+function videoPreviewStaleThresholdMs() {
+	const intervalMs = configNumber(OH_CONFIG.videoPreviewIntervalMs, 0);
+	return intervalMs > 0 ? intervalMs + VIDEO_PREVIEW_STALE_GRACE_MS : Infinity;
+}
 
 function formatVideoPreviewAge(ageMs) {
 	const seconds = Math.max(1, Math.floor(ageMs / 1000));
@@ -2724,7 +2733,7 @@ function updateVideoPreviewAgeBadge(badge) {
 	const ageMs = Date.now() - capturedAt;
 	const text = formatVideoPreviewAge(ageMs);
 	if (badge.textContent !== text) badge.textContent = text;
-	badge.classList.toggle('stale', ageMs > VIDEO_PREVIEW_STALE_MS);
+	badge.classList.toggle('stale', ageMs > videoPreviewStaleThresholdMs());
 	ensureVideoPreviewAgeTicker();
 	return true;
 }

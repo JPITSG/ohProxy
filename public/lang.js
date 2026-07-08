@@ -272,7 +272,7 @@ window.ohLang = {
 			'server.websocket.atmosphereNoUpdateWarnMs': 'Warn if no Atmosphere updates received for this long (ms)',
 			'server.websocket.backendRecoveryDelayMs': 'Delay before marking backend as OK after recovery (ms)',
 			'server.groupItems': 'Group items whose state is calculated from member states',
-			'server.videoPreview.intervalMs': 'Interval to capture preview frames from RTSP streams (ms)',
+			'server.videoPreview.intervalMs': 'Interval to capture preview frames from RTSP streams (ms); also sets the thumbnail-age alert threshold (interval + 60s grace)',
 			'server.videoPreview.pruneAfterHours': 'Delete preview images older than this (hours)',
 			'server.cmdapi.enabled': 'Enable /CMD endpoint',
 			'server.cmdapi.allowedSubnets': 'Allowed subnets for /CMD requests (IPv4 CIDR)',

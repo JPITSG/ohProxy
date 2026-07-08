@@ -7714,6 +7714,8 @@ app.get('/config.js', (req, res) => {
 		assetVersion: liveConfig.assetVersion,
 		iconVersion: liveConfig.iconVersion,
 		jsLogEnabled: liveConfig.jsLogEnabled,
+		// The thumbnail-age alert threshold follows the capture schedule.
+		videoPreviewIntervalMs: liveConfig.videoPreviewIntervalMs,
 		client: clientConfig,
 		webviewNoProxy: liveConfig.webviewNoProxy,
 		widgetGlowRules: sessions.getAllGlowRules(),

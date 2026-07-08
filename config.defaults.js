@@ -217,6 +217,8 @@ module.exports = {
 		// Video preview screenshot configuration.
 		videoPreview: {
 			// Interval to capture preview frames from RTSP streams (ms; 0 = disabled).
+			// Also sets the video card thumbnail-age alert: the age badge turns red
+			// once a thumbnail is older than this interval plus a 60s grace.
 			intervalMs: 900000,
 			// Delete preview images older than this (hours; >=1).
 			pruneAfterHours: 24,

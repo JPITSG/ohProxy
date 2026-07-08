@@ -61,12 +61,19 @@ describe('Video preview age badge', () => {
 		assert.match(app, /const visible = capturedAt > 0 && !streamLive;\s*badge\.classList\.toggle\('hidden', !visible\);/);
 	});
 
-	it('marks thumbnails older than the freshness window with the alert background', () => {
+	it('marks thumbnails as stale only when a capture cycle was missed', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
-		assert.match(app, /const VIDEO_PREVIEW_STALE_MS = 60000;/);
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		// the threshold follows the configured capture schedule (interval + grace),
+		// so a thumbnail aging normally between cycles never turns red; with
+		// captures disabled there is no schedule to miss
+		assert.match(app, /const VIDEO_PREVIEW_STALE_GRACE_MS = 60000;/);
+		assert.match(app, /function videoPreviewStaleThresholdMs\(\) \{\s*const intervalMs = configNumber\(OH_CONFIG\.videoPreviewIntervalMs, 0\);\s*return intervalMs > 0 \? intervalMs \+ VIDEO_PREVIEW_STALE_GRACE_MS : Infinity;\s*\}/);
 		// re-evaluated on every badge update, so the 1s ticker flips the state
 		// live as the thumbnail crosses the threshold
-		assert.match(app, /const ageMs = Date\.now\(\) - capturedAt;\s*const text = formatVideoPreviewAge\(ageMs\);\s*if \(badge\.textContent !== text\) badge\.textContent = text;\s*badge\.classList\.toggle\('stale', ageMs > VIDEO_PREVIEW_STALE_MS\);/);
+		assert.match(app, /const ageMs = Date\.now\(\) - capturedAt;\s*const text = formatVideoPreviewAge\(ageMs\);\s*if \(badge\.textContent !== text\) badge\.textContent = text;\s*badge\.classList\.toggle\('stale', ageMs > videoPreviewStaleThresholdMs\(\)\);/);
+		// the server exposes the capture interval to the client bootstrap config
+		assert.match(server, /videoPreviewIntervalMs: liveConfig\.videoPreviewIntervalMs,/);
 	});
 
 	it('ticks visible badges and stops the ticker when none remain', () => {
