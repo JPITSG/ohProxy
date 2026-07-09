@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 
-const { widgetKey } = require('../../lib/widget-normalizer');
+const { widgetKey, cardWidthKey } = require('../../lib/widget-normalizer');
 
 describe('Widget Key Strategy', () => {
 	it('keys item-backed widgets by sitemap + item name', () => {
@@ -56,5 +56,34 @@ describe('Widget Key Strategy', () => {
 	it('uses a missing-sitemap sentinel when sitemap metadata is absent', () => {
 		const key = widgetKey({ item: { name: 'AnyItem' } });
 		assert.strictEqual(key, 'widget:__missing_sitemap__|item:AnyItem');
+	});
+
+	it('keys card width by sitemap, page, and widget occurrence', () => {
+		const a = cardWidthKey({
+			__sitemapName: 'default',
+			__pageUrl: '/rest/sitemaps/default/0201?type=json',
+			widgetId: '020102',
+			item: { name: 'KitchenLight' },
+		});
+		const b = cardWidthKey({
+			__sitemapName: 'default',
+			__pageUrl: '/rest/sitemaps/default/0301?type=json',
+			widgetId: '030104',
+			item: { name: 'KitchenLight' },
+		});
+
+		assert.strictEqual(a, 'cardwidth:default|page:rest/sitemaps/default/0201?type=json|widget:020102');
+		assert.strictEqual(b, 'cardwidth:default|page:rest/sitemaps/default/0301?type=json|widget:030104');
+		assert.notStrictEqual(a, b);
+	});
+
+	it('normalizes card width page URLs before keying', () => {
+		const key = cardWidthKey({
+			__sitemapName: 'default',
+			__pageUrl: 'https://example.test/rest/sitemaps/default/0201',
+			widgetId: '020102',
+		});
+
+		assert.strictEqual(key, 'cardwidth:default|page:rest/sitemaps/default/0201?type=json|widget:020102');
 	});
 });

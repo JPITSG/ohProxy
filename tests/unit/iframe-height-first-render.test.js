@@ -34,7 +34,7 @@ describe('Iframe Height First Render', () => {
 	it('annotates server-embedded sitemap pages with resolved iframe heights', () => {
 		const server = read(SERVER_FILE);
 		assert.match(server, /function annotatePageIframeHeights\(page, ctx, iframeHeightMap\) \{/);
-		assert.match(server, /annotatePageIframeHeights\(page, \{ path: pagePath, sitemapName \}, iframeHeightMap\);/);
+		assert.match(server, /annotatePageIframeHeights\(page, \{ path: pagePath, sitemapName, pageUrl: url \}, iframeHeightMap\);/);
 		assert.match(server, /annotateWidgetIframeHeights\(widgets, buildWidgetIframeHeightMap\(\)\);/);
 	});
 

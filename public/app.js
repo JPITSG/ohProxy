@@ -45,7 +45,7 @@
 /* Shared widget helpers (loaded from widget-normalizer.js before this script) */
 const {
 	widgetType, widgetLink, widgetPageLink, widgetIconName,
-	deltaKey, splitLabelState, widgetKey, widgetConfigLookupKeys, filterVisibleSearchEntries, normalizeMapping, normalizeButtongridButtons,
+	deltaKey, splitLabelState, widgetKey, cardWidthKey, widgetConfigLookupKeys, filterVisibleSearchEntries, normalizeMapping, normalizeButtongridButtons,
 	buildHistoryStateFormatter,
 } = window.WidgetNormalizer;
 
@@ -809,6 +809,10 @@ const widgetCardWidthMap = buildWidgetMap(OH_CONFIG.widgetCardWidths, {
 	extract: e => e.width, validate: v => !!v
 });
 
+function getWidgetCardWidthKey(widget) {
+	return cardWidthKey(widget, widget?.__pageUrl || state.pageUrl || state.rootPageUrl || '');
+}
+
 function normalizeIframeHeightValue(value) {
 	const height = parseInt(value, 10);
 	return Number.isFinite(height) && height > 0 ? height : 0;
@@ -845,8 +849,8 @@ function updateWidgetIframeHeightAnnotations(widgetId, height) {
 
 	applyToWidgets(state.rawWidgets);
 	applyToWidgets(state.searchWidgets);
-	for (const page of state.sitemapCache.values()) {
-		applyToWidgets(normalizeWidgets(page, { sitemapName: state.sitemapName || '' }));
+	for (const [pageUrl, page] of state.sitemapCache.entries()) {
+		applyToWidgets(normalizeWidgets(page, { sitemapName: state.sitemapName || '', pageUrl }));
 	}
 }
 
@@ -4037,6 +4041,7 @@ let configModalClosePending = false;
 // Card Config Modal
 let cardConfigModal = null;
 let cardConfigWidgetKey = '';
+let cardConfigCardWidthKey = '';
 let cardConfigWidgetLabel = '';
 let historyOffsetStack = [];
 let historyMappings = [];
@@ -4878,9 +4883,11 @@ function collectCardConfigValues() {
 	// Get cardWidth for non-media cards (only if section is visible)
 	const cardWidthSection = cardConfigModal.querySelector('.card-width-section');
 	let cardWidth;
+	let cardWidthWidgetId;
 	if (cardWidthSection && cardWidthSection.style.display !== 'none') {
 		const cardWidthRadio = cardConfigModal.querySelector('input[name="cardWidth"]:checked');
 		cardWidth = cardWidthRadio?.value || 'standard';
+		cardWidthWidgetId = cardConfigCardWidthKey || cardConfigWidgetKey;
 	}
 
 	// Get glow rules
@@ -4898,7 +4905,7 @@ function collectCardConfigValues() {
 		}
 	}
 
-	return { widgetId: cardConfigWidgetKey, rules, visibility, visibilityUsers, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth };
+	return { widgetId: cardConfigWidgetKey, rules, visibility, visibilityUsers, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth, cardWidthWidgetId };
 }
 
 function isCardConfigDirty() {
@@ -4921,6 +4928,7 @@ function openCardConfigModal(widget, card) {
 	ensureCardConfigModal();
 	const wKey = widgetKey(widget);
 	cardConfigWidgetKey = wKey;
+	cardConfigCardWidthKey = getWidgetCardWidthKey(widget);
 	cardConfigWidgetLabel = widget?.label || widget?.item?.label || widget?.item?.name || wKey;
 	const saveBtn = cardConfigModal.querySelector('.card-config-save');
 	if (saveBtn) saveBtn.disabled = true;
@@ -5005,7 +5013,7 @@ function openCardConfigModal(widget, card) {
 	if (cardWidthSection) {
 		cardWidthSection.style.display = (isMediaWidget || isSection) ? 'none' : '';
 		if (!isMediaWidget && !isSection) {
-			const cardWidth = widgetCardWidthMap.get(wKey) || 'standard';
+			const cardWidth = widgetCardWidthMap.get(cardConfigCardWidthKey) || 'standard';
 			const widthRadio = cardConfigModal.querySelector(`input[name="cardWidth"][value="${cardWidth}"]`);
 			if (widthRadio) {
 				widthRadio.checked = true;
@@ -5994,6 +6002,7 @@ function closeCardConfigModal() {
 	});
 	closeModalBase(cardConfigModal, '.card-config-frame', 'card-config-open');
 	cardConfigWidgetKey = '';
+	cardConfigCardWidthKey = '';
 	cardConfigWidgetLabel = '';
 	cardVisibilityCurrent = 'all';
 	cardVisibilityPreviousBeforeUsers = 'all';
@@ -6024,7 +6033,7 @@ async function saveCardConfig() {
 		updateCardConfigSaveState();
 		return false;
 	}
-	const { visibility, visibilityUsers, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth, rules } = payload;
+	const { visibility, visibilityUsers, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth, cardWidthWidgetId, rules } = payload;
 
 	try {
 		// Save widget config (rules, visibility, etc.)
@@ -6101,10 +6110,11 @@ async function saveCardConfig() {
 
 		// Update local card width map
 		if (cardWidth !== undefined) {
+			const widthKey = cardWidthWidgetId || cardConfigCardWidthKey || cardConfigWidgetKey;
 			if (cardWidth !== 'standard') {
-				widgetCardWidthMap.set(cardConfigWidgetKey, cardWidth);
+				widgetCardWidthMap.set(widthKey, cardWidth);
 			} else {
-				widgetCardWidthMap.delete(cardConfigWidgetKey);
+				widgetCardWidthMap.delete(widthKey);
 			}
 		}
 
@@ -7864,6 +7874,7 @@ function flattenWidgets(list, out, ctx) {
 	const frameLabel = safeText(ctx?.frame || '');
 	const path = Array.isArray(ctx?.path) ? ctx.path.slice() : null;
 	const sitemapName = safeText(ctx?.sitemapName || '').trim();
+	const pageUrl = safeText(ctx?.pageUrl || '').trim();
 	const sectionPath = Array.isArray(ctx?.sectionPath) ? ctx.sectionPath.slice() : [];
 	for (const w of list) {
 		if (w?.type === 'Frame') {
@@ -7878,6 +7889,7 @@ function flattenWidgets(list, out, ctx) {
 					staticIcon: !!w?.staticIcon,
 					__sectionPath: nextSectionPath.slice(),
 					__sitemapName: sitemapName,
+					__pageUrl: pageUrl,
 				});
 			}
 			// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
@@ -7894,6 +7906,7 @@ function flattenWidgets(list, out, ctx) {
 					frame: label || frameLabel,
 					path,
 					sitemapName,
+					pageUrl,
 					sectionPath: nextSectionPath,
 				});
 			}
@@ -7903,6 +7916,7 @@ function flattenWidgets(list, out, ctx) {
 		if (frameLabel) w.__frame = frameLabel;
 		if (sectionPath.length) w.__sectionPath = sectionPath.slice();
 		if (sitemapName) w.__sitemapName = sitemapName;
+		if (pageUrl) w.__pageUrl = pageUrl;
 		out.push(w);
 	}
 }
@@ -7926,6 +7940,7 @@ function normalizeWidgets(page, ctx) {
 		frame: safeText(ctx?.frame || ''),
 		path: Array.isArray(ctx?.path) ? ctx.path.slice() : null,
 		sitemapName: safeText(ctx?.sitemapName || '').trim(),
+		pageUrl: safeText(ctx?.pageUrl || '').trim(),
 		sectionPath: Array.isArray(ctx?.sectionPath) ? ctx.sectionPath.slice() : [],
 	});
 	return out;
@@ -9511,7 +9526,8 @@ function getWidgetRenderInfo(w) {
 	const path = Array.isArray(w?.__path) ? w.__path.join('>') : '';
 	const frame = safeText(w?.__frame || '');
 	// Get config values that affect rendering
-	const cardWidthConfig = widgetCardWidthMap.get(wKey) || 'standard';
+	const cardWidthLookupKey = getWidgetCardWidthKey(w);
+	const cardWidthConfig = widgetCardWidthMap.get(cardWidthLookupKey) || 'standard';
 	const videoConfig = isVideo ? widgetVideoConfigMap.get(wKey) : null;
 	const defaultMutedConfig = videoConfig ? String(videoConfig.defaultMuted) : '';
 	const labelcolor = safeText(w?.labelcolor || '');
@@ -9542,6 +9558,7 @@ function getWidgetRenderInfo(w) {
 		state.headerMode === 'none' ? 'header-none' : '',
 		path,
 		frame,
+		cardWidthLookupKey,
 		cardWidthConfig,
 		defaultMutedConfig,
 		labelcolor,
@@ -9583,6 +9600,8 @@ function getWidgetRenderInfo(w) {
 		labelcolor,
 		valuecolor,
 		iconcolor,
+		cardWidthLookupKey,
+		cardWidthConfig,
 		signature,
 	};
 }
@@ -9637,9 +9656,12 @@ function updateCard(card, w, info) {
 		videoHeight,
 		rawVideoUrl,
 		signature,
+		cardWidthLookupKey,
+		cardWidthConfig,
 	} = data;
 
 	card.dataset.widgetKey = widgetKey(w);
+	card.dataset.cardWidthKey = cardWidthLookupKey;
 	// Keep existing slider interactions intact while a drag is active.
 	const isSliderType = t === 'colortemperaturepicker' || t.includes('dimmer') || t.includes('roller') || t.includes('slider');
 	const existingSliderWrap = isSliderType ? labelRow.querySelector('.inline-slider') : null;
@@ -9683,7 +9705,7 @@ function updateCard(card, w, info) {
 		'switch-many',
 		'switch-single'
 	);
-	const cardWidth = widgetCardWidthMap.get(card.dataset.widgetKey);
+	const cardWidth = cardWidthConfig;
 	const cardWidthFull = cardWidth === 'full';
 	const cardWidthStretch = cardWidth === 'stretch';
 	card.classList.toggle('sm:col-span-2', isImage || isChart || isMapview || isWebview || isVideo || cardWidthFull);
@@ -11979,7 +12001,7 @@ async function buildSearchIndex() {
 			continue;
 		}
 
-		const normalized = normalizeWidgets(page, { path: pagePath, sitemapName: state.sitemapName || '' });
+		const normalized = normalizeWidgets(page, { path: pagePath, sitemapName: state.sitemapName || '', pageUrl: url });
 		const visibleEntries = filterVisibleSearchEntries(normalized, isWidgetVisible);
 		for (const f of visibleEntries) {
 			if (!f || !f.__section) continue;
@@ -12020,7 +12042,7 @@ async function buildSearchIndex() {
 
 async function applyPageData(page, fade, shouldScroll) {
 	state.pageTitle = page?.title || state.pageTitle;
-	state.rawWidgets = normalizeWidgets(page, { sitemapName: state.sitemapName || '' });
+	state.rawWidgets = normalizeWidgets(page, { sitemapName: state.sitemapName || '', pageUrl: state.pageUrl || '' });
 	state.lastPageUrl = state.pageUrl;
 	if (fade) await fade.promise;
 	if (shouldScroll) scrollToTop();

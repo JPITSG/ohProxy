@@ -5323,14 +5323,14 @@ async function getFullSitemapData(sitemapName, userRole = '', username = '') {
 
 		// Apply group state overrides
 		await applyGroupStateOverrides(page);
-		annotatePageIframeHeights(page, { path: pagePath, sitemapName }, iframeHeightMap);
+		annotatePageIframeHeights(page, { path: pagePath, sitemapName, pageUrl: url }, iframeHeightMap);
 
 		// Store the page data indexed by URL
 		pages[url] = page;
 
 		const visibleEntries = visibleSearchEntriesForRole(
 			page,
-			{ path: pagePath, sitemapName },
+			{ path: pagePath, sitemapName, pageUrl: url },
 			userRole,
 			username,
 			visibilityMap
@@ -5419,15 +5419,16 @@ async function getHomepageData(req, sitemapName) {
 	if (!sitemap) return null;
 
 	try {
+		const pageUrl = `/rest/sitemaps/${encodeURIComponent(sitemap)}/${encodeURIComponent(sitemap)}?type=json`;
 		const result = await Promise.race([
-			fetchOpenhab(`/rest/sitemaps/${encodeURIComponent(sitemap)}/${encodeURIComponent(sitemap)}?type=json`),
+			fetchOpenhab(pageUrl),
 			new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), HOMEPAGE_DATA_TIMEOUT_MS)),
 		]);
 		if (!result.ok) return null;
 
 		const page = JSON.parse(result.body);
 		await applyGroupStateOverrides(page);
-		const widgets = normalizeWidgets(page, { sitemapName: sitemap });
+		const widgets = normalizeWidgets(page, { sitemapName: sitemap, pageUrl });
 		annotateWidgetIframeHeights(widgets, buildWidgetIframeHeightMap());
 
 		// Apply visibility filtering
@@ -5440,7 +5441,7 @@ async function getHomepageData(req, sitemapName) {
 
 		return {
 			sitemapName: sitemap,
-			pageUrl: `/rest/sitemaps/${encodeURIComponent(sitemap)}/${encodeURIComponent(sitemap)}?type=json`,
+			pageUrl,
 			pageTitle: page.title || sitemap,
 			widgets: visibleWidgets,
 			inlineIcons,
@@ -5545,6 +5546,7 @@ function normalizeWidgets(page, ctx = {}) {
 
 	const out = [];
 	const sitemapName = safeText(ctx?.sitemapName || '').trim();
+	const pageUrl = safeText(ctx?.pageUrl || '').trim();
 	const basePath = Array.isArray(ctx?.path) ? ctx.path.slice() : null;
 	const walk = (list, sectionPath = []) => {
 		for (const item of list) {
@@ -5559,6 +5561,7 @@ function normalizeWidgets(page, ctx = {}) {
 					staticIcon: !!item?.staticIcon,
 					__sectionPath: nextSectionPath.slice(),
 					__sitemapName: sitemapName,
+					__pageUrl: pageUrl,
 				});
 				// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
 				let kids = item.widgets || item.widget;
@@ -5577,6 +5580,7 @@ function normalizeWidgets(page, ctx = {}) {
 				item.__frame = sectionPath[sectionPath.length - 1];
 			}
 			if (sitemapName) item.__sitemapName = sitemapName;
+			if (pageUrl) item.__pageUrl = pageUrl;
 			out.push(item);
 		}
 	};
@@ -5654,6 +5658,7 @@ function normalizeSearchWidgets(page, ctx) {
 	const out = [];
 	const path = Array.isArray(ctx?.path) ? ctx.path : null;
 	const sitemapName = safeText(ctx?.sitemapName || '').trim();
+	const pageUrl = safeText(ctx?.pageUrl || '').trim();
 	const walk = (list, frameLabel, sectionPath = []) => {
 		for (const item of list) {
 			if (item?.type === 'Frame') {
@@ -5668,6 +5673,7 @@ function normalizeSearchWidgets(page, ctx) {
 						staticIcon: !!item?.staticIcon,
 						__sectionPath: nextSectionPath.slice(),
 						__sitemapName: sitemapName,
+						__pageUrl: pageUrl,
 					});
 				}
 				// Support both 'widget' (OH 1.x) and 'widgets' (OH 3.x+)
@@ -5685,6 +5691,7 @@ function normalizeSearchWidgets(page, ctx) {
 			if (sectionPath.length) item.__sectionPath = sectionPath.slice();
 			if (frameLabel) item.__frame = frameLabel;
 			if (sitemapName) item.__sitemapName = sitemapName;
+			if (pageUrl) item.__pageUrl = pageUrl;
 			out.push(item);
 		}
 	};
@@ -8069,7 +8076,7 @@ app.post('/api/card-config', jsonParserLarge, requireAdmin, (req, res) => {
 		return;
 	}
 
-	const { widgetId, rules, visibility, visibilityUsers, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth } = req.body;
+	const { widgetId, rules, visibility, visibilityUsers, defaultMuted, iframeHeight, proxyCacheSeconds, cardWidth, cardWidthWidgetId } = req.body;
 	if (!widgetId || typeof widgetId !== 'string' || widgetId.length > 200 || hasAnyControlChars(widgetId)) {
 		res.status(400).json({ error: 'Missing or invalid widgetId' });
 		return;
@@ -8196,10 +8203,21 @@ app.post('/api/card-config', jsonParserLarge, requireAdmin, (req, res) => {
 	}
 
 	// Validate cardWidth if provided
+	let normalizedCardWidthWidgetId = widgetId;
 	if (cardWidth !== undefined) {
 		const validWidths = ['standard', 'full', 'stretch'];
 		if (typeof cardWidth !== 'string' || !validWidths.includes(cardWidth)) {
 			res.status(400).json({ error: `Invalid cardWidth: ${cardWidth}` });
+			return;
+		}
+		normalizedCardWidthWidgetId = cardWidthWidgetId === undefined ? widgetId : cardWidthWidgetId;
+		if (
+			!normalizedCardWidthWidgetId
+			|| typeof normalizedCardWidthWidgetId !== 'string'
+			|| normalizedCardWidthWidgetId.length > 512
+			|| hasAnyControlChars(normalizedCardWidthWidgetId)
+		) {
+			res.status(400).json({ error: 'Missing or invalid cardWidthWidgetId' });
 			return;
 		}
 	}
@@ -8222,7 +8240,7 @@ app.post('/api/card-config', jsonParserLarge, requireAdmin, (req, res) => {
 			sessions.setProxyCacheConfig(widgetId, cacheNum);
 		}
 		if (cardWidth !== undefined) {
-			sessions.setCardWidth(widgetId, cardWidth);
+			sessions.setCardWidth(normalizedCardWidthWidgetId, cardWidth);
 		}
 		const effectiveVisibility = visibility === 'users' && normalizedVisibilityUsers.length === 0 ? 'all' : visibility;
 		const effectiveVisibilityUsers = effectiveVisibility === 'users' ? normalizedVisibilityUsers : [];
@@ -8235,7 +8253,8 @@ app.post('/api/card-config', jsonParserLarge, requireAdmin, (req, res) => {
 			defaultMuted,
 			iframeHeight,
 			proxyCacheSeconds,
-			cardWidth
+			cardWidth,
+			cardWidthWidgetId: cardWidth !== undefined ? normalizedCardWidthWidgetId : undefined
 		});
 	} catch (err) {
 		logMessage(`Failed to save card config: ${err.message || err}`, 'error');
@@ -9110,7 +9129,7 @@ app.get('/search-index', async (req, res) => {
 		await applyGroupStateOverrides(page);
 		const visibleEntries = visibleSearchEntriesForRole(
 			page,
-			{ path: pagePath, sitemapName: searchSitemapName },
+			{ path: pagePath, sitemapName: searchSitemapName, pageUrl: url },
 			userRole,
 			username,
 			visibilityMap
@@ -9209,7 +9228,7 @@ app.get('/sitemap-full', async (req, res) => {
 
 			const visibleEntries = visibleSearchEntriesForRole(
 				page,
-				{ path: pagePath, sitemapName: targetSitemapName },
+				{ path: pagePath, sitemapName: targetSitemapName, pageUrl: url },
 				userRole,
 				username,
 				visibilityMap
