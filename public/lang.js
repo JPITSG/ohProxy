@@ -362,7 +362,7 @@ window.ohLang = {
 		frameTitle: 'Frame Settings',
 		historyHeader: 'HISTORICAL VALUES',
 		soundHeader: 'DEFAULT SOUND',
-		heightHeader: 'HEIGHT',
+		heightHeader: 'HEIGHT (PX)',
 		cacheHeader: 'CACHE',
 		visibilityHeader: 'VISIBILITY',
 		glowHeader: 'GLOW RULES',
