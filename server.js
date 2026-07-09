@@ -19,7 +19,7 @@ const sessions = require('./sessions');
 const { generateStructureMap } = require('./lib/structure-map');
 const {
 	widgetType, widgetLink, widgetPageLink, widgetIconName,
-	deltaKey, splitLabelState, widgetKey, filterVisibleSearchEntries, normalizeMapping, normalizeButtongridButtons,
+	deltaKey, splitLabelState, widgetKey, widgetConfigLookupKeys, filterVisibleSearchEntries, normalizeMapping, normalizeButtongridButtons,
 } = require('./lib/widget-normalizer');
 const {
 	getCookieValueFromHeader,
@@ -5242,6 +5242,50 @@ const HOMEPAGE_DATA_TIMEOUT_MS = 500;
 const SITEMAP_CACHE_TIMEOUT_MS = 2000;
 const HOMEPAGE_INLINE_ICON_LIMIT = 80;
 
+function normalizeIframeHeightValue(value) {
+	const height = parseInt(value, 10);
+	return Number.isFinite(height) && height > 0 ? height : 0;
+}
+
+function buildWidgetIframeHeightMap() {
+	const map = new Map();
+	for (const entry of sessions.getAllIframeConfigs()) {
+		const widgetId = safeText(entry?.widgetId).trim();
+		const height = normalizeIframeHeightValue(entry?.height);
+		if (!widgetId || !height) continue;
+		map.set(widgetId, height);
+	}
+	return map;
+}
+
+function widgetIframeHeightFromMap(widget, iframeHeightMap) {
+	if (!widget || !iframeHeightMap?.size) return 0;
+	for (const key of widgetConfigLookupKeys(widget)) {
+		const height = iframeHeightMap.get(key);
+		if (height) return height;
+	}
+	return 0;
+}
+
+function annotateWidgetIframeHeights(widgets, iframeHeightMap) {
+	if (!Array.isArray(widgets) || !iframeHeightMap?.size) return;
+	for (const widget of widgets) {
+		if (!widget || widget.__section) continue;
+		const type = widgetType(widget).toLowerCase();
+		const isIframeWidget = type === 'video' || type.includes('webview') || type === 'chart' || type === 'mapview';
+		if (!isIframeWidget) continue;
+		const height = widgetIframeHeightFromMap(widget, iframeHeightMap);
+		if (height) widget.__iframeHeight = height;
+	}
+}
+
+function annotatePageIframeHeights(page, ctx, iframeHeightMap) {
+	if (!page || !iframeHeightMap?.size) return page;
+	const widgets = normalizeWidgets(page, ctx);
+	annotateWidgetIframeHeights(widgets, iframeHeightMap);
+	return page;
+}
+
 async function getFullSitemapData(sitemapName, userRole = '', username = '') {
 	if (!sitemapName) return null;
 
@@ -5251,6 +5295,7 @@ async function getFullSitemapData(sitemapName, userRole = '', username = '') {
 	const pages = {};
 	const startTime = Date.now();
 	const visibilityMap = buildVisibilityMap();
+	const iframeHeightMap = buildWidgetIframeHeightMap();
 
 	while (queue.length) {
 		// Check timeout
@@ -5278,6 +5323,7 @@ async function getFullSitemapData(sitemapName, userRole = '', username = '') {
 
 		// Apply group state overrides
 		await applyGroupStateOverrides(page);
+		annotatePageIframeHeights(page, { path: pagePath, sitemapName }, iframeHeightMap);
 
 		// Store the page data indexed by URL
 		pages[url] = page;
@@ -5382,6 +5428,7 @@ async function getHomepageData(req, sitemapName) {
 		const page = JSON.parse(result.body);
 		await applyGroupStateOverrides(page);
 		const widgets = normalizeWidgets(page, { sitemapName: sitemap });
+		annotateWidgetIframeHeights(widgets, buildWidgetIframeHeightMap());
 
 		// Apply visibility filtering
 		const userRole = getRequestUserRole(req);

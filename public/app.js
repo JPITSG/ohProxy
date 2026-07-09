@@ -45,7 +45,7 @@
 /* Shared widget helpers (loaded from widget-normalizer.js before this script) */
 const {
 	widgetType, widgetLink, widgetPageLink, widgetIconName,
-	deltaKey, splitLabelState, widgetKey, filterVisibleSearchEntries, normalizeMapping, normalizeButtongridButtons,
+	deltaKey, splitLabelState, widgetKey, widgetConfigLookupKeys, filterVisibleSearchEntries, normalizeMapping, normalizeButtongridButtons,
 	buildHistoryStateFormatter,
 } = window.WidgetNormalizer;
 
@@ -808,6 +808,47 @@ const widgetProxyCacheConfigMap = buildWidgetMap(OH_CONFIG.widgetProxyCacheConfi
 const widgetCardWidthMap = buildWidgetMap(OH_CONFIG.widgetCardWidths, {
 	extract: e => e.width, validate: v => !!v
 });
+
+function normalizeIframeHeightValue(value) {
+	const height = parseInt(value, 10);
+	return Number.isFinite(height) && height > 0 ? height : 0;
+}
+
+function getWidgetIframeConfig(widget) {
+	if (!widget || !widgetIframeConfigMap.size) return null;
+	for (const key of widgetConfigLookupKeys(widget)) {
+		const config = widgetIframeConfigMap.get(key);
+		if (config) return config;
+	}
+	return null;
+}
+
+function getWidgetIframeHeightOverride(widget) {
+	const configuredHeight = normalizeIframeHeightValue(getWidgetIframeConfig(widget)?.height);
+	if (configuredHeight) return configuredHeight;
+	return normalizeIframeHeightValue(widget?.__iframeHeight);
+}
+
+function updateWidgetIframeHeightAnnotations(widgetId, height) {
+	const target = safeText(widgetId).trim();
+	if (!target) return;
+	const normalizedHeight = normalizeIframeHeightValue(height);
+	const applyToWidgets = (widgets) => {
+		if (!Array.isArray(widgets)) return;
+		for (const widget of widgets) {
+			if (!widget || widget.__section) continue;
+			if (!widgetConfigLookupKeys(widget).includes(target)) continue;
+			if (normalizedHeight) widget.__iframeHeight = normalizedHeight;
+			else delete widget.__iframeHeight;
+		}
+	};
+
+	applyToWidgets(state.rawWidgets);
+	applyToWidgets(state.searchWidgets);
+	for (const page of state.sitemapCache.values()) {
+		applyToWidgets(normalizeWidgets(page, { sitemapName: state.sitemapName || '' }));
+	}
+}
 
 // Get current user role from config
 function getUserRole() {
@@ -4938,8 +4979,8 @@ function openCardConfigModal(widget, card) {
 		const heightInput = iframeHeightSection.querySelector('.iframe-height-input');
 		if (heightInput) {
 			// Load existing iframe config
-			const iframeConfig = widgetIframeConfigMap.get(wKey);
-			heightInput.value = iframeConfig?.height ? String(iframeConfig.height) : '';
+			const iframeHeight = getWidgetIframeHeightOverride(widget);
+			heightInput.value = iframeHeight ? String(iframeHeight) : '';
 		}
 	}
 
@@ -6040,8 +6081,10 @@ async function saveCardConfig() {
 			if (!heightNum || heightNum <= 0) {
 				// Empty or zero means use default, remove entry
 				widgetIframeConfigMap.delete(cardConfigWidgetKey);
+				updateWidgetIframeHeightAnnotations(cardConfigWidgetKey, 0);
 			} else {
 				widgetIframeConfigMap.set(cardConfigWidgetKey, { widgetId: cardConfigWidgetKey, height: heightNum });
+				updateWidgetIframeHeightAnnotations(cardConfigWidgetKey, heightNum);
 			}
 		}
 
@@ -9449,8 +9492,7 @@ function getWidgetRenderInfo(w) {
 			: `/proxy?url=${encodeURIComponent(rawWebviewUrl)}&mode=${themeMode}`)
 		: '';
 	// Check for iframe config height override
-	const iframeConfig = widgetIframeConfigMap.get(wKey);
-	const iframeHeightOverride = iframeConfig?.height || 0;
+	const iframeHeightOverride = getWidgetIframeHeightOverride(w);
 	const webviewHeight = isWebview ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
 	const mapviewUrl = isMapview ? resolveMapviewUrl(w, st) : '';
 	const mapviewHeight = isMapview ? (iframeHeightOverride || parseInt(w?.height, 10) || 0) : 0;
