@@ -46,7 +46,7 @@
 const {
 	widgetType, widgetLink, widgetPageLink, widgetIconName,
 	deltaKey, splitLabelState, widgetKey, cardWidthKey, widgetConfigLookupKeys, filterVisibleSearchEntries, normalizeMapping, normalizeButtongridButtons,
-	buildHistoryStateFormatter,
+	buildHistoryStateFormatter, formatSetpointStepCommand,
 } = window.WidgetNormalizer;
 
 function logJsError(message, error) {
@@ -10586,7 +10586,9 @@ function updateCard(card, w, info) {
 			};
 		};
 
-		const minus = createSetpointButton('\u2212', current <= spMin, () => Math.max(spMin, current - spStep), itemName, markSetpointCrossfadePending);
+		const minus = createSetpointButton('\u2212', current <= spMin,
+			() => formatSetpointStepCommand(current, spStep, spMin, spMax, -1),
+			itemName, markSetpointCrossfadePending);
 
 		const display = document.createElement('span');
 		display.className = 'setpoint-value';
@@ -10600,7 +10602,9 @@ function updateCard(card, w, info) {
 			display.__crossfadeCurrentText = setpointDisplayText;
 		}
 
-		const plus = createSetpointButton('+', current >= spMax, () => Math.min(spMax, current + spStep), itemName, markSetpointCrossfadePending);
+		const plus = createSetpointButton('+', current >= spMax,
+			() => formatSetpointStepCommand(current, spStep, spMin, spMax, 1),
+			itemName, markSetpointCrossfadePending);
 
 		inlineControls.appendChild(minus);
 		inlineControls.appendChild(display);
