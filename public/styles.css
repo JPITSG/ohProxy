@@ -893,7 +893,6 @@ body.theme-light .image-viewer {
 	opacity: 0;
 }
 .image-viewer-img.zoomed {
-	transform: scale(2);
 	cursor: zoom-out;
 }
 .slim .image-viewer-img {
