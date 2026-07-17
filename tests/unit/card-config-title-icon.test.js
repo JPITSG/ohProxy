@@ -22,8 +22,11 @@ describe('Card Config Title Icon', () => {
 		assert.match(app, /titleEl\.prepend\(iconImg\);/);
 	});
 
-	it('sizes the icon to the header text and hides it until loaded', () => {
-		assert.match(styles, /\.card-config-title-icon \{[^}]*height: 1\.2em;/);
+	it('sizes the icon without growing the header and hides it until loaded', () => {
+		assert.match(styles, /\.card-config-title-icon \{[^}]*height: 1\.8em;/);
+		// Negative margins offset the extra 0.6em so the header stays as
+		// tall as it was with the original 1.2em icon
+		assert.match(styles, /\.card-config-title-icon \{[^}]*margin-top: -0\.3em;\s*margin-bottom: -0\.3em;/);
 		assert.match(styles, /\.card-config-title-icon \{[^}]*display: none;/);
 		assert.match(styles, /\.card-config-title-icon\.icon-ready \{\s*display: block;/);
 		// Equidistant: icon-to-text gap matches the header's 20px edge padding

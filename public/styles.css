@@ -2288,11 +2288,16 @@ body.theme-light .oh-modal-header {
 	min-width: 0;
 }
 .card-config-title-icon {
-	height: 1.2em;
+	height: 1.8em;
 	width: auto;
-	max-width: 1.6em;
+	max-width: 2.4em;
 	object-fit: contain;
 	flex: 0 0 auto;
+	/* Symmetric negative margins keep the layout footprint at 1.2em, so
+	   the larger icon overflows into the header padding instead of
+	   growing the header bar. */
+	margin-top: -0.3em;
+	margin-bottom: -0.3em;
 	/* Optical alignment: text glyphs sit slightly above the line-box
 	   center, so a geometrically centered icon reads as too low */
 	position: relative;
