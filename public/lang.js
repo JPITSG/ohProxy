@@ -2,6 +2,7 @@
 'use strict';
 
 window.ohLang = {
+	searchClearLabel: 'Clear search',
 	adminConfig: {
 		title: 'System Settings',
 		userTitle: 'User Settings',

@@ -1860,6 +1860,7 @@ function applyHomeSnapshot(snapshot) {
 	state.stack = [];
 	state.filter = '';
 	if (els.search) els.search.value = '';
+	syncSearchClearButton(els.search);
 	clearSearchScrollReset();
 	// Restore icon caches for this sitemap snapshot.
 	iconCache.clear();
@@ -3061,10 +3062,48 @@ function syncSearchFocusedLayout() {
 	setSearchFocusedLayout(shouldExpandSearchOnFocus());
 }
 
+// --- Search Clear Button ---
+// Shared red clear X for search boxes. Replaces the native search cancel
+// button (hidden in CSS): it was nearly invisible in dark mode and missing
+// entirely in some browsers.
+function attachSearchClearButton(input) {
+	if (!input || typeof input.__syncSearchClear === 'function' || !input.parentNode) return;
+	const wrap = document.createElement('span');
+	wrap.className = 'search-clear-wrap';
+	input.parentNode.insertBefore(wrap, input);
+	wrap.appendChild(input);
+	const btn = document.createElement('button');
+	btn.type = 'button';
+	btn.className = 'search-clear-btn';
+	btn.setAttribute('aria-label', ohLang.searchClearLabel || 'Clear search');
+	btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+	const sync = () => {
+		btn.classList.toggle('visible', input.value.length > 0);
+	};
+	input.__syncSearchClear = sync;
+	// Keep the input focused while the button is pressed
+	btn.addEventListener('mousedown', (e) => e.preventDefault());
+	btn.addEventListener('click', () => {
+		haptic();
+		input.value = '';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		input.focus();
+	});
+	input.addEventListener('input', sync);
+	wrap.appendChild(btn);
+	sync();
+}
+
+// Programmatic value changes bypass the input event; call this after them.
+function syncSearchClearButton(input) {
+	if (input && typeof input.__syncSearchClear === 'function') input.__syncSearchClear();
+}
+
 function resetSearchUiForSoftReset() {
 	const hadSearchHistoryEntry = searchFocusHistoryPushed || searchFilterHistoryPushed;
 	state.filter = '';
 	if (els.search) els.search.value = '';
+	syncSearchClearButton(els.search);
 	clearSearchScrollReset();
 	state.searchStateToken += 1;
 	cancelSearchStateRequests();
@@ -6974,9 +7013,11 @@ function ensureAdminConfigModal() {
 		if (e.key === 'Escape' && searchInput.value) {
 			e.stopPropagation();
 			searchInput.value = '';
+			syncSearchClearButton(searchInput);
 			filterAdminConfigSections();
 		}
 	});
+	attachSearchClearButton(searchInput);
 	attachModalDismissListeners(wrap, adminConfigModal, closeAdminConfigModal);
 	makeFrameDraggable(wrap.querySelector('.admin-config-frame'), wrap.querySelector('.admin-config-header h2'));
 }
@@ -6989,7 +7030,10 @@ async function openAdminConfigModal() {
 	const saveBtn = adminConfigModal.querySelector('.admin-config-save');
 	const searchInput = adminConfigModal.querySelector('.admin-config-search-input');
 	if (titleEl) titleEl.textContent = getAdminConfigModalTitleForRole(getUserRole());
-	if (searchInput) searchInput.value = '';
+	if (searchInput) {
+		searchInput.value = '';
+		syncSearchClearButton(searchInput);
+	}
 
 	statusEl.className = 'admin-config-status';
 	statusEl.textContent = '';
@@ -11849,6 +11893,7 @@ function clearSearchFilter() {
 	if (!state.filter.trim()) return false;
 	state.filter = '';
 	if (els.search) els.search.value = '';
+	syncSearchClearButton(els.search);
 	clearSearchScrollReset();
 	state.searchStateToken += 1;
 	cancelSearchStateRequests();
@@ -13846,6 +13891,7 @@ function restoreNormalPolling() {
 		clearSearchFocusScrollTouch();
 		syncSearchFocusedLayout();
 	});
+	attachSearchClearButton(els.search);
 
 	els.back.addEventListener('click', () => {
 		haptic();
