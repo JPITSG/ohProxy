@@ -2284,7 +2284,10 @@ body.theme-light .oh-modal-header {
 	border: none;
 	color: var(--color-text-muted);
 	cursor: pointer;
-	padding: 4px;
+	/* Left-only horizontal padding: the button's right edge sits on the
+	   header's 20px content line, so the X glyph must be flush right to
+	   align with it (symmetric padding shifted the X visibly left). */
+	padding: 4px 0 4px 8px;
 	line-height: 0;
 	border-radius: 6px;
 	transition: color .4s ease;
@@ -2616,28 +2619,8 @@ body.theme-light .admin-config-search-input:focus {
 	border-color: rgba(78, 183, 128, 0.45);
 	box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.2), inset 0 1px 3px rgba(0, 0, 0, 0.15), 0 0 10px rgba(78, 183, 128, 0.35);
 }
-.card-config-close,
-.admin-config-close {
-	background: none;
-	border: none;
-	color: var(--color-text-muted);
-	cursor: pointer;
-	padding: 4px;
-	line-height: 0;
-	border-radius: 6px;
-	transition: color .4s ease;
-}
-.card-config-close svg,
-.admin-config-close svg {
-	width: 18px;
-	height: 18px;
-}
-@media (hover: hover) and (pointer: fine) {
-	.card-config-close:hover,
-	.admin-config-close:hover {
-		color: var(--color-text-primary);
-	}
-}
+/* .card-config-close and .admin-config-close are styled by .oh-modal-close
+   (both buttons carry that class); the former duplicate block drifted. */
 .card-config-body {
 	display: flex;
 	flex-direction: column;
