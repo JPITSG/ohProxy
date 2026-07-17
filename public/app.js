@@ -200,6 +200,8 @@ function promptAssetReload() {
 			{ text: ohLang.adminConfig.closeBtn },
 			{ text: ohLang.adminConfig.reloadBtn, onClick: () => { dismissAllAlerts(); void reloadForUpdatedAssets(); } },
 		],
+		// Auto-reload unless the user dismisses within the countdown
+		countdown: { seconds: 10, buttonIndex: 1 },
 	});
 }
 
@@ -4134,6 +4136,7 @@ let alertCurrentOptions = null;
 let alertDismissListener = null;
 let alertHistoryPushed = false;
 let alertClosePending = false;
+let alertCountdownTimer = null;
 
 let sitemapSelectModal = null;
 let sitemapSelectHistoryPushed = false;
@@ -5479,6 +5482,28 @@ function showAlert(options = {}) {
 		footerEl.classList.add('alert-no-footer');
 	}
 
+	// Countdown auto-action: after N seconds one button is pressed
+	// automatically, with the remaining time shown on its label. Closing
+	// the alert in any way (other buttons, X, backdrop, Escape) aborts it.
+	if (options.countdown && options.buttons && options.buttons.length > 0) {
+		const idx = Math.min(Math.max(options.countdown.buttonIndex || 0, 0), options.buttons.length - 1);
+		const target = footerEl.children[idx];
+		const baseText = options.buttons[idx].text;
+		let remaining = Math.max(1, Math.floor(options.countdown.seconds) || 10);
+		target.textContent = `${baseText} (${remaining}s)`;
+		equalizeFooterButtons(footerEl);
+		alertCountdownTimer = setInterval(() => {
+			remaining--;
+			if (remaining <= 0) {
+				clearInterval(alertCountdownTimer);
+				alertCountdownTimer = null;
+				target.click();
+				return;
+			}
+			target.textContent = `${baseText} (${remaining}s)`;
+		}, 1000);
+	}
+
 	// Backdrop dismiss listener
 	const dismissOnBackdrop = options.dismissOnBackdrop !== false;
 	const dismissOnEscape = options.dismissOnEscape !== false;
@@ -5517,6 +5542,10 @@ function showAlert(options = {}) {
 
 function closeAlert() {
 	if (!alertModal || alertModal.classList.contains('hidden')) return;
+	if (alertCountdownTimer) {
+		clearInterval(alertCountdownTimer);
+		alertCountdownTimer = null;
+	}
 	if (alertHistoryPushed) {
 		alertHistoryPushed = false;
 		alertClosePending = true;
