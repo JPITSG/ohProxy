@@ -5174,6 +5174,22 @@ function openCardConfigModal(widget, card) {
 		} else {
 			titleEl.textContent = itemName ? `Item ${itemName} Settings` : ohLang.cardConfig.title;
 		}
+		// Show the widget's icon beside the title when it has one. Same
+		// derivation as the grid cards; the img stays hidden until a
+		// candidate actually loads, so iconless widgets show no gap.
+		const rawTitleIcon = safeText(widgetIconName(widget)).trim();
+		const titleIcon = rawTitleIcon.toLowerCase() === 'buttongrid' ? '' : rawTitleIcon;
+		if (titleIcon) {
+			const iconImg = document.createElement('img');
+			iconImg.className = 'card-config-title-icon';
+			iconImg.alt = '';
+			iconImg.draggable = false;
+			const isDynamicIcon = !widget?.staticIcon && !/^material:/i.test(titleIcon);
+			const iconState = isDynamicIcon ? widgetState(widget) : undefined;
+			iconImg.dataset.iconKey = isDynamicIcon ? `${titleIcon}@${iconState}` : titleIcon;
+			titleEl.prepend(iconImg);
+			loadBestIcon(iconImg, iconCandidates(titleIcon, iconState));
+		}
 	}
 
 	openModalBase(cardConfigModal, 'card-config-open');

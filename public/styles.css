@@ -2279,6 +2279,32 @@ body.theme-light .oh-modal-header {
 	cursor: move;
 	touch-action: none;
 }
+.card-config-header h2 {
+	display: flex;
+	align-items: center;
+	/* Icon-to-text spacing matches the header's 20px edge padding, so the
+	   icon sits equidistant from the frame border and the title text */
+	gap: 20px;
+	min-width: 0;
+}
+.card-config-title-icon {
+	height: 1.2em;
+	width: auto;
+	max-width: 1.6em;
+	object-fit: contain;
+	flex: 0 0 auto;
+	/* Optical alignment: text glyphs sit slightly above the line-box
+	   center, so a geometrically centered icon reads as too low */
+	position: relative;
+	top: -0.09em;
+	/* Inert: drags and clicks fall through to the h2 drag handle */
+	pointer-events: none;
+	-webkit-user-drag: none;
+	display: none;
+}
+.card-config-title-icon.icon-ready {
+	display: block;
+}
 .oh-modal-close {
 	background: none;
 	border: none;
