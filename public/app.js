@@ -6357,6 +6357,8 @@ const ADMIN_CONFIG_SCHEMA = [
 			{ key: 'server.cmdapi.allowedSubnets', type: 'list', allowEmpty: true },
 			{ key: 'server.cmdapi.allowedItems', type: 'list', allowEmpty: true },
 			{ key: 'server.cmdapi.verifypost', type: 'toggle' },
+			{ key: 'server.activeUsers.enabled', type: 'toggle' },
+			{ key: 'server.activeUsers.filePath', type: 'text', allowEmpty: true },
 		],
 	},
 	{
@@ -13068,6 +13070,10 @@ function initWakeLockManager() {
 let lastFocusState = null;
 let focusListenersInitialized = false;
 let externalFocusOverride = null;  // Set by postMessage from WebView2 container
+// Server-side visibility reports expire after ~30s unless refreshed, so
+// re-assert visibility well within that window while the app stays visible.
+const FOCUS_HEARTBEAT_MS = 10000;
+let focusHeartbeatTimer = null;
 
 
 function isClientFocused() {
@@ -13101,9 +13107,17 @@ function sendFocusState() {
 	syncGpsTracking();
 }
 
+function sendFocusHeartbeat() {
+	// Hidden tabs stay silent (their throttled timers are irrelevant); the
+	// server drops silent clients from the active user count via its TTL.
+	if (!isClientFocused()) return;
+	sendClientState({ focused: true });
+}
+
 function initFocusTracking() {
 	if (focusListenersInitialized) return;
 	focusListenersInitialized = true;
+	focusHeartbeatTimer = setInterval(sendFocusHeartbeat, FOCUS_HEARTBEAT_MS);
 	document.addEventListener('visibilitychange', sendFocusState);
 	// Listen for external focus control via postMessage (e.g., from WebView2 container)
 	// Send ohProxyFocus: true/false to override, or ohProxyFocus: null to clear and use visibilityState

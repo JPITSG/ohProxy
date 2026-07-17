@@ -41,13 +41,47 @@ function cleanupSocket(key) {
 	} catch {}
 }
 
+function browserSafeCloseCode(code) {
+	// Browsers only permit close() with 1000 or 3000-4999; anything else throws
+	// and would leave the socket dangling open with its handlers detached.
+	return code === 1000 || (Number.isInteger(code) && code >= 3000 && code <= 4999) ? code : 1000;
+}
+
+function browserSafeCloseReason(reason) {
+	// close() rejects reasons longer than 123 UTF-8 bytes.
+	return safeText(reason).slice(0, 120);
+}
+
 function closeSocket(key, code, reason) {
 	const record = sockets.get(key);
 	if (!record) return;
 	try {
-		record.ws.close(code, reason);
+		record.ws.close(browserSafeCloseCode(code), browserSafeCloseReason(reason));
 	} catch {
 		cleanupSocket(key);
+	}
+}
+
+function forceCloseSocket(key, code, reason, notifyPort) {
+	const record = sockets.get(key);
+	if (!record) return;
+	// Detach first so the eventual onclose cannot double-report, then tell the
+	// owning page immediately so its socket facade never dangles half-open.
+	cleanupSocket(key);
+	if (notifyPort) {
+		post(record.port, {
+			type: 'transport-ws-event',
+			id: record.socketId,
+			event: 'close',
+			code: Number(code) || 1001,
+			reason: safeText(reason),
+			wasClean: true,
+		});
+	}
+	try {
+		record.ws.close(browserSafeCloseCode(code), browserSafeCloseReason(reason));
+	} catch {
+		try { record.ws.close(); } catch {}
 	}
 }
 
@@ -68,8 +102,9 @@ function openSocket(portId, port, data) {
 	}
 	const key = socketKey(portId, socketId);
 
-	closeSocket(key, 1000, 'Replaced');
-	cleanupSocket(key);
+	// Silent discard: the same id is being reopened, so a synthetic close
+	// event would be misread as belonging to the replacement socket.
+	forceCloseSocket(key, 1000, 'Replaced', false);
 
 	const protocols = normalizeProtocols(data?.protocols);
 	let ws;
@@ -156,12 +191,11 @@ function sendSocket(portId, data) {
 	}
 }
 
-function closePortSockets(portId, code, reason) {
+function closePortSockets(portId, code, reason, notifyPort) {
 	const prefix = `${portId}:`;
 	for (const key of Array.from(sockets.keys())) {
 		if (!key.startsWith(prefix)) continue;
-		closeSocket(key, code, reason);
-		cleanupSocket(key);
+		forceCloseSocket(key, code, reason, notifyPort);
 	}
 }
 
@@ -194,7 +228,9 @@ self.onconnect = (connectEvent) => {
 		}
 		if (type === 'transport-ws-pause') {
 			pausedPorts.add(portId);
-			closePortSockets(portId, 1001, safeText(data?.reason || 'Transport paused'));
+			// Notify the page: its facade must observe the close so reconnect
+			// logic starts cleanly on resume instead of sending into a void.
+			closePortSockets(portId, 1001, safeText(data?.reason || 'Transport paused'), true);
 			return;
 		}
 		if (type === 'transport-ws-resume') {
@@ -202,14 +238,14 @@ self.onconnect = (connectEvent) => {
 			return;
 		}
 		if (type === 'transport-port-close') {
-			closePortSockets(portId, 1001, 'Port closing');
+			closePortSockets(portId, 1001, 'Port closing', false);
 		}
 	};
 
 	port.onmessageerror = () => {};
 	port.addEventListener('close', () => {
 		pausedPorts.delete(portId);
-		closePortSockets(portId, 1001, 'Port closed');
+		closePortSockets(portId, 1001, 'Port closed', false);
 	});
 	port.start();
 };

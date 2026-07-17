@@ -36,13 +36,15 @@ function extractValidationRules(content) {
 		});
 	}
 
-	// Find ensureLogPath calls (which internally use ensureString)
+	// Find ensureLogPath calls (which internally use ensureString with
+	// allowEmpty: true — an empty path disables the feature)
 	const ensureLogPathPattern = /ensureLogPath\s*\(\s*([^,]+),\s*['"]([^'"]+)['"]/g;
 	while ((match = ensureLogPathPattern.exec(content)) !== null) {
 		rules.push({
 			variable: match[1].trim(),
 			name: match[2],
 			type: 'logPath',
+			allowEmpty: true,
 		});
 	}
 

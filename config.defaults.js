@@ -234,6 +234,20 @@ module.exports = {
 			// Verify /POST target state first and skip unchanged OpenHAB updates.
 			verifypost: true,
 		},
+		// Active user count export.
+		// When enabled, the number of users actively browsing the PWA is written
+		// to filePath whenever it changes. A user is counted while their app is
+		// open and visible: clients re-assert visibility every ~10s and reports
+		// expire after ~30s, so frozen or vanished clients drop out even if
+		// their connection lingers. Authenticated clients are deduplicated by
+		// username. The count is reset to 0 on shutdown so automations never act
+		// on a stale value while the proxy is down.
+		activeUsers: {
+			// Enable writing the active user count to filePath (true/false).
+			enabled: false,
+			// Target file for the count (absolute path; required when enabled).
+			filePath: '',
+		},
 
 		// === GPS ===
 		gps: {

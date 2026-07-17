@@ -30,6 +30,7 @@ const { createAuthLockoutManager } = require('./lib/auth-lockout');
 const { createUnauthenticatedIpGuard } = require('./lib/unauthenticated-ip-guard');
 const { buildOpenhabClient } = require('./lib/openhab-client');
 const { getBackendRecoveryDelayMs } = require('./lib/backend-recovery-delay');
+const { createActiveUserCountWriter } = require('./lib/active-user-count');
 
 // Keep-alive agents for openHAB backend connections (eliminates TIME_WAIT buildup)
 const ohHttpAgent = new http.Agent({ keepAlive: true });
@@ -673,6 +674,9 @@ const CMDAPI_ALLOWED_ITEMS = Array.isArray(CMDAPI_CONFIG.allowedItems)
 	: [];
 const CMDAPI_VERIFY_POST = CMDAPI_CONFIG.verifypost !== false;
 const CMDAPI_TIMEOUT_MS = 10000;
+const ACTIVE_USERS_CONFIG = SERVER_CONFIG.activeUsers || {};
+const ACTIVE_USERS_ENABLED = ACTIVE_USERS_CONFIG.enabled === true;
+const ACTIVE_USERS_FILE = safeText(ACTIVE_USERS_CONFIG.filePath || '').trim();
 let mysqlConnection = null;
 let mysqlConnecting = false;
 let videoPreviewInitialCaptureDone = false;
@@ -1151,6 +1155,14 @@ function validateConfig() {
 		}
 	}
 
+	if (ensureObject(SERVER_CONFIG.activeUsers, 'server.activeUsers', errors)) {
+		ensureBoolean(ACTIVE_USERS_CONFIG.enabled, 'server.activeUsers.enabled', errors);
+		ensureLogPath(ACTIVE_USERS_FILE, 'server.activeUsers.filePath', errors);
+		if (ACTIVE_USERS_ENABLED && !ACTIVE_USERS_FILE) {
+			errors.push('server.activeUsers.filePath is required when server.activeUsers.enabled is true');
+		}
+	}
+
 	if (ensureArray(SERVER_CONFIG.proxyAllowlist, 'server.proxyAllowlist', { allowEmpty: false }, errors)) {
 		SERVER_CONFIG.proxyAllowlist.forEach((entry, index) => {
 			if (!parseProxyAllowEntry(entry)) {
@@ -1446,6 +1458,17 @@ function validateAdminConfig(config) {
 					}
 				});
 			}
+		}
+	}
+
+	// Active user count export
+	if (isPlainObject(s.activeUsers)) {
+		ensureBoolean(s.activeUsers.enabled, 'server.activeUsers.enabled', errors);
+		if (s.activeUsers.filePath !== undefined) {
+			ensureLogPath(s.activeUsers.filePath, 'server.activeUsers.filePath', errors);
+		}
+		if (s.activeUsers.enabled === true && !safeText(s.activeUsers.filePath || '').trim()) {
+			errors.push('server.activeUsers.filePath is required when server.activeUsers.enabled is true');
 		}
 	}
 
@@ -2174,6 +2197,8 @@ const liveConfig = {
 	cmdapiAllowedSubnets: CMDAPI_ALLOWED_SUBNETS,
 	cmdapiAllowedItems: CMDAPI_ALLOWED_ITEMS,
 	cmdapiVerifyPost: CMDAPI_VERIFY_POST,
+	activeUsersEnabled: ACTIVE_USERS_ENABLED,
+	activeUsersFile: ACTIVE_USERS_FILE,
 	jsLogEnabled: JS_LOG_ENABLED,
 	logFile: LOG_FILE,
 	accessLog: ACCESS_LOG,
@@ -2367,6 +2392,15 @@ function reloadLiveConfig() {
 		? newServer.cmdapi.allowedItems
 		: [];
 	liveConfig.cmdapiVerifyPost = newServer.cmdapi?.verifypost !== false;
+
+	// Active user count config
+	const prevActiveUsersEnabled = liveConfig.activeUsersEnabled;
+	const prevActiveUsersFile = liveConfig.activeUsersFile;
+	liveConfig.activeUsersEnabled = newServer.activeUsers?.enabled === true;
+	liveConfig.activeUsersFile = safeText(newServer.activeUsers?.filePath || '').trim();
+	if (liveConfig.activeUsersEnabled !== prevActiveUsersEnabled || liveConfig.activeUsersFile !== prevActiveUsersFile) {
+		activeUserCountWriter.handleSettingsChange();
+	}
 
 	// Logging config
 	liveConfig.jsLogEnabled = newServer.jsLogEnabled === true;
@@ -2776,12 +2810,25 @@ wss.on('headers', (headers) => {
 	}
 });
 
+// Persists the number of users actively browsing the PWA to a state file
+const activeUserCountWriter = createActiveUserCountWriter({
+	getSettings: () => ({ enabled: liveConfig.activeUsersEnabled, filePath: liveConfig.activeUsersFile }),
+	getClients: () => wss.clients,
+	log: (message) => logMessage(message),
+});
+// Baseline write at startup (no clients connected yet)
+activeUserCountWriter.update();
+
 function handleWsConnection(ws, req) {
 	const clientIp = getRemoteIp(req) || 'unknown';
 	logMessage(`[WS] Client connected from ${clientIp}, total: ${wss.clients.size}`);
 
 	ws.isAlive = true;
-	ws.clientState = { focused: true };  // Assume focused on connect; client will send actual state
+	// focused is assumed on connect (drives polling speed); the client sends the
+	// actual state right after. visibleAt is only ever set by explicit client
+	// reports and feeds the active user count, so a client that never reports
+	// (or goes silent) is not counted as browsing.
+	ws.clientState = { focused: true, visibleAt: 0 };
 	ws.ohProxyUser = req.ohProxyUser || null;  // Track authenticated username
 	ws.clientIp = clientIp;  // Track for LAN status detection
 
@@ -2801,6 +2848,7 @@ function handleWsConnection(ws, req) {
 	}
 
 	startWsPushIfNeeded();
+	activeUserCountWriter.update();
 
 	ws.on('pong', () => { ws.isAlive = true; });
 
@@ -2810,15 +2858,20 @@ function handleWsConnection(ws, req) {
 			if (msg.event === 'clientState' && msg.data) {
 				if (typeof msg.data.focused === 'boolean') {
 					const prevState = ws.clientState.focused;
-					const prevLabel = prevState === null ? 'uninitialized' : (prevState ? 'focused' : 'unfocused');
-					const newLabel = msg.data.focused ? 'focused' : 'unfocused';
 					const changed = prevState !== msg.data.focused;
-					logMessage(`[WS] Client ${clientIp} focus: ${prevLabel} -> ${newLabel}${changed ? '' : ' (no change)'}`);
 					if (changed) {
+						const prevLabel = prevState === null ? 'uninitialized' : (prevState ? 'focused' : 'unfocused');
+						const newLabel = msg.data.focused ? 'focused' : 'unfocused';
+						logMessage(`[WS] Client ${clientIp} focus: ${prevLabel} -> ${newLabel}`);
 						ws.clientState.focused = msg.data.focused;
 					}
+					// Visibility freshness for the active user count: clients
+					// heartbeat focused=true every ~10s while visible; stale
+					// reports expire so frozen/vanished clients drop out.
+					ws.clientState.visibleAt = msg.data.focused === true ? Date.now() : 0;
 					// Always verify interval is correct (handles edge cases where interval doesn't match state)
 					adjustPollingForFocus();
+					activeUserCountWriter.update();
 				}
 			} else if (msg.event === 'fetchDelta' && msg.data) {
 				// Handle delta fetch over WS instead of XHR
@@ -2848,8 +2901,10 @@ function handleWsConnection(ws, req) {
 		logMessage(`[WS] Client disconnected from ${clientIp}, code: ${code}, remaining: ${wss.clients.size}`);
 		// Clear focus state before adjusting (ensures not counted if still in wss.clients)
 		ws.clientState.focused = null;
+		ws.clientState.visibleAt = 0;
 		stopWsPushIfUnneeded();
 		adjustPollingForFocus();
+		activeUserCountWriter.update();
 	});
 
 	ws.on('error', (err) => {
@@ -12733,6 +12788,8 @@ process.on('exit', () => {
 	try {
 		if (fs.existsSync(IPC_SOCKET_PATH)) fs.unlinkSync(IPC_SOCKET_PATH);
 	} catch (err) { /* ignore */ }
+	// Nobody is browsing through this proxy while it is down
+	activeUserCountWriter.shutdownSync();
 });
 process.on('SIGINT', () => process.exit());
 process.on('SIGTERM', () => process.exit());
