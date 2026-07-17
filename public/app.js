@@ -13961,6 +13961,36 @@ function restoreNormalPolling() {
 				speechSynthesis.speak(utterance);
 			}
 
+			// Recording cue sounds: rising two-tone blip when recording starts,
+			// falling when it stops. Synthesized via Web Audio, so no asset
+			// files; the context is created lazily inside a click gesture.
+			var voiceCueCtx = null;
+			function playVoiceCue(kind) {
+				try {
+					var AudioCtx = window.AudioContext || window.webkitAudioContext;
+					if (!AudioCtx) return;
+					if (!voiceCueCtx) voiceCueCtx = new AudioCtx();
+					if (voiceCueCtx.state === 'suspended') voiceCueCtx.resume().catch(function() {});
+					var ctx = voiceCueCtx;
+					var t = ctx.currentTime;
+					var freqs = kind === 'start' ? [660, 880] : [880, 660];
+					for (var i = 0; i < freqs.length; i++) {
+						var osc = ctx.createOscillator();
+						var gain = ctx.createGain();
+						osc.type = 'sine';
+						osc.frequency.value = freqs[i];
+						var at = t + i * 0.09;
+						gain.gain.setValueAtTime(0.0001, at);
+						gain.gain.exponentialRampToValueAtTime(0.22, at + 0.02);
+						gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.16);
+						osc.connect(gain);
+						gain.connect(ctx.destination);
+						osc.start(at);
+						osc.stop(at + 0.18);
+					}
+				} catch (err) { /* cue sounds are best-effort */ }
+			}
+
 			function startVoiceProcessingTimeout(requestId) {
 				voiceTimeoutId = setTimeout(function() {
 					if (voiceRequestId === requestId) {
@@ -13992,6 +14022,8 @@ function restoreNormalPolling() {
 
 			// Send transcript to voice command API and handle response
 			async function sendVoiceCommand(transcript) {
+				// In vosk mode listening already ended (stop cue played there)
+				if (isListening) playVoiceCue('stop');
 				isListening = false;
 				els.voice.classList.remove('listening');
 				els.voice.classList.add('processing');
@@ -14038,6 +14070,7 @@ function restoreNormalPolling() {
 
 			// Reset all voice states to passive
 			function resetVoiceState() {
+				if (isListening) playVoiceCue('stop');
 				if (voiceTimeoutId) {
 					clearTimeout(voiceTimeoutId);
 					voiceTimeoutId = null;
@@ -14069,6 +14102,7 @@ function restoreNormalPolling() {
 						// Second click: stop recording and send to Vosk
 						isListening = false;
 						els.voice.classList.remove('listening');
+						playVoiceCue('stop');
 
 						// Gather collected chunks
 						var totalLen = 0;
@@ -14168,6 +14202,7 @@ function restoreNormalPolling() {
 
 						isListening = true;
 						els.voice.classList.add('listening');
+						playVoiceCue('start');
 					}).catch(function(err) {
 						logJsError('vosk getUserMedia failed', err);
 						resetVoiceState();
@@ -14186,6 +14221,7 @@ function restoreNormalPolling() {
 
 					isListening = true;
 					els.voice.classList.add('listening');
+					playVoiceCue('start');
 
 					recognition.onresult = function(event) {
 						var transcript = event.results[0][0].transcript;
@@ -14200,6 +14236,7 @@ function restoreNormalPolling() {
 
 					recognition.onend = function() {
 						if (!isProcessing) {
+							if (isListening) playVoiceCue('stop');
 							isListening = false;
 							els.voice.classList.remove('listening');
 						}
