@@ -30,8 +30,10 @@ describe('Search Clear Button', () => {
 
 	it('stays in sync after programmatic clears', () => {
 		assert.match(app, /function syncSearchClearButton\(input\) \{/);
-		// Header search: home snapshot restore, soft reset, and back-button filter clear
-		assert.equal((app.match(/syncSearchClearButton\(els\.search\);/g) || []).length, 3);
+		// Header search: snapshot restore, soft reset, back/filter clears,
+		// search-result navigation, and Home navigation.
+		assert.equal((app.match(/syncSearchClearButton\(els\.search\);/g) || []).length, 7);
+		assert.match(app, /async function pushPage[\s\S]*?if \(els\.search\) els\.search\.value = '';\s*syncSearchClearButton\(els\.search\);/);
 		// Settings modal search: Escape key and modal reopen reset
 		assert.equal((app.match(/syncSearchClearButton\(searchInput\);/g) || []).length, 2);
 	});

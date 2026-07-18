@@ -17,6 +17,6 @@ describe('Search scroll reset wiring', () => {
 		assert.match(app, /const shouldResetSearchScroll = !!q && state\.searchScrollResetPending;\s*if \(shouldResetSearchScroll\) \{\s*clearSearchScrollReset\(\);\s*scrollToTop\(\);\s*\}/);
 		assert.match(app, /if \(state\.filter\.trim\(\)\) \{\s*queueSearchScrollReset\(\);\s*\} else \{\s*clearSearchScrollReset\(\);\s*\}/);
 		assert.match(app, /recalculateStretchCards\(\);\s*if \(shouldResetSearchScroll\) finishSearchScrollReset\(\);/);
-		assert.match(app, /if \(els\.search\) els\.search\.value = '';\s*clearSearchScrollReset\(\);/);
+		assert.match(app, /if \(els\.search\) els\.search\.value = '';\s*syncSearchClearButton\(els\.search\);\s*clearSearchScrollReset\(\);/);
 	});
 });

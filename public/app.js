@@ -11979,6 +11979,7 @@ async function pushPage(pageUrl, pageTitle) {
 	if (state.filter.trim()) {
 		state.filter = '';
 		if (els.search) els.search.value = '';
+		syncSearchClearButton(els.search);
 		clearSearchScrollReset();
 	}
 	if (state.pageUrl) state.stack.push({ pageUrl: state.pageUrl, pageTitle: state.pageTitle });
@@ -13819,6 +13820,7 @@ function restoreNormalPolling() {
 			if (state.filter.trim()) {
 				state.filter = '';
 				if (els.search) els.search.value = '';
+				syncSearchClearButton(els.search);
 				clearSearchScrollReset();
 				state.searchStateToken += 1;
 				cancelSearchStateRequests();
@@ -13836,6 +13838,7 @@ function restoreNormalPolling() {
 		if (state.filter.trim()) {
 			state.filter = '';
 			if (els.search) els.search.value = '';
+			syncSearchClearButton(els.search);
 			clearSearchScrollReset();
 			state.searchStateToken += 1;
 			cancelSearchStateRequests();
@@ -13949,6 +13952,7 @@ function restoreNormalPolling() {
 		const replaceFilterEntry = searchFilterHistoryPushed;
 		if (searchFilterHistoryPushed) searchFilterHistoryPushed = false;
 		els.search.value = '';
+		syncSearchClearButton(els.search);
 		state.filter = '';
 		clearSearchScrollReset();
 		state.stack = [];
