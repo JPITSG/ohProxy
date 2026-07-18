@@ -31,6 +31,11 @@ const { createUnauthenticatedIpGuard } = require('./lib/unauthenticated-ip-guard
 const { buildOpenhabClient } = require('./lib/openhab-client');
 const { getBackendRecoveryDelayMs } = require('./lib/backend-recovery-delay');
 const { createActiveUserCountWriter } = require('./lib/active-user-count');
+const { createOpenhabMapTransformer, defaultOpenhabTransformDir, MAX_MAP_PATTERN_LENGTH } = require('./lib/openhab-map-transform');
+
+const historyMapTransformer = createOpenhabMapTransformer({
+	transformDir: defaultOpenhabTransformDir(),
+});
 
 // Keep-alive agents for openHAB backend connections (eliminates TIME_WAIT buildup)
 const ohHttpAgent = new http.Agent({ keepAlive: true });
@@ -8666,6 +8671,14 @@ app.post('/api/admin/restart', jsonParserSmall, requireAdmin, (req, res) => {
 	res.once('close', maybeTriggerRestart);
 });
 
+function applyHistoryStateTransforms(entries, statePattern) {
+	if (!Array.isArray(entries) || !entries.length || !statePattern) return entries;
+	return entries.map((entry) => {
+		const transformedState = historyMapTransformer.transform(statePattern, entry?.state);
+		return transformedState === null ? entry : { ...entry, transformedState };
+	});
+}
+
 app.get('/api/card-config/:itemName/history', requireAdmin, async (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
@@ -8683,6 +8696,12 @@ app.get('/api/card-config/:itemName/history', requireAdmin, async (req, res) => 
 	const validCommands = rawCommands.length > 0 && rawCommands.length <= 200
 		? new Set(rawCommands.split(',').map(c => c.toLowerCase()))
 		: null;
+	const rawStatePattern = typeof req.query.statePattern === 'string' ? req.query.statePattern : '';
+	if (rawStatePattern.length > MAX_MAP_PATTERN_LENGTH || hasAnyControlChars(rawStatePattern)) {
+		res.status(400).json({ error: 'Invalid state pattern' });
+		return;
+	}
+	const statePattern = rawStatePattern.trim();
 	const rawBefore = typeof req.query.before === 'string' ? req.query.before : '';
 	const conn = getMysqlConnection();
 	if (!conn) {
@@ -8821,7 +8840,10 @@ app.get('/api/card-config/:itemName/history', requireAdmin, async (req, res) => 
 				deduped.push(pendingEntry);
 			}
 		}
-		const entries = deduped.slice(0, 3).map(({ time, state }) => ({ time, state }));
+		const entries = applyHistoryStateTransforms(
+			deduped.slice(0, 3).map(({ time, state }) => ({ time, state })),
+			statePattern
+		);
 		const nextOffset = deduped.length > 3 ? deduped[3].cursorPos : cursor;
 		const hasOlder = deduped.length > 3 || !exhausted;
 		res.json({

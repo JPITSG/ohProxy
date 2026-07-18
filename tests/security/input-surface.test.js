@@ -76,6 +76,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawItemName\s*=\s*req\.params\.itemName\s*;/,
 			/const\s+offset\s*=\s*Math\.max\(0,\s*parseInt\(req\.query\.offset,\s*10\)\s*\|\|\s*0\)\s*;/,
 			/const\s+rawCommands\s*=\s*typeof\s+req\.query\.commands\s*===\s*'string'\s*\?\s*req\.query\.commands\s*:\s*''\s*;/,
+			/const\s+rawStatePattern\s*=\s*typeof\s+req\.query\.statePattern\s*===\s*'string'\s*\?\s*req\.query\.statePattern\s*:\s*''\s*;/,
 			/const\s+rawBefore\s*=\s*typeof\s+req\.query\.before\s*===\s*'string'\s*\?\s*req\.query\.before\s*:\s*''\s*;/,
 			/const\s+rawOffset\s*=\s*req\.query\.offset\s*;/,
 			/const\s+rawRadius\s*=\s*req\.query\.radius\s*;/,
@@ -165,6 +166,7 @@ describe('Input Validation Coverage', () => {
 
 		assert.ok(content.includes("/^[a-zA-Z0-9_]{1,50}$/"), 'Missing itemName regex validation');
 		assert.ok(content.includes('offset > 100000'), 'Missing history offset upper bound');
+		assert.ok(content.includes('rawStatePattern.length > MAX_MAP_PATTERN_LENGTH'), 'Missing history state pattern length validation');
 	});
 });
 

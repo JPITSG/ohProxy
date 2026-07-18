@@ -46,7 +46,7 @@
 const {
 	widgetType, widgetLink, widgetPageLink, widgetIconName,
 	deltaKey, splitLabelState, widgetKey, cardWidthKey, widgetConfigLookupKeys, filterVisibleSearchEntries, normalizeMapping, normalizeButtongridButtons,
-	buildHistoryStateFormatter, formatSetpointStepCommand,
+	buildHistoryStateFormatter, resolveStateDisplayPattern, formatSetpointStepCommand,
 } = window.WidgetNormalizer;
 
 function logJsError(message, error) {
@@ -4126,6 +4126,7 @@ let historyMappings = [];
 let historyCursorStack = [];
 let historyGlowColor = null;
 let historyStateFormatter = null;
+let historyStatePattern = '';
 let historyAbort = null;
 let historyWheelNavUntil = 0;
 let cardConfigInitialStateJson = null;
@@ -5134,6 +5135,7 @@ function openCardConfigModal(widget, card) {
 	// Show/hide history section for items with persistence
 	const itemName = widget?.item?.name || '';
 	const historySection = cardConfigModal.querySelector('.history-section');
+	historyStatePattern = '';
 	if (historySection) {
 		if (itemName && !isSection) {
 			historySection.style.display = '';
@@ -5152,6 +5154,7 @@ function openCardConfigModal(widget, card) {
 				loadGroupHistoryEntries(itemName, null);
 			} else {
 				historyMappings = normalizeMapping(widget?.mappings || widget?.mapping);
+				historyStatePattern = resolveStateDisplayPattern(widget);
 				historyStateFormatter = buildHistoryStateFormatter(widget, historyMappings, formatRawState);
 				loadHistoryEntries(itemName, 0);
 			}
@@ -5316,12 +5319,19 @@ async function loadHistoryEntriesShared(itemName, token, config) {
 function loadHistoryEntries(itemName, offset) {
 	return loadHistoryEntriesShared(itemName, offset, {
 		buildUrl: (name, off) => {
-			let url = '/api/card-config/' + encodeURIComponent(name) + '/history?offset=' + off;
-			if (historyMappings.length) url += '&commands=' + encodeURIComponent(historyMappings.map(m => m.command).join(','));
-			return url;
+			const params = new URLSearchParams();
+			params.set('offset', String(off));
+			if (historyMappings.length) params.set('commands', historyMappings.map(m => m.command).join(','));
+			if (historyStatePattern) params.set('statePattern', historyStatePattern);
+			return '/api/card-config/' + encodeURIComponent(name) + '/history?' + params.toString();
 		},
 		formatState: (entry, raw) => {
-			return historyStateFormatter ? historyStateFormatter(raw) : formatRawState(raw);
+			const transformedState = entry && Object.prototype.hasOwnProperty.call(entry, 'transformedState')
+				? entry.transformedState
+				: undefined;
+			return historyStateFormatter
+				? historyStateFormatter(raw, transformedState)
+				: transformedState !== undefined ? safeText(transformedState) : formatRawState(raw);
 		},
 		stack: historyOffsetStack,
 		nextTokenKey: 'nextOffset',

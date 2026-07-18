@@ -10,6 +10,7 @@ const {
 	extractNumericStateSuffix,
 	formatDateStateLikeDisplay,
 	formatStateWithPattern,
+	resolveStateDisplayPattern,
 } = require('../../lib/widget-normalizer');
 
 const PROJECT_ROOT = path.join(__dirname, '..', '..');
@@ -88,6 +89,26 @@ describe('Card Config History State Formatting', () => {
 		assert.strictEqual(formatter('21.5'), '21.5 \u00B0C');
 	});
 
+	it('uses server-resolved transformed states while keeping explicit mappings first', () => {
+		const formatter = buildHistoryStateFormatter(
+			{ pattern: 'MAP(status.map):%s', label: 'Status [Available]' },
+			[{ command: 'DISABLED', label: 'Unavailable' }],
+			(raw) => raw.toLowerCase()
+		);
+
+		assert.strictEqual(formatter('READY', 'Available'), 'Available');
+		assert.strictEqual(formatter('DISABLED', 'Mapped disabled'), 'Unavailable');
+		assert.strictEqual(formatter('WAITING'), 'waiting');
+		assert.strictEqual(formatStateWithPattern('READY', 'MAP(status.map):%s'), '');
+	});
+
+	it('prefers a widget pattern over the item-level state pattern', () => {
+		assert.strictEqual(resolveStateDisplayPattern({
+			pattern: 'MAP(widget.map):%s',
+			item: { stateDescription: { pattern: 'MAP(item.map):%s' } },
+		}), 'MAP(widget.map):%s');
+	});
+
 	it('falls back to the caller formatter when no display format applies', () => {
 		const formatter = buildHistoryStateFormatter(
 			{ label: 'Door [Closed]' },
@@ -105,6 +126,7 @@ describe('Card Config History State Formatting', () => {
 		assert.match(app, /buildHistoryStateFormatter,/);
 		assert.match(app, /let historyStateFormatter = null;/);
 		assert.match(app, /historyStateFormatter = buildHistoryStateFormatter\(widget, historyMappings, formatRawState\);/);
-		assert.match(app, /return historyStateFormatter \? historyStateFormatter\(raw\) : formatRawState\(raw\);/);
+		assert.match(app, /if \(historyStatePattern\) params\.set\('statePattern', historyStatePattern\);/);
+		assert.match(app, /historyStateFormatter\(raw, transformedState\)/);
 	});
 });
