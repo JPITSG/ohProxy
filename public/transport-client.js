@@ -326,6 +326,11 @@
 	}
 
 	if (state.nativeFetch) {
+		// Streaming consumers (the video timeshift engine) must bypass the
+		// worker RPC: it ships response bodies as single buffered payloads,
+		// which never completes for a live stream and stalls playback until
+		// the RPC timeout before falling back.
+		window.__OH_NATIVE_FETCH__ = state.nativeFetch;
 		window.fetch = async function patchedFetch(input, init) {
 			const request = new Request(input, init);
 			if (!isCandidateForSwFetch(request)) {

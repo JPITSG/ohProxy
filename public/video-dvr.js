@@ -365,7 +365,12 @@
 			if (abortCtrl) { try { abortCtrl.abort(); } catch (_) {} }
 			const ctrl = new AbortController();
 			abortCtrl = ctrl;
-			fetch(url, { credentials: 'same-origin', cache: 'no-store', signal: ctrl.signal })
+			// window.fetch may be rerouted through a worker RPC that buffers
+			// whole bodies - that never completes for an endless live stream
+			// (it would stall until the RPC timeout on every first attempt).
+			// Streaming must always use the browser's native fetch.
+			const doFetch = window.__OH_NATIVE_FETCH__ || window.fetch;
+			doFetch(url, { credentials: 'same-origin', cache: 'no-store', signal: ctrl.signal })
 				.then((resp) => {
 					if (!resp.ok || !resp.body) throw new Error('http-' + (resp ? resp.status : 0));
 					retryDelayMs = RETRY_BASE_MS;

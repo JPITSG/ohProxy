@@ -284,6 +284,17 @@ describe('Video timeshift (DVR) wiring', () => {
 		assert.match(css, /\.video-dvr\.at-live \.video-dvr-live-dot \{\s*animation: dvr-live-pulse 1\.6s ease-in-out infinite;\s*\}/);
 	});
 
+	it('streams around the worker RPC fetch transport', () => {
+		const dvr = fs.readFileSync(DVR_FILE, 'utf8');
+		const transport = fs.readFileSync(path.join(PROJECT_ROOT, 'public', 'transport-client.js'), 'utf8');
+		// The SW HTTP RPC ships bodies as single buffered payloads - an
+		// endless stream never completes, stalling first playback for the
+		// full workerRpcTimeoutMs before the native-fetch fallback kicks in.
+		// The engine therefore always uses the pristine native fetch.
+		assert.match(transport, /window\.__OH_NATIVE_FETCH__ = state\.nativeFetch;/);
+		assert.match(dvr, /const doFetch = window\.__OH_NATIVE_FETCH__ \|\| window\.fetch;\s*doFetch\(url, \{ credentials: 'same-origin', cache: 'no-store', signal: ctrl\.signal \}\)/);
+	});
+
 	it('handles the hard parts of the MSE pipeline in the engine', () => {
 		const dvr = fs.readFileSync(DVR_FILE, 'utf8');
 		// reconnects stitch onto the live edge instead of restarting at zero
