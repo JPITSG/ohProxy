@@ -119,8 +119,9 @@ module.exports = {
 				enabled: true,
 				// Use report-only mode (true/false).
 				reportOnly: false,
-				// CSP policy string (empty disables).
-				policy: "default-src 'self'; img-src 'self' data: https: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https:; font-src 'self' data:; frame-src 'self' https:;",
+				// CSP policy string (empty disables). media-src blob: is needed
+				// for the in-browser video timeshift (MediaSource object URLs).
+				policy: "default-src 'self'; img-src 'self' data: https: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https:; font-src 'self' data:; frame-src 'self' https:;",
 			},
 			// Referrer-Policy value (same-origin|no-referrer|strict-origin-when-cross-origin|etc).
 			// Note: 'same-origin' is required for auth-exempt assets to work correctly.
@@ -330,6 +331,20 @@ module.exports = {
 			swHttpEnabled: true,
 			// Timeout for worker RPC responses in milliseconds (>=1).
 			workerRpcTimeoutMs: 15000,
+		},
+
+		// === Video Timeshift (DVR) ===
+		videoDvr: {
+			// In-browser timeshift buffer on video widgets: buffers the live
+			// stream in browser memory (never persisted) so users can pause,
+			// scrub back through a timeline overlay and jump back to live.
+			// Falls back to plain live playback where MediaSource is
+			// unavailable (e.g. iPhones before iOS 17.1) (true/false).
+			enabled: true,
+			// Rolling timeshift history kept in browser memory per video
+			// (seconds; >=30). Browsers may trim earlier under memory
+			// pressure - the buffer shrinks automatically when they do.
+			windowSeconds: 300,
 		},
 
 		// === Search ===

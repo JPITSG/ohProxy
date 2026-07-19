@@ -11,6 +11,7 @@ const PRECACHE_URLS = [
 	'./transport-client.__JS_VERSION__.js',
 	'./transport.sharedworker.__JS_VERSION__.js',
 	'./widget-normalizer.__JS_VERSION__.js',
+	'./video-dvr.__JS_VERSION__.js',
 	'./app.__JS_VERSION__.js',
 	'./tailwind.__CSS_VERSION__.css',
 	'./styles.__CSS_VERSION__.css',

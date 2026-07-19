@@ -1211,9 +1211,13 @@ async function enterVideoFullscreen(videoEl, videoContainer) {
 				await screen.orientation.lock('landscape');
 			} catch (_) {
 				videoEl.classList.add('fs-rotated');
+				// Rotate the DVR bar with the video so scrubbing stays at the
+				// visual bottom edge on rotated phone fullscreen.
+				videoContainer.classList.add('dvr-rotated');
 			}
 		} else {
 			videoEl.classList.add('fs-rotated');
+			videoContainer.classList.add('dvr-rotated');
 		}
 	}
 
@@ -1239,6 +1243,7 @@ function cleanupVideoFullscreen() {
 	resetVideoZoom(videoEl);
 
 	videoEl.classList.remove('fs-rotated');
+	if (videoContainer) videoContainer.classList.remove('dvr-rotated');
 	try { screen.orientation.unlock(); } catch (_) {}
 
 	// Clean up fake fullscreen state
@@ -1589,9 +1594,44 @@ function restartVideoStream(videoEl) {
 	resetVideoControlButtonStates(videoEl);
 	setVideoZoomReady(videoEl, false);
 	resetVideoZoom(videoEl);
+	// DVR-backed streams own their MediaSource; a src round-trip would just
+	// detach it. The engine rebuilds its pipeline (history restarts too).
+	if (videoEl.__dvr) {
+		videoEl.__dvr.restart();
+		videoEl.play().catch(() => {});
+		return;
+	}
 	const src = videoEl.src;
 	videoEl.src = '';
 	videoEl.src = src;
+	videoEl.play().catch(() => {});
+}
+
+function videoDvrClientConfig() {
+	const cfg = CLIENT_CONFIG.videoDvr && typeof CLIENT_CONFIG.videoDvr === 'object' ? CLIENT_CONFIG.videoDvr : {};
+	return {
+		enabled: cfg.enabled !== false,
+		windowSeconds: configNumber(cfg.windowSeconds, 300),
+	};
+}
+
+// Starts playback of a video widget stream: timeshift (DVR) via MediaSource
+// when enabled and supported, otherwise the legacy direct-src live-only path.
+function startVideoWidgetStream(videoEl, videoContainer, videoSrc) {
+	const dvrCfg = videoDvrClientConfig();
+	const dvrApi = window.OhVideoDvr;
+	if (dvrCfg.enabled && dvrApi && dvrApi.isSupported()) {
+		const session = dvrApi.attach(videoEl, videoContainer, videoSrc, {
+			windowSeconds: dvrCfg.windowSeconds,
+			formatClock: (d) => formatDT(d, TIME_FORMAT),
+			onFallback: () => {
+				videoEl.src = videoSrc;
+				videoEl.play().catch(() => {});
+			},
+		});
+		if (session) return;
+	}
+	videoEl.src = videoSrc;
 	videoEl.play().catch(() => {});
 }
 
@@ -1884,6 +1924,7 @@ function stopAllVideoStreams() {
 		resetVideoControlButtonStates(video);
 		setVideoZoomReady(video, false);
 		resetVideoZoom(video);
+		if (video.__dvr) video.__dvr.destroy();
 		if (video.src) {
 			video.src = '';
 			video.load();
@@ -1897,6 +1938,12 @@ function pauseVideoStreamsForVisibility() {
 		resetVideoControlButtonStates(video);
 		setVideoZoomReady(video, false);
 		resetVideoZoom(video);
+		if (video.__dvr) {
+			// DVR streams keep their buffered history across a hide/show
+			// cycle; only the network fetch stops while hidden.
+			video.__dvr.suspend();
+			continue;
+		}
 		if (video.src) {
 			video.dataset.savedSrc = video.src;
 			// Save preview image URL for use as poster during resume
@@ -1921,6 +1968,13 @@ function resumeVideoStreamsFromVisibility() {
 		resetVideoControlButtonStates(video);
 		setVideoZoomReady(video, false);
 		resetVideoZoom(video);
+		if (video.__dvr) {
+			video.__dvr.resumeFromSuspend();
+			// A session left paused mid-review resumes without a 'playing'
+			// event; restore zoom for the already-presented frame.
+			if (!video.ended && video.readyState >= 2) setVideoZoomReady(video, true);
+			continue;
+		}
 		if (video.dataset.savedSrc) {
 			const container = video.closest('.video-container');
 			const spinner = container?.querySelector('.video-spinner');
@@ -2881,6 +2935,9 @@ function initVideoClock(videoEl, videoContainer) {
 	let stallTimer = null;
 	const markClockStalled = () => {
 		stallTimer = null;
+		// A paused element stops presenting frames on purpose (DVR pause);
+		// that is not a stalled stream.
+		if (videoEl.paused) return;
 		const clock = videoContainer.querySelector('.video-clock');
 		if (clock && !clock.classList.contains('hidden')) clock.classList.add('stalled');
 	};
@@ -2892,8 +2949,12 @@ function initVideoClock(videoEl, videoContainer) {
 		frameCallbackPending = false;
 		const clock = videoContainer.querySelector('.video-clock');
 		if (clock) {
-			const text = formatDT(new Date(), TIME_FORMAT);
+			// While the DVR playhead sits behind live, show the wall time of
+			// the displayed frame instead of "now".
+			const dvrDate = videoEl.__dvr ? videoEl.__dvr.shiftedClockDate() : null;
+			const text = formatDT(dvrDate || new Date(), TIME_FORMAT);
 			if (clock.textContent !== text) clock.textContent = text;
+			clock.classList.toggle('dvr-shifted', !!dvrDate);
 			clock.classList.remove('stalled');
 			clock.classList.remove('hidden');
 			armClockStallWatchdog();
@@ -6537,6 +6598,13 @@ const ADMIN_CONFIG_SCHEMA = [
 		],
 	},
 	{
+		id: 'client-video', group: 'client', reloadRequired: true,
+		fields: [
+			{ key: 'client.videoDvr.enabled', type: 'toggle' },
+			{ key: 'client.videoDvr.windowSeconds', type: 'number', min: 30 },
+		],
+	},
+	{
 		id: 'client-format', group: 'client', reloadRequired: true,
 		fields: [
 			{ key: 'client.dateFormat', type: 'text' },
@@ -10084,6 +10152,7 @@ function updateCard(card, w, info) {
 			const staleContainer = card.querySelector('.video-container');
 			if (staleContainer) {
 				const staleVideo = staleContainer.querySelector('video.video-stream');
+				if (staleVideo && staleVideo.__dvr) staleVideo.__dvr.destroy();
 				if (staleVideo && staleVideo.src) {
 					resetVideoControlButtonStates(staleVideo);
 					setVideoZoomReady(staleVideo, false);
@@ -10180,10 +10249,23 @@ function updateCard(card, w, info) {
 		// Video z-15 covers preview z-10 and spinner z-12 when playing
 
 		if (isNewVideo) {
-			const disableVideoZoom = () => setVideoZoomReady(videoEl, false);
+			// A DVR session keeps a valid (paused or time-shifted) frame on
+			// screen through pause/waiting/stalled, so zoom stays available;
+			// those events only disable zoom for legacy live-only streams.
+			// Destructive events (no frame) always disable.
+			const disableVideoZoom = (e) => {
+				const transientWithFrame = e && (e.type === 'pause' || e.type === 'waiting' || e.type === 'stalled');
+				if (transientWithFrame && videoEl.__dvr && videoEl.readyState >= 2) return;
+				setVideoZoomReady(videoEl, false);
+			};
 			for (const evt of ['loadstart','waiting','stalled','pause','ended','emptied','abort','error']) {
 				videoEl.addEventListener(evt, disableVideoZoom);
 			}
+			// Paused scrubbing presents new frames through seeks alone (no
+			// 'playing' event follows) - re-arm zoom once the frame is up.
+			videoEl.addEventListener('seeked', () => {
+				if (videoEl.__dvr && videoEl.readyState >= 2) setVideoZoomReady(videoEl, true);
+			});
 
 			// Thumbnail age badge: visible while the preview is what the user sees,
 			// hidden as soon as live frames are flowing. loadstart/emptied/error mark
@@ -10209,6 +10291,7 @@ function updateCard(card, w, info) {
 			videoEl.addEventListener('stalled', () => {
 				setTimeout(() => {
 					if (videosPausedForVisibility) return;
+					if (videoEl.__dvr && (videoEl.__dvr.isUserPaused() || videoEl.__dvr.isScrubbing())) return;
 					if (videoEl.src) {
 						videoEl.play().catch(() => {});
 					}
@@ -10229,6 +10312,9 @@ function updateCard(card, w, info) {
 					return;
 				}
 				if (videosPausedForVisibility) return;
+				// A DVR pause, suspend or held scrub is intentional; the
+				// health check must not yank the user back into playback.
+				if (videoEl.__dvr && (videoEl.__dvr.isUserPaused() || videoEl.__dvr.isSuspended() || videoEl.__dvr.isScrubbing())) return;
 				if (videoEl.src && videoEl.paused && !videoEl.ended) {
 					videoEl.play().catch(() => {
 						restartVideoStream(videoEl);
@@ -10305,7 +10391,7 @@ function updateCard(card, w, info) {
 		}
 		if (videoEl.parentNode !== zoomStage) zoomStage.appendChild(videoEl);
 		initVideoZoom(videoEl, zoomStage);
-		setVideoZoomReady(videoEl, !videoEl.paused && !videoEl.ended);
+		setVideoZoomReady(videoEl, !videoEl.ended && (!videoEl.paused || (!!videoEl.__dvr && videoEl.readyState >= 2)));
 
 		// Height: if 0, use 16:9 aspect ratio; otherwise use specified height
 		if (videoHeight > 0) {
@@ -10328,11 +10414,11 @@ function updateCard(card, w, info) {
 			resetVideoControlButtonStates(videoEl);
 			setVideoZoomReady(videoEl, false);
 			resetVideoZoom(videoEl);
+			if (videoEl.__dvr) videoEl.__dvr.destroy();
 			requestAnimationFrame(() => {
 				const containerWidth = videoContainer.offsetWidth || videoContainer.clientWidth || 640;
 				const videoSrc = `${videoUrl}&w=${containerWidth}`;
-				videoEl.src = videoSrc;
-				videoEl.play().catch(() => {});
+				startVideoWidgetStream(videoEl, videoContainer, videoSrc);
 			});
 		}
 		return true;

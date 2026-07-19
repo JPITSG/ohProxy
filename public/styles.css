@@ -3473,6 +3473,213 @@ html.fs-no-scroll body {
 	z-index: 25;
 }
 
+/* ── Video timeshift (DVR) bar ──
+   Slim overlay row aligned with the mute/fullscreen buttons: same 8px inset,
+   same 32px control height and the same black-chip look as the clock/age
+   badges. Appears once the in-memory timeshift window holds a few seconds.
+   z-order: above the video (15), badges (20) and fullscreen buttons (25). */
+.video-dvr {
+	position: absolute;
+	left: 8px;
+	right: 88px; /* clear of the mute (right:48) + fullscreen (right:8) buttons */
+	bottom: 8px;
+	z-index: 26;
+	height: 32px;
+	display: none;
+	align-items: center;
+	gap: 8px;
+	/* right padding matches the LIVE chip's 5px vertical centering gap so the
+	   chip sits equidistant from the bar's top, bottom and right edges */
+	padding: 0 5px 0 10px;
+	border: 1px solid #3a3a3a;
+	border-radius: 6.4px;
+	background: #000000;
+	color: #ffffff;
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 1;
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+}
+.video-dvr.ready { display: flex; }
+/* First seconds after stream start: bar is visible but inert until enough
+   history exists for scrubbing (engine gates the handlers; this is the
+   matching visual affordance) */
+.video-dvr.locked .video-dvr-play,
+.video-dvr.locked .video-dvr-track,
+.video-dvr.locked .video-dvr-live {
+	opacity: .45;
+	cursor: default;
+}
+
+.video-dvr-play {
+	flex: none;
+	width: 20px;
+	height: 20px;
+	margin: 0;
+	padding: 2px;
+	border: none;
+	background: transparent;
+	color: #ffffff;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+/* pointer-events none keeps the button itself the click target even while
+   the icon svg is being swapped (a swap mid-click swallows the event) */
+.video-dvr-play svg { width: 100%; height: 100%; display: block; fill: currentColor; pointer-events: none; }
+
+.video-dvr-offset {
+	flex: none;
+	min-width: 40px;
+	text-align: center;
+}
+.video-dvr-offset.empty { display: none; }
+
+.video-dvr-track {
+	flex: 1;
+	position: relative;
+	height: 100%;
+	min-width: 40px;
+	/* the 12px thumb overhangs the track ends by 6px; keep it clear of the
+	   LIVE chip / offset label */
+	margin: 0 6px;
+	cursor: pointer;
+}
+/* Fixed-scale track: the rail base is the part of the timeshift window not
+   buffered yet (dim); .video-dvr-avail overlays the buffered region. */
+.video-dvr-rail {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 50%;
+	height: 4px;
+	transform: translateY(-50%);
+	border-radius: 2px;
+	background: rgba(255, 255, 255, .12);
+	overflow: hidden;
+}
+.video-dvr-avail {
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	right: 0;
+	border-radius: 2px;
+	background: rgba(255, 255, 255, .28);
+}
+.video-dvr-fill {
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	width: 100%;
+	border-radius: 2px;
+	background: #818cf8; /* indigo: reviewing history */
+}
+.video-dvr.at-live .video-dvr-fill { background: #dc2626; } /* red: at the live edge */
+.video-dvr-thumb {
+	position: absolute;
+	top: 50%;
+	left: 100%;
+	width: 12px;
+	height: 12px;
+	margin: -6px 0 0 -6px;
+	border-radius: 50%;
+	background: #ffffff;
+	box-shadow: 0 0 4px rgba(0, 0, 0, .6);
+	pointer-events: none;
+	transition: transform .15s ease;
+}
+.video-dvr.dragging .video-dvr-thumb { transform: scale(1.35); }
+.video-dvr-bubble {
+	position: absolute;
+	bottom: calc(100% + 10px);
+	left: 100%;
+	transform: translateX(-50%);
+	display: none;
+	padding: 4px 8px;
+	border-radius: 4px;
+	background: rgba(0, 0, 0, .8);
+	color: #ffffff;
+	font-size: 11px;
+	white-space: nowrap;
+	pointer-events: none;
+}
+.video-dvr.dragging .video-dvr-bubble { display: block; }
+
+.video-dvr-live {
+	flex: none;
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	height: 20px;
+	margin: 0;
+	padding: 0 8px;
+	border: none;
+	border-radius: 4px;
+	background: rgba(255, 255, 255, .16);
+	color: rgba(255, 255, 255, .8);
+	/* buttons do not inherit the app font; without this the label renders
+	   in the UA button font with its own metrics */
+	font-family: inherit;
+	font-size: 10px;
+	font-weight: 600;
+	line-height: 1;
+	letter-spacing: .06em;
+	cursor: pointer;
+}
+.video-dvr-live-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: currentColor;
+}
+/* Heartbeat on the dot while playback is at the live edge */
+@keyframes dvr-live-pulse {
+	0%, 100% { opacity: 1; transform: scale(1); }
+	50% { opacity: .35; transform: scale(.8); }
+}
+.video-dvr.at-live .video-dvr-live-dot {
+	animation: dvr-live-pulse 1.6s ease-in-out infinite;
+}
+/* Uppercase-only label: no descenders, so the ink rides ~0.5px above the
+   line-box center (measured). Nudge the glyphs back onto the optical center;
+   the dot is geometrically centered already. */
+.video-dvr-live-text {
+	position: relative;
+	top: 0.5px;
+}
+.video-dvr.at-live .video-dvr-live {
+	background: #dc2626;
+	color: #ffffff;
+	cursor: default;
+}
+
+/* Rotated fullscreen (fs-rotated video on portrait-locked phones): rotate the
+   bar with the video so scrubbing hugs the visual bottom edge. The container
+   fills the viewport whenever this class is set, so vw/vh measure the screen.
+   rotate(90deg) maps the bar's Y axis to screen-left, matching the video. */
+.video-container.dvr-rotated .video-dvr {
+	left: 50%;
+	right: auto;
+	bottom: auto;
+	top: 50%;
+	width: calc(100vh - 16px);
+	transform: translate(-50%, -50%) rotate(90deg) translateY(calc(50vw - 50% - 8px));
+}
+
+/* Stream clock while the DVR playhead is behind live: indigo chip showing the
+   frame's wall time (red stays reserved for the stalled alert). */
+.video-clock.dvr-shifted {
+	background: #4338ca;
+	opacity: .75;
+}
+
 /* ========== Iframe Pseudo-Fullscreen ========== */
 .iframe-fs-active {
 	position: fixed !important;

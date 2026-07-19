@@ -25,10 +25,11 @@ describe('Video stream clock', () => {
 		const end = app.indexOf('function buildCompactSearchPlaceholder');
 		assert.ok(start > -1 && end > start);
 		const body = app.slice(start, end);
-		// each presented frame stamps the current time, clears the stall alert,
+		// each presented frame stamps the current time (or the DVR-shifted
+		// frame time while scrubbed behind live), clears the stall alert,
 		// re-arms the watchdog and the callback
 		assert.match(body, /const hasFrameCallback = typeof videoEl\.requestVideoFrameCallback === 'function';/);
-		assert.match(body, /const text = formatDT\(new Date\(\), TIME_FORMAT\);\s*if \(clock\.textContent !== text\) clock\.textContent = text;\s*clock\.classList\.remove\('stalled'\);\s*clock\.classList\.remove\('hidden'\);\s*armClockStallWatchdog\(\);/);
+		assert.match(body, /const dvrDate = videoEl\.__dvr \? videoEl\.__dvr\.shiftedClockDate\(\) : null;\s*const text = formatDT\(dvrDate \|\| new Date\(\), TIME_FORMAT\);\s*if \(clock\.textContent !== text\) clock\.textContent = text;\s*clock\.classList\.toggle\('dvr-shifted', !!dvrDate\);\s*clock\.classList\.remove\('stalled'\);\s*clock\.classList\.remove\('hidden'\);\s*armClockStallWatchdog\(\);/);
 		// exactly one armed callback via pending flag; never cancelled from event
 		// handlers (cancelling on 'playing' can starve the chain on live streams)
 		assert.match(body, /if \(!hasFrameCallback \|\| frameCallbackPending\) return;\s*frameCallbackPending = true;\s*videoEl\.requestVideoFrameCallback\(onFrame\);/);
@@ -39,7 +40,8 @@ describe('Video stream clock', () => {
 		assert.doesNotMatch(body, /setInterval|requestAnimationFrame/);
 		assert.strictEqual((body.match(/textContent = /g) || []).length, 1);
 		assert.match(body, /stallTimer = setTimeout\(markClockStalled, VIDEO_CLOCK_STALL_MS\);/);
-		assert.match(body, /const markClockStalled = \(\) => \{\s*stallTimer = null;\s*const clock = videoContainer\.querySelector\('\.video-clock'\);\s*if \(clock && !clock\.classList\.contains\('hidden'\)\) clock\.classList\.add\('stalled'\);\s*\};/);
+		// an intentionally paused element (DVR pause) is not a stalled stream
+		assert.match(body, /const markClockStalled = \(\) => \{\s*stallTimer = null;[\s\S]*?if \(videoEl\.paused\) return;\s*const clock = videoContainer\.querySelector\('\.video-clock'\);\s*if \(clock && !clock\.classList\.contains\('hidden'\)\) clock\.classList\.add\('stalled'\);\s*\};/);
 		// fallback path only advances when currentTime actually moved
 		assert.match(body, /if \(videoEl\.currentTime === lastMediaTime\) return;\s*lastMediaTime = videoEl\.currentTime;\s*onFrame\(\);/);
 	});

@@ -1196,6 +1196,11 @@ function validateConfig() {
 			ensureNumber(CLIENT_CONFIG.transport?.workerRpcTimeoutMs, 'client.transport.workerRpcTimeoutMs', { min: 1 }, errors);
 		}
 
+		if (ensureObject(CLIENT_CONFIG.videoDvr, 'client.videoDvr', errors)) {
+			ensureBoolean(CLIENT_CONFIG.videoDvr?.enabled, 'client.videoDvr.enabled', errors);
+			ensureNumber(CLIENT_CONFIG.videoDvr?.windowSeconds, 'client.videoDvr.windowSeconds', { min: 30 }, errors);
+		}
+
 		if (ensureObject(CLIENT_CONFIG.searchDebounceMs, 'client.searchDebounceMs', errors)) {
 			ensureNumber(CLIENT_CONFIG.searchDebounceMs?.default, 'client.searchDebounceMs.default', { min: 0 }, errors);
 			ensureNumber(CLIENT_CONFIG.searchDebounceMs?.slim, 'client.searchDebounceMs.slim', { min: 0 }, errors);
@@ -1595,6 +1600,14 @@ function validateAdminConfig(config) {
 			}
 			if (c.transport.workerRpcTimeoutMs !== undefined) {
 				ensureNumber(c.transport.workerRpcTimeoutMs, 'client.transport.workerRpcTimeoutMs', { min: 1 }, errors);
+			}
+		}
+		if (isPlainObject(c.videoDvr)) {
+			if (c.videoDvr.enabled !== undefined) {
+				ensureBoolean(c.videoDvr.enabled, 'client.videoDvr.enabled', errors);
+			}
+			if (c.videoDvr.windowSeconds !== undefined) {
+				ensureNumber(c.videoDvr.windowSeconds, 'client.videoDvr.windowSeconds', { min: 30 }, errors);
 			}
 		}
 		if (isPlainObject(c.searchDebounceMs)) {
@@ -2545,6 +2558,7 @@ const LANG_JS_PATH = path.join(PUBLIC_DIR, 'lang.js');
 const OH_UTILS_JS_PATH = path.join(PUBLIC_DIR, 'oh-utils.js');
 const TRANSPORT_CLIENT_JS_PATH = path.join(PUBLIC_DIR, 'transport-client.js');
 const TRANSPORT_SHAREDWORKER_JS_PATH = path.join(PUBLIC_DIR, 'transport.sharedworker.js');
+const VIDEO_DVR_JS_PATH = path.join(PUBLIC_DIR, 'video-dvr.js');
 const WIDGET_NORMALIZER_PATH = path.join(__dirname, 'lib', 'widget-normalizer.js');
 const MATERIAL_ICONS_DIR = path.join(__dirname, 'node_modules', '@material-design-icons', 'svg');
 const MATERIAL_ICONS_FILLED_DIR = path.join(MATERIAL_ICONS_DIR, 'filled');
@@ -9479,6 +9493,10 @@ app.get(/^\/transport\.sharedworker\.v[\w.-]+\.js$/i, (req, res) => {
 
 app.get(/^\/widget-normalizer\.v[\w.-]+\.js$/i, (req, res) => {
 	sendVersionedAsset(res, WIDGET_NORMALIZER_PATH, 'application/javascript; charset=utf-8');
+});
+
+app.get(/^\/video-dvr\.v[\w.-]+\.js$/i, (req, res) => {
+	sendVersionedAsset(res, VIDEO_DVR_JS_PATH, 'application/javascript; charset=utf-8');
 });
 
 // --- Proxy FIRST (so bodies aren't eaten by any parsers) ---
