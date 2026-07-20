@@ -3482,18 +3482,21 @@ html.fs-no-scroll body {
 	position: absolute;
 	left: 8px;
 	right: 88px; /* clear of the mute (right:48) + fullscreen (right:8) buttons */
-	bottom: 8px;
+	/* 34px outer at bottom:7 puts the 32px black area INSIDE the 1px border
+	   exactly on the buttons' 8px-inset 32px band - the visible black matches
+	   the visible button squares, with the border hugging the outside */
+	bottom: 7px;
 	z-index: 26;
-	height: 32px;
+	height: 34px;
 	display: none;
 	align-items: center;
 	gap: 8px;
-	/* right padding matches the LIVE chip's 5px vertical centering gap so the
+	/* right padding matches the LIVE chip's 6px vertical centering gap so the
 	   chip sits equidistant from the bar's top, bottom and right edges */
-	padding: 0 5px 0 10px;
+	padding: 0 6px 0 10px;
 	border: 1px solid #3a3a3a;
 	border-radius: 6.4px;
-	background: #000000;
+	background: rgba(0, 0, 0, .5);
 	color: #ffffff;
 	font-size: 12px;
 	font-weight: 500;
@@ -3551,7 +3554,8 @@ html.fs-no-scroll body {
 	cursor: pointer;
 }
 /* Fixed-scale track: the rail base is the part of the timeshift window not
-   buffered yet (dim); .video-dvr-avail overlays the buffered region. */
+   buffered yet (dim); .video-dvr-avail overlays the buffered region. Solid
+   colors: the bar behind is 50% transparent, the controls are not. */
 .video-dvr-rail {
 	position: absolute;
 	left: 0;
@@ -3560,7 +3564,7 @@ html.fs-no-scroll body {
 	height: 4px;
 	transform: translateY(-50%);
 	border-radius: 2px;
-	background: rgba(255, 255, 255, .12);
+	background: #3f3f46;
 	overflow: hidden;
 }
 .video-dvr-avail {
@@ -3570,7 +3574,7 @@ html.fs-no-scroll body {
 	bottom: 0;
 	right: 0;
 	border-radius: 2px;
-	background: rgba(255, 255, 255, .28);
+	background: #9ca3af;
 }
 .video-dvr-fill {
 	position: absolute;
@@ -3603,8 +3607,9 @@ html.fs-no-scroll body {
 	transform: translateX(-50%);
 	display: none;
 	padding: 4px 8px;
+	border: 1px solid #3a3a3a;
 	border-radius: 4px;
-	background: rgba(0, 0, 0, .8);
+	background: #000000;
 	color: #ffffff;
 	font-size: 11px;
 	white-space: nowrap;
@@ -3622,8 +3627,8 @@ html.fs-no-scroll body {
 	padding: 0 8px;
 	border: none;
 	border-radius: 4px;
-	background: rgba(255, 255, 255, .16);
-	color: rgba(255, 255, 255, .8);
+	background: #52525b;
+	color: #ffffff;
 	/* buttons do not inherit the app font; without this the label renders
 	   in the UA button font with its own metrics */
 	font-family: inherit;
@@ -3670,7 +3675,7 @@ html.fs-no-scroll body {
 	bottom: auto;
 	top: 50%;
 	width: calc(100vh - 16px);
-	transform: translate(-50%, -50%) rotate(90deg) translateY(calc(50vw - 50% - 8px));
+	transform: translate(-50%, -50%) rotate(90deg) translateY(calc(50vw - 50% - 7px));
 }
 
 /* Stream clock while the DVR playhead is behind live: indigo chip showing the

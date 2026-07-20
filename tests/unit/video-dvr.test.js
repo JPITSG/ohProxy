@@ -183,10 +183,15 @@ describe('Video timeshift (DVR) wiring', () => {
 		const block = css.slice(start, css.indexOf('}', start));
 		assert.match(block, /left: 8px;/);
 		assert.match(block, /right: 88px;/); // mute (right:48 + 32px) + gap
-		assert.match(block, /bottom: 8px;/);
-		assert.match(block, /height: 32px;/);
+		// 34px outer at bottom:7 puts the 32px black area inside the 1px
+		// border exactly on the buttons' 8px-inset 32px band
+		assert.match(block, /bottom: 7px;/);
+		assert.match(block, /height: 34px;/);
 		assert.match(block, /z-index: 26;/); // above video(15)/badges(20)/fs buttons(25)
 		assert.match(block, /touch-action: none;/);
+		// bar surface is half-transparent; the controls on it are opaque
+		assert.match(block, /background: rgba\(0, 0, 0, \.5\);/);
+		assert.match(block, /border: 1px solid #3a3a3a;/);
 		assert.match(css, /\.video-clock\.dvr-shifted \{/);
 	});
 
