@@ -290,12 +290,21 @@ describe('Video timeshift (DVR) wiring', () => {
 		assert.match(dvr, /fill\.style\.width = posPct \+ '%';\s*thumb\.style\.left = posPct \+ '%';/);
 		// scrub targets clamp into the buffered span
 		assert.match(dvr, /const target = tw\.origin \+ tw\.windowS \* fraction;\s*return Math\.min\(tw\.end, Math\.max\(tw\.start, target\)\);/);
-		// span growth moves percentage positions once per append (~1/s); the
-		// thumb and fill glide to the new spot instead of stepping, and the
-		// glide is disabled while dragging so the pointer is tracked 1:1
-		assert.match(css, /\.video-dvr-fill \{[^}]*transition: width \.4s linear;[^}]*\}/);
+		// the scale extrapolates the live edge between appends (positions
+		// would otherwise see-saw: right on timeupdate, left on each append)
+		// and a UI ticker repaints between media events; seeks still clamp
+		// to the real buffered end
+		assert.match(dvr, /const UI_TICK_MS = 100;/);
+		assert.match(dvr, /const EDGE_EXTRAPOLATION_MAX_S = 2\.5;/);
+		assert.match(dvr, /if \(range\.end !== edgeBaseEnd\) \{\s*edgeBaseEnd = range\.end;\s*edgeBaseWall = performance\.now\(\);\s*\}/);
+		assert.match(dvr, /const scaleEnd = range\.end \+ Math\.min\(EDGE_EXTRAPOLATION_MAX_S, \(performance\.now\(\) - edgeBaseWall\) \/ 1000\);/);
+		assert.match(dvr, /const uiTicker = setInterval\(\(\) => \{\s*if \(session\.destroyed \|\| session\.suspended \|\| document\.hidden\) return;\s*if \(!bar\.classList\.contains\('ready'\)\) return;\s*scheduleUiUpdate\(\);\s*\}, UI_TICK_MS\);/);
+		assert.match(dvr, /clearInterval\(watchdog\);\s*clearInterval\(uiTicker\);/);
+		// the short glide smooths the discrete residue and is disabled while
+		// dragging so the pointer is tracked 1:1
+		assert.match(css, /\.video-dvr-fill \{[^}]*transition: width \.2s linear;[^}]*\}/);
 		assert.match(css, /\.video-dvr\.dragging \.video-dvr-fill \{ transition: none; \}/);
-		assert.match(css, /transition: transform \.15s ease, left \.4s linear;/);
+		assert.match(css, /transition: transform \.15s ease, left \.2s linear;/);
 		assert.match(css, /\.video-dvr\.dragging \.video-dvr-thumb \{ transform: scale\(1\.35\); transition: transform \.15s ease; \}/);
 		// the gray remainder past the thumb still covers the whole rail
 		assert.match(dvr, /avail\.className = 'video-dvr-avail';/);

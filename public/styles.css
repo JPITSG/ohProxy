@@ -3586,9 +3586,9 @@ html.fs-no-scroll body {
 	width: 100%;
 	border-radius: 2px;
 	background: #818cf8; /* indigo: reviewing history */
-	/* buffer growth shifts percentage positions once per appended fragment
-	   (~1/s); glide to the new position instead of stepping */
-	transition: width .4s linear;
+	/* positions update ~10x/s from a continuously-extrapolated scale; the
+	   short glide smooths the residue (evictions, reconnect stitches) */
+	transition: width .2s linear;
 }
 .video-dvr.dragging .video-dvr-fill { transition: none; } /* track the pointer 1:1 */
 .video-dvr.at-live .video-dvr-fill { background: #dc2626; } /* red: at the live edge */
@@ -3603,7 +3603,7 @@ html.fs-no-scroll body {
 	background: #ffffff;
 	box-shadow: 0 0 4px rgba(0, 0, 0, .6);
 	pointer-events: none;
-	transition: transform .15s ease, left .4s linear;
+	transition: transform .15s ease, left .2s linear;
 }
 /* while dragging, left snaps to the pointer; only the scale pop animates */
 .video-dvr.dragging .video-dvr-thumb { transform: scale(1.35); transition: transform .15s ease; }

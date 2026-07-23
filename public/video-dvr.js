@@ -183,6 +183,8 @@
 	const RETRY_MAX_MS = 8000;
 	const DRAG_SEEK_THROTTLE_MS = 150;   // min gap between live seeks while dragging
 	const DRAG_DRIFT_RESEEK_S = 0.5;     // held-pointer reseek once the timeline stretch moves the target this far
+	const UI_TICK_MS = 100;              // meter repaint cadence between media events
+	const EDGE_EXTRAPOLATION_MAX_S = 2.5; // how far past the last append the scale may run ahead
 	const DVR_UNLOCK_WINDOW_S = 5;       // bar shows immediately but stays inert until this much history exists
 	const MAX_QUEUE_BYTES = 24 * 1024 * 1024;
 	const MAX_FAILURES_PER_URL = 2;      // then stick to the legacy path this session
@@ -334,10 +336,24 @@
 		// which moves a time-shifted playhead's percentage - the thumb/fill
 		// GLIDE there via a CSS transition (disabled while dragging) instead
 		// of stepping once per append.
+		//
+		// The buffered end itself only advances once per append while playback
+		// time advances continuously, so metering positions against the raw
+		// end see-saws: right on every timeupdate, left on every append. The
+		// scale instead extrapolates the live edge at 1s/s between appends
+		// (capped, so a stalled stream freezes rather than runs away). Seek
+		// targets still clamp to the REAL buffered end.
+		let edgeBaseEnd = -1;
+		let edgeBaseWall = 0;
 		function timelineWindow() {
 			const range = bufferedRange();
 			if (!range) return null;
-			const spanS = Math.max(0.1, range.end - range.start);
+			if (range.end !== edgeBaseEnd) {
+				edgeBaseEnd = range.end;
+				edgeBaseWall = performance.now();
+			}
+			const scaleEnd = range.end + Math.min(EDGE_EXTRAPOLATION_MAX_S, (performance.now() - edgeBaseWall) / 1000);
+			const spanS = Math.max(0.1, scaleEnd - range.start);
 			return { start: range.start, end: range.end, windowS: spanS, origin: range.start };
 		}
 
@@ -899,6 +915,16 @@
 			if (!document.contains(videoEl)) destroy();
 		}, 5000);
 
+		// High-resolution meter clock: media events repaint only ~4x/s
+		// (timeupdate) and once per append, which is too coarse for the
+		// extrapolated scale - tick the UI between them so motion stays
+		// continuous. Skipped while hidden/suspended; rAF-coalesced.
+		const uiTicker = setInterval(() => {
+			if (session.destroyed || session.suspended || document.hidden) return;
+			if (!bar.classList.contains('ready')) return;
+			scheduleUiUpdate();
+		}, UI_TICK_MS);
+
 		// ── lifecycle ──
 
 		function teardownStream() {
@@ -968,6 +994,7 @@
 			session.active = false;
 			teardownStream();
 			clearInterval(watchdog);
+			clearInterval(uiTicker);
 			if (uiRaf) { cancelAnimationFrame(uiRaf); uiRaf = 0; }
 			for (const [event, handler] of videoListeners.splice(0)) {
 				try { videoEl.removeEventListener(event, handler); } catch (_) {}
