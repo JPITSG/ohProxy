@@ -11220,7 +11220,7 @@ ddInput.value=String(d);yyyyInput.value=String(y);
 loadDay(m,d,y);
 });
 
-var PLAYBACK_STEP_MS=2000;
+var PLAYBACK_STEP_MS=1000;
 var PLAYBACK_MIN_DIST_M=50;
 var pbBackBtn=document.getElementById('pb-back');
 var pbPlayBtn=document.getElementById('pb-play');
@@ -11270,6 +11270,8 @@ addPlaybackMarkerFeature(markers[idx],idx,p===playbackPos?'red':'blue');
 }
 red=markers[playbackSeq[playbackPos]];
 setTooltipHtml(redTooltip,red[3]);
+var headLonLat=new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj);
+if(!map.getExtent().containsLonLat(headLonLat))map.panTo(headLonLat);
 updateRedTooltip();
 syncZoomButtonState();
 }
@@ -11340,7 +11342,6 @@ playbackState='idle';
 playbackSeq=[];
 playbackPos=0;
 restoreOriginalMarkers();
-focusRedMarkerAtDefaultZoom();
 syncZoomButtonState();
 syncPlaybackButtons();
 setTimeout(updateAnchoredTooltips,100);

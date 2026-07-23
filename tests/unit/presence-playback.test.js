@@ -26,8 +26,8 @@ describe('Presence playback (VCR) controls', () => {
 		assert.match(server, /\.playback-controls\{display:flex;justify-content:space-between;gap:6px;margin-top:8px\}/);
 	});
 
-	it('hardcodes the 2s step interval and 50m skip threshold', () => {
-		assert.match(server, /var PLAYBACK_STEP_MS=2000;/);
+	it('hardcodes the 1s step interval and 50m skip threshold', () => {
+		assert.match(server, /var PLAYBACK_STEP_MS=1000;/);
 		assert.match(server, /var PLAYBACK_MIN_DIST_M=50;/);
 		assert.match(server, /playbackTimer=setTimeout\(playbackTick,PLAYBACK_STEP_MS\);/);
 	});
@@ -75,11 +75,11 @@ describe('Presence playback (VCR) controls', () => {
 
 	it('starts playback from the full-day extent with a red playhead and traveling tooltip', () => {
 		assert.match(server, /function startPlayback\(\)\{\s*if\(playbackState!=='idle'\|\|markers\.length<2\)return;\s*playbackSeq=buildPlaybackSequence\(\);\s*if\(playbackSeq\.length<2\)return;\s*clearPresenceMapPopups\(\);\s*playbackState='playing';\s*playbackPos=0;\s*zoomToMarkers\(\);\s*renderPlaybackFrame\(\);/);
-		assert.match(server, /addPlaybackMarkerFeature\(markers\[idx\],idx,p===playbackPos\?'red':'blue'\);\s*\}\s*red=markers\[playbackSeq\[playbackPos\]\];\s*setTooltipHtml\(redTooltip,red\[3\]\);\s*updateRedTooltip\(\);/);
+		assert.match(server, /addPlaybackMarkerFeature\(markers\[idx\],idx,p===playbackPos\?'red':'blue'\);\s*\}\s*red=markers\[playbackSeq\[playbackPos\]\];\s*setTooltipHtml\(redTooltip,red\[3\]\);\s*var headLonLat=new OpenLayers\.LonLat\(red\[1\],red\[0\]\)\.transform\(wgs84,proj\);\s*if\(!map\.getExtent\(\)\.containsLonLat\(headLonLat\)\)map\.panTo\(headLonLat\);\s*updateRedTooltip\(\);/);
 	});
 
-	it('stop and natural completion restore the original markers and view framing', () => {
-		assert.match(server, /function stopPlayback\(\)\{\s*if\(playbackState==='idle'\)return;\s*clearPlaybackTimer\(\);\s*playbackState='idle';\s*playbackSeq=\[\];\s*playbackPos=0;\s*restoreOriginalMarkers\(\);\s*focusRedMarkerAtDefaultZoom\(\);\s*syncZoomButtonState\(\);\s*syncPlaybackButtons\(\);\s*setTimeout\(updateAnchoredTooltips,100\);\s*\}/);
+	it('stop and natural completion restore the original markers without moving the map', () => {
+		assert.match(server, /function stopPlayback\(\)\{\s*if\(playbackState==='idle'\)return;\s*clearPlaybackTimer\(\);\s*playbackState='idle';\s*playbackSeq=\[\];\s*playbackPos=0;\s*restoreOriginalMarkers\(\);\s*syncZoomButtonState\(\);\s*syncPlaybackButtons\(\);\s*setTimeout\(updateAnchoredTooltips,100\);\s*\}/);
 		assert.match(server, /function playbackTick\(\)\{\s*playbackTimer=null;\s*if\(playbackState!=='playing'\)return;\s*if\(playbackPos>=playbackSeq\.length-2\)\{stopPlayback\(\);return\}/);
 		assert.match(server, /function restoreOriginalMarkers\(\)\{\s*clearBlueTooltipSelectionState\(\);\s*vector\.removeAllFeatures\(\);\s*markers\.forEach\(function\(m,i\)\{\s*addPlaybackMarkerFeature\(m,i,m\[2\]\);\s*\}\);/);
 	});
