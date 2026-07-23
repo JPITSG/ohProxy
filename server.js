@@ -10393,6 +10393,7 @@ app.get('/presence', async (req, res) => {
 .month-select-menu div:hover{background:rgba(78,183,128,0.12)}
 .month-select-menu div.selected{background:rgba(78,183,128,0.12);font-weight:500}
 .search-go{}
+.playback-controls{display:flex;justify-content:space-between;gap:6px;margin-top:8px}
 .search-empty{display:none;font-size:0.625rem;font-weight:300;letter-spacing:0.08em;color:rgba(19,21,54,0.5);padding:0 0 8px;font-family:'Rubik',sans-serif}
 @media(max-width:767px){#ctx-menu{display:none!important}}
 #ctx-menu{display:none;position:absolute;z-index:200;background:rgb(245,246,250);border:1px solid rgba(150,150,150,0.3);border-radius:18px;box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:12px;font-family:'Rubik',sans-serif;min-width:160px}
@@ -10442,6 +10443,13 @@ app.get('/presence', async (req, res) => {
 	<input type="text" class="search-dd" placeholder="DD" maxlength="2">
 	<input type="text" class="search-yyyy" placeholder="YYYY" maxlength="4">
 	<button class="search-go" type="button">Search</button>
+	</div>
+	<div class="playback-controls">
+	<button class="map-ctrl-btn" id="pb-back" type="button" title="Step back" aria-label="Step back"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
+	<button class="map-ctrl-btn" id="pb-play" type="button" title="Play" aria-label="Play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+	<button class="map-ctrl-btn" id="pb-pause" type="button" title="Pause" aria-label="Pause"><svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg></button>
+	<button class="map-ctrl-btn" id="pb-stop" type="button" title="Stop" aria-label="Stop"><svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>
+	<button class="map-ctrl-btn" id="pb-forward" type="button" title="Step forward" aria-label="Step forward"><svg viewBox="0 0 24 24"><path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
 	</div>
 	</div>`}
 	</div>
@@ -11166,6 +11174,7 @@ fetch('/api/presence?month='+month+'&day='+day+'&year='+year).then(function(r){r
 if(!data.ok){searchEmpty.textContent=data.error||'Request failed';searchEmpty.style.display='block';shakeSearch();return}
 if(!data.markers.length){searchEmpty.textContent='No results found';searchEmpty.style.display='block';shakeSearch();return}
 searchEmpty.style.display='none';
+resetPlaybackForDayChange();
 clearBlueTooltipSelectionState();
 vector.removeAllFeatures();
 previewLayer.removeAllFeatures();
@@ -11184,6 +11193,7 @@ captureDefaultHomeZoom();
 focusRedMarkerAtDefaultZoom();
 syncZoomButtonState();
 setTimeout(updateAnchoredTooltips,100);
+syncPlaybackButtons();
 }).catch(function(){searchEmpty.textContent='Request failed';searchEmpty.style.display='block';shakeSearch()});
 }
 
@@ -11209,6 +11219,177 @@ monthMenu.querySelectorAll('div').forEach(function(el,i){if(i===m)el.classList.a
 ddInput.value=String(d);yyyyInput.value=String(y);
 loadDay(m,d,y);
 });
+
+var PLAYBACK_STEP_MS=2000;
+var PLAYBACK_MIN_DIST_M=50;
+var pbBackBtn=document.getElementById('pb-back');
+var pbPlayBtn=document.getElementById('pb-play');
+var pbPauseBtn=document.getElementById('pb-pause');
+var pbStopBtn=document.getElementById('pb-stop');
+var pbForwardBtn=document.getElementById('pb-forward');
+var playbackState='idle';
+var playbackSeq=[];
+var playbackPos=0;
+var playbackTimer=null;
+
+function haversineMeters(lat1,lon1,lat2,lon2){
+var toRad=function(deg){return deg*Math.PI/180};
+var R=6371000;
+var dLat=toRad(lat2-lat1);
+var dLon=toRad(lon2-lon1);
+var a=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)*Math.sin(dLon/2);
+return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function buildPlaybackSequence(){
+var seq=[];
+for(var i=0;i<markers.length;i++){
+if(!seq.length){seq.push(i);continue}
+var last=markers[seq[seq.length-1]];
+if(haversineMeters(last[0],last[1],markers[i][0],markers[i][1])>PLAYBACK_MIN_DIST_M)seq.push(i);
+}
+var lastIndex=markers.length-1;
+if(lastIndex>0&&seq[seq.length-1]!==lastIndex)seq.push(lastIndex);
+return seq;
+}
+
+function addPlaybackMarkerFeature(m,idx,color){
+vector.addFeatures(new OpenLayers.Feature.Vector(
+new OpenLayers.Geometry.Point(m[1],m[0]).transform(wgs84,proj),
+{timestamp:m[3],index:idx,color:color},
+{externalGraphic:'/images/marker-'+color+'.png',graphicHeight:41,graphicWidth:25,graphicXOffset:-12,graphicYOffset:-41}
+));
+}
+
+function renderPlaybackFrame(){
+clearBlueTooltipSelectionState();
+vector.removeAllFeatures();
+for(var p=0;p<=playbackPos;p++){
+var idx=playbackSeq[p];
+addPlaybackMarkerFeature(markers[idx],idx,p===playbackPos?'red':'blue');
+}
+red=markers[playbackSeq[playbackPos]];
+setTooltipHtml(redTooltip,red[3]);
+updateRedTooltip();
+syncZoomButtonState();
+}
+
+function restoreOriginalMarkers(){
+clearBlueTooltipSelectionState();
+vector.removeAllFeatures();
+markers.forEach(function(m,i){
+addPlaybackMarkerFeature(m,i,m[2]);
+});
+red=markers.length?markers[markers.length-1]:null;
+if(red){
+setTooltipHtml(redTooltip,red[3]);
+updateRedTooltip();
+}
+}
+
+function clearPlaybackTimer(){
+if(playbackTimer!==null){clearTimeout(playbackTimer);playbackTimer=null}
+}
+
+function schedulePlaybackTick(){
+clearPlaybackTimer();
+playbackTimer=setTimeout(playbackTick,PLAYBACK_STEP_MS);
+}
+
+function playbackTick(){
+playbackTimer=null;
+if(playbackState!=='playing')return;
+if(playbackPos>=playbackSeq.length-2){stopPlayback();return}
+playbackPos++;
+renderPlaybackFrame();
+syncPlaybackButtons();
+schedulePlaybackTick();
+}
+
+function startPlayback(){
+if(playbackState!=='idle'||markers.length<2)return;
+playbackSeq=buildPlaybackSequence();
+if(playbackSeq.length<2)return;
+clearPresenceMapPopups();
+playbackState='playing';
+playbackPos=0;
+zoomToMarkers();
+renderPlaybackFrame();
+syncPlaybackButtons();
+schedulePlaybackTick();
+}
+
+function pausePlayback(){
+if(playbackState!=='playing')return;
+clearPlaybackTimer();
+playbackState='paused';
+syncPlaybackButtons();
+}
+
+function resumePlayback(){
+if(playbackState!=='paused')return;
+playbackState='playing';
+syncPlaybackButtons();
+schedulePlaybackTick();
+}
+
+function stopPlayback(){
+if(playbackState==='idle')return;
+clearPlaybackTimer();
+playbackState='idle';
+playbackSeq=[];
+playbackPos=0;
+restoreOriginalMarkers();
+focusRedMarkerAtDefaultZoom();
+syncZoomButtonState();
+syncPlaybackButtons();
+setTimeout(updateAnchoredTooltips,100);
+}
+
+function resetPlaybackForDayChange(){
+clearPlaybackTimer();
+playbackState='idle';
+playbackSeq=[];
+playbackPos=0;
+syncPlaybackButtons();
+}
+
+function playbackStepBack(){
+if(playbackState==='idle'||playbackPos<=0)return;
+playbackPos--;
+renderPlaybackFrame();
+syncPlaybackButtons();
+if(playbackState==='playing')schedulePlaybackTick();
+}
+
+function playbackStepForward(){
+if(playbackState==='idle')return;
+if(playbackPos>=playbackSeq.length-2){stopPlayback();return}
+playbackPos++;
+renderPlaybackFrame();
+syncPlaybackButtons();
+if(playbackState==='playing')schedulePlaybackTick();
+}
+
+function syncPlaybackButtons(){
+var inSession=playbackState!=='idle';
+setMapControlDisabled(pbPlayBtn,playbackState==='playing'||(!inSession&&markers.length<2));
+setMapControlDisabled(pbPauseBtn,playbackState!=='playing');
+setMapControlDisabled(pbStopBtn,!inSession);
+setMapControlDisabled(pbBackBtn,!inSession||playbackPos<=0);
+setMapControlDisabled(pbForwardBtn,!inSession);
+}
+
+pbPlayBtn.addEventListener('click',function(){
+if(pbPlayBtn.disabled)return;
+if(playbackState==='paused'){resumePlayback();return}
+startPlayback();
+});
+pbPauseBtn.addEventListener('click',function(){if(pbPauseBtn.disabled)return;pausePlayback()});
+pbStopBtn.addEventListener('click',function(){if(pbStopBtn.disabled)return;stopPlayback()});
+pbBackBtn.addEventListener('click',function(){if(pbBackBtn.disabled)return;playbackStepBack()});
+pbForwardBtn.addEventListener('click',function(){if(pbForwardBtn.disabled)return;playbackStepForward()});
+syncPlaybackButtons();
 
 var ctxMenu=document.getElementById('ctx-menu');
 var ctxLat=0,ctxLon=0,ctxOffset=0,ctxRadius=100,ctxWheelNavUntil=0;
