@@ -252,6 +252,22 @@ describe('Video timeshift (DVR) wiring', () => {
 		assert.match(dvr, /session\.isScrubbing = \(\) => dragging;/);
 	});
 
+	it('shows the landing bubble on hover, kept live while the pointer rests', () => {
+		const dvr = fs.readFileSync(DVR_FILE, 'utf8');
+		const css = fs.readFileSync(STYLES_FILE, 'utf8');
+		// drag preview and hover preview share one bubble writer
+		assert.match(dvr, /function positionBubble\(fraction\) \{/);
+		assert.match(dvr, /const behind = positionBubble\(fraction\);\s*offsetLabel\.textContent = behind !== null && behind > LIVE_LATENCY_SHIFT_S \? '-' \+ formatOffset\(behind\) : '';/);
+		// mouse hover shows the bubble without engaging the scrub; touch has
+		// no hover and goes straight to the drag path; a locked bar stays inert
+		assert.match(dvr, /track\.addEventListener\('pointerenter', \(e\) => \{\s*if \(e\.pointerType === 'touch' \|\| dragging \|\| !bar\.classList\.contains\('ready'\) \|\| barLocked\) return;\s*lastHoverFraction = trackFraction\(e\);\s*setHovering\(true\);\s*positionBubble\(lastHoverFraction\);\s*\}\);/);
+		assert.match(dvr, /track\.addEventListener\('pointerleave', \(\) => \{\s*setHovering\(false\);\s*\}\);/);
+		assert.match(dvr, /if \(!dragging\) \{\s*if \(e\.pointerType === 'touch' \|\| !bar\.classList\.contains\('ready'\) \|\| barLocked\) return;\s*lastHoverFraction = trackFraction\(e\);\s*setHovering\(true\);\s*positionBubble\(lastHoverFraction\);\s*return;\s*\}/);
+		// a resting hover pointer stays live as appends stretch the span
+		assert.match(dvr, /if \(hovering\) \{\s*if \(barLocked\) setHovering\(false\);\s*else positionBubble\(lastHoverFraction\);\s*\}/);
+		assert.match(css, /\.video-dvr\.hover-preview \.video-dvr-bubble,\s*\.video-dvr\.dragging \.video-dvr-bubble \{ display: block; \}/);
+	});
+
 	it('keeps zoom available for paused and time-shifted DVR frames', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		// pause/waiting/stalled leave a valid frame on a DVR session

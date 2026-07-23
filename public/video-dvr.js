@@ -682,6 +682,12 @@
 			offsetLabel.textContent = live ? '' : '-' + formatOffset(behind);
 			offsetLabel.classList.toggle('empty', live);
 			bar.classList.toggle('at-live', live);
+			// A resting hover pointer is live too: appends stretch the span,
+			// so the spot under the cursor keeps changing.
+			if (hovering) {
+				if (barLocked) setHovering(false);
+				else positionBubble(lastHoverFraction);
+			}
 		}
 
 		function trackFraction(event) {
@@ -695,6 +701,20 @@
 			return Math.min(1, Math.max(0, fraction));
 		}
 
+		// Shared by the drag preview and the hover preview: place the bubble
+		// at the (clamped) landing position and describe it. Returns how far
+		// behind live that landing point is.
+		function positionBubble(fraction) {
+			const tw = timelineWindow();
+			if (!tw) return null;
+			const target = timelineTime(fraction, tw);
+			const behind = Math.max(0, tw.end - target);
+			bubble.style.left = timelinePct(target, tw) + '%';
+			const wall = wallTimeFromEpochs(epochs, target);
+			bubble.textContent = (wall ? formatClock(wall) : '') + (behind > LIVE_LATENCY_SHIFT_S ? '  -' + formatOffset(behind) : '  LIVE');
+			return behind;
+		}
+
 		function previewScrub(fraction) {
 			const tw = timelineWindow();
 			if (!tw) return;
@@ -702,11 +722,8 @@
 			const pct = timelinePct(target, tw);
 			fill.style.width = pct + '%';
 			thumb.style.left = pct + '%';
-			bubble.style.left = pct + '%';
-			const wall = wallTimeFromEpochs(epochs, target);
-			const behind = Math.max(0, tw.end - target);
-			bubble.textContent = (wall ? formatClock(wall) : '') + (behind > LIVE_LATENCY_SHIFT_S ? '  -' + formatOffset(behind) : '  LIVE');
-			offsetLabel.textContent = behind > LIVE_LATENCY_SHIFT_S ? '-' + formatOffset(behind) : '';
+			const behind = positionBubble(fraction);
+			offsetLabel.textContent = behind !== null && behind > LIVE_LATENCY_SHIFT_S ? '-' + formatOffset(behind) : '';
 		}
 
 		function applyScrub(fraction) {
@@ -759,6 +776,16 @@
 		// authoritative position and the follow-live decision.
 		let lastDragSeekAt = 0;
 		let lastDragFraction = 1;
+		// Hover preview: a mouse resting over the track shows the same landing
+		// bubble without engaging the scrub; updateUi keeps it live as the
+		// timeline stretches (touch has no hover - a finger goes straight to
+		// the drag path).
+		let hovering = false;
+		let lastHoverFraction = 0;
+		function setHovering(on) {
+			hovering = on;
+			bar.classList.toggle('hover-preview', on);
+		}
 		function scrubSeek(fraction) {
 			const tw = timelineWindow();
 			if (!tw) return;
@@ -783,8 +810,23 @@
 			scrubSeek(lastDragFraction);
 			lastDragSeekAt = Date.now();
 		});
+		track.addEventListener('pointerenter', (e) => {
+			if (e.pointerType === 'touch' || dragging || !bar.classList.contains('ready') || barLocked) return;
+			lastHoverFraction = trackFraction(e);
+			setHovering(true);
+			positionBubble(lastHoverFraction);
+		});
+		track.addEventListener('pointerleave', () => {
+			setHovering(false);
+		});
 		track.addEventListener('pointermove', (e) => {
-			if (!dragging) return;
+			if (!dragging) {
+				if (e.pointerType === 'touch' || !bar.classList.contains('ready') || barLocked) return;
+				lastHoverFraction = trackFraction(e);
+				setHovering(true);
+				positionBubble(lastHoverFraction);
+				return;
+			}
 			e.stopPropagation();
 			const fraction = trackFraction(e);
 			lastDragFraction = fraction;

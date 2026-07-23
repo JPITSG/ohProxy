@@ -3622,6 +3622,7 @@ html.fs-no-scroll body {
 	white-space: nowrap;
 	pointer-events: none;
 }
+.video-dvr.hover-preview .video-dvr-bubble,
 .video-dvr.dragging .video-dvr-bubble { display: block; }
 
 .video-dvr-live {
