@@ -233,9 +233,15 @@ describe('Video timeshift (DVR) wiring', () => {
 		assert.match(dvr, /const DRAG_SEEK_THROTTLE_MS = 150;/);
 		// pointerdown disarms follow-live, pauses for the scrub preview and
 		// seeks immediately...
-		assert.match(dvr, /session\.followLive = false;[\s\S]*?videoEl\.pause\(\);[\s\S]*?previewScrub\(trackFraction\(e\)\);\s*scrubSeek\(trackFraction\(e\)\);/);
+		assert.match(dvr, /session\.followLive = false;[\s\S]*?videoEl\.pause\(\);[\s\S]*?lastDragFraction = trackFraction\(e\);\s*previewScrub\(lastDragFraction\);\s*scrubSeek\(lastDragFraction\);/);
 		// ...and pointermove keeps seeking, throttled
+		assert.match(dvr, /const fraction = trackFraction\(e\);\s*lastDragFraction = fraction;\s*previewScrub\(fraction\);/);
 		assert.match(dvr, /if \(now - lastDragSeekAt >= DRAG_SEEK_THROTTLE_MS\) \{\s*lastDragSeekAt = now;\s*scrubSeek\(fraction\);/);
+		// a HELD pointer stays live: every append re-resolves the preview
+		// against the stretched timeline and reseeks once the landing target
+		// has drifted past the threshold
+		assert.match(dvr, /const DRAG_DRIFT_RESEEK_S = 0\.5;/);
+		assert.match(dvr, /if \(dragging\) \{\s*previewScrub\(lastDragFraction\);\s*const tw = timelineWindow\(\);\s*if \(tw && Math\.abs\(timelineTime\(lastDragFraction, tw\) - videoEl\.currentTime\) > DRAG_DRIFT_RESEEK_S\) \{\s*scrubSeek\(lastDragFraction\);\s*\}\s*return;\s*\}/);
 		// drag-initiated seeking must not re-arm follow-live mid-drag
 		assert.match(dvr, /addVideoListener\('seeking', \(\) => \{[\s\S]*?if \(dragging\) return;/);
 		// release still applies the authoritative position + live decision,

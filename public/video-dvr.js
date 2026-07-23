@@ -182,6 +182,7 @@
 	const RETRY_BASE_MS = 1000;
 	const RETRY_MAX_MS = 8000;
 	const DRAG_SEEK_THROTTLE_MS = 150;   // min gap between live seeks while dragging
+	const DRAG_DRIFT_RESEEK_S = 0.5;     // held-pointer reseek once the timeline stretch moves the target this far
 	const DVR_UNLOCK_WINDOW_S = 5;       // bar shows immediately but stays inert until this much history exists
 	const MAX_QUEUE_BYTES = 24 * 1024 * 1024;
 	const MAX_FAILURES_PER_URL = 2;      // then stick to the legacy path this session
@@ -643,8 +644,19 @@
 			barLocked = span < DVR_UNLOCK_WINDOW_S;
 			bar.classList.toggle('locked', barLocked);
 			// While scrubbing, the transient pause must not flip the play
-			// button or repaint positions - the drag owns the bar.
-			if (dragging) return;
+			// button or repaint positions - the drag owns the bar. But the
+			// timeline stretches under a HELD pointer as video arrives (this
+			// runs on every append), so keep the preview live: re-resolve the
+			// bubble's wall-clock/offset from the current mapping, and reseek
+			// the frozen frame once the landing target has drifted enough.
+			if (dragging) {
+				previewScrub(lastDragFraction);
+				const tw = timelineWindow();
+				if (tw && Math.abs(timelineTime(lastDragFraction, tw) - videoEl.currentTime) > DRAG_DRIFT_RESEEK_S) {
+					scrubSeek(lastDragFraction);
+				}
+				return;
+			}
 			// Only rewrite the icon when the state actually flips: replacing
 			// the svg under the cursor between mousedown and mouseup makes
 			// the browser swallow the click (the "press twice" bug).
@@ -746,6 +758,7 @@
 		// decoder with seeks. The release still runs applyScrub for the
 		// authoritative position and the follow-live decision.
 		let lastDragSeekAt = 0;
+		let lastDragFraction = 1;
 		function scrubSeek(fraction) {
 			const tw = timelineWindow();
 			if (!tw) return;
@@ -765,14 +778,16 @@
 			// Scrub preview: hold the frame still while the pointer is down;
 			// applyScrub resumes playback on release (unless user-paused).
 			try { videoEl.pause(); } catch (_) {}
-			previewScrub(trackFraction(e));
-			scrubSeek(trackFraction(e));
+			lastDragFraction = trackFraction(e);
+			previewScrub(lastDragFraction);
+			scrubSeek(lastDragFraction);
 			lastDragSeekAt = Date.now();
 		});
 		track.addEventListener('pointermove', (e) => {
 			if (!dragging) return;
 			e.stopPropagation();
 			const fraction = trackFraction(e);
+			lastDragFraction = fraction;
 			previewScrub(fraction);
 			const now = Date.now();
 			if (now - lastDragSeekAt >= DRAG_SEEK_THROTTLE_MS) {
