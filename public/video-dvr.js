@@ -327,15 +327,17 @@
 			return range ? range.end : 0;
 		}
 
-		// The track uses a FIXED scale: it always represents the configured
-		// window anchored at the live edge, no matter how much has buffered
-		// so far. A span-relative scale stretches every second the buffer
-		// grows, which makes a paused playhead take big erratic strides.
+		// The track represents exactly the buffered span: 0% is the oldest
+		// buffered footage, 100% is the live edge, so the fill always covers
+		// the full rail. The span stretches with every appended fragment,
+		// which moves a time-shifted playhead's percentage - the thumb/fill
+		// GLIDE there via a CSS transition (disabled while dragging) instead
+		// of stepping once per append.
 		function timelineWindow() {
 			const range = bufferedRange();
 			if (!range) return null;
-			const windowS = Math.max(DVR_MIN_WINDOW_S, windowSeconds);
-			return { start: range.start, end: range.end, windowS, origin: range.end - windowS };
+			const spanS = Math.max(0.1, range.end - range.start);
+			return { start: range.start, end: range.end, windowS: spanS, origin: range.start };
 		}
 
 		function timelinePct(time, tw) {
@@ -658,15 +660,12 @@
 			const behind = Math.max(0, range.end - clamped);
 			const live = behind <= LIVE_LATENCY_SHIFT_S && !videoEl.paused;
 			const tw = timelineWindow();
-			const availPct = timelinePct(tw.start, tw);
 			// Pin the playhead to the end while following live: the edge jumps
 			// forward with every appended fragment while playback advances
 			// smoothly, so tracking the real position bounces the thumb
 			// inside the last few percent of the track.
 			const posPct = live ? 100 : timelinePct(clamped, tw);
-			avail.style.left = availPct + '%';
-			fill.style.left = Math.min(availPct, posPct) + '%';
-			fill.style.width = Math.max(0, posPct - availPct) + '%';
+			fill.style.width = posPct + '%';
 			thumb.style.left = posPct + '%';
 			offsetLabel.textContent = live ? '' : '-' + formatOffset(behind);
 			offsetLabel.classList.toggle('empty', live);
@@ -687,13 +686,9 @@
 		function previewScrub(fraction) {
 			const tw = timelineWindow();
 			if (!tw) return;
-			// The pointer position clamps to the buffered region, so the
-			// thumb visibly stops at the oldest available footage.
 			const target = timelineTime(fraction, tw);
 			const pct = timelinePct(target, tw);
-			const availPct = timelinePct(tw.start, tw);
-			fill.style.left = Math.min(availPct, pct) + '%';
-			fill.style.width = Math.max(0, pct - availPct) + '%';
+			fill.style.width = pct + '%';
 			thumb.style.left = pct + '%';
 			bubble.style.left = pct + '%';
 			const wall = wallTimeFromEpochs(epochs, target);

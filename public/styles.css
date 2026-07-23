@@ -3553,9 +3553,11 @@ html.fs-no-scroll body {
 	margin: 0 6px;
 	cursor: pointer;
 }
-/* Fixed-scale track: the rail base is the part of the timeshift window not
-   buffered yet (dim); .video-dvr-avail overlays the buffered region. Solid
-   colors: the bar behind is 50% transparent, the controls are not. */
+/* Span-relative track: the rail always represents exactly the buffered
+   footage (oldest -> live edge), so the played fill covers the full width
+   while at the live edge and .video-dvr-avail (the gray remainder past the
+   thumb) statically covers the whole rail beneath it. Solid colors: the bar
+   behind is 50% transparent, the controls are not. */
 .video-dvr-rail {
 	position: absolute;
 	left: 0;
@@ -3584,7 +3586,11 @@ html.fs-no-scroll body {
 	width: 100%;
 	border-radius: 2px;
 	background: #818cf8; /* indigo: reviewing history */
+	/* buffer growth shifts percentage positions once per appended fragment
+	   (~1/s); glide to the new position instead of stepping */
+	transition: width .4s linear;
 }
+.video-dvr.dragging .video-dvr-fill { transition: none; } /* track the pointer 1:1 */
 .video-dvr.at-live .video-dvr-fill { background: #dc2626; } /* red: at the live edge */
 .video-dvr-thumb {
 	position: absolute;
@@ -3597,9 +3603,10 @@ html.fs-no-scroll body {
 	background: #ffffff;
 	box-shadow: 0 0 4px rgba(0, 0, 0, .6);
 	pointer-events: none;
-	transition: transform .15s ease;
+	transition: transform .15s ease, left .4s linear;
 }
-.video-dvr.dragging .video-dvr-thumb { transform: scale(1.35); }
+/* while dragging, left snaps to the pointer; only the scale pop animates */
+.video-dvr.dragging .video-dvr-thumb { transform: scale(1.35); transition: transform .15s ease; }
 .video-dvr-bubble {
 	position: absolute;
 	bottom: calc(100% + 10px);

@@ -258,19 +258,25 @@ describe('Video timeshift (DVR) wiring', () => {
 		assert.match(app, /video\.__dvr\.resumeFromSuspend\(\);[\s\S]*?if \(!video\.ended && video\.readyState >= 2\) setVideoZoomReady\(video, true\);/);
 	});
 
-	it('anchors the timeline to a fixed window scale', () => {
+	it('scales the timeline to the buffered span and glides position changes', () => {
 		const dvr = fs.readFileSync(DVR_FILE, 'utf8');
 		const css = fs.readFileSync(STYLES_FILE, 'utf8');
-		// the track always represents windowSeconds anchored at the live
-		// edge - a span-relative scale stretches as the buffer grows and
-		// makes a paused playhead take big erratic strides
-		assert.match(dvr, /return \{ start: range\.start, end: range\.end, windowS, origin: range\.end - windowS \};/);
+		// the track represents exactly the buffered span (oldest -> live
+		// edge), so the played fill covers the full rail at the live edge
+		assert.match(dvr, /return \{ start: range\.start, end: range\.end, windowS: spanS, origin: range\.start \};/);
 		assert.match(dvr, /const posPct = live \? 100 : timelinePct\(clamped, tw\);/);
-		// scrub targets clamp into the buffered region of the fixed window
+		assert.match(dvr, /fill\.style\.width = posPct \+ '%';\s*thumb\.style\.left = posPct \+ '%';/);
+		// scrub targets clamp into the buffered span
 		assert.match(dvr, /const target = tw\.origin \+ tw\.windowS \* fraction;\s*return Math\.min\(tw\.end, Math\.max\(tw\.start, target\)\);/);
-		// the unbuffered part of the window renders dim behind the avail overlay
+		// span growth moves percentage positions once per append (~1/s); the
+		// thumb and fill glide to the new spot instead of stepping, and the
+		// glide is disabled while dragging so the pointer is tracked 1:1
+		assert.match(css, /\.video-dvr-fill \{[^}]*transition: width \.4s linear;[^}]*\}/);
+		assert.match(css, /\.video-dvr\.dragging \.video-dvr-fill \{ transition: none; \}/);
+		assert.match(css, /transition: transform \.15s ease, left \.4s linear;/);
+		assert.match(css, /\.video-dvr\.dragging \.video-dvr-thumb \{ transform: scale\(1\.35\); transition: transform \.15s ease; \}/);
+		// the gray remainder past the thumb still covers the whole rail
 		assert.match(dvr, /avail\.className = 'video-dvr-avail';/);
-		assert.match(dvr, /avail\.style\.left = availPct \+ '%';/);
 		assert.match(css, /\.video-dvr-avail \{/);
 	});
 
