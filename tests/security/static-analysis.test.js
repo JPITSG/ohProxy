@@ -229,11 +229,19 @@ describe('Static Analysis: XSS Prevention', () => {
 			if (issue.interpolation === 'highTemp') return false;
 			if (issue.interpolation === 'lowTemp') return false;
 			if (issue.interpolation === 'pop') return false;
-			if (issue.interpolation === 'rainOpacity') return false;
-			if (issue.interpolation === 'rainTextColor') return false;
 			if (issue.interpolation === 'forecastCards') return false;
-			// dateLabel is built from fixed monthNames array + numeric day + hardcoded suffix
+			// dateLabel is built from fixed monthNames array + numeric day
 			if (issue.interpolation === 'dateLabel') return false;
+			// Weather widget server-built markup: inline SVG icon strings, chip markup
+			// (string values escaped where interpolated), and numeric strings
+			if (issue.interpolation === 'sceneSvg') return false;
+			if (issue.interpolation === 'dayIconSvg') return false;
+			if (issue.interpolation === 'popSlot') return false;
+			if (issue.interpolation === 'popIcon') return false;
+			if (issue.interpolation === 'chipsHtml') return false;
+			if (issue.interpolation === 'currentTempStr') return false;
+			if (issue.interpolation === 'unitSymbol') return false;
+			if (issue.interpolation.includes('CHIP_ICONS')) return false;
 			if (issue.interpolation.includes('bgColor')) return false;
 			if (issue.interpolation.includes('cardBg')) return false;
 			if (issue.interpolation.includes('textColor')) return false;

@@ -4918,14 +4918,256 @@ function renderLoginHtml() {
 	return html;
 }
 
-function renderWeatherWidget(forecastData, mode, slim, updatedAtMs) {
+const WEATHER_CHIP_ICON_STROKE = 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
+const CHIP_ICONS = {
+	humidity: `<svg viewBox="0 0 24 24" ${WEATHER_CHIP_ICON_STROKE}><path d="M12 3.5c3.4 4 5.5 6.9 5.5 9.5a5.5 5.5 0 1 1-11 0c0-2.6 2.1-5.5 5.5-9.5z"/></svg>`,
+	wind: `<svg viewBox="0 0 24 24" ${WEATHER_CHIP_ICON_STROKE}><path d="M3.5 8h9.2a2.8 2.8 0 1 0-2.8-2.8M3.5 12.5h13.7a2.8 2.8 0 1 1-2.8 2.8M3.5 17h6.5"/></svg>`,
+	uv: `<svg viewBox="0 0 24 24" ${WEATHER_CHIP_ICON_STROKE}><circle cx="12" cy="12" r="4.2"/><path d="M12 3v2.4M12 18.6V21M3 12h2.4M18.6 12H21M5.6 5.6l1.7 1.7M16.7 16.7l1.7 1.7M18.4 5.6l-1.7 1.7M7.3 16.7l-1.7 1.7"/></svg>`,
+	sunrise: `<svg viewBox="0 0 24 24" ${WEATHER_CHIP_ICON_STROKE}><path d="M4 17.5h16M8.5 14a3.5 3.5 0 0 1 7 0M12 10V4.5m0 0L9.5 7M12 4.5 14.5 7"/></svg>`,
+	sunset: `<svg viewBox="0 0 24 24" ${WEATHER_CHIP_ICON_STROKE}><path d="M4 17.5h16M8.5 14a3.5 3.5 0 0 1 7 0M12 4.5V10m0 0 2.5-2.5M12 10 9.5 7.5"/></svg>`,
+};
+
+// Map a Weatherbit condition code (with icon string fallback) to an icon group
+function weatherGroupForCode(code, icon) {
+	const c = Number(code) || 0;
+	if (c >= 200 && c < 300) return 'storm';
+	if (c >= 300 && c < 400) return 'drizzle';
+	if (c === 511) return 'freezing';
+	if (c >= 500 && c < 600) return 'rain';
+	if (c >= 610 && c <= 612) return 'freezing';
+	if (c >= 600 && c < 700) return 'snow';
+	if (c >= 700 && c < 800) return 'fog';
+	if (c === 800) return 'clear';
+	if (c === 801 || c === 802) return 'partly';
+	if (c === 803) return 'cloudy';
+	if (c === 804 || c === 900) return 'overcast';
+	const ic = String(icon || '');
+	if (ic.startsWith('t')) return 'storm';
+	if (ic.startsWith('d')) return 'drizzle';
+	if (ic.startsWith('f')) return 'freezing';
+	if (ic.startsWith('r')) return 'rain';
+	if (ic.startsWith('s')) return 'snow';
+	if (ic.startsWith('a')) return 'fog';
+	if (ic === 'c01d' || ic === 'c01n') return 'clear';
+	if (ic === 'c02d' || ic === 'c02n') return 'partly';
+	if (ic === 'c03d' || ic === 'c03n') return 'cloudy';
+	return 'overcast';
+}
+
+// Map a current-conditions description (the only current field cached) to an icon group
+function weatherGroupForDescription(description) {
+	const d = String(description || '').toLowerCase();
+	if (!d) return '';
+	if (d.includes('thunder')) return 'storm';
+	if (d.includes('freezing') || d.includes('sleet')) return 'freezing';
+	if (d.includes('drizzle')) return 'drizzle';
+	if (d.includes('rain') || d.includes('shower')) return 'rain';
+	if (d.includes('snow') || d.includes('flurr')) return 'snow';
+	if (d.includes('fog') || d.includes('mist') || d.includes('haze') || d.includes('smoke') || d.includes('sand') || d.includes('dust')) return 'fog';
+	if (d.includes('few clouds') || d.includes('scattered')) return 'partly';
+	if (d.includes('broken')) return 'cloudy';
+	if (d.includes('overcast')) return 'overcast';
+	if (d.includes('clear') || d.includes('sunny')) return 'clear';
+	if (d.includes('cloud')) return 'cloudy';
+	return '';
+}
+
+// Shared gradient/mask defs referenced by every inline weather icon on the page
+function weatherIconDefs(isDark) {
+	const cloudBrightA = isDark ? '#f7faff' : '#ffffff';
+	const cloudBrightB = isDark ? '#b7c4e0' : '#c8d2e6';
+	const cloudGreyA = isDark ? '#aab5cc' : '#b6c1d8';
+	const cloudGreyB = isDark ? '#707c98' : '#8794af';
+	const cloudDeepA = isDark ? '#8b93b8' : '#9aa3c4';
+	const cloudDeepB = isDark ? '#565f83' : '#6c7597';
+	return `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<radialGradient id="wxSun" cx="0.35" cy="0.35" r="0.8"><stop offset="0" stop-color="#fff6da"/><stop offset="0.55" stop-color="#ffd166"/><stop offset="1" stop-color="#ff9f43"/></radialGradient>
+<radialGradient id="wxSunGlow"><stop offset="0" stop-color="#ffcf6e" stop-opacity="0.8"/><stop offset="1" stop-color="#ffcf6e" stop-opacity="0"/></radialGradient>
+<radialGradient id="wxMoon" cx="0.35" cy="0.3" r="0.85"><stop offset="0" stop-color="#ffffff"/><stop offset="0.6" stop-color="#dfe6ff"/><stop offset="1" stop-color="#aab7ee"/></radialGradient>
+<radialGradient id="wxMoonGlow"><stop offset="0" stop-color="#9fb2ff" stop-opacity="0.7"/><stop offset="1" stop-color="#9fb2ff" stop-opacity="0"/></radialGradient>
+<linearGradient id="wxCloudBright" x1="0" y1="16" x2="0" y2="50" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${cloudBrightA}"/><stop offset="1" stop-color="${cloudBrightB}"/></linearGradient>
+<linearGradient id="wxCloudGrey" x1="0" y1="16" x2="0" y2="50" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${cloudGreyA}"/><stop offset="1" stop-color="${cloudGreyB}"/></linearGradient>
+<linearGradient id="wxCloudDeep" x1="0" y1="14" x2="0" y2="52" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${cloudDeepA}"/><stop offset="1" stop-color="${cloudDeepB}"/></linearGradient>
+<linearGradient id="wxBolt" x1="0" y1="36" x2="0" y2="62" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffe45e"/><stop offset="1" stop-color="#ffb02e"/></linearGradient>
+<mask id="wxCrescentA" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="#fff"/><circle cx="37" cy="24.5" r="10.5" fill="#000"/></mask>
+<mask id="wxCrescentB" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="#fff"/><circle cx="27" cy="24.5" r="10.5" fill="#000"/></mask>
+</defs></svg>`;
+}
+
+// Build one inline weather icon SVG for an icon group.
+// opts: { night, animated, moonLunation }
+function weatherIconSvg(group, opts = {}) {
+	const night = !!opts.night;
+	const animated = !!opts.animated;
+	const dropColor = opts.isDark === false ? '#3b8de0' : '#6db3f8';
+	const flakeColor = opts.isDark === false ? '#7fa7dd' : '#cfe0ff';
+	const fogColor = opts.isDark === false ? 'rgba(120,135,165,0.8)' : 'rgba(190,200,220,0.8)';
+
+	// Cloud silhouette centered on (0,0); overlapping shapes share one gradient so no seams show
+	const cloudShape = (fill) => `<g fill="url(#${fill})">` +
+		`<circle cx="-9.5" cy="1.5" r="10.5"/>` +
+		`<circle cx="3" cy="-3.5" r="12.5"/>` +
+		`<circle cx="12.5" cy="3" r="8"/>` +
+		`<rect x="-20" y="1" width="41" height="10.5" rx="5.25"/>` +
+		`</g>`;
+	// CSS keyframe transforms override the SVG transform attribute, so animated
+	// groups sit inside a positioning wrapper and the class goes on the inner group.
+	const cloudAt = (x, y, s, fill, cls) =>
+		`<g transform="translate(${x} ${y}) scale(${s})"><g class="${cls || ''}">${cloudShape(fill)}</g></g>`;
+
+	const sunAt = (x, y, r, rayLen) => {
+		const rays = [];
+		for (let i = 0; i < 8; i++) {
+			rays.push(`<rect x="-1.15" y="${-r - 3 - rayLen}" width="2.3" height="${rayLen}" rx="1.15" transform="rotate(${i * 45})"/>`);
+		}
+		return `<g transform="translate(${x} ${y})">` +
+			`<circle class="wx-glow" r="${r + 9}" fill="url(#wxSunGlow)"/>` +
+			`<g class="wx-rays" fill="#ffc95e">${rays.join('')}</g>` +
+			`<circle r="${r}" fill="url(#wxSun)"/>` +
+			`</g>`;
+	};
+
+	const moonAt = (x, y, r, lunation) => {
+		const lun = Number.isFinite(lunation) ? lunation : 0.25;
+		const full = lun > 0.46 && lun < 0.54;
+		const mask = full ? '' : ` mask="url(#${lun < 0.5 ? 'wxCrescentA' : 'wxCrescentB'})"`;
+		return `<g transform="translate(${x} ${y})">` +
+			`<circle class="wx-glow" r="${r + 7}" fill="url(#wxMoonGlow)"/>` +
+			`<circle r="${r}" fill="url(#wxMoon)"${mask}/>` +
+			`</g>`;
+	};
+
+	const stars = `<g class="wx-stars" fill="#e8eeff">` +
+		`<path class="wx-star s1" transform="translate(47 15)" d="M0 -2.4 0.7 -0.7 2.4 0 0.7 0.7 0 2.4 -0.7 0.7 -2.4 0 -0.7 -0.7Z"/>` +
+		`<path class="wx-star s2" transform="translate(15 12) scale(0.7)" d="M0 -2.4 0.7 -0.7 2.4 0 0.7 0.7 0 2.4 -0.7 0.7 -2.4 0 -0.7 -0.7Z"/>` +
+		`<path class="wx-star s3" transform="translate(52 34) scale(0.55)" d="M0 -2.4 0.7 -0.7 2.4 0 0.7 0.7 0 2.4 -0.7 0.7 -2.4 0 -0.7 -0.7Z"/>` +
+		`</g>`;
+
+	const drops = (xs, len) => `<g stroke="${dropColor}" stroke-width="2.4" stroke-linecap="round">` +
+		xs.map((x, i) => `<line class="wx-drop d${i + 1}" x1="${x}" y1="47.5" x2="${x - 1.6}" y2="${47.5 + len}"/>`).join('') +
+		`</g>`;
+
+	const flakes = (xs) => `<g stroke="${flakeColor}" stroke-width="1.5" stroke-linecap="round">` +
+		xs.map(([x, y], i) =>
+			`<g transform="translate(${x} ${y})"><g class="wx-flake f${i + 1}"><line x1="-2.6" y1="0" x2="2.6" y2="0"/><line x1="-1.3" y1="-2.25" x2="1.3" y2="2.25"/><line x1="-1.3" y1="2.25" x2="1.3" y2="-2.25"/></g></g>`
+		).join('') +
+		`</g>`;
+
+	const bolt = `<path class="wx-bolt" d="M35 38 26.5 51h6l-4 11 11.5-15h-6l5.5-9z" fill="url(#wxBolt)"/>`;
+
+	let body = '';
+	switch (group) {
+		case 'clear':
+			body = night ? (stars + moonAt(32, 30, 11.5, opts.moonLunation)) : sunAt(32, 32, 12, 5.5);
+			break;
+		case 'partly':
+			body = (night ? moonAt(24, 21, 8.5, opts.moonLunation) : sunAt(24, 20.5, 8.5, 4)) +
+				cloudAt(34, 38, 0.92, 'wxCloudBright', 'wx-cloud-front');
+			break;
+		case 'cloudy':
+			body = cloudAt(42, 27, 0.62, 'wxCloudGrey') + cloudAt(30, 38, 0.95, 'wxCloudBright', 'wx-cloud-front');
+			break;
+		case 'overcast':
+			body = cloudAt(23, 29, 0.6, 'wxCloudBright') + cloudAt(35, 37, 1, 'wxCloudGrey', 'wx-cloud-front');
+			break;
+		case 'drizzle':
+			body = cloudAt(32, 32, 0.95, 'wxCloudGrey', 'wx-cloud-front') + drops([27, 37], 4.5);
+			break;
+		case 'rain':
+			body = cloudAt(32, 31, 0.95, 'wxCloudGrey', 'wx-cloud-front') + drops([25, 33, 41], 7);
+			break;
+		case 'freezing':
+			body = cloudAt(32, 31, 0.95, 'wxCloudGrey', 'wx-cloud-front') + drops([26, 34], 6) + flakes([[42, 51]]);
+			break;
+		case 'storm':
+			body = cloudAt(32, 30, 0.98, 'wxCloudDeep', 'wx-cloud-front') + bolt;
+			break;
+		case 'snow':
+			body = cloudAt(32, 31, 0.95, 'wxCloudGrey', 'wx-cloud-front') + flakes([[25, 50], [34, 53], [42, 49]]);
+			break;
+		case 'fog':
+			body = cloudAt(32, 26, 0.7, 'wxCloudGrey') +
+				`<g fill="${fogColor}">` +
+				`<rect class="wx-fog-line g1" x="17" y="40" width="28" height="3" rx="1.5"/>` +
+				`<rect class="wx-fog-line g2" x="22" y="46" width="26" height="3" rx="1.5" opacity="0.65"/>` +
+				`<rect class="wx-fog-line g3" x="18" y="52" width="22" height="3" rx="1.5" opacity="0.4"/>` +
+				`</g>`;
+			break;
+		default:
+			body = sunAt(32, 32, 12, 5.5);
+	}
+
+	return `<svg class="wx-icon${animated ? ' wx-anim' : ''}" viewBox="0 0 64 64" role="img" aria-hidden="true">${body}</svg>`;
+}
+
+// Map a temperature (in configured units) to a hue-coded hsl color for range bars.
+// Piecewise curve keeps cold in blue/teal and warm in amber/orange with only a brief green band.
+const WEATHER_TEMP_HUE_STOPS = [[-15, 224], [-5, 210], [4, 197], [10, 180], [15, 140], [19, 90], [23, 62], [27, 44], [32, 28], [38, 16]];
+function weatherTempColor(temp, isDark) {
+	let t = Number(temp) || 0;
+	if (liveConfig.weatherbitUnits === 'imperial') t = (t - 32) * 5 / 9;
+	t = Math.max(-15, Math.min(38, t));
+	let hue = WEATHER_TEMP_HUE_STOPS[WEATHER_TEMP_HUE_STOPS.length - 1][1];
+	for (let i = 1; i < WEATHER_TEMP_HUE_STOPS.length; i++) {
+		const [t0, h0] = WEATHER_TEMP_HUE_STOPS[i - 1];
+		const [t1, h1] = WEATHER_TEMP_HUE_STOPS[i];
+		if (t <= t1) {
+			hue = Math.round(h0 + ((t - t0) / (t1 - t0)) * (h1 - h0));
+			break;
+		}
+	}
+	return `hsl(${hue},${isDark ? 68 : 64}%,${isDark ? 60 : 47}%)`;
+}
+
+function formatWeatherTime(ts, timeZone) {
+	if (!Number.isFinite(ts) || ts <= 0) return '';
+	try {
+		return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: timeZone || 'UTC' }).format(new Date(ts * 1000));
+	} catch {
+		return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }).format(new Date(ts * 1000));
+	}
+}
+
+function currentDateInTimeZone(timeZone) {
+	try {
+		return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: timeZone || 'UTC' }).format(new Date());
+	} catch {
+		return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'UTC' }).format(new Date());
+	}
+}
+
+// Atmospheric wash palettes per condition group: [top-left blob, bottom-right blob, top tint]
+function weatherSkyPalette(cond, isDark) {
+	const dark = {
+		sun: ['rgba(255,193,94,0.16)', 'rgba(106,116,211,0.12)', 'rgba(64,110,190,0.10)'],
+		night: ['rgba(110,130,255,0.13)', 'rgba(70,80,160,0.10)', 'rgba(24,30,72,0.30)'],
+		cloud: ['rgba(148,168,205,0.11)', 'rgba(106,116,211,0.08)', 'rgba(90,110,150,0.10)'],
+		rain: ['rgba(86,140,220,0.15)', 'rgba(60,80,150,0.12)', 'rgba(40,70,120,0.16)'],
+		snow: ['rgba(180,210,250,0.14)', 'rgba(120,140,200,0.10)', 'rgba(150,180,230,0.10)'],
+		storm: ['rgba(140,120,255,0.15)', 'rgba(255,190,90,0.07)', 'rgba(60,60,120,0.16)'],
+		fog: ['rgba(170,180,205,0.10)', 'rgba(140,150,180,0.08)', 'rgba(120,130,160,0.10)'],
+	};
+	const light = {
+		sun: ['rgba(255,196,90,0.30)', 'rgba(120,170,255,0.22)', 'rgba(150,195,255,0.25)'],
+		night: ['rgba(130,150,255,0.20)', 'rgba(90,105,200,0.14)', 'rgba(70,90,180,0.14)'],
+		cloud: ['rgba(150,170,210,0.20)', 'rgba(190,205,230,0.25)', 'rgba(170,190,220,0.22)'],
+		rain: ['rgba(100,150,225,0.22)', 'rgba(140,170,220,0.18)', 'rgba(120,160,220,0.20)'],
+		snow: ['rgba(190,215,250,0.30)', 'rgba(160,190,240,0.20)', 'rgba(200,220,250,0.28)'],
+		storm: ['rgba(150,130,240,0.20)', 'rgba(255,200,110,0.16)', 'rgba(140,140,200,0.18)'],
+		fog: ['rgba(175,185,205,0.24)', 'rgba(200,208,225,0.24)', 'rgba(185,195,215,0.24)'],
+	};
+	const table = isDark ? dark : light;
+	return table[cond] || table.cloud;
+}
+
+function renderWeatherWidget(weatherData, mode, slim, updatedAtMs) {
 	const isDark = mode === 'dark';
-	const textColor = isDark ? '#ffffff' : '#000000';
-	const rainColor = '#3498db';
+	const textColor = isDark ? '#ffffff' : '#0f1430';
 	const updatedAtAttr = Number.isFinite(updatedAtMs) && updatedAtMs > 0
 		? String(Math.floor(updatedAtMs))
 		: '';
 
+	const forecastData = weatherData?.forecast;
 	const days = Array.isArray(forecastData?.data) ? forecastData.data : [];
 	if (!days.length) {
 		return `<!DOCTYPE html>
@@ -4936,39 +5178,120 @@ function renderWeatherWidget(forecastData, mode, slim, updatedAtMs) {
 </body></html>`;
 	}
 	const cityName = escapeHtml(forecastData?.city_name || '');
+	const timeZone = typeof forecastData?.timezone === 'string' ? forecastData.timezone : 'UTC';
 	const unitSymbol = liveConfig.weatherbitUnits === 'imperial' ? 'F' : 'C';
+	const isImperial = liveConfig.weatherbitUnits === 'imperial';
 
 	const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 	const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-	const forecastCards = days.map((day) => {
+	// Today = forecast entry matching the current date in the city's timezone (fallback: first entry)
+	const cityToday = currentDateInTimeZone(timeZone);
+	let todayIdx = days.findIndex((d) => d?.datetime === cityToday);
+	if (todayIdx < 0) todayIdx = 0;
+	const today = days[todayIdx] || days[0];
+
+	// Day/night for the hero scene from today's sun times
+	const nowSec = Date.now() / 1000;
+	const sunriseTs = Number(today?.sunrise_ts) || 0;
+	const sunsetTs = Number(today?.sunset_ts) || 0;
+	const isNight = sunriseTs > 0 && sunsetTs > 0 ? (nowSec < sunriseTs || nowSec > sunsetTs) : false;
+
+	// Prefer the live current-conditions description for the hero scene so the
+	// icon matches the text beside it; fall back to today's forecast code.
+	const heroGroup = weatherGroupForDescription(weatherData?.currentDescription)
+		|| weatherGroupForCode(today?.weather?.code, today?.weather?.icon);
+	const condClass = (() => {
+		if (heroGroup === 'clear' || heroGroup === 'partly') return isNight ? 'night' : 'sun';
+		if (heroGroup === 'cloudy' || heroGroup === 'overcast') return 'cloud';
+		if (heroGroup === 'rain' || heroGroup === 'drizzle' || heroGroup === 'freezing') return 'rain';
+		if (heroGroup === 'snow') return 'snow';
+		if (heroGroup === 'storm') return 'storm';
+		return 'fog';
+	})();
+	const [skyA, skyB, skyC] = weatherSkyPalette(condClass, isDark);
+	const nightStars = condClass === 'night'
+		? `radial-gradient(1.4px 1.4px at 12% 18%, rgba(255,255,255,${isDark ? '0.5' : '0.55'}), transparent 55%),` +
+		  `radial-gradient(1.2px 1.2px at 32% 8%, rgba(255,255,255,${isDark ? '0.4' : '0.45'}), transparent 55%),` +
+		  `radial-gradient(1.5px 1.5px at 55% 14%, rgba(255,255,255,${isDark ? '0.45' : '0.5'}), transparent 55%),` +
+		  `radial-gradient(1.1px 1.1px at 76% 6%, rgba(255,255,255,${isDark ? '0.38' : '0.42'}), transparent 55%),` +
+		  `radial-gradient(1.3px 1.3px at 90% 22%, rgba(255,255,255,${isDark ? '0.42' : '0.46'}), transparent 55%)`
+		: 'none';
+
+	// Hero values: current temp cached alongside the forecast, description from the current-conditions pull
+	const currentRaw = Number(weatherData?.current);
+	const currentTempStr = String(Number.isFinite(currentRaw) ? Math.round(currentRaw) : Math.round(Number(today?.temp) || Number(today?.high_temp) || 0));
+	const heroDesc = String(weatherData?.currentDescription || today?.weather?.description || '');
+	const todayHigh = Math.round(Number(today?.high_temp) || 0);
+	const todayLow = Math.round(Number(today?.low_temp) || 0);
+	const heroSubParts = [`H ${todayHigh}°  L ${todayLow}°`];
+	if (forecastData?.city_name) heroSubParts.push(String(forecastData.city_name));
+	const heroSub = heroSubParts.join('  ·  ');
+	const sceneSvg = weatherIconSvg(heroGroup, {
+		night: isNight,
+		animated: !slim,
+		isDark,
+		moonLunation: Number(today?.moon_phase_lunation),
+	});
+
+	// Condition chips from today's data (humidity, wind, UV, sun times)
+	const chipItems = [];
+	const rh = Number(today?.rh);
+	if (Number.isFinite(rh)) chipItems.push({ icon: 'humidity', title: 'Humidity', value: `${Math.round(rh)}%` });
+	const windSpd = Number(today?.wind_spd);
+	if (Number.isFinite(windSpd)) {
+		const windValue = isImperial ? `${Math.round(windSpd)} mph` : `${Math.round(windSpd * 3.6)} km/h`;
+		const windDir = typeof today?.wind_cdir === 'string' ? ` ${today.wind_cdir}` : '';
+		chipItems.push({ icon: 'wind', title: 'Wind', value: windValue + windDir });
+	}
+	const uv = Number(today?.uv);
+	if (Number.isFinite(uv)) chipItems.push({ icon: 'uv', title: 'UV index', value: `UV ${Math.round(uv)}` });
+	if (sunriseTs > 0) chipItems.push({ icon: 'sunrise', title: 'Sunrise', value: formatWeatherTime(sunriseTs, timeZone) });
+	if (sunsetTs > 0) chipItems.push({ icon: 'sunset', title: 'Sunset', value: formatWeatherTime(sunsetTs, timeZone) });
+	const chipsHtml = chipItems.map((c) =>
+		`<div class="chip" title="${escapeHtml(c.title)}">${CHIP_ICONS[c.icon]}<span class="chip-val">${escapeHtml(c.value)}</span></div>`
+	).join('');
+
+	// Week-wide temperature range for the per-day range bars
+	const lows = days.map((d) => Math.round(Number(d?.low_temp) || 0));
+	const highs = days.map((d) => Math.round(Number(d?.high_temp) || 0));
+	const weekMin = Math.min(...lows);
+	const weekMax = Math.max(...highs);
+	const weekSpan = Math.max(0.001, weekMax - weekMin);
+	const gradStops = [0, 0.25, 0.5, 0.75, 1].map((f) =>
+		`${weatherTempColor(weekMin + f * weekSpan, isDark)} ${f * 100}%`
+	).join(', ');
+	const weekGradient = `linear-gradient(90deg, ${gradStops})`;
+
+	const forecastCards = days.map((day, idx) => {
 		const date = new Date(day.datetime);
-		const dayName = dayNames[date.getUTCDay()];
-		const dayOfMonth = date.getUTCDate();
-		const suffix = (dayOfMonth === 1 || dayOfMonth === 21 || dayOfMonth === 31) ? 'st'
-		             : (dayOfMonth === 2 || dayOfMonth === 22) ? 'nd'
-		             : (dayOfMonth === 3 || dayOfMonth === 23) ? 'rd' : 'th';
-		const dateLabel = monthNames[date.getUTCMonth()] + ' ' + dayOfMonth + suffix;
-		const icon = escapeHtml(day.weather?.icon || 'c01d');
-		const highTemp = Math.round(day.high_temp || 0);
-		const lowTemp = Math.round(day.low_temp || 0);
-		const pop = day.pop || 0;
-		const rainOpacity = pop > 0 ? '0.9' : '0.3';
-		const rainTextColor = pop > 0 ? rainColor : 'inherit';
+		const isToday = idx === todayIdx;
+		const dayName = isToday ? 'Today' : dayNames[date.getUTCDay()];
+		const dateLabel = monthNames[date.getUTCMonth()] + ' ' + date.getUTCDate();
+		const highTemp = highs[idx];
+		const lowTemp = lows[idx];
+		const pop = Math.round(Number(day?.pop) || 0);
+		const snowy = (Number(day?.snow) || 0) > 0;
+		const popIcon = snowy
+			? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9M12 3l-2.5 2M12 3l2.5 2M12 21l-2.5-2M12 21l2.5-2"/></svg>`
+			: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6c3.6 4.3 5.9 7.4 5.9 10.2a5.9 5.9 0 1 1-11.8 0C6.1 10 8.4 6.9 12 2.6z"/></svg>`;
+		const popSlot = pop > 0 ? `${popIcon}<span>${pop}%</span>` : '';
+		const dayIconSvg = weatherIconSvg(weatherGroupForCode(day?.weather?.code, day?.weather?.icon), { isDark });
+
+		const widthPct = Math.min(100, Math.max(7, ((highTemp - lowTemp) / weekSpan) * 100));
+		const leftPct = Math.min(100 - widthPct, Math.max(0, ((lowTemp - weekMin) / weekSpan) * 100));
+		const bgSize = (10000 / widthPct).toFixed(2);
+		const bgPos = widthPct >= 100 ? '0' : ((leftPct / (100 - widthPct)) * 100).toFixed(2);
+		const rangeStyle = `left:${leftPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%;background-image:${weekGradient};background-size:${bgSize}% 100%;background-position-x:${bgPos}%`;
 
 		return `
-			<div class="forecast-day">
+			<div class="forecast-day${isToday ? ' today' : ''}" title="${escapeHtml(day?.weather?.description || '')}">
 				<div class="day-name">${dayName}</div>
 				<div class="day-date">${dateLabel}</div>
-				<img class="weather-icon" src="/weather/icons/${icon}.png" alt="${escapeHtml(day.weather?.description || '')}">
-				<div class="temps">
-					<div class="temp-high">${highTemp}°</div>
-					<div class="temp-low">${lowTemp}°</div>
-				</div>
-				<div class="rain-chance" style="opacity:${rainOpacity};color:${rainTextColor}">
-					<svg class="rain-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2c0-3.32-2.67-7.25-8-11.8z"/></svg>
-					<span>${pop}%</span>
-				</div>
+				<div class="day-icon">${dayIconSvg}</div>
+				<div class="day-pop">${popSlot}</div>
+				<div class="day-temps"><span class="t-low">${lowTemp}°</span><span class="t-high">${highTemp}°</span></div>
+				<div class="day-range"><span class="day-range-fill" style="${rangeStyle}"></span></div>
 			</div>`;
 	}).join('');
 
@@ -4993,24 +5316,181 @@ function renderWeatherWidget(forecastData, mode, slim, updatedAtMs) {
 	font-display: swap;
 	src: url('/fonts/rubik-400.woff2') format('woff2');
 }
+@font-face {
+	font-family: 'Rubik';
+	font-style: normal;
+	font-weight: 500;
+	font-display: swap;
+	src: url('/fonts/rubik-500.woff2') format('woff2');
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+	--tx: ${isDark ? 'rgba(240,243,252,0.97)' : 'rgba(22,26,52,0.96)'};
+	--tx-soft: ${isDark ? 'rgba(240,243,252,0.66)' : 'rgba(22,26,52,0.64)'};
+	--tx-faint: ${isDark ? 'rgba(240,243,252,0.46)' : 'rgba(22,26,52,0.48)'};
+	--rain: ${isDark ? '#6db3f8' : '#2f7fd0'};
+	--chip-bg: ${isDark ? 'rgba(255,255,255,0.065)' : 'rgba(22,26,52,0.045)'};
+	--chip-bd: ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(22,26,52,0.09)'};
+	--card-hover: ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.55)'};
+	--today-bg: ${isDark ? 'rgba(255,255,255,0.055)' : 'rgba(255,255,255,0.5)'};
+	--today-bd: ${isDark ? 'rgba(255,255,255,0.13)' : 'rgba(255,255,255,0.7)'};
+	--track-bg: ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(22,26,52,0.10)'};
+	--sky-a: ${skyA};
+	--sky-b: ${skyB};
+	--sky-c: ${skyC};
+}
 html, body {
 	height: 100%;
 	font-family: 'Rubik', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 	font-weight: 300;
 	background: transparent;
-	color: ${textColor};
+	color: var(--tx);
+	overflow: hidden;
+}
+.weather-bg {
+	position: fixed;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	background-image: linear-gradient(180deg, var(--sky-c), transparent 60%), ${nightStars};
+}
+.weather-bg::before,
+.weather-bg::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	will-change: transform;
+}
+.weather-bg::before {
+	background: radial-gradient(58% 62% at 16% 4%, var(--sky-a), transparent 72%);
+	animation: skyDriftA 46s ease-in-out infinite alternate;
+}
+.weather-bg::after {
+	background: radial-gradient(55% 60% at 86% 92%, var(--sky-b), transparent 72%);
+	animation: skyDriftB 58s ease-in-out infinite alternate;
+}
+@keyframes skyDriftA {
+	from { transform: translate3d(-1.5%, -1%, 0); }
+	to { transform: translate3d(2%, 1.5%, 0); }
+}
+@keyframes skyDriftB {
+	from { transform: translate3d(1.5%, 1%, 0); }
+	to { transform: translate3d(-2%, -1.5%, 0); }
 }
 .weather-card {
+	position: relative;
 	height: 100%;
 	display: flex;
 	flex-direction: column;
-	padding: 12px;
+	padding: clamp(8px, 3vh, 15px) 14px clamp(6px, 2vh, 12px);
+}
+.hero {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 14px;
+	padding: 0 4px;
+	margin-bottom: clamp(4px, 2vh, 10px);
+	flex: 0 0 auto;
+	min-width: 0;
+	animation: riseIn 0.5s ease backwards;
+}
+.hero-main {
+	display: flex;
+	align-items: center;
+	gap: clamp(8px, 2.5vw, 14px);
+	min-width: 0;
+}
+.hero-scene {
+	width: clamp(46px, 24vh, 70px);
+	height: clamp(46px, 24vh, 70px);
+	flex: 0 0 auto;
+}
+.hero-scene .wx-icon {
+	display: block;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+}
+.hero-temp {
+	display: flex;
+	align-items: flex-start;
+	line-height: 0.95;
+	flex: 0 0 auto;
+}
+.hero-temp-val {
+	font-size: clamp(2.1rem, 21vh, 3.4rem);
+	font-weight: 300;
+	letter-spacing: -0.03em;
+	background: linear-gradient(180deg, ${isDark ? '#ffffff, #c3d0f2' : '#1a2142, #4c5a94'});
+	-webkit-background-clip: text;
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+}
+.hero-temp-unit {
+	font-size: clamp(0.85rem, 7vh, 1.1rem);
+	font-weight: 400;
+	margin-top: clamp(4px, 2.5vh, 8px);
+	margin-left: 2px;
+	color: var(--tx-soft);
+	-webkit-text-fill-color: currentColor;
+}
+.hero-meta {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+.hero-desc {
+	font-size: clamp(0.85rem, 8vh, 1.05rem);
+	font-weight: 400;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.hero-sub {
+	font-size: 0.72rem;
+	color: var(--tx-soft);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.hero-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	justify-content: flex-end;
+	max-width: 54%;
+}
+.chip {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	padding: 4px 9px;
+	border-radius: 999px;
+	background: var(--chip-bg);
+	border: 1px solid var(--chip-bd);
+	font-size: 0.68rem;
+	white-space: nowrap;
+	color: var(--tx-soft);
+}
+.chip svg {
+	width: 13px;
+	height: 13px;
+	opacity: 0.85;
+	flex: 0 0 auto;
+}
+.chip-val {
+	color: var(--tx);
+	font-weight: 400;
 }
 .forecast-container {
 	overflow: hidden;
-	padding: 5px;
+	padding: 4px 2px;
 	flex: 1;
+	min-height: 0;
+	display: flex;
+	align-items: center;
 	position: relative;
 }
 .forecast-track {
@@ -5019,84 +5499,140 @@ html, body {
 	transform: translate3d(0, 0, 0);
 	transition: transform 0.26s ease;
 	will-change: transform;
+	width: 100%;
 }
 @media (prefers-reduced-motion: reduce) {
 	.forecast-track {
 		transition: none;
 	}
+	.hero, .forecast-day, .weather-bg::before, .weather-bg::after, .wx-anim * {
+		animation: none !important;
+	}
 }
 .forecast-day {
 	flex: 0 0 auto;
-	min-width: 70px;
-	background: transparent;
-	border-radius: 10px;
-	padding: 12px;
+	border-radius: 14px;
+	padding: clamp(6px, 2vh, 11px) 8px;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: 12px;
+	gap: clamp(2px, 1.3vh, 6px);
+	border: 1px solid transparent;
+	transition: background-color 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+	animation: riseIn 0.45s ease backwards;
+}
+.forecast-day:nth-child(1) { animation-delay: 0.03s; }
+.forecast-day:nth-child(2) { animation-delay: 0.07s; }
+.forecast-day:nth-child(3) { animation-delay: 0.11s; }
+.forecast-day:nth-child(4) { animation-delay: 0.15s; }
+.forecast-day:nth-child(5) { animation-delay: 0.19s; }
+.forecast-day:nth-child(6) { animation-delay: 0.23s; }
+.forecast-day:nth-child(7) { animation-delay: 0.27s; }
+.forecast-day:nth-child(n+8) { animation-delay: 0.31s; }
+@keyframes riseIn {
+	from { opacity: 0; transform: translateY(8px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+.forecast-day.today {
+	background: var(--today-bg);
+	border-color: var(--today-bd);
+	box-shadow: 0 4px 16px ${isDark ? 'rgba(5,8,20,0.25)' : 'rgba(90,110,170,0.18)'};
+}
+@media (hover: hover) and (pointer: fine) {
+	.forecast-day:hover {
+		background: var(--card-hover);
+		transform: translateY(-2px);
+	}
 }
 .day-name {
-	font-size: 1.125rem;
+	font-size: 0.8rem;
 	font-weight: 400;
-	opacity: 0.7;
+}
+.today .day-name {
+	font-weight: 500;
 }
 .day-date {
-	font-size: .7rem;
+	font-size: 0.64rem;
 	font-weight: 300;
-	opacity: 0.5;
+	color: var(--tx-faint);
+	letter-spacing: 0.02em;
 }
-.weather-icon {
-	width: 45px;
-	height: 45px;
+.day-icon {
+	width: clamp(30px, 17vh, 46px);
+	height: clamp(30px, 17vh, 46px);
+	filter: drop-shadow(0 2px 4px ${isDark ? 'rgba(0,0,0,0.28)' : 'rgba(60,80,130,0.22)'});
 }
-.temps {
-	display: flex;
-	flex-direction: column;
-	align-items: flex-end;
-	margin-top: 5px;
+.day-icon .wx-icon {
+	display: block;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
 }
-.temp-high {
-	font-size: .75rem;
-	font-weight: 300;
-}
-.temp-low {
-	font-size: .75rem;
-	opacity: 0.6;
-}
-.rain-chance {
+.day-pop {
+	height: 0.9rem;
 	display: flex;
 	align-items: center;
-	gap: 2px;
-	font-size: .7rem;
-	margin-top: 8px;
+	gap: 3px;
+	font-size: 0.66rem;
+	font-weight: 400;
+	color: var(--rain);
 }
-.rain-icon {
-	width: .625rem;
-	height: .625rem;
+.day-pop svg {
+	width: 9px;
+	height: 9px;
+}
+.day-temps {
+	display: flex;
+	align-items: baseline;
+	gap: 9px;
+	font-size: 0.76rem;
+}
+.t-low { color: var(--tx-faint); }
+.t-high { color: var(--tx); font-weight: 400; }
+.day-range {
+	width: 100%;
+	max-width: 74px;
+	height: 4px;
+	border-radius: 2px;
+	background: var(--track-bg);
+	position: relative;
+	overflow: hidden;
+}
+.day-range-fill {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	border-radius: 2px;
+	background-repeat: no-repeat;
 }
 .forecast-dots {
 	display: none;
 	justify-content: center;
 	align-items: center;
-	gap: 4px;
+	gap: 3px;
 }
 .forecast-dots.visible { display: flex; }
 .forecast-dot {
-	border-radius: 50%;
+	width: 5px;
+	height: 5px;
+	border-radius: 3px;
 	background: ${textColor};
-	opacity: 0.25;
-	transition: opacity 0.2s;
+	background-clip: padding-box;
+	opacity: 0.22;
+	transition: opacity 0.2s, width 0.2s;
 	cursor: pointer;
-	border: 4px solid transparent;
+	border: 5px solid transparent;
 	box-sizing: content-box;
 }
-.forecast-dot.active { opacity: 0.8; }
+.forecast-dot.active {
+	opacity: 0.85;
+	width: 14px;
+}
 .forecast-footer {
 	position: relative;
-	min-height: 18px;
-	margin-top: 12px;
+	min-height: 16px;
+	margin-top: clamp(2px, 1.4vh, 8px);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -5109,13 +5645,86 @@ html, body {
 	transform: translateY(-50%);
 	color: ${textColor};
 	opacity: 0.3;
-	font-size: .7rem;
+	font-size: 0.68rem;
 	line-height: 1;
 	white-space: nowrap;
 	pointer-events: none;
 }
 .weather-updated[hidden] {
 	display: none;
+}
+/* Hero scene animations (hero icon only) */
+.wx-anim .wx-rays {
+	animation: wxSpin 70s linear infinite;
+	transform-box: fill-box;
+	transform-origin: center;
+}
+@keyframes wxSpin { to { transform: rotate(360deg); } }
+.wx-anim .wx-glow { animation: wxPulse 5s ease-in-out infinite alternate; }
+@keyframes wxPulse { from { opacity: 0.45; } to { opacity: 0.9; } }
+.wx-anim .wx-cloud-front { animation: wxBob 6s ease-in-out infinite alternate; }
+@keyframes wxBob { from { transform: translateX(-1.4px); } to { transform: translateX(1.4px); } }
+.wx-anim .wx-drop { animation: wxFall 1.15s ease-in infinite; }
+.wx-anim .wx-drop.d2 { animation-delay: 0.38s; }
+.wx-anim .wx-drop.d3 { animation-delay: 0.76s; }
+@keyframes wxFall {
+	0% { transform: translateY(-2px); opacity: 0; }
+	25% { opacity: 1; }
+	75% { opacity: 1; }
+	100% { transform: translateY(7px); opacity: 0; }
+}
+.wx-anim .wx-flake { animation: wxDrift 2.6s ease-in-out infinite; }
+.wx-anim .wx-flake.f2 { animation-delay: 0.9s; }
+.wx-anim .wx-flake.f3 { animation-delay: 1.7s; }
+@keyframes wxDrift {
+	0% { transform: translateY(0); opacity: 0; }
+	30% { opacity: 1; }
+	70% { opacity: 1; }
+	100% { transform: translateY(6px); opacity: 0; }
+}
+.wx-anim .wx-star { animation: wxTwinkle 2.4s ease-in-out infinite alternate; }
+.wx-anim .wx-star.s2 { animation-delay: 0.7s; }
+.wx-anim .wx-star.s3 { animation-delay: 1.3s; }
+@keyframes wxTwinkle { from { opacity: 0.35; } to { opacity: 1; } }
+.wx-anim .wx-bolt { animation: wxFlash 3.4s ease-in-out infinite; }
+@keyframes wxFlash {
+	0%, 100% { opacity: 0.75; }
+	42% { opacity: 0.75; }
+	46% { opacity: 1; }
+	50% { opacity: 0.6; }
+	54% { opacity: 1; }
+	60% { opacity: 0.75; }
+}
+.wx-anim .wx-fog-line { animation: wxFogSlide 5s ease-in-out infinite alternate; }
+.wx-anim .wx-fog-line.g2 { animation-delay: 1.2s; animation-direction: alternate-reverse; }
+.wx-anim .wx-fog-line.g3 { animation-delay: 0.6s; }
+@keyframes wxFogSlide { from { transform: translateX(-2.5px); } to { transform: translateX(2.5px); } }
+/* Structural breakpoints for narrow widths and short heights */
+@media (max-width: 619px), (max-height: 219px) {
+	.hero-chips { display: none; }
+	.hero { justify-content: flex-start; }
+}
+@media (max-height: 209px) {
+	.hero { margin-bottom: 3px; }
+	.hero-sub { display: none; }
+	.day-date { display: none; }
+	.hero-scene { width: 36px; height: 36px; }
+	.hero-temp-val { font-size: 1.8rem; }
+	.hero-temp-unit { font-size: 0.8rem; margin-top: 3px; }
+	.hero-desc { font-size: 0.82rem; }
+}
+@media (max-height: 165px) {
+	.hero { display: none; }
+	.day-pop { display: none; }
+}
+@media (max-height: 129px) {
+	.day-range { display: none; }
+	.day-name { font-size: 0.72rem; }
+}
+@media (max-width: 379px) {
+	.hero-temp-val { font-size: clamp(1.9rem, 18vh, 2.6rem); }
+	.hero-scene { width: clamp(36px, 18vh, 52px); height: clamp(36px, 18vh, 52px); }
+	.hero-desc { font-size: 0.85rem; }
 }
 ${slim ? `
 .forecast-track {
@@ -5128,12 +5737,31 @@ ${slim ? `
 .forecast-container {
 	scroll-snap-type: x mandatory;
 }
+.hero, .forecast-day, .weather-bg::before, .weather-bg::after {
+	animation: none !important;
+}
+.forecast-day {
+	transition: none !important;
+}
 ` : ''}
 </style>
 </head>
 <body>
-<script>if(window.self===window.top)document.documentElement.style.background='${isDark ? '#0f172a' : '#ffffff'}'</script>
+<script>if(window.self===window.top)document.documentElement.style.background='${isDark ? '#10131f' : '#eef1f7'}'</script>
+${weatherIconDefs(isDark)}
+<div class="weather-bg"></div>
 <div class="weather-card">
+	<div class="hero">
+		<div class="hero-main">
+			<div class="hero-scene">${sceneSvg}</div>
+			<div class="hero-temp"><span class="hero-temp-val">${currentTempStr}</span><span class="hero-temp-unit">°${unitSymbol}</span></div>
+			<div class="hero-meta">
+				<div class="hero-desc">${escapeHtml(heroDesc)}</div>
+				<div class="hero-sub">${escapeHtml(heroSub)}</div>
+			</div>
+		</div>
+		<div class="hero-chips">${chipsHtml}</div>
+	</div>
 	<div class="forecast-container">
 		<div class="forecast-track">
 			${forecastCards}
@@ -5231,8 +5859,8 @@ ${slim ? `
   }
 
   function fitCards(animate) {
-    var contentWidth = Math.max(0, container.clientWidth - 10);
-    maxFit = Math.max(1, Math.min(cards.length, Math.floor((contentWidth + 10) / 80)));
+    var contentWidth = Math.max(0, container.clientWidth - 4);
+    maxFit = Math.max(1, Math.min(cards.length, Math.floor((contentWidth + 12) / 104)));
     var maxStart = Math.max(0, cards.length - maxFit);
     if (startIndex > maxStart) startIndex = maxStart;
 
@@ -9385,7 +10013,7 @@ app.get('/weather', (req, res) => {
 
 	res.setHeader('Content-Type', 'text/html; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
-	res.send(renderWeatherWidget(forecast, mode, slim, weatherUpdatedAtMs));
+	res.send(renderWeatherWidget(weatherData, mode, slim, weatherUpdatedAtMs));
 });
 
 app.get(['/', '/index.html'], (req, res) => {

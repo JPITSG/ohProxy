@@ -23,7 +23,7 @@ describe('Weather Smooth Slide Wiring', () => {
 	it('drives paging via translate3d instead of visible-class toggles', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /var track = container\.querySelector\('\.forecast-track'\);/);
-		assert.match(server, /maxFit = Math\.max\(1, Math\.min\(cards\.length, Math\.floor\(\(contentWidth \+ 10\) \/ 80\)\)\);/);
+		assert.match(server, /maxFit = Math\.max\(1, Math\.min\(cards\.length, Math\.floor\(\(contentWidth \+ 12\) \/ 104\)\)\);/);
 		assert.match(server, /track\.style\.transform = 'translate3d\(' \+ \(-offsetX\) \+ 'px,0,0\)'/);
 		assert.match(server, /if \(dots\[i\] === dot\) \{ startIndex = i; fitCards\(true\); break; \}/);
 		assert.match(server, /if \(delta < 0\) startIndex = Math\.min\(startIndex \+ 1, maxStart\);/);
@@ -34,7 +34,7 @@ describe('Weather Smooth Slide Wiring', () => {
 
 	it('renders a client-side updated-age footer that avoids overlapping pager dots', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(server, /function renderWeatherWidget\(forecastData, mode, slim, updatedAtMs\) \{/);
+		assert.match(server, /function renderWeatherWidget\(weatherData, mode, slim, updatedAtMs\) \{/);
 		assert.match(server, /const updatedAtAttr = Number\.isFinite\(updatedAtMs\) && updatedAtMs > 0\s*\? String\(Math\.floor\(updatedAtMs\)\)\s*: '';/);
 		assert.match(server, /<div class="forecast-footer">\s*<div class="forecast-dots"><\/div>\s*<div class="weather-updated" data-updated-at="\$\{updatedAtAttr\}" aria-live="off"><\/div>\s*<\/div>/);
 		assert.match(server, /\.weather-updated \{[\s\S]*?right: 0;[\s\S]*?top: 50%;[\s\S]*?opacity: 0\.3;[\s\S]*?white-space: nowrap;/);
@@ -42,5 +42,35 @@ describe('Weather Smooth Slide Wiring', () => {
 		assert.match(server, /var rightSpace = Math\.floor\(\(footerWidth - dotsWidth\) \/ 2\) - 8;\s*fits = updatedWidth <= rightSpace;/);
 		assert.match(server, /updatedEl\.textContent = 'Updated ' \+ formatUpdatedAgo\(updatedAt\);/);
 		assert.match(server, /updatedEl\.hidden = !fits;/);
+	});
+
+	it('renders a hero band with current conditions and inline SVG scene', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /<div class="hero-scene">\$\{sceneSvg\}<\/div>/);
+		assert.match(server, /<span class="hero-temp-val">\$\{currentTempStr\}<\/span>/);
+		assert.match(server, /<div class="hero-chips">\$\{chipsHtml\}<\/div>/);
+		// Hero text values are escaped at the interpolation site
+		assert.match(server, /<div class="hero-desc">\$\{escapeHtml\(heroDesc\)\}<\/div>/);
+		assert.match(server, /<div class="hero-sub">\$\{escapeHtml\(heroSub\)\}<\/div>/);
+	});
+
+	it('renders per-day temperature range bars scaled to the forecast span', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /<div class="day-range"><span class="day-range-fill" style="\$\{rangeStyle\}"><\/span><\/div>/);
+		assert.match(server, /const weekMin = Math\.min\(\.\.\.lows\);/);
+		assert.match(server, /const weekMax = Math\.max\(\.\.\.highs\);/);
+		assert.match(server, /background-position-x:\$\{bgPos\}%/);
+	});
+
+	it('uses inline SVG icons instead of remote icon images', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /function weatherIconSvg\(group, opts = \{\}\) \{/);
+		assert.match(server, /<div class="day-icon">\$\{dayIconSvg\}<\/div>/);
+		assert.doesNotMatch(server, /<img class="weather-icon"/);
+	});
+
+	it('disables animation and transitions in slim mode', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /\$\{slim \? `[\s\S]*?\.forecast-track \{\s*transition: none !important;\s*will-change: auto !important;\s*\}[\s\S]*?animation: none !important;[\s\S]*?` : ''\}/);
 	});
 });
