@@ -8128,7 +8128,15 @@ function flattenWidgets(list, out, ctx) {
 			}
 			continue;
 		}
+		// __path is a search-index breadcrumb. A single-page render never supplies
+		// one, so drop any left over from a server-crawled page (the inline
+		// __OH_SITEMAP_CACHE__ and /sitemap-full ship them). Without this, the same
+		// item-less widget gets a different widgetKey() depending on whether the
+		// cached or the freshly fetched copy of the page rendered it, which fails
+		// the patch check in render() and rebuilds the whole grid — reloading every
+		// iframe on the page.
 		if (path) w.__path = path.slice();
+		else if (w.__path) delete w.__path;
 		if (frameLabel) w.__frame = frameLabel;
 		if (sectionPath.length) w.__sectionPath = sectionPath.slice();
 		if (sitemapName) w.__sitemapName = sitemapName;

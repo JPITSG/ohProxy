@@ -5988,6 +5988,37 @@ function annotatePageIframeHeights(page, ctx, iframeHeightMap) {
 	return page;
 }
 
+/*
+ * The sitemap crawl walks each page with a breadcrumb path so it can queue linked
+ * pages and evaluate visibility, and that walk annotates the widgets in place with
+ * __path. __path is a search-index concept: the client never sets one when it
+ * renders a single page, so shipping it on the cached copy makes widgetKey()
+ * disagree between the cached and the freshly fetched copy of the same page. That
+ * fails the patch check in render() and rebuilds the whole grid, reloading every
+ * iframe on it. Strip the annotation once the crawl is done with the page.
+ */
+function stripCrawlPathAnnotations(page) {
+	const stripWidget = (widget) => {
+		if (!widget || typeof widget !== 'object') return;
+		if (widget.__path) delete widget.__path;
+		if (widget.widgets) stripContainer(widget.widgets);
+		if (widget.widget) stripContainer(widget.widget);
+	};
+	// Widget containers vary in shape: array, { item: [...] }, { item: {...} }, or a
+	// bare widget object (matches the shapes handled in filterSitemapCacheVisibility).
+	const stripContainer = (val) => {
+		if (!val || typeof val !== 'object') return;
+		if (Array.isArray(val)) { val.forEach(stripWidget); return; }
+		if (Array.isArray(val.item)) { val.item.forEach(stripWidget); return; }
+		if (val.item) { stripWidget(val.item); return; }
+		stripWidget(val);
+	};
+	if (!page || typeof page !== 'object') return page;
+	if (page.widgets) stripContainer(page.widgets);
+	if (page.widget) stripContainer(page.widget);
+	return page;
+}
+
 async function getFullSitemapData(sitemapName, userRole = '', username = '') {
 	if (!sitemapName) return null;
 
@@ -6038,6 +6069,7 @@ async function getFullSitemapData(sitemapName, userRole = '', username = '') {
 			visibilityMap
 		);
 		queueLinkedSearchPages(visibleEntries, queue, seenPages, pagePath);
+		stripCrawlPathAnnotations(page);
 	}
 
 	if (Object.keys(pages).length === 0) return null;
@@ -9953,6 +9985,7 @@ app.get('/sitemap-full', async (req, res) => {
 				visibilityMap
 			);
 			queueLinkedSearchPages(visibleEntries, queue, seenPages, pagePath);
+			stripCrawlPathAnnotations(page);
 		}
 
 		const filtered = filterSitemapCacheVisibility({ pages, root: rootPath }, userRole, username);
