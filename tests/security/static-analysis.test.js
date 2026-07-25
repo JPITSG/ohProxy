@@ -74,6 +74,11 @@ function findHtmlTemplateLiterals(content, filePath) {
 						if (/escape|safeHtml|sanitize/i.test(inner)) continue;
 						// Skip if it's a known safe value (numbers, booleans, JSON.stringify)
 						if (/^(true|false|\d+|JSON\.stringify)/.test(inner)) continue;
+						// Skip conditionals whose every branch is a string literal. Whatever
+						// the condition evaluates to, the output is one of those literals, so
+						// no input can reach the page through it. (Backticks are only literal
+						// when they carry no interpolation of their own.)
+						if (/^[^?]+\?\s*('[^']*'|"[^"]*"|`[^`$]*`)\s*:\s*('[^']*'|"[^"]*"|`[^`$]*`)$/.test(inner)) continue;
 						// Skip if it's accessing a safe property
 						if (/\.(length|size|count|id|version)$/.test(inner)) continue;
 
@@ -246,6 +251,12 @@ describe('Static Analysis: XSS Prevention', () => {
 			if (issue.interpolation.includes('cardBg')) return false;
 			if (issue.interpolation.includes('textColor')) return false;
 			if (issue.interpolation.includes('cityName')) return false;
+			// Chart period-nav tooltips: generateChartHtml builds these as attribute
+			// fragments before the template, and every value inside them goes through
+			// escapeHtml; the alternatives are string constants.
+			if (issue.interpolation === 'backTooltipAttrs') return false;
+			if (issue.interpolation === 'forwardTooltipAttrs') return false;
+			if (issue.interpolation === 'latestTooltipAttrs') return false;
 			return true;
 		});
 
