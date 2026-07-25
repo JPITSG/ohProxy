@@ -1918,6 +1918,22 @@ function applyHomeSnapshot(snapshot) {
 	return true;
 }
 
+// The video card stacks the .video-preview thumbnail (z-10) BEHIND the <video>
+// (z-15) and relies on a frameless element painting nothing, so the thumbnail
+// shows through until the first decoded frame covers it. Desktop Chrome does paint
+// nothing; Android WebView instead asks the host app for
+// WebChromeClient.getDefaultVideoPoster() and, unless the container overrides it to
+// return null, fills the element with its own low-resolution gray play-button
+// bitmap - opaque, on top, hiding the thumbnail entirely.
+//
+// WebView only substitutes that default when the poster attribute is ABSENT. A 1x1
+// fully transparent poster satisfies the check while painting nothing, so the
+// existing layering works unchanged on every platform. It must therefore stay set
+// whenever no real poster is in play - never removeAttribute('poster').
+// (Layout is unaffected: .video-container drives the box via aspect-ratio/height and
+// .video-stream is width/height 100%, so the poster's 1x1 intrinsic size is unused.)
+const VIDEO_TRANSPARENT_POSTER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
 function stopAllVideoStreams() {
 	const videos = document.querySelectorAll('video.video-stream');
 	for (const video of videos) {
@@ -1988,7 +2004,9 @@ function resumeVideoStreamsFromVisibility() {
 			}
 			video.addEventListener('playing', function onResumePlaying() {
 				video.removeEventListener('playing', onResumePlaying);
-				video.removeAttribute('poster');
+				// Back to the transparent placeholder, not no poster at all -
+				// clearing the attribute would let WebView's default return.
+				video.poster = VIDEO_TRANSPARENT_POSTER;
 				if (spinner) {
 					spinner.style.display = '';
 					spinner.style.zIndex = '';
@@ -10244,6 +10262,9 @@ function updateCard(card, w, info) {
 			videoEl.style.cssText = 'position:relative;z-index:15;';
 			videoEl.setAttribute('autoplay', '');
 			videoEl.setAttribute('playsinline', '');
+			// Suppress Android WebView's built-in gray play-button placeholder so the
+			// .video-preview thumbnail behind the element stays visible.
+			videoEl.setAttribute('poster', VIDEO_TRANSPARENT_POSTER);
 			// Apply video config for muted state
 			const videoConfig = widgetVideoConfigMap.get(widgetKey(w));
 			const shouldMute = videoConfig?.defaultMuted !== false; // Default to muted
