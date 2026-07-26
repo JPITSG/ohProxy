@@ -837,6 +837,7 @@ body.theme-light .admin-config-sections::-webkit-scrollbar-thumb:hover {
 }
 .image-viewer-trigger {
 	cursor: zoom-in;
+	touch-action: pan-y;
 }
 .image-viewer {
 	position: fixed;
@@ -913,6 +914,12 @@ body.theme-light .image-viewer {
 .image-viewer.loading:not(.has-preview) .image-viewer-img,
 .image-viewer.has-preview:not(.image-ready) .image-viewer-img {
 	opacity: 0;
+}
+.image-viewer.pinching .image-viewer-img {
+	transition-duration: 0s, .4s;
+}
+.image-viewer.pinching .image-viewer-preview {
+	transition-duration: 0s, .4s, 0s;
 }
 .image-viewer-img.zoomed {
 	cursor: zoom-out;
