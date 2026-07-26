@@ -3,7 +3,10 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const path = require('path');
+const { Writable } = require('stream');
 
 function safeText(value) {
 	return value === null || value === undefined ? '' : String(value);
@@ -80,6 +83,54 @@ function extractRtspUrlFromBody(body, _contentType) {
 	return '';
 }
 
+function extractFunction(source, name) {
+	const start = source.indexOf(`function ${name}(`);
+	assert.ok(start >= 0, `${name} must exist`);
+	const bodyStart = source.indexOf('{', start);
+	let depth = 0;
+	for (let i = bodyStart; i < source.length; i += 1) {
+		if (source[i] === '{') depth += 1;
+		else if (source[i] === '}') {
+			depth -= 1;
+			if (depth === 0) return source.slice(start, i + 1);
+		}
+	}
+	throw new Error(`Could not extract ${name}`);
+}
+
+function buildServerFunction(source, name, dependencies = {}) {
+	const names = Object.keys(dependencies);
+	const values = Object.values(dependencies);
+	return Function(...names, `return (${extractFunction(source, name)});`)(...values);
+}
+
+class ExpressResponseSink extends Writable {
+	constructor() {
+		super();
+		this.statusCode = 200;
+		this.headers = new Map();
+		this.chunks = [];
+	}
+
+	status(value) {
+		this.statusCode = value;
+		return this;
+	}
+
+	setHeader(name, value) {
+		this.headers.set(String(name).toLowerCase(), String(value));
+	}
+
+	_write(chunk, _encoding, callback) {
+		this.chunks.push(Buffer.from(chunk));
+		callback();
+	}
+
+	body() {
+		return Buffer.concat(this.chunks);
+	}
+}
+
 describe('RTSP proxy fallback helpers', () => {
 	describe('isOpenhabWidgetProxyTarget', () => {
 		it('matches same host/port and widget proxy query', () => {
@@ -150,7 +201,68 @@ describe('RTSP fallback wiring in server route', () => {
 		assert.match(source, /const shouldTryRtspFallback = isOpenhabWidgetProxyTarget\(target, liveConfig\.ohTarget\);/);
 		assert.match(source, /const fallbackUrl = extractRtspUrlFromBody\(probe\.body, probe\.contentType\);/);
 		assert.match(source, /if \(startVideoProxyStream\(req, res, fallbackTarget, 'rtsp'\)\) return;/);
-		assert.match(source, /if \(probe\.ok\) \{\s*await pipeStreamingProxy\(targetUrl, res, headers\);\s*return;\s*\}/s);
+		assert.match(
+			source,
+			/fetchErrorBodyIfHttpError\(targetUrl, headers, 3, undefined,\s*\(redirectUrl\) => isProxyTargetAllowed\(redirectUrl, allowlist\), res\)/
+		);
+		assert.match(source, /if \(probe\.ok\) \{\s*return;\s*\}/s);
+		const routeStart = source.indexOf('const shouldTryRtspFallback = isOpenhabWidgetProxyTarget');
+		const routeEnd = source.indexOf('const fallbackUrl = extractRtspUrlFromBody', routeStart);
+		assert.doesNotMatch(source.slice(routeStart, routeEnd), /pipeStreamingProxy/);
+	});
+
+	it('streams a successful openHAB response from the probe request itself', async () => {
+		const projectRoot = path.join(__dirname, '..', '..');
+		const serverSource = fs.readFileSync(path.join(projectRoot, 'server.js'), 'utf8');
+		const fetchErrorBodyIfHttpError = buildServerFunction(
+			serverSource,
+			'fetchErrorBodyIfHttpError',
+			{
+				http,
+				https,
+				safeText,
+				liveConfig: { userAgent: 'ohProxy-test' },
+				REDIRECT_STATUS: new Set([301, 302, 303, 307, 308]),
+				decodeCompressedBody: (body) => body,
+				logMessage: () => {},
+			}
+		);
+
+		let successfulBodyRequests = 0;
+		const upstream = http.createServer((req, res) => {
+			if (req.url === '/redirect') {
+				res.writeHead(302, { Location: '/image' });
+				res.end();
+				return;
+			}
+			successfulBodyRequests += 1;
+			res.writeHead(200, { 'Content-Type': 'image/png' });
+			res.end(Buffer.from('single-request-image'));
+		});
+		await new Promise((resolve) => upstream.listen(0, 'localhost', resolve));
+
+		try {
+			const address = upstream.address();
+			const sink = new ExpressResponseSink();
+			const result = await fetchErrorBodyIfHttpError(
+				`http://localhost:${address.port}/redirect`,
+				{},
+				3,
+				undefined,
+				() => true,
+				sink
+			);
+
+			assert.strictEqual(result.ok, true);
+			assert.strictEqual(result.streamed, true);
+			assert.strictEqual(successfulBodyRequests, 1);
+			assert.strictEqual(sink.statusCode, 200);
+			assert.strictEqual(sink.headers.get('content-type'), 'image/png');
+			assert.strictEqual(sink.headers.get('cache-control'), 'no-store');
+			assert.strictEqual(sink.body().toString(), 'single-request-image');
+		} finally {
+			await new Promise((resolve) => upstream.close(resolve));
+		}
 	});
 });
 

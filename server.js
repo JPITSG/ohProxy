@@ -7232,7 +7232,7 @@ function fetchBinaryFromUrl(targetUrl, headers, redirectsLeft = 3, agent, valida
 	});
 }
 
-function fetchErrorBodyIfHttpError(targetUrl, headers, redirectsLeft = 3, agent, validateRedirect) {
+function fetchErrorBodyIfHttpError(targetUrl, headers, redirectsLeft = 3, agent, validateRedirect, streamSuccessTo) {
 	return new Promise((resolve, reject) => {
 		let url;
 		try {
@@ -7265,12 +7265,45 @@ function fetchErrorBodyIfHttpError(targetUrl, headers, redirectsLeft = 3, agent,
 					reject(new Error('Redirect target not allowed'));
 					return;
 				}
-				resolve(fetchErrorBodyIfHttpError(nextUrl.toString(), headers, redirectsLeft - 1, agent, validateRedirect));
+				resolve(fetchErrorBodyIfHttpError(
+					nextUrl.toString(),
+					headers,
+					redirectsLeft - 1,
+					agent,
+					validateRedirect,
+					streamSuccessTo
+				));
 				return;
 			}
 
 			const contentType = safeText(res.headers['content-type']);
 			if (status < 400) {
+				if (streamSuccessTo) {
+					streamSuccessTo.status(status);
+					if (contentType) streamSuccessTo.setHeader('Content-Type', contentType);
+					streamSuccessTo.setHeader('Cache-Control', 'no-store');
+					streamSuccessTo.setHeader('Connection', 'close');
+					res.pipe(streamSuccessTo);
+					res.on('end', () => resolve({
+						status,
+						ok: true,
+						contentType,
+						url: url.toString(),
+						streamed: true,
+					}));
+					res.on('error', (err) => {
+						logMessage(`Stream error: ${err.message}`);
+						resolve({
+							status,
+							ok: true,
+							contentType,
+							url: url.toString(),
+							streamed: true,
+							error: err,
+						});
+					});
+					return;
+				}
 				res.resume();
 				resolve({
 					status,
@@ -7308,6 +7341,11 @@ function fetchErrorBodyIfHttpError(targetUrl, headers, redirectsLeft = 3, agent,
 			req.destroy(new Error('Proxy fetch timed out'));
 		});
 		req.on('error', reject);
+		if (streamSuccessTo) {
+			streamSuccessTo.once('close', () => {
+				req.destroy();
+			});
+		}
 		req.end();
 	});
 }
@@ -12554,9 +12592,8 @@ app.get('/proxy', async (req, res, next) => {
 			try {
 				const allowlist = liveConfig.proxyAllowlist;
 				const probe = await fetchErrorBodyIfHttpError(targetUrl, headers, 3, undefined,
-					(redirectUrl) => isProxyTargetAllowed(redirectUrl, allowlist));
+					(redirectUrl) => isProxyTargetAllowed(redirectUrl, allowlist), res);
 				if (probe.ok) {
-					await pipeStreamingProxy(targetUrl, res, headers);
 					return;
 				}
 

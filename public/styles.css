@@ -872,9 +872,10 @@ body.theme-light .image-viewer {
 	justify-content: center;
 	transition: opacity .4s ease;
 }
-.image-viewer.loading .image-viewer-frame {
+.image-viewer.loading:not(.has-preview) .image-viewer-frame {
 	opacity: 0;
 }
+.image-viewer-preview,
 .image-viewer-img {
 	width: 100%;
 	height: 100%;
@@ -889,7 +890,21 @@ body.theme-light .image-viewer {
 	z-index: 1;
 	opacity: 1;
 }
-.image-viewer.loading .image-viewer-img {
+.image-viewer-preview {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	opacity: 0;
+	pointer-events: none;
+}
+.image-viewer.has-preview .image-viewer-preview {
+	opacity: 1;
+}
+.image-viewer.has-preview.image-ready .image-viewer-preview {
+	opacity: 0;
+}
+.image-viewer.loading:not(.has-preview) .image-viewer-img,
+.image-viewer.has-preview:not(.image-ready) .image-viewer-img {
 	opacity: 0;
 }
 .image-viewer-img.zoomed {

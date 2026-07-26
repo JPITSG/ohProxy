@@ -95,7 +95,8 @@ describe('Hybrid media zoom input handling', () => {
 		resetMediaZoomState(zoomState);
 
 		assert.deepStrictEqual(zoomState, createMediaZoomState());
-		assert.match(app, /function resetImageViewerZoom\(\) \{\s*resetMediaZoomState\(imageViewerZoomState\);[\s\S]*?classList\.remove\('zoomed'\);[\s\S]*?style\.transform = '';[\s\S]*?style\.transformOrigin = '50% 50%';/);
+		assert.match(app, /function resetImageViewerZoom\(\) \{\s*resetMediaZoomState\(imageViewerZoomState\);[\s\S]*?classList\.remove\('zoomed'\);[\s\S]*?setImageViewerVisualTransform\('', '50% 50%'\);/);
+		assert.match(app, /function setImageViewerVisualTransform\(transform, transformOrigin\) \{\s*for \(const el of \[imageViewerImg, imageViewerPreview\]\)/);
 		assert.match(app, /function openImageViewer\([\s\S]*?resetImageViewerZoom\(\);/);
 		assert.match(app, /function closeImageViewer\([\s\S]*?resetImageViewerZoom\(\);/);
 	});

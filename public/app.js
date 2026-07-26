@@ -734,6 +734,9 @@ const IMAGE_VIEWER_MAX_SCALE = 4;
 const IMAGE_VIEWER_DESKTOP_SCALE = 2;
 const IMAGE_VIEWER_PAN_SPEED = 1.5;
 const IMAGE_VIEWER_RESET_THRESHOLD = 1.1;
+const IMAGE_VIEWER_UPGRADE_RATIO = 1.1;
+const IMAGE_VIEWER_PREVIEW_MAX_DIMENSION = 4096;
+const IMAGE_VIEWER_PREVIEW_MAX_PIXELS = 16 * 1024 * 1024;
 const VIDEO_ZOOM_MAX_SCALE = 4;
 const VIDEO_ZOOM_DESKTOP_SCALE = 2;
 const VIDEO_ZOOM_PAN_SPEED = 1.5;
@@ -830,6 +833,15 @@ function getWidgetIframeConfig(widget) {
 	if (!widget || !widgetIframeConfigMap.size) return null;
 	for (const key of widgetConfigLookupKeys(widget)) {
 		const config = widgetIframeConfigMap.get(key);
+		if (config) return config;
+	}
+	return null;
+}
+
+function getWidgetProxyCacheConfig(widget) {
+	if (!widget || !widgetProxyCacheConfigMap.size) return null;
+	for (const key of widgetConfigLookupKeys(widget)) {
+		const config = widgetProxyCacheConfigMap.get(key);
 		if (config) return config;
 	}
 	return null;
@@ -4112,12 +4124,18 @@ function setupImage(imgEl, url, refreshMs) {
 let imageViewer = null;
 let imageViewerFrame = null;
 let imageViewerImg = null;
+let imageViewerPreview = null;
 let imageViewerClose = null;
 const imageViewerZoomState = createMediaZoomState();
 let imageViewerTimer = null;
 let imageViewerUrl = '';
 let imageViewerRefreshMs = null;
 let imageViewerInitialLoadPending = false;
+let imageViewerPreviewNaturalWidth = 0;
+let imageViewerPreviewNaturalHeight = 0;
+let imageViewerSourceEl = null;
+let imageViewerSourceLoadHandler = null;
+let imageViewerLoadGeneration = 0;
 let imageViewerFitMode = 'real';
 let imageResizeEpoch = 0;
 let imageResizeTimer = null;
@@ -5159,7 +5177,7 @@ function openCardConfigModal(widget, card) {
 		if (isImageWidget) {
 			const cacheInput = proxyCacheSection.querySelector('.proxy-cache-input');
 			if (cacheInput) {
-				const cacheConfig = widgetProxyCacheConfigMap.get(wKey);
+				const cacheConfig = getWidgetProxyCacheConfig(widget);
 				cacheInput.value = cacheConfig?.cacheSeconds ? String(cacheConfig.cacheSeconds) : '';
 			}
 		}
@@ -7551,13 +7569,15 @@ function ensureImageViewer() {
 						<img src="icons/image-viewer-close.svg" alt="" aria-hidden="true" />
 					</button>
 				</div>
+			<canvas class="image-viewer-preview" aria-hidden="true"></canvas>
 			<img class="image-viewer-img" />
 		</div>
-	`;
+		`;
 	document.body.appendChild(wrap);
 	imageViewer = wrap;
 	imageViewerFrame = wrap.querySelector('.image-viewer-frame');
 	imageViewerImg = wrap.querySelector('.image-viewer-img');
+	imageViewerPreview = wrap.querySelector('.image-viewer-preview');
 	imageViewerClose = wrap.querySelector('.image-viewer-close');
 	if (imageViewerClose) {
 		imageViewerClose.addEventListener('click', () => { haptic(); requestCloseImageViewer(); });
@@ -7568,15 +7588,18 @@ function ensureImageViewer() {
 	}
 	if (imageViewerImg) {
 		imageViewerImg.addEventListener('load', () => {
+			if (Number(imageViewerImg.dataset.loadGeneration) !== imageViewerLoadGeneration) return;
 			updateImageViewerFrameSize();
 			const finalize = () => {
 				if (!imageViewerInitialLoadPending || !imageViewer) return;
+				imageViewer.classList.add('image-ready');
 				imageViewer.classList.remove('loading');
 				imageViewerInitialLoadPending = false;
 			};
 			finalize();
 		});
 		imageViewerImg.addEventListener('error', () => {
+			if (Number(imageViewerImg.dataset.loadGeneration) !== imageViewerLoadGeneration) return;
 			if (!imageViewerInitialLoadPending || !imageViewer) return;
 			imageViewer.classList.remove('loading');
 			imageViewerInitialLoadPending = false;
@@ -7609,6 +7632,129 @@ function ensureImageViewer() {
 	});
 }
 
+function imageViewerFitSize(naturalWidth, naturalHeight, viewportWidth, viewportHeight) {
+	const maxW = Math.max(0, Math.round((Number(viewportWidth) || 0) * IMAGE_VIEWER_MAX_VIEWPORT));
+	const maxH = Math.max(0, Math.round((Number(viewportHeight) || 0) * IMAGE_VIEWER_MAX_VIEWPORT));
+	if (!maxW || !maxH) return { width: 0, height: 0 };
+	if (
+		!Number.isFinite(naturalWidth) ||
+		!Number.isFinite(naturalHeight) ||
+		naturalWidth <= 0 ||
+		naturalHeight <= 0
+	) {
+		return { width: maxW, height: maxH };
+	}
+	const ratio = naturalWidth / naturalHeight;
+	let width = maxW;
+	let height = Math.round(width / ratio);
+	if (height > maxH) {
+		height = maxH;
+		width = Math.round(height * ratio);
+	}
+	return { width, height };
+}
+
+function clearImageViewerSourceBinding() {
+	if (imageViewerSourceEl && imageViewerSourceLoadHandler) {
+		imageViewerSourceEl.removeEventListener('load', imageViewerSourceLoadHandler);
+	}
+	imageViewerSourceEl = null;
+	imageViewerSourceLoadHandler = null;
+}
+
+function clearImageViewerPreview() {
+	imageViewerPreviewNaturalWidth = 0;
+	imageViewerPreviewNaturalHeight = 0;
+	if (imageViewerPreview) {
+		imageViewerPreview.width = 0;
+		imageViewerPreview.height = 0;
+		imageViewerPreview.style.transform = '';
+		imageViewerPreview.style.transformOrigin = '50% 50%';
+	}
+	if (imageViewer) {
+		imageViewer.classList.remove('has-preview');
+		imageViewer.classList.remove('image-ready');
+	}
+}
+
+function drawImageViewerPreview(sourceImage) {
+	if (!imageViewer || !imageViewerPreview || !sourceImage) return false;
+	const naturalWidth = Number(sourceImage.naturalWidth) || 0;
+	const naturalHeight = Number(sourceImage.naturalHeight) || 0;
+	if (!sourceImage.complete || naturalWidth <= 0 || naturalHeight <= 0) return false;
+
+	let scale = Math.min(
+		1,
+		IMAGE_VIEWER_PREVIEW_MAX_DIMENSION / naturalWidth,
+		IMAGE_VIEWER_PREVIEW_MAX_DIMENSION / naturalHeight
+	);
+	const pixelCount = naturalWidth * naturalHeight;
+	if (pixelCount > IMAGE_VIEWER_PREVIEW_MAX_PIXELS) {
+		scale = Math.min(scale, Math.sqrt(IMAGE_VIEWER_PREVIEW_MAX_PIXELS / pixelCount));
+	}
+	const width = Math.max(1, Math.round(naturalWidth * scale));
+	const height = Math.max(1, Math.round(naturalHeight * scale));
+
+	try {
+		imageViewerPreview.width = width;
+		imageViewerPreview.height = height;
+		const ctx = imageViewerPreview.getContext('2d');
+		if (!ctx) return false;
+		ctx.clearRect(0, 0, width, height);
+		ctx.drawImage(sourceImage, 0, 0, width, height);
+	} catch (err) {
+		logJsError('drawImageViewerPreview failed', err);
+		clearImageViewerPreview();
+		return false;
+	}
+
+	imageViewerPreviewNaturalWidth = naturalWidth;
+	imageViewerPreviewNaturalHeight = naturalHeight;
+	imageViewer.classList.add('has-preview');
+	imageViewer.classList.remove('image-ready');
+	updateImageViewerFrameSize();
+	return true;
+}
+
+function imageViewerSourceNeedsUpgrade(sourceImage) {
+	if (!sourceImage) return true;
+	const naturalWidth = Number(sourceImage.naturalWidth) || 0;
+	const naturalHeight = Number(sourceImage.naturalHeight) || 0;
+	if (naturalWidth <= 0 || naturalHeight <= 0) return true;
+	const fit = imageViewerFitSize(
+		naturalWidth,
+		naturalHeight,
+		window.innerWidth || 0,
+		window.innerHeight || 0
+	);
+	return fit.width > naturalWidth * IMAGE_VIEWER_UPGRADE_RATIO;
+}
+
+function bindImageViewerToSource(sourceImage, generation) {
+	clearImageViewerSourceBinding();
+	if (!sourceImage) return;
+	imageViewerSourceEl = sourceImage;
+	imageViewerSourceLoadHandler = () => {
+		if (
+			generation !== imageViewerLoadGeneration ||
+			!imageViewer ||
+			imageViewer.classList.contains('hidden')
+		) return;
+		drawImageViewerPreview(sourceImage);
+	};
+	sourceImage.addEventListener('load', imageViewerSourceLoadHandler);
+}
+
+function findLoadedImageViewerSource(url) {
+	const target = safeText(url).trim();
+	if (!target) return null;
+	for (const img of document.querySelectorAll('img.card-image')) {
+		if (safeText(img.dataset.mediaUrl).trim() !== target) continue;
+		if (img.complete && Number(img.naturalWidth) > 0 && Number(img.naturalHeight) > 0) return img;
+	}
+	return null;
+}
+
 function openImageViewer(url, refreshMs, options = {}) {
 	if (state.isSlim) return;
 	const target = safeText(url).trim();
@@ -7618,12 +7764,19 @@ function openImageViewer(url, refreshMs, options = {}) {
 	if (!imageViewer || !imageViewerImg) return;
 	imageViewerFitMode = 'real';
 	resetImageViewerZoom();
-	imageViewerInitialLoadPending = true;
-	imageViewer.classList.add('loading');
+	imageViewerInitialLoadPending = false;
+	clearImageViewerTimer();
+	clearImageViewerSourceBinding();
+	clearImageViewerPreview();
+	imageViewerImg.removeAttribute('src');
+	const sourceImage = options.sourceImage || findLoadedImageViewerSource(target);
+	const hasPreview = drawImageViewerPreview(sourceImage);
 	imageViewer.classList.remove('hidden');
 	document.body.classList.add('image-viewer-open');
 	updateImageViewerFrameSize();
-	setImageViewerSource(target, refreshMs);
+	const loadStarted = setImageViewerSource(target, refreshMs, { sourceImage, hasPreview });
+	imageViewerInitialLoadPending = loadStarted;
+	imageViewer.classList.toggle('loading', loadStarted);
 	if (!options.skipHistory) {
 		pushImageViewerHistory(target, refreshMs);
 	}
@@ -7632,16 +7785,20 @@ function openImageViewer(url, refreshMs, options = {}) {
 function closeImageViewer() {
 	if (!imageViewer) return;
 	haptic();
+	imageViewerLoadGeneration += 1;
 	imageViewer.classList.add('hidden');
 	document.body.classList.remove('image-viewer-open');
 	resetImageViewerZoom();
 	imageViewerInitialLoadPending = false;
 	imageViewer.classList.remove('loading');
 	clearImageViewerTimer();
+	clearImageViewerSourceBinding();
+	clearImageViewerPreview();
 	imageViewerUrl = '';
 	imageViewerRefreshMs = null;
 	if (imageViewerImg) {
 		imageViewerImg.removeAttribute('src');
+		delete imageViewerImg.dataset.loadGeneration;
 		imageViewerImg.style.transform = '';
 	}
 }
@@ -7673,21 +7830,35 @@ function clearImageViewerTimer() {
 	}
 }
 
-function setImageViewerSource(url, refreshMs) {
-	if (!imageViewerImg) return;
+function setImageViewerSource(url, refreshMs, options = {}) {
+	if (!imageViewerImg) return false;
 	clearImageViewerTimer();
+	clearImageViewerSourceBinding();
 	imageViewerUrl = url;
 	imageViewerRefreshMs = refreshMs;
+	const generation = ++imageViewerLoadGeneration;
+	const sourceImage = options.sourceImage || null;
+	if (options.hasPreview && sourceImage && !imageViewerSourceNeedsUpgrade(sourceImage)) {
+		bindImageViewerToSource(sourceImage, generation);
+		return false;
+	}
 	let ms = Number(refreshMs);
 	if (state.isSlim && Number.isFinite(ms) && ms > 0 && ms < MIN_IMAGE_REFRESH_MS) {
 		ms = MIN_IMAGE_REFRESH_MS;
 	}
 	const update = () => {
-		if (!imageViewerImg) return;
+		if (
+			!imageViewerImg ||
+			generation !== imageViewerLoadGeneration ||
+			!imageViewer ||
+			imageViewer.classList.contains('hidden')
+		) return;
 		const resolved = resolveMediaUrl(imageViewerImg, url);
+		imageViewerImg.dataset.loadGeneration = String(generation);
 		imageViewerImg.src = withCacheBust(resolved);
 	};
 	const start = () => {
+		if (generation !== imageViewerLoadGeneration) return;
 		update();
 		if (Number.isFinite(ms) && ms > 0) {
 			imageViewerTimer = setInterval(update, ms);
@@ -7698,29 +7869,22 @@ function setImageViewerSource(url, refreshMs) {
 	} else {
 		start();
 	}
+	return true;
 }
 
 function updateImageViewerFrameSize() {
 	if (!imageViewerFrame || !imageViewerImg) return;
-	const maxW = Math.max(0, Math.round((window.innerWidth || 0) * IMAGE_VIEWER_MAX_VIEWPORT));
-	const maxH = Math.max(0, Math.round((window.innerHeight || 0) * IMAGE_VIEWER_MAX_VIEWPORT));
-	if (!maxW || !maxH) return;
-	const naturalW = imageViewerImg.naturalWidth;
-	const naturalH = imageViewerImg.naturalHeight;
-	if (!Number.isFinite(naturalW) || !Number.isFinite(naturalH) || naturalW <= 0 || naturalH <= 0) {
-		imageViewerFrame.style.width = `${maxW}px`;
-		imageViewerFrame.style.height = `${maxH}px`;
-		return;
-	}
-	const ratio = naturalW / naturalH;
-	let width = maxW;
-	let height = Math.round(width / ratio);
-	if (height > maxH) {
-		height = maxH;
-		width = Math.round(height * ratio);
-	}
-	imageViewerFrame.style.width = `${width}px`;
-	imageViewerFrame.style.height = `${height}px`;
+	const naturalW = imageViewerImg.naturalWidth || imageViewerPreviewNaturalWidth;
+	const naturalH = imageViewerImg.naturalHeight || imageViewerPreviewNaturalHeight;
+	const fit = imageViewerFitSize(
+		naturalW,
+		naturalH,
+		window.innerWidth || 0,
+		window.innerHeight || 0
+	);
+	if (!fit.width || !fit.height) return;
+	imageViewerFrame.style.width = `${fit.width}px`;
+	imageViewerFrame.style.height = `${fit.height}px`;
 }
 
 function clampImageViewerZoomTranslate() {
@@ -7744,6 +7908,14 @@ function clampImageViewerZoomTranslate() {
 	imageViewerZoomState.translateY = Math.min(maxY, Math.max(-maxY, imageViewerZoomState.translateY));
 }
 
+function setImageViewerVisualTransform(transform, transformOrigin) {
+	for (const el of [imageViewerImg, imageViewerPreview]) {
+		if (!el) continue;
+		el.style.transform = transform;
+		el.style.transformOrigin = transformOrigin;
+	}
+}
+
 function applyImageViewerZoom() {
 	if (!imageViewerImg) return;
 	const zoomed = imageViewerZoomState.scale > 1;
@@ -7752,20 +7924,21 @@ function applyImageViewerZoom() {
 		imageViewerZoomState.scale = 1;
 		imageViewerZoomState.translateX = 0;
 		imageViewerZoomState.translateY = 0;
-		imageViewerImg.style.transform = '';
-		imageViewerImg.style.transformOrigin = '50% 50%';
+		setImageViewerVisualTransform('', '50% 50%');
 		return;
 	}
 	clampImageViewerZoomTranslate();
-	imageViewerImg.style.transform = `translate(${imageViewerZoomState.translateX}px, ${imageViewerZoomState.translateY}px) scale(${imageViewerZoomState.scale})`;
+	setImageViewerVisualTransform(
+		`translate(${imageViewerZoomState.translateX}px, ${imageViewerZoomState.translateY}px) scale(${imageViewerZoomState.scale})`,
+		imageViewerImg.style.transformOrigin || '50% 50%'
+	);
 }
 
 function resetImageViewerZoom() {
 	resetMediaZoomState(imageViewerZoomState);
 	if (!imageViewerImg) return;
 	imageViewerImg.classList.remove('zoomed');
-	imageViewerImg.style.transform = '';
-	imageViewerImg.style.transformOrigin = '50% 50%';
+	setImageViewerVisualTransform('', '50% 50%');
 }
 
 function setImageViewerZoomOriginFromPoint(clientX, clientY) {
@@ -7774,7 +7947,7 @@ function setImageViewerZoomOriginFromPoint(clientX, clientY) {
 	if (!rect.width || !rect.height) return;
 	const x = Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100));
 	const y = Math.min(100, Math.max(0, ((clientY - rect.top) / rect.height) * 100));
-	imageViewerImg.style.transformOrigin = `${x}% ${y}%`;
+	setImageViewerVisualTransform(imageViewerImg.style.transform || '', `${x}% ${y}%`);
 }
 
 function toggleImageViewerZoom(clientX, clientY) {
@@ -9736,7 +9909,7 @@ function getWidgetRenderInfo(w) {
 	const labelParts = splitLabelState(label);
 	const wKey = widgetKey(w);
 	// Check for proxy cache config and add cache param to image URL
-	const proxyCacheConfig = isImage ? widgetProxyCacheConfigMap.get(wKey) : null;
+	const proxyCacheConfig = isImage ? getWidgetProxyCacheConfig(w) : null;
 	const cacheParam = proxyCacheConfig?.cacheSeconds ? `&cache=${proxyCacheConfig.cacheSeconds}` : '';
 	const rawMediaUrl = isImage ? normalizeMediaUrl(imageWidgetUrl(w)) : '';
 	const mediaUrl = rawMediaUrl ? rawMediaUrl + cacheParam : '';
@@ -10104,7 +10277,7 @@ function updateCard(card, w, info) {
 		imgEl.onclick = state.isSlim ? null : (e) => {
 			e.preventDefault();
 			e.stopPropagation();
-			openImageViewer(imgEl.dataset.mediaUrl || mediaUrl, w?.refresh);
+			openImageViewer(imgEl.dataset.mediaUrl || mediaUrl, w?.refresh, { sourceImage: imgEl });
 		};
 
 		const refreshKey = safeText(w?.refresh ?? '');
