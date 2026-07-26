@@ -1213,8 +1213,8 @@ async function enterVideoFullscreen(videoEl, videoContainer) {
 	// Update button icon to exit
 	const fsBtn = videoContainer.querySelector('.video-fullscreen-btn');
 	if (fsBtn) {
-		fsBtn.innerHTML = '<img src="icons/video-fullscreen-exit.svg" alt="Exit Fullscreen" style="width:100%;height:100%;display:block;" />';
-		fsBtn.title = 'Exit Fullscreen';
+		fsBtn.innerHTML = '<img src="icons/video-fullscreen-exit.svg" alt="" aria-hidden="true" style="width:100%;height:100%;display:block;" />';
+		setControlTooltip(fsBtn, tooltipLabel('exitFullscreen', 'Exit fullscreen'));
 	}
 
 	// On mobile with landscape video, rotate to landscape orientation
@@ -1279,8 +1279,8 @@ function cleanupVideoFullscreen() {
 	// Restore button icon to enter
 	const fsBtn = videoContainer?.querySelector('.video-fullscreen-btn');
 	if (fsBtn) {
-		fsBtn.innerHTML = '<img src="icons/video-fullscreen.svg" alt="Fullscreen" style="width:100%;height:100%;display:block;" />';
-		fsBtn.title = 'Fullscreen';
+		fsBtn.innerHTML = '<img src="icons/video-fullscreen.svg" alt="" aria-hidden="true" style="width:100%;height:100%;display:block;" />';
+		setControlTooltip(fsBtn, tooltipLabel('enterFullscreen', 'Enter fullscreen'));
 	}
 
 	videoFullscreenActive = false;
@@ -2408,6 +2408,7 @@ function showStatusTooltip(e) {
 		els.statusTooltip.style.top = y + 'px';
 	}
 	els.statusTooltip.classList.add('visible');
+	els.statusTooltip.setAttribute('aria-hidden', 'false');
 }
 
 function updateTooltipLatency() {
@@ -2417,21 +2418,25 @@ function updateTooltipLatency() {
 	if (isLanClient === true) {
 		valueEl.textContent = 'LAN';
 		valueEl.classList.remove('loading');
+		els.statusDotWrap?.setAttribute('aria-label', 'Connection: LAN');
 		return;
 	}
 	const latency = getDisplayLatency();
 	if (latency !== null) {
 		valueEl.textContent = latency + 'ms';
 		valueEl.classList.remove('loading');
+		els.statusDotWrap?.setAttribute('aria-label', `Connection latency: ${latency} milliseconds`);
 	} else {
 		valueEl.textContent = '';
 		valueEl.classList.add('loading');
+		els.statusDotWrap?.setAttribute('aria-label', 'Connection latency loading');
 	}
 }
 
 function hideStatusTooltip() {
 	if (!els.statusTooltip) return;
 	els.statusTooltip.classList.remove('visible');
+	els.statusTooltip.setAttribute('aria-hidden', 'true');
 }
 
 function getStatusNotificationBody() {
@@ -2668,6 +2673,12 @@ function setTheme(mode, syncToServer = true) {
 	}
 	document.body.classList.toggle('theme-light', isLight);
 	document.body.classList.toggle('theme-dark', !isLight);
+	if (els.themeToggle) {
+		const themeAction = isLight
+			? tooltipLabel('switchToDark', 'Switch to dark mode')
+			: tooltipLabel('switchToLight', 'Switch to light mode');
+		setControlTooltip(els.themeToggle, themeAction);
+	}
 	colorResolveCache.clear();
 	if (els.lightMode) els.lightMode.classList.toggle('active', isLight);
 	if (els.darkMode) els.darkMode.classList.toggle('active', !isLight);
@@ -2792,6 +2803,44 @@ function applyHeaderSmallLayout() {
 
 function safeText(v) {
 	return (v === null || v === undefined) ? '' : String(v);
+}
+
+function tooltipLabel(key, fallback) {
+	const value = safeText(ohLang?.tooltips?.[key]).trim();
+	return value || fallback;
+}
+
+function setControlTooltip(el, text, options = {}) {
+	if (!el) return;
+	if (window.ohTooltips?.set) {
+		window.ohTooltips.set(el, text, options);
+		return;
+	}
+	const normalized = safeText(text).trim();
+	el.removeAttribute('title');
+	if (normalized) el.setAttribute('data-oh-tooltip', normalized);
+	else el.removeAttribute('data-oh-tooltip');
+	if (options.ariaLabel !== false) {
+		const ariaLabel = typeof options.ariaLabel === 'string'
+			? options.ariaLabel.trim()
+			: normalized;
+		if (ariaLabel) el.setAttribute('aria-label', ariaLabel);
+		else el.removeAttribute('aria-label');
+	}
+	if (normalized && options.overflowSelector) el.setAttribute('data-oh-tooltip-overflow', options.overflowSelector);
+	else el.removeAttribute('data-oh-tooltip-overflow');
+}
+
+function clearControlTooltip(el, options = {}) {
+	if (!el) return;
+	if (window.ohTooltips?.clear) {
+		window.ohTooltips.clear(el, options);
+		return;
+	}
+	el.removeAttribute('title');
+	el.removeAttribute('data-oh-tooltip');
+	el.removeAttribute('data-oh-tooltip-overflow');
+	if (options.ariaLabel === true) el.removeAttribute('aria-label');
 }
 
 function normalizeVideoPreviewVersion(value) {
@@ -3206,7 +3255,7 @@ function attachSearchClearButton(input) {
 	const btn = document.createElement('button');
 	btn.type = 'button';
 	btn.className = 'search-clear-btn';
-	btn.setAttribute('aria-label', ohLang.searchClearLabel || 'Clear search');
+	setControlTooltip(btn, ohLang.searchClearLabel || 'Clear search');
 	btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
 	const sync = () => {
 		btn.classList.toggle('visible', input.value.length > 0);
@@ -4382,6 +4431,10 @@ function createVisibilityUsersPicker(wrap, {
 			name.className = 'visibility-users-option-name';
 			name.textContent = username;
 			row.appendChild(name);
+			setControlTooltip(row, username, {
+				ariaLabel: false,
+				overflowSelector: '.visibility-users-option-name',
+			});
 			row.addEventListener('click', (e) => {
 				e.preventDefault();
 				e.stopPropagation();
@@ -4733,6 +4786,10 @@ function ensureCardConfigModal() {
 	`;
 	document.body.appendChild(wrap);
 	cardConfigModal = wrap;
+	setControlTooltip(
+		wrap.querySelector('.card-config-close'),
+		tooltipLabel('close', 'Close')
+	);
 	const historyEntries = wrap.querySelector('.history-entries');
 	if (historyEntries) {
 		historyEntries.addEventListener('wheel', e => {
@@ -5034,6 +5091,7 @@ function createGlowRuleRow(rule = {}) {
 	deleteBtn.type = 'button';
 	deleteBtn.className = 'glow-rule-delete';
 	deleteBtn.innerHTML = '<img src="icons/image-viewer-close.svg" alt="X" />';
+	setControlTooltip(deleteBtn, tooltipLabel('deleteGlowRule', 'Delete glow rule'));
 	deleteBtn.onclick = () => {
 		haptic();
 		row.querySelectorAll('.glow-select-wrap').forEach(w => {
@@ -5316,6 +5374,10 @@ function openCardConfigModal(widget, card) {
 		} else {
 			titleEl.textContent = itemName ? `Item ${itemName} Settings` : ohLang.cardConfig.title;
 		}
+		setControlTooltip(titleEl, titleEl.textContent, {
+			ariaLabel: false,
+			overflowSelector: 'self',
+		});
 		// Show the widget's icon beside the title when it has one. Same
 		// derivation as the grid cards; the img stays hidden until a
 		// candidate actually loads, so iconless widgets show no gap.
@@ -5394,6 +5456,10 @@ async function loadHistoryEntriesShared(itemName, token, config) {
 			stateSpan.className = 'history-state';
 			const rawState = entry.state;
 			stateSpan.textContent = formatState(entry, rawState);
+			setControlTooltip(stateSpan, stateSpan.textContent, {
+				ariaLabel: false,
+				overflowSelector: 'self',
+			});
 			row.appendChild(timeSpan);
 			if (historyGlowColor) {
 				const color = historyGlowColor(rawState);
@@ -5553,7 +5619,9 @@ function ensureAlertModal() {
 	document.body.appendChild(wrap);
 	alertModal = wrap;
 
-	wrap.querySelector('.alert-close').addEventListener('click', () => { haptic(); closeAlert(); });
+	const alertClose = wrap.querySelector('.alert-close');
+	setControlTooltip(alertClose, tooltipLabel('close', 'Close'));
+	alertClose.addEventListener('click', () => { haptic(); closeAlert(); });
 	makeFrameDraggable(wrap.querySelector('.alert-frame'), wrap.querySelector('.alert-header h2'));
 }
 
@@ -5585,6 +5653,10 @@ function showAlert(options = {}) {
 		titleEl.textContent = '';
 		headerEl.classList.add('alert-no-header');
 	}
+	setControlTooltip(titleEl, titleEl.textContent, {
+		ariaLabel: false,
+		overflowSelector: 'self',
+	});
 
 	// Close button
 	if (options.showClose === false) {
@@ -5876,6 +5948,10 @@ function ensureSitemapSettingsModal() {
 	`;
 	document.body.appendChild(wrap);
 	sitemapSettingsModal = wrap;
+	setControlTooltip(
+		wrap.querySelector('.sitemap-settings-close'),
+		tooltipLabel('close', 'Close')
+	);
 	const sitemapUsersVisibilityRadio = wrap.querySelector('input[name="sitemapVisibility"][value="users"]');
 	const sitemapUsersVisibilityLabel = sitemapUsersVisibilityRadio?.closest('.item-config-radio') || null;
 	sitemapVisibilityUsersPicker = createVisibilityUsersPicker(
@@ -5968,7 +6044,13 @@ async function openSitemapSettingsModal(option) {
 
 	const titleEl = sitemapSettingsModal.querySelector('.sitemap-settings-header h2');
 	const saveBtn = sitemapSettingsModal.querySelector('.sitemap-settings-save');
-	if (titleEl) titleEl.textContent = sitemapSettingsModalTitle(option);
+	if (titleEl) {
+		titleEl.textContent = sitemapSettingsModalTitle(option);
+		setControlTooltip(titleEl, titleEl.textContent, {
+			ariaLabel: false,
+			overflowSelector: 'self',
+		});
+	}
 	if (saveBtn) saveBtn.disabled = true;
 	applySitemapSettingsVisibility({ visibility: 'all', visibilityUsers: [] });
 	setSitemapSettingsStatus(ohLang?.sitemapSettings?.loading || 'Loading…', { isPending: true });
@@ -6115,6 +6197,10 @@ function renderSitemapSelectOptions() {
 		headerRow.appendChild(chevron);
 
 		button.appendChild(headerRow);
+		setControlTooltip(button, primary.textContent, {
+			ariaLabel: false,
+			overflowSelector: '.sitemap-select-option-title',
+		});
 
 		button.addEventListener('click', (e) => {
 			if (isAdminUser() && (e.ctrlKey || e.metaKey)) {
@@ -6170,7 +6256,9 @@ function ensureSitemapSelectModal() {
 	document.body.appendChild(wrap);
 	sitemapSelectModal = wrap;
 
-	wrap.querySelector('.sitemap-select-close').addEventListener('click', () => { haptic(); closeSitemapSelectModal(); });
+	const sitemapSelectClose = wrap.querySelector('.sitemap-select-close');
+	setControlTooltip(sitemapSelectClose, tooltipLabel('close', 'Close'));
+	sitemapSelectClose.addEventListener('click', () => { haptic(); closeSitemapSelectModal(); });
 	wrap.querySelector('.sitemap-select-cancel').addEventListener('click', () => { haptic(); closeSitemapSelectModal(); });
 	attachModalDismissListeners(wrap, sitemapSelectModal, closeSitemapSelectModal);
 	makeFrameDraggable(wrap.querySelector('.sitemap-select-frame'), wrap.querySelector('.sitemap-select-header h2'));
@@ -6863,6 +6951,7 @@ function createAdminListRow(value, placeholder, wrap) {
 	del.type = 'button';
 	del.className = 'admin-list-delete';
 	del.innerHTML = '<img src="icons/image-viewer-close.svg" alt="X" />';
+	setControlTooltip(del, tooltipLabel('deleteRow', 'Delete row'));
 	del.addEventListener('click', () => {
 		haptic();
 		row.remove();
@@ -6967,6 +7056,13 @@ function createAdminField(field, value) {
 		eyeBtn.type = 'button';
 		eyeBtn.className = 'admin-secret-eye';
 		eyeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+		const syncEyeTooltip = () => {
+			const label = input.type === 'password'
+				? tooltipLabel('showValue', 'Show value')
+				: tooltipLabel('hideValue', 'Hide value');
+			setControlTooltip(eyeBtn, label);
+		};
+		syncEyeTooltip();
 		eyeBtn.addEventListener('click', async (e) => {
 			e.preventDefault();
 			e.stopPropagation();
@@ -6996,6 +7092,7 @@ function createAdminField(field, value) {
 			} else {
 				input.type = input.type === 'password' ? 'text' : 'password';
 			}
+			syncEyeTooltip();
 		});
 		wrap.appendChild(input);
 		wrap.appendChild(eyeBtn);
@@ -7200,7 +7297,9 @@ function ensureAdminConfigModal() {
 	document.body.appendChild(wrap);
 	adminConfigModal = wrap;
 
-	wrap.querySelector('.admin-config-close').addEventListener('click', () => { haptic(); closeAdminConfigModal(); });
+	const adminConfigClose = wrap.querySelector('.admin-config-close');
+	setControlTooltip(adminConfigClose, tooltipLabel('close', 'Close'));
+	adminConfigClose.addEventListener('click', () => { haptic(); closeAdminConfigModal(); });
 	wrap.querySelector('.admin-config-cancel').addEventListener('click', () => { haptic(); closeAdminConfigModal(); });
 	wrap.querySelector('.admin-config-save').addEventListener('click', () => { haptic(); saveAdminConfig(); });
 	wrap.querySelector('.admin-config-sections').addEventListener('input', updateAdminConfigSaveState);
@@ -7227,7 +7326,13 @@ async function openAdminConfigModal() {
 	const sectionsEl = adminConfigModal.querySelector('.admin-config-sections');
 	const saveBtn = adminConfigModal.querySelector('.admin-config-save');
 	const searchInput = adminConfigModal.querySelector('.admin-config-search-input');
-	if (titleEl) titleEl.textContent = getAdminConfigModalTitleForRole(getUserRole());
+	if (titleEl) {
+		titleEl.textContent = getAdminConfigModalTitleForRole(getUserRole());
+		setControlTooltip(titleEl, titleEl.textContent, {
+			ariaLabel: false,
+			overflowSelector: 'self',
+		});
+	}
 	if (searchInput) {
 		searchInput.value = '';
 		syncSearchClearButton(searchInput);
@@ -7619,10 +7724,12 @@ function ensureImageViewer() {
 	imageViewerPreview = wrap.querySelector('.image-viewer-preview');
 	imageViewerClose = wrap.querySelector('.image-viewer-close');
 	if (imageViewerClose) {
+		setControlTooltip(imageViewerClose, tooltipLabel('closeImage', 'Close image'));
 		imageViewerClose.addEventListener('click', () => { haptic(); requestCloseImageViewer(); });
 	}
 	const imageViewerDownload = wrap.querySelector('.image-viewer-download');
 	if (imageViewerDownload) {
+		setControlTooltip(imageViewerDownload, tooltipLabel('downloadImage', 'Download image'));
 		imageViewerDownload.addEventListener('click', () => { haptic(); downloadImageViewerImage(); });
 	}
 	if (imageViewerImg) {
@@ -9037,8 +9144,8 @@ function isExplicitOnOffSwitchMapping(parsed) {
 
 function switchToggleAriaLabel(command) {
 	const token = normalizeSwitchCommandToken(command);
-	if (token === 'ON') return 'Turn ON';
-	if (token === 'OFF') return 'Turn OFF';
+	if (token === 'ON') return 'Turn on';
+	if (token === 'OFF') return 'Turn off';
 	return '';
 }
 
@@ -9047,18 +9154,16 @@ function switchToggleDualAriaLabel(parsed) {
 	const press = normalizeSwitchCommandToken(parsed.press);
 	const release = normalizeSwitchCommandToken(parsed.release);
 	if (!isOnOffCommandToken(press) || !isOnOffCommandToken(release) || press === release) return '';
-	return `Hold for ${press}, release for ${release}`;
+	return `Hold to turn ${press.toLowerCase()}; release to turn ${release.toLowerCase()}`;
 }
 
 function setSwitchToggleLabel(btn, label) {
 	const text = safeText(label).trim();
 	if (!text) {
-		btn.removeAttribute('aria-label');
-		btn.removeAttribute('title');
+		clearControlTooltip(btn, { ariaLabel: true });
 		return;
 	}
-	btn.setAttribute('aria-label', text);
-	btn.setAttribute('title', text);
+	setControlTooltip(btn, text);
 }
 
 function applySwitchToggleClass(btn, enabled) {
@@ -9175,11 +9280,9 @@ function setMappingControlContent(el, mapping, options = {}) {
 	el.textContent = '';
 	el.classList.remove('mapping-icon-ready');
 	if (text) {
-		el.setAttribute('aria-label', text);
-		el.setAttribute('title', text);
+		setControlTooltip(el, text, { overflowSelector: '.mapping-text' });
 	} else {
-		el.removeAttribute('aria-label');
-		el.removeAttribute('title');
+		clearControlTooltip(el, { ariaLabel: true });
 	}
 
 	const content = document.createElement('span');
@@ -9199,6 +9302,7 @@ function setMappingControlContent(el, mapping, options = {}) {
 		iconEl.classList.add('hidden');
 		clearMappingIconUrl(iconEl);
 		textEl.classList.remove('hidden');
+		if (text) setControlTooltip(el, text, { overflowSelector: '.mapping-text' });
 	};
 
 	const showIcon = (url, cacheKey) => {
@@ -9210,6 +9314,7 @@ function setMappingControlContent(el, mapping, options = {}) {
 		applyMappingIconUrl(iconEl, url);
 		iconEl.classList.remove('hidden');
 		textEl.classList.add('hidden');
+		if (text) setControlTooltip(el, text);
 	};
 
 	if (ignoreIcon || !iconToken) {
@@ -10065,6 +10170,12 @@ function createSetpointButton(text, isDisabled, computeNext, itemName, onBeforeS
 	const btn = document.createElement('button');
 	btn.className = 'setpoint-btn';
 	btn.textContent = text;
+	setControlTooltip(
+		btn,
+		text === '\u2212'
+			? tooltipLabel('decrease', 'Decrease')
+			: tooltipLabel('increase', 'Increase')
+	);
 	btn.disabled = isDisabled;
 	btn.onclick = async () => {
 		haptic();
@@ -10453,6 +10564,10 @@ function updateCard(card, w, info) {
 	}
 
 	titleEl.textContent = labelParts.title;
+	setControlTooltip(titleEl, labelParts.title, {
+		ariaLabel: false,
+		overflowSelector: 'self',
+	});
 	const metaState = (isText || isGroup) ? (labelParts.state || (!pageLink && ['NULL', 'UNDEF'].includes(st) ? '—' : '')) : labelParts.state;
 	if (isText || isGroup) {
 		crossfadeText(metaEl, metaState);
@@ -10799,19 +10914,19 @@ function updateCard(card, w, info) {
 			muteBtn.type = 'button';
 			muteBtn.className = 'video-mute-btn';
 			muteBtn.innerHTML = '<img src="icons/video-mute.svg" alt="" aria-hidden="true" />';
-			muteBtn.title = 'Unmute';
-			muteBtn.setAttribute('aria-label', 'Unmute');
+			setControlTooltip(muteBtn, tooltipLabel('unmuteAudio', 'Unmute audio'));
 			videoContainer.appendChild(muteBtn);
 
 			const updateMuteBtn = () => {
 				const isMuted = videoEl.muted;
-				const actionLabel = isMuted ? 'Unmute' : 'Mute';
+				const actionLabel = isMuted
+					? tooltipLabel('unmuteAudio', 'Unmute audio')
+					: tooltipLabel('muteAudio', 'Mute audio');
 				// Show the current sound state: muted (red) vs sound on (green).
 				muteBtn.innerHTML = isMuted
 					? '<img src="icons/video-mute.svg" alt="" aria-hidden="true" />'
 					: '<img src="icons/video-unmute.svg" alt="" aria-hidden="true" />';
-				muteBtn.title = actionLabel;
-				muteBtn.setAttribute('aria-label', actionLabel);
+				setControlTooltip(muteBtn, actionLabel);
 			};
 
 			muteBtn.addEventListener('click', (e) => {
@@ -10841,8 +10956,8 @@ function updateCard(card, w, info) {
 			const fsBtn = document.createElement('button');
 			fsBtn.type = 'button';
 			fsBtn.className = 'video-fullscreen-btn';
-			fsBtn.innerHTML = '<img src="icons/video-fullscreen.svg" alt="Fullscreen" />';
-			fsBtn.title = 'Fullscreen';
+			fsBtn.innerHTML = '<img src="icons/video-fullscreen.svg" alt="" aria-hidden="true" />';
+			setControlTooltip(fsBtn, tooltipLabel('enterFullscreen', 'Enter fullscreen'));
 			videoContainer.appendChild(fsBtn);
 			setVideoFullscreenButtonState(videoEl, 'pending');
 
@@ -11361,6 +11476,7 @@ function updateCard(card, w, info) {
 		const sendBtn = document.createElement('button');
 		sendBtn.className = 'input-send-btn';
 		sendBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline pathLength="1" points="4,12.5 9.5,18 20,7"/></svg>';
+		setControlTooltip(sendBtn, tooltipLabel('sendValue', 'Send value'));
 
 		// doSend handler
 		const doSend = async () => {
@@ -11538,6 +11654,7 @@ function updateCard(card, w, info) {
 		const minusBtn = document.createElement('button');
 		minusBtn.className = 'setpoint-btn';
 		minusBtn.textContent = '\u2212';
+		setControlTooltip(minusBtn, tooltipLabel('turnOff', 'Turn off'));
 		minusBtn.onclick = async () => {
 			haptic();
 			liveB = 0;
@@ -11553,6 +11670,7 @@ function updateCard(card, w, info) {
 		// Color swatch
 		const swatch = document.createElement('button');
 		swatch.className = 'colorpicker-swatch';
+		setControlTooltip(swatch, tooltipLabel('chooseColor', 'Choose color'));
 		const updateSwatchColor = (r, g, b, alpha) => {
 			swatch.style.setProperty('--cp-color', `rgba(${r}, ${g}, ${b}, ${alpha})`);
 		};
@@ -11562,6 +11680,7 @@ function updateCard(card, w, info) {
 		const plusBtn = document.createElement('button');
 		plusBtn.className = 'setpoint-btn';
 		plusBtn.textContent = '+';
+		setControlTooltip(plusBtn, tooltipLabel('fullBrightness', 'Set full brightness'));
 		plusBtn.onclick = async () => {
 			haptic();
 			liveB = 100;
@@ -12231,13 +12350,13 @@ function updatePageTitleSite(siteSpan, siteText) {
 		siteSpan.classList.add('sitemap-title-selectable');
 		siteSpan.tabIndex = 0;
 		siteSpan.setAttribute('role', 'button');
-		siteSpan.setAttribute('aria-label', ohLang?.sitemapSelect?.triggerAriaLabel || 'Select sitemap');
+		setControlTooltip(siteSpan, ohLang?.sitemapSelect?.triggerAriaLabel || 'Select sitemap');
 		return;
 	}
 	siteSpan.classList.remove('sitemap-title-selectable');
 	siteSpan.removeAttribute('tabindex');
 	siteSpan.removeAttribute('role');
-	siteSpan.removeAttribute('aria-label');
+	clearControlTooltip(siteSpan, { ariaLabel: true });
 }
 
 function beginPageTitleFadeOut(token) {
@@ -12319,6 +12438,10 @@ function renderHeaderTitle(searchText, options = {}) {
 		resetPageTitleTransition(pageSpan);
 		pageSpan.textContent = headerTitle.pageText;
 	}
+	setControlTooltip(pageSpan, headerTitle.pageText, {
+		ariaLabel: false,
+		overflowSelector: 'self',
+	});
 
 	document.title = headerTitle.pageTitleText;
 	return headerTitle;
@@ -14089,6 +14212,11 @@ function restoreNormalPolling() {
 		els.statusDotWrap.addEventListener('mouseenter', showStatusTooltip);
 		els.statusDotWrap.addEventListener('mousemove', positionStatusTooltip);
 		els.statusDotWrap.addEventListener('mouseleave', hideStatusTooltip);
+		els.statusDotWrap.addEventListener('focus', () => showStatusTooltip());
+		els.statusDotWrap.addEventListener('blur', hideStatusTooltip);
+		els.statusDotWrap.addEventListener('keydown', (e) => {
+			if (e.key === 'Escape') hideStatusTooltip();
+		});
 		els.statusDotWrap.addEventListener('click', function () {
 			if (!isTouchDevice()) return;
 			if (els.statusTooltip.classList.contains('visible')) {
@@ -14519,6 +14647,11 @@ function restoreNormalPolling() {
 	});
 	attachSearchClearButton(els.search);
 
+	setControlTooltip(els.back, tooltipLabel('back', 'Back'));
+	setControlTooltip(els.home, tooltipLabel('home', 'Home'));
+	setControlTooltip(els.adminConfig, tooltipLabel('settings', 'Settings'));
+	setControlTooltip(els.logout, tooltipLabel('logOut', 'Log out'));
+
 	els.back.addEventListener('click', () => {
 		haptic();
 		if (clearSearchFilter()) return;
@@ -14574,6 +14707,16 @@ function restoreNormalPolling() {
 			var voiceRequestId = 0;
 			var voiceTimeoutId = null;
 
+			function syncVoiceControlLabel() {
+				const label = isListening
+					? tooltipLabel('stopListening', 'Stop listening')
+					: isProcessing
+						? tooltipLabel('cancelVoiceCommand', 'Cancel voice command')
+						: tooltipLabel('voiceCommand', 'Voice command');
+				setControlTooltip(els.voice, label);
+			}
+			syncVoiceControlLabel();
+
 			// Vosk recording state
 			var voskStream = null;
 			var voskAudioCtx = null;
@@ -14624,6 +14767,7 @@ function restoreNormalPolling() {
 						els.voice.classList.remove('processing');
 						isProcessing = false;
 						voiceRequestId++;
+						syncVoiceControlLabel();
 					}
 				}, VOICE_RESPONSE_TIMEOUT_MS);
 			}
@@ -14633,6 +14777,7 @@ function restoreNormalPolling() {
 				if (voiceRequestId !== requestId) return false;
 				els.voice.classList.remove('processing');
 				isProcessing = false;
+				syncVoiceControlLabel();
 				return true;
 			}
 			function handleVoiceError(requestId, err, label) {
@@ -14644,6 +14789,7 @@ function restoreNormalPolling() {
 				if (voiceRequestId === requestId) {
 					els.voice.classList.remove('processing');
 					isProcessing = false;
+					syncVoiceControlLabel();
 				}
 			}
 
@@ -14655,6 +14801,7 @@ function restoreNormalPolling() {
 				els.voice.classList.remove('listening');
 				els.voice.classList.add('processing');
 				isProcessing = true;
+				syncVoiceControlLabel();
 
 				var currentRequestId = ++voiceRequestId;
 				startVoiceProcessingTimeout(currentRequestId);
@@ -14712,6 +14859,7 @@ function restoreNormalPolling() {
 				}
 				stopVoskRecording();
 				voskChunks = [];
+				syncVoiceControlLabel();
 			}
 
 			els.voice.addEventListener('click', function() {
@@ -14730,6 +14878,7 @@ function restoreNormalPolling() {
 						isListening = false;
 						els.voice.classList.remove('listening');
 						playVoiceCue('stop');
+						syncVoiceControlLabel();
 
 						// Gather collected chunks
 						var totalLen = 0;
@@ -14748,6 +14897,7 @@ function restoreNormalPolling() {
 						// Transition to processing
 						els.voice.classList.add('processing');
 						isProcessing = true;
+						syncVoiceControlLabel();
 						var currentRequestId = ++voiceRequestId;
 
 						startVoiceProcessingTimeout(currentRequestId);
@@ -14830,6 +14980,7 @@ function restoreNormalPolling() {
 						isListening = true;
 						els.voice.classList.add('listening');
 						playVoiceCue('start');
+						syncVoiceControlLabel();
 					}).catch(function(err) {
 						logJsError('vosk getUserMedia failed', err);
 						resetVoiceState();
@@ -14849,6 +15000,7 @@ function restoreNormalPolling() {
 					isListening = true;
 					els.voice.classList.add('listening');
 					playVoiceCue('start');
+					syncVoiceControlLabel();
 
 					recognition.onresult = function(event) {
 						var transcript = event.results[0][0].transcript;
@@ -14866,6 +15018,7 @@ function restoreNormalPolling() {
 							if (isListening) playVoiceCue('stop');
 							isListening = false;
 							els.voice.classList.remove('listening');
+							syncVoiceControlLabel();
 						}
 						recognition = null;
 					};

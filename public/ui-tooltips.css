@@ -1,0 +1,83 @@
+/*
+ * Shared control tooltip surface.
+ *
+ * The colors, radius, spacing, type and motion intentionally mirror the
+ * chart data/range tooltips. Each page can override the custom properties,
+ * while the fallbacks keep standalone server-rendered pages consistent.
+ */
+:root {
+	--oh-tooltip-bg: var(--bg-primary, #f1f2f9);
+	--oh-tooltip-border: var(--border-color, #ccccd1);
+	--oh-tooltip-text: var(--text-primary, #0f172a);
+	--oh-tooltip-shadow: var(
+		--shadow-lg,
+		0 10px 15px -3px rgb(0 0 0 / 0.08),
+		0 4px 6px -4px rgb(0 0 0 / 0.05)
+	);
+}
+
+[data-theme="dark"],
+body.theme-dark {
+	--oh-tooltip-bg: var(--bg-card, #131420);
+	--oh-tooltip-border: var(--border-color, #54555e);
+	--oh-tooltip-text: var(--text-primary, #fafafa);
+	--oh-tooltip-shadow: var(
+		--shadow-lg,
+		0 10px 15px -3px rgb(0 0 0 / 0.4),
+		0 4px 6px -4px rgb(0 0 0 / 0.3)
+	);
+}
+
+body.theme-light {
+	--oh-tooltip-bg: #f1f2f9;
+	--oh-tooltip-border: #ccccd1;
+	--oh-tooltip-text: #0f172a;
+	--oh-tooltip-shadow:
+		0 10px 15px -3px rgb(0 0 0 / 0.08),
+		0 4px 6px -4px rgb(0 0 0 / 0.05);
+}
+
+.oh-tooltip {
+	position: fixed;
+	top: 0;
+	left: 0;
+	z-index: 10000;
+	box-sizing: border-box;
+	width: max-content;
+	max-width: calc(100vw - 8px);
+	padding: 0.5rem 0.75rem;
+	border: 1px solid var(--oh-tooltip-border);
+	border-radius: 10px;
+	background: var(--oh-tooltip-bg);
+	box-shadow: var(--oh-tooltip-shadow);
+	color: var(--oh-tooltip-text);
+	font-family: 'Rubik', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+	font-size: .7rem;
+	font-weight: 500;
+	line-height: 1.35;
+	text-align: center;
+	overflow-wrap: anywhere;
+	pointer-events: none;
+	user-select: none;
+	opacity: 0;
+	visibility: hidden;
+	transform: translateY(8px);
+	transition:
+		opacity .4s ease,
+		transform .4s ease,
+		visibility 0s linear .4s;
+}
+
+.oh-tooltip.visible {
+	opacity: 1;
+	visibility: visible;
+	transform: translateY(0);
+	transition-delay: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.oh-tooltip {
+		transform: none;
+		transition: none;
+	}
+}

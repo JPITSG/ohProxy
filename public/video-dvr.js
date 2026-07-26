@@ -16,6 +16,21 @@
  * caller-provided onFallback restores the legacy direct <video>.src path.
  */
 (function () {
+	function tooltipLabel(key, fallback) {
+		const value = window.ohLang?.tooltips?.[key];
+		return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+	}
+
+	function setDvrTooltip(el, text) {
+		if (!el) return;
+		if (window.ohTooltips?.set) {
+			window.ohTooltips.set(el, text);
+			return;
+		}
+		el.removeAttribute('title');
+		el.setAttribute('data-oh-tooltip', text);
+		el.setAttribute('aria-label', text);
+	}
 
 	/* DVR_PURE_HELPERS_START */
 	// Tunables shared by the pure helpers and the engine.
@@ -277,8 +292,7 @@
 		const playBtn = document.createElement('button');
 		playBtn.type = 'button';
 		playBtn.className = 'video-dvr-play';
-		playBtn.title = 'Pause';
-		playBtn.setAttribute('aria-label', 'Pause');
+		setDvrTooltip(playBtn, tooltipLabel('pauseVideo', 'Pause video'));
 		playBtn.innerHTML = PAUSE_SVG;
 		const offsetLabel = document.createElement('span');
 		offsetLabel.className = 'video-dvr-offset';
@@ -303,8 +317,7 @@
 		const liveBtn = document.createElement('button');
 		liveBtn.type = 'button';
 		liveBtn.className = 'video-dvr-live';
-		liveBtn.title = 'Go to live';
-		liveBtn.setAttribute('aria-label', 'Go to live');
+		liveBtn.setAttribute('aria-label', 'Jump to live');
 		liveBtn.innerHTML = '<span class="video-dvr-live-dot"></span><span class="video-dvr-live-text">LIVE</span>';
 		bar.appendChild(playBtn);
 		bar.appendChild(offsetLabel);
@@ -680,9 +693,10 @@
 			if (playBtn.dataset.icon !== wantIcon) {
 				playBtn.dataset.icon = wantIcon;
 				playBtn.innerHTML = videoEl.paused ? PLAY_SVG : PAUSE_SVG;
-				const playLabel = videoEl.paused ? 'Play' : 'Pause';
-				playBtn.title = playLabel;
-				playBtn.setAttribute('aria-label', playLabel);
+				const playLabel = videoEl.paused
+					? tooltipLabel('playVideo', 'Play video')
+					: tooltipLabel('pauseVideo', 'Pause video');
+				setDvrTooltip(playBtn, playLabel);
 			}
 			const clamped = Math.min(Math.max(videoEl.currentTime, range.start), range.end);
 			const behind = Math.max(0, range.end - clamped);

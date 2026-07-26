@@ -26,7 +26,8 @@ function loadSearchHelpers() {
 describe('System settings modal role visibility wiring', () => {
 	it('uses neutral settings tooltip and aria label for the gear button', () => {
 		const html = read('public/index.html');
-		assert.match(html, /<button id="adminConfigBtn"[\s\S]*title="Settings"/, 'settings button should use neutral Settings title');
+		assert.match(html, /<button id="adminConfigBtn"[^>]*data-oh-tooltip="Settings"/, 'settings button should use the shared Settings tooltip');
+		assert.doesNotMatch(html, /<button id="adminConfigBtn"[^>]*\stitle=/, 'settings button should not use a native browser tooltip');
 		assert.match(html, /<button id="adminConfigBtn"[\s\S]*aria-label="Settings"/, 'settings button should expose neutral Settings aria-label');
 	});
 
@@ -44,7 +45,7 @@ describe('System settings modal role visibility wiring', () => {
 		assert.match(app, /function getAdminConfigModalTitleForRole\(role\)/, 'missing role-aware modal title helper');
 		assert.match(app, /if \(role === 'admin'\) return ohLang\.adminConfig\.title \|\| 'System Settings';/, 'admin should see System Settings title');
 		assert.match(app, /return ohLang\.adminConfig\.userTitle \|\| 'User Settings';/, 'non-admin should see User Settings title');
-		assert.match(app, /if \(titleEl\) titleEl\.textContent = getAdminConfigModalTitleForRole\(getUserRole\(\)\);/, 'modal open should refresh title from current role');
+		assert.match(app, /if \(titleEl\) \{\s*titleEl\.textContent = getAdminConfigModalTitleForRole\(getUserRole\(\)\);/, 'modal open should refresh title from current role');
 	});
 
 	it('renders and collects user-only sections for non-admin roles', () => {

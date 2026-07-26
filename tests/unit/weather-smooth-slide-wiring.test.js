@@ -50,8 +50,8 @@ describe('Weather Smooth Slide Wiring', () => {
 		assert.match(server, /<span class="hero-temp-val">\$\{currentTempStr\}<\/span>/);
 		assert.match(server, /<div class="hero-chips">\$\{chipsHtml\}<\/div>/);
 		// Hero text values are escaped at the interpolation site
-		assert.match(server, /<div class="hero-desc">\$\{escapeHtml\(heroDesc\)\}<\/div>/);
-		assert.match(server, /<div class="hero-sub">\$\{escapeHtml\(heroSub\)\}<\/div>/);
+		assert.match(server, /<div class="hero-desc" data-oh-tooltip="\$\{escapeHtml\(heroDesc\)\}" data-oh-tooltip-overflow="self">\$\{escapeHtml\(heroDesc\)\}<\/div>/);
+		assert.match(server, /<div class="hero-sub" data-oh-tooltip="\$\{escapeHtml\(heroSub\)\}" data-oh-tooltip-overflow="self">\$\{escapeHtml\(heroSub\)\}<\/div>/);
 	});
 
 	it('renders per-day temperature range bars scaled to the forecast span', () => {

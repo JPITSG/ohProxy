@@ -30,7 +30,7 @@ describe('Presence Single-Point Mode', () => {
 
 	it('conditionally removes search and context UI in single-point mode', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(server, /\$\{singlePointMode \? '' : `<div id="red-tooltip" class="tooltip"><\/div>/);
+		assert.match(server, /\$\{singlePointMode \? '' : `<div id="red-tooltip" class="tooltip" role="tooltip" aria-hidden="true"><\/div>/);
 		assert.match(server, /\$\{singlePointMode \? '' : `<div id="search-modal">/);
 		assert.match(server, /if\(!singlePointMode\)\{\s*var presenceRoot=document\.getElementById\('presence-root'\);\s*var searchModal=document\.getElementById\('search-modal'\);/);
 		assert.match(server, /searchModal\.addEventListener\('keydown'/);
@@ -55,7 +55,7 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /<div id="presence-root">/);
 		assert.match(server, /#presence-root\.presence-rotated\{top:50%;left:50%;width:100vh;height:100vw;transform:translate\(-50%,-50%\) rotate\(90deg\)\}/);
 		assert.match(server, /#map-rotate\{display:none\}/);
-		assert.match(server, /<button class="map-ctrl-btn" id="map-rotate" type="button">/);
+		assert.match(server, /<button class="map-ctrl-btn" id="map-rotate" type="button" data-oh-tooltip="Rotate map" aria-label="Rotate map" aria-pressed="false">/);
 		assert.match(server, /var rotateBtn=document\.getElementById\('map-rotate'\);/);
 		assert.match(server, /rotateBtn\.style\.display=\(isTouchDevice&&fsActive\)\?'flex':'none';/);
 		assert.match(server, /rotateBtn\.addEventListener\('click',function\(\)\{\s*if\(!isTouchDevice\|\|!fsActive\)return;\s*isRotated=!isRotated;\s*applyRotation\(\);/);

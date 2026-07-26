@@ -33,10 +33,10 @@ describe('video mute audio detection', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 
 		assert.match(app, /muteBtn\.innerHTML = '<img src="icons\/video-mute\.svg" alt="" aria-hidden="true" \/>';/);
-		assert.match(app, /const actionLabel = isMuted \? 'Unmute' : 'Mute';/);
+		assert.match(app, /const actionLabel = isMuted[\s\S]*tooltipLabel\('unmuteAudio', 'Unmute audio'\)[\s\S]*tooltipLabel\('muteAudio', 'Mute audio'\);/);
 		assert.match(app, /muteBtn\.innerHTML = isMuted\s*\?\s*'<img src="icons\/video-mute\.svg" alt="" aria-hidden="true" \/>'\s*:\s*'<img src="icons\/video-unmute\.svg" alt="" aria-hidden="true" \/>';/s);
-		assert.match(app, /muteBtn\.title = actionLabel;/);
-		assert.match(app, /muteBtn\.setAttribute\('aria-label', actionLabel\);/);
+		assert.match(app, /setControlTooltip\(muteBtn, actionLabel\);/);
+		assert.doesNotMatch(app, /muteBtn\.title\s*=/);
 	});
 
 	it('probes audio tracks and only resolves mute visibility when audio presence is definitive', () => {

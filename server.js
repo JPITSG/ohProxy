@@ -2556,6 +2556,8 @@ const CHART_CSS_PATH = path.join(PUBLIC_DIR, 'chart.css');
 const LOGIN_JS_PATH = path.join(PUBLIC_DIR, 'login.js');
 const LANG_JS_PATH = path.join(PUBLIC_DIR, 'lang.js');
 const OH_UTILS_JS_PATH = path.join(PUBLIC_DIR, 'oh-utils.js');
+const UI_TOOLTIPS_JS_PATH = path.join(PUBLIC_DIR, 'ui-tooltips.js');
+const UI_TOOLTIPS_CSS_PATH = path.join(PUBLIC_DIR, 'ui-tooltips.css');
 const TRANSPORT_CLIENT_JS_PATH = path.join(PUBLIC_DIR, 'transport-client.js');
 const TRANSPORT_SHAREDWORKER_JS_PATH = path.join(PUBLIC_DIR, 'transport.sharedworker.js');
 const VIDEO_DVR_JS_PATH = path.join(PUBLIC_DIR, 'video-dvr.js');
@@ -4077,7 +4079,7 @@ function generateChartHtml(chartSeries, xLabels, yMin, yMax, dataMin, dataMax, t
 	const safeNavTooltipData = navTooltipData || { back: { from: '', to: '' }, forward: null, latest: null };
 	const backTooltipAttrs = hasPreviousPeriod
 		? ` data-range-from="${escapeHtml(safeNavTooltipData.back?.from || '')}" data-range-to="${escapeHtml(safeNavTooltipData.back?.to || '')}"`
-		: ' data-tooltip-message="No data available"';
+		: ' data-tooltip-message="No earlier data"';
 	const forwardTooltipAttrs = safeNavTooltipData.forward
 		? ` data-range-from="${escapeHtml(safeNavTooltipData.forward.from)}" data-range-to="${escapeHtml(safeNavTooltipData.forward.to)}"`
 		: '';
@@ -4106,21 +4108,22 @@ function generateChartHtml(chartSeries, xLabels, yMin, yMax, dataMin, dataMax, t
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${safeTitle}</title>
 <link rel="stylesheet" href="/chart.${assetVersion}.css">
+<link rel="stylesheet" href="/ui-tooltips.${assetVersion}.css">
 </head>
 <body>
 <div class="container">
 <div class="chart-card">
 <div class="chart-header">
-<div class="chart-title-group"><h2 class="chart-title" id="chartTitle">${safeTitle}</h2></div>
-<div class="chart-header-right" id="chartStats">${statsHtml}${legendHtml}<span class="chart-fs-divider" id="fsDivider"></span><button class="chart-fs-btn chart-nav-btn chart-nav-prev" id="chartPeriodBack" type="button" aria-label="Previous period"${backTooltipAttrs}${hasPreviousPeriod ? '' : ' aria-disabled="true" data-nav-disabled="true"'}></button><button class="chart-fs-btn chart-nav-btn chart-nav-next" id="chartPeriodForward" type="button" aria-label="Next period"${forwardTooltipAttrs}></button><button class="chart-fs-btn" id="chartPeriodLatest" type="button" aria-label="Latest period"${latestTooltipAttrs}><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 22L4 22" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M2 11L10.1259 4.49931C11.2216 3.62279 12.7784 3.62279 13.8741 4.49931L22 11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M15.5 5.5V3.5C15.5 3.22386 15.7239 3 16 3H18.5C18.7761 3 19 3.22386 19 3.5V8.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M4 22V9.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M20 22V9.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M15 22V17C15 15.5858 15 14.8787 14.5607 14.4393C14.1213 14 13.4142 14 12 14C10.5858 14 9.87868 14 9.43934 14.4393C9 14.8787 9 15.5858 9 17V22" fill="none" stroke="currentColor" stroke-width="1.2"></path><path d="M14 9.5C14 10.6046 13.1046 11.5 12 11.5C10.8954 11.5 10 10.6046 10 9.5C10 8.39543 10.8954 7.5 12 7.5C13.1046 7.5 14 8.39543 14 9.5Z" fill="none" stroke="currentColor" stroke-width="1.2"></path></svg></button><button class="chart-fs-btn" id="chartRotate" type="button"><svg viewBox="0 0 24 24"><path d="M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.96-.7 2.8l1.46 1.46A7.944 7.944 0 0 0 20 13c0-4.42-3.58-8-8-8zM6.7 9.2 5.24 7.74A7.944 7.944 0 0 0 4 13c0 4.42 3.58 8 8 8v3l4-4-4-4v3c-3.31 0-6-2.69-6-6 0-1.01.25-1.96.7-2.8z"/></svg></button><button class="chart-fs-btn" id="chartFullscreen" type="button"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg></button></div>
+<div class="chart-title-group"><h2 class="chart-title" id="chartTitle" data-oh-tooltip="${safeTitle}" data-oh-tooltip-overflow="self">${safeTitle}</h2></div>
+<div class="chart-header-right" id="chartStats">${statsHtml}${legendHtml}<span class="chart-fs-divider" id="fsDivider"></span><button class="chart-fs-btn chart-nav-btn chart-nav-prev" id="chartPeriodBack" type="button" aria-label="Previous period"${backTooltipAttrs}${hasPreviousPeriod ? '' : ' aria-disabled="true" data-nav-disabled="true"'}></button><button class="chart-fs-btn chart-nav-btn chart-nav-next" id="chartPeriodForward" type="button" aria-label="Next period"${forwardTooltipAttrs}></button><button class="chart-fs-btn" id="chartPeriodLatest" type="button" aria-label="Latest period"${latestTooltipAttrs}><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 22L4 22" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M2 11L10.1259 4.49931C11.2216 3.62279 12.7784 3.62279 13.8741 4.49931L22 11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M15.5 5.5V3.5C15.5 3.22386 15.7239 3 16 3H18.5C18.7761 3 19 3.22386 19 3.5V8.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M4 22V9.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M20 22V9.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path><path d="M15 22V17C15 15.5858 15 14.8787 14.5607 14.4393C14.1213 14 13.4142 14 12 14C10.5858 14 9.87868 14 9.43934 14.4393C9 14.8787 9 15.5858 9 17V22" fill="none" stroke="currentColor" stroke-width="1.2"></path><path d="M14 9.5C14 10.6046 13.1046 11.5 12 11.5C10.8954 11.5 10 10.6046 10 9.5C10 8.39543 10.8954 7.5 12 7.5C13.1046 7.5 14 8.39543 14 9.5Z" fill="none" stroke="currentColor" stroke-width="1.2"></path></svg></button><button class="chart-fs-btn" id="chartRotate" type="button" data-oh-tooltip="Rotate chart" aria-label="Rotate chart" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.96-.7 2.8l1.46 1.46A7.944 7.944 0 0 0 20 13c0-4.42-3.58-8-8-8zM6.7 9.2 5.24 7.74A7.944 7.944 0 0 0 4 13c0 4.42 3.58 8 8 8v3l4-4-4-4v3c-3.31 0-6-2.69-6-6 0-1.01.25-1.96.7-2.8z"/></svg></button><button class="chart-fs-btn" id="chartFullscreen" type="button" data-oh-tooltip="Enter fullscreen" aria-label="Enter fullscreen"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg></button></div>
 </div>
 <div class="chart-container" id="chartContainer">
 <svg class="chart-svg" id="chartSvg"></svg>
-<div class="tooltip" id="tooltip"><div class="tooltip-value" id="tooltipValue"></div><div class="tooltip-label" id="tooltipLabel"></div></div>
+<div class="tooltip" id="tooltip" role="tooltip" aria-hidden="true"><div class="tooltip-value" id="tooltipValue"></div><div class="tooltip-label" id="tooltipLabel"></div></div>
 </div>
 </div>
 </div>
-<div class="chart-nav-tooltip" id="chartNavTooltip" aria-hidden="true"><div class="chart-nav-tooltip-line" id="chartNavTooltipFrom"></div><div class="chart-nav-tooltip-arrow" aria-hidden="true"></div><div class="chart-nav-tooltip-line chart-nav-tooltip-line-secondary" id="chartNavTooltipTo"></div></div>
+<div class="chart-nav-tooltip" id="chartNavTooltip" role="tooltip" aria-hidden="true"><div class="chart-nav-tooltip-line" id="chartNavTooltipFrom"></div><div class="chart-nav-tooltip-arrow" aria-hidden="true"></div><div class="chart-nav-tooltip-line chart-nav-tooltip-line-secondary" id="chartNavTooltipTo"></div></div>
 <script>
 window._chartData=${inlineJson(primaryChartData)};
 window._chartSeries=${inlineJson(chartSeries)};
@@ -4139,6 +4142,7 @@ window._chartYAxisPattern=${inlineJson(yAxisDecimalPattern || null)};
 window._chartInterpolation=${inlineJson(interpolation || 'linear')};
 </script>
 <script src="/oh-utils.${assetVersion}.js"></script>
+<script src="/ui-tooltips.${assetVersion}.js"></script>
 <script src="/chart.${assetVersion}.js"></script>
 </body>
 </html>`;
@@ -5163,6 +5167,7 @@ function weatherSkyPalette(cond, isDark) {
 function renderWeatherWidget(weatherData, mode, slim, updatedAtMs) {
 	const isDark = mode === 'dark';
 	const textColor = isDark ? '#ffffff' : '#0f1430';
+	const assetVersion = liveConfig.assetVersion || 'v1';
 	const updatedAtAttr = Number.isFinite(updatedAtMs) && updatedAtMs > 0
 		? String(Math.floor(updatedAtMs))
 		: '';
@@ -5249,7 +5254,7 @@ function renderWeatherWidget(weatherData, mode, slim, updatedAtMs) {
 	if (sunriseTs > 0) chipItems.push({ icon: 'sunrise', title: 'Sunrise', value: formatWeatherTime(sunriseTs, timeZone) });
 	if (sunsetTs > 0) chipItems.push({ icon: 'sunset', title: 'Sunset', value: formatWeatherTime(sunsetTs, timeZone) });
 	const chipsHtml = chipItems.map((c) =>
-		`<div class="chip" title="${escapeHtml(c.title)}">${CHIP_ICONS[c.icon]}<span class="chip-val">${escapeHtml(c.value)}</span></div>`
+		`<div class="chip" role="img" tabindex="0" data-oh-tooltip="${escapeHtml(c.title)}" data-oh-tooltip-touch="true" aria-label="${escapeHtml(c.title + ': ' + c.value)}">${CHIP_ICONS[c.icon]}<span class="chip-val">${escapeHtml(c.value)}</span></div>`
 	).join('');
 
 	// Week-wide temperature range for the per-day range bars
@@ -5277,6 +5282,17 @@ function renderWeatherWidget(weatherData, mode, slim, updatedAtMs) {
 			: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6c3.6 4.3 5.9 7.4 5.9 10.2a5.9 5.9 0 1 1-11.8 0C6.1 10 8.4 6.9 12 2.6z"/></svg>`;
 		const popSlot = pop > 0 ? `${popIcon}<span>${pop}%</span>` : '';
 		const dayIconSvg = weatherIconSvg(weatherGroupForCode(day?.weather?.code, day?.weather?.icon), { isDark });
+		const rawDescription = safeText(day?.weather?.description).replace(/\s+/g, ' ').trim();
+		const conditionLabel = rawDescription
+			? rawDescription.charAt(0).toUpperCase() + rawDescription.slice(1)
+			: 'Conditions unavailable';
+		const forecastAria = [
+			dayName,
+			dateLabel,
+			conditionLabel,
+			`Low ${lowTemp} degrees, high ${highTemp} degrees`,
+			pop > 0 ? `${pop}% chance of precipitation` : '',
+		].filter(Boolean).join(', ');
 
 		const widthPct = Math.min(100, Math.max(7, ((highTemp - lowTemp) / weekSpan) * 100));
 		const leftPct = Math.min(100 - widthPct, Math.max(0, ((lowTemp - weekMin) / weekSpan) * 100));
@@ -5285,7 +5301,7 @@ function renderWeatherWidget(weatherData, mode, slim, updatedAtMs) {
 		const rangeStyle = `left:${leftPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%;background-image:${weekGradient};background-size:${bgSize}% 100%;background-position-x:${bgPos}%`;
 
 		return `
-			<div class="forecast-day${isToday ? ' today' : ''}" title="${escapeHtml(day?.weather?.description || '')}">
+			<div class="forecast-day${isToday ? ' today' : ''}" role="group" tabindex="0" data-oh-tooltip="${escapeHtml(conditionLabel)}" data-oh-tooltip-touch="true" aria-label="${escapeHtml(forecastAria)}">
 				<div class="day-name">${dayName}</div>
 				<div class="day-date">${dateLabel}</div>
 				<div class="day-icon">${dayIconSvg}</div>
@@ -5296,11 +5312,12 @@ function renderWeatherWidget(weatherData, mode, slim, updatedAtMs) {
 	}).join('');
 
 	return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="${isDark ? 'dark' : 'light'}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Weather Forecast${cityName ? ` - ${cityName}` : ''}</title>
+<link rel="stylesheet" href="/ui-tooltips.${assetVersion}.css">
 <style>
 @font-face {
 	font-family: 'Rubik';
@@ -5756,8 +5773,8 @@ ${weatherIconDefs(isDark)}
 			<div class="hero-scene">${sceneSvg}</div>
 			<div class="hero-temp"><span class="hero-temp-val">${currentTempStr}</span><span class="hero-temp-unit">°${unitSymbol}</span></div>
 			<div class="hero-meta">
-				<div class="hero-desc">${escapeHtml(heroDesc)}</div>
-				<div class="hero-sub">${escapeHtml(heroSub)}</div>
+				<div class="hero-desc" data-oh-tooltip="${escapeHtml(heroDesc)}" data-oh-tooltip-overflow="self">${escapeHtml(heroDesc)}</div>
+				<div class="hero-sub" data-oh-tooltip="${escapeHtml(heroSub)}" data-oh-tooltip-overflow="self">${escapeHtml(heroSub)}</div>
 			</div>
 		</div>
 		<div class="hero-chips">${chipsHtml}</div>
@@ -5936,6 +5953,7 @@ ${weatherIconDefs(isDark)}
   }
 })();
 </script>
+<script src="/ui-tooltips.${assetVersion}.js"></script>
 </body>
 </html>`;
 }
@@ -10182,6 +10200,14 @@ app.get(/^\/oh-utils\.v[\w.-]+\.js$/i, (req, res) => {
 	sendVersionedAsset(res, OH_UTILS_JS_PATH, 'application/javascript; charset=utf-8');
 });
 
+app.get(/^\/ui-tooltips\.v[\w.-]+\.js$/i, (req, res) => {
+	sendVersionedAsset(res, UI_TOOLTIPS_JS_PATH, 'application/javascript; charset=utf-8');
+});
+
+app.get(/^\/ui-tooltips\.v[\w.-]+\.css$/i, (req, res) => {
+	sendVersionedAsset(res, UI_TOOLTIPS_CSS_PATH, 'text/css; charset=utf-8');
+});
+
 app.get(/^\/transport-client\.v[\w.-]+\.js$/i, (req, res) => {
 	sendVersionedAsset(res, TRANSPORT_CLIENT_JS_PATH, 'application/javascript; charset=utf-8');
 });
@@ -11034,12 +11060,14 @@ app.get('/presence', async (req, res) => {
 	}
 
 	const markersJson = JSON.stringify(markers).replace(/</g, '\\u003c');
+	const assetVersion = liveConfig.assetVersion || 'v1';
 
 	const html = `<!DOCTYPE html>
-<html>
+<html data-theme="light">
 <head>
 <meta charset="utf-8">
 <title>Map</title>
+<link rel="stylesheet" href="/ui-tooltips.${assetVersion}.css">
 <style>
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-300.woff2') format('woff2');font-weight:300;font-style:normal;font-display:swap}
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
@@ -11119,20 +11147,21 @@ app.get('/presence', async (req, res) => {
 .shake{animation:shake 0.5s ease-in-out}
 </style>
 	<script src="/vendor/OpenLayers.js"></script>
+	<script src="/ui-tooltips.${assetVersion}.js"></script>
 	</head>
 	<body>
 	<div id="presence-root">
 	<div id="map"></div>
-	${singlePointMode ? '' : `<div id="red-tooltip" class="tooltip"></div>
-	<div id="hover-tooltip" class="tooltip"></div>
-	<div id="preview-tooltip" class="tooltip"></div>
+	${singlePointMode ? '' : `<div id="red-tooltip" class="tooltip" role="tooltip" aria-hidden="true"></div>
+	<div id="hover-tooltip" class="tooltip" role="tooltip" aria-hidden="true"></div>
+	<div id="preview-tooltip" class="tooltip" role="tooltip" aria-hidden="true"></div>
 	<div id="ctx-menu"></div>`}
 	<div id="map-controls">
-	<button class="map-ctrl-btn" id="zoom-in" type="button">+</button>
-	<button class="map-ctrl-btn" id="zoom-home" type="button"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></button>
-	<button class="map-ctrl-btn" id="map-fullscreen" type="button"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg></button>
-	<button class="map-ctrl-btn" id="map-rotate" type="button"><svg viewBox="0 0 24 24"><path d="M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.96-.7 2.8l1.46 1.46A7.944 7.944 0 0 0 20 13c0-4.42-3.58-8-8-8zM6.7 9.2 5.24 7.74A7.944 7.944 0 0 0 4 13c0 4.42 3.58 8 8 8v3l4-4-4-4v3c-3.31 0-6-2.69-6-6 0-1.01.25-1.96.7-2.8z"/></svg></button>
-	<button class="map-ctrl-btn" id="zoom-out" type="button">&minus;</button>
+	<button class="map-ctrl-btn" id="zoom-in" type="button" data-oh-tooltip="Zoom in" aria-label="Zoom in">+</button>
+	<button class="map-ctrl-btn" id="zoom-home" type="button" data-oh-tooltip="Center map" aria-label="Center map"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></button>
+	<button class="map-ctrl-btn" id="map-fullscreen" type="button" data-oh-tooltip="Enter fullscreen" aria-label="Enter fullscreen"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg></button>
+	<button class="map-ctrl-btn" id="map-rotate" type="button" data-oh-tooltip="Rotate map" aria-label="Rotate map" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.96-.7 2.8l1.46 1.46A7.944 7.944 0 0 0 20 13c0-4.42-3.58-8-8-8zM6.7 9.2 5.24 7.74A7.944 7.944 0 0 0 4 13c0 4.42 3.58 8 8 8v3l4-4-4-4v3c-3.31 0-6-2.69-6-6 0-1.01.25-1.96.7-2.8z"/></svg></button>
+	<button class="map-ctrl-btn" id="zoom-out" type="button" data-oh-tooltip="Zoom out" aria-label="Zoom out">&minus;</button>
 	</div>
 	${singlePointMode ? '' : `<div id="search-modal">
 	<div class="search-header"><span>SEARCH HISTORY</span><span class="search-today">TODAY</span></div>
@@ -11144,11 +11173,11 @@ app.get('/presence', async (req, res) => {
 	<button class="search-go" type="button">Search</button>
 	</div>
 	<div class="playback-controls">
-	<button class="map-ctrl-btn" id="pb-back" type="button" title="Step back" aria-label="Step back"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
-	<button class="map-ctrl-btn" id="pb-play" type="button" title="Play" aria-label="Play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
-	<button class="map-ctrl-btn" id="pb-pause" type="button" title="Pause" aria-label="Pause"><svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg></button>
-	<button class="map-ctrl-btn" id="pb-stop" type="button" title="Stop" aria-label="Stop"><svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>
-	<button class="map-ctrl-btn" id="pb-forward" type="button" title="Step forward" aria-label="Step forward"><svg viewBox="0 0 24 24"><path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+	<button class="map-ctrl-btn" id="pb-back" type="button" data-oh-tooltip="Previous route point" aria-label="Previous route point"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
+	<button class="map-ctrl-btn" id="pb-play" type="button" data-oh-tooltip="Play route" aria-label="Play route"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+	<button class="map-ctrl-btn" id="pb-pause" type="button" data-oh-tooltip="Pause route" aria-label="Pause route"><svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg></button>
+	<button class="map-ctrl-btn" id="pb-stop" type="button" data-oh-tooltip="Stop playback" aria-label="Stop playback"><svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>
+	<button class="map-ctrl-btn" id="pb-forward" type="button" data-oh-tooltip="Next route point" aria-label="Next route point"><svg viewBox="0 0 24 24"><path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
 	</div>
 	</div>`}
 	</div>
@@ -11209,6 +11238,16 @@ vector.addFeatures(feature);
 	var rotatedPanLastX=0;
 	var rotatedPanLastY=0;
 	var updateFullscreenSearchVisibility=function(){};
+	function setPresenceControlLabel(btn,label){
+	if(!btn)return;
+	if(window.ohTooltips&&typeof window.ohTooltips.set==='function'){
+	window.ohTooltips.set(btn,label);
+	return;
+	}
+	btn.removeAttribute('title');
+	btn.setAttribute('data-oh-tooltip',label);
+	btn.setAttribute('aria-label',label);
+	}
 	function isRotatedTouchPanMode(){
 	return isTouchDevice&&presenceFullscreenActive&&presenceRotated;
 	}
@@ -11302,11 +11341,13 @@ vector.addFeatures(feature);
 	function showTooltip(el){
 	if(!el)return;
 	el.style.display='block';
+	el.setAttribute('aria-hidden','false');
 	}
 
 	function hideTooltip(el){
 	if(!el)return;
 	el.style.display='none';
+	el.setAttribute('aria-hidden','true');
 	}
 
 	function isTooltipVisible(el){
@@ -11658,10 +11699,13 @@ zoomOutBtn.addEventListener('click',function(){if(zoomOutBtn.disabled)return;map
 	presenceRoot.classList.remove('presence-rotated');
 	presenceRotated=false;
 	}
+	syncRotateButton();
 	scheduleMapReflow();
 	}
 	function syncRotateButton(){
 	rotateBtn.style.display=(isTouchDevice&&fsActive)?'flex':'none';
+	rotateBtn.setAttribute('aria-pressed',isRotated?'true':'false');
+	setPresenceControlLabel(rotateBtn,isRotated?'Reset map orientation':'Rotate map');
 	}
 	rotateBtn.addEventListener('click',function(){
 	if(!isTouchDevice||!fsActive)return;
@@ -11680,6 +11724,7 @@ zoomOutBtn.addEventListener('click',function(){if(zoomOutBtn.disabled)return;map
 		fsActive=!!e.data.active;
 		presenceFullscreenActive=fsActive;
 		fsBtn.innerHTML=fsActive?minimizeSvg:expandSvg;
+		setPresenceControlLabel(fsBtn,fsActive?'Exit fullscreen':'Enter fullscreen');
 	if(!fsActive){
 	isRotated=false;
 	applyRotation();
@@ -11689,6 +11734,7 @@ zoomOutBtn.addEventListener('click',function(){if(zoomOutBtn.disabled)return;map
 		syncRotateButton();
 		updateFullscreenSearchVisibility();
 		});
+		setPresenceControlLabel(fsBtn,'Enter fullscreen');
 		syncRotateButton();
 		})();
 
@@ -12194,7 +12240,7 @@ bindCtxHeaderControls();
 bindCtxBody();
 }
 
-function ctxHeader(){return '<div class="ctx-header"><span class="ctx-drag-handle">NEARBY DAYS</span><span class="ctx-actions"><span class="ctx-radius-wrap"><input class="ctx-radius" type="text" value="'+ctxRadius+'" maxlength="5">m</span><button class="ctx-close" type="button" aria-label="Close nearby days">X</button></span></div>'}
+function ctxHeader(){return '<div class="ctx-header"><span class="ctx-drag-handle">NEARBY DAYS</span><span class="ctx-actions"><span class="ctx-radius-wrap"><input class="ctx-radius" type="text" value="'+ctxRadius+'" maxlength="5">m</span><button class="ctx-close" type="button" data-oh-tooltip="Close nearby days" aria-label="Close nearby days">X</button></span></div>'}
 
 var ctxDragActive=false,ctxDragStartX=0,ctxDragStartY=0,ctxMenuStartX=0,ctxMenuStartY=0;
 function bindCtxDrag(){

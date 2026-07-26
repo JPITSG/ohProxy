@@ -1220,6 +1220,7 @@
 			this.tooltip.style.left = tx + 'px';
 			this.tooltip.style.top = ty + 'px';
 			this.tooltip.classList.add('visible');
+			this.tooltip.setAttribute('aria-hidden', 'false');
 		}
 
 			showStatTooltip(pt) {
@@ -1241,10 +1242,12 @@
 			this.tooltip.style.left = tx + 'px';
 			this.tooltip.style.top = ty + 'px';
 			this.tooltip.classList.add('visible');
+			this.tooltip.setAttribute('aria-hidden', 'false');
 		}
 
 		hideTooltip() {
 			this.tooltip.classList.remove('visible');
+			this.tooltip.setAttribute('aria-hidden', 'true');
 			if (this.tapCircle) {
 				this.tapCircle.remove();
 				this.tapCircle = null;
@@ -1260,6 +1263,8 @@
 
 		// Check if title is truncated (scrollWidth > clientWidth)
 		var isOverflowing = title.scrollWidth > title.clientWidth;
+		if (isOverflowing) title.setAttribute('tabindex', '0');
+		else title.removeAttribute('tabindex');
 		stats.querySelectorAll('.stat-item').forEach(function(el) {
 			el.classList.toggle('hidden', isOverflowing);
 		});
@@ -1394,6 +1399,7 @@
 				positionNavTooltipForButton(btn);
 			}
 			navTooltip.classList.add('visible');
+			navTooltip.setAttribute('aria-hidden', 'false');
 		}
 
 		function moveNavTooltip(e) {
@@ -1405,6 +1411,7 @@
 		function hideNavTooltip() {
 			if (!navTooltip) return;
 			navTooltip.classList.remove('visible');
+			navTooltip.setAttribute('aria-hidden', 'true');
 		}
 
 		function bindNavTooltip(btn) {
@@ -1471,6 +1478,16 @@
 		var isRotated = false;
 		var expandSvg = '<svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg>';
 		var minimizeSvg = '<svg viewBox="0 0 24 24"><path d="M9 3v6H3V7h4V3h2zm6 0h2v4h4v2h-6V3zM3 15h6v6H7v-4H3v-2zm12 0h6v2h-4v4h-2v-6z"/></svg>';
+		function setChartControlLabel(btn, label) {
+			if (!btn) return;
+			if (window.ohTooltips && typeof window.ohTooltips.set === 'function') {
+				window.ohTooltips.set(btn, label);
+				return;
+			}
+			btn.removeAttribute('title');
+			btn.setAttribute('data-oh-tooltip', label);
+			btn.setAttribute('aria-label', label);
+		}
 		function syncRendererFullscreenState() {
 			if (!chartRenderer) return;
 			chartRenderer.isFullscreenActive = !!fsActive;
@@ -1482,12 +1499,15 @@
 			} else {
 				document.body.classList.remove('chart-fs-rotated');
 			}
+			syncRotateButton();
 			syncRendererFullscreenState();
 			scheduleChartReflow();
 		}
 		function syncRotateButton() {
 			if (!rotateBtn) return;
 			rotateBtn.style.display = (isTouchDevice && fsActive) ? 'flex' : 'none';
+			rotateBtn.setAttribute('aria-pressed', isRotated ? 'true' : 'false');
+			setChartControlLabel(rotateBtn, isRotated ? 'Reset chart orientation' : 'Rotate chart');
 		}
 		if (rotateBtn) {
 			rotateBtn.addEventListener('click', function() {
@@ -1509,6 +1529,7 @@
 			if (!e.data || e.data.type !== 'ohproxy-fullscreen-state') return;
 			fsActive = !!e.data.active;
 			fsBtn.innerHTML = fsActive ? minimizeSvg : expandSvg;
+			setChartControlLabel(fsBtn, fsActive ? 'Exit fullscreen' : 'Enter fullscreen');
 			if (!fsActive) {
 				isRotated = false;
 				applyRotation();
@@ -1518,6 +1539,7 @@
 			}
 			syncRotateButton();
 		});
+		setChartControlLabel(fsBtn, 'Enter fullscreen');
 		syncRendererFullscreenState();
 		syncRotateButton();
 	})();

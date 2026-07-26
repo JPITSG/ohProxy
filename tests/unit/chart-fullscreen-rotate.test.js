@@ -14,7 +14,7 @@ describe('Chart Fullscreen Rotate', () => {
 	it('adds period navigation buttons before rotate/fullscreen in chart header controls', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /id="chartPeriodBack"/);
-		assert.match(server, /const backTooltipAttrs = hasPreviousPeriod[\s\S]*data-range-from="\$\{escapeHtml\(safeNavTooltipData\.back\?\.from \|\| ''\)\}" data-range-to="\$\{escapeHtml\(safeNavTooltipData\.back\?\.to \|\| ''\)\}"[\s\S]*' data-tooltip-message="No data available"';/);
+		assert.match(server, /const backTooltipAttrs = hasPreviousPeriod[\s\S]*data-range-from="\$\{escapeHtml\(safeNavTooltipData\.back\?\.from \|\| ''\)\}" data-range-to="\$\{escapeHtml\(safeNavTooltipData\.back\?\.to \|\| ''\)\}"[\s\S]*' data-tooltip-message="No earlier data"';/);
 		assert.match(server, /id="chartPeriodBack"[\s\S]*\$\{backTooltipAttrs\}[\s\S]*hasPreviousPeriod \? '' : ' aria-disabled="true" data-nav-disabled="true"'/);
 		assert.match(server, /id="chartPeriodForward"/);
 		assert.match(server, /const forwardTooltipAttrs = safeNavTooltipData\.forward[\s\S]*data-range-from="\$\{escapeHtml\(safeNavTooltipData\.forward\.from\)\}" data-range-to="\$\{escapeHtml\(safeNavTooltipData\.forward\.to\)\}"/);
@@ -50,7 +50,7 @@ describe('Chart Fullscreen Rotate', () => {
 		assert.match(chartJs, /btn\.addEventListener\('focus', function\(\) \{\s*showNavTooltip\(btn\);\s*\}\);/);
 		assert.match(chartJs, /bindNavTooltip\(forwardBtn\);/);
 		assert.match(chartJs, /if \(isNavButtonDisabled\(backBtn\)\) \{\s*e\.preventDefault\(\);\s*return;\s*\}/);
-		assert.match(chartJs, /function hideNavTooltip\(\) \{\s*if \(!navTooltip\) return;\s*navTooltip\.classList\.remove\('visible'\);\s*\}/);
+		assert.match(chartJs, /function hideNavTooltip\(\) \{\s*if \(!navTooltip\) return;\s*navTooltip\.classList\.remove\('visible'\);\s*navTooltip\.setAttribute\('aria-hidden', 'true'\);\s*\}/);
 		assert.match(chartJs, /window\.addEventListener\('resize', hideNavTooltip\);/);
 		assert.match(chartJs, /function navigateChartOffset\(nextOffset\) \{/);
 		assert.match(chartJs, /forwardBtn\.addEventListener\('click', function\(\) \{\s*hideNavTooltip\(\);\s*navigateChartPeriod\(-1\);\s*\}\);/);
