@@ -142,6 +142,17 @@ describe('image viewer source reuse', () => {
 		assert.match(styles, /\.image-viewer\.has-preview:not\(\.image-ready\) \.image-viewer-img \{\s*opacity: 0;\s*\}/s);
 	});
 
+	it('keeps the preview opaque until the upgraded image has finished fading in', () => {
+		assert.match(
+			styles,
+			/\.image-viewer-preview \{[\s\S]*?visibility: visible;[\s\S]*?visibility 0s linear;[\s\S]*?\}/
+		);
+		assert.match(
+			styles,
+			/\.image-viewer\.has-preview\.image-ready \.image-viewer-preview \{\s*opacity: 1;\s*visibility: hidden;\s*transition-delay: 0s, 0s, \.4s;\s*\}/s
+		);
+	});
+
 	it('resolves proxy-cache settings through stable widget fallback keys', () => {
 		assert.match(
 			app,

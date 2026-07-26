@@ -895,13 +895,20 @@ body.theme-light .image-viewer {
 	inset: 0;
 	z-index: 0;
 	opacity: 0;
+	visibility: visible;
 	pointer-events: none;
+	transition:
+		transform .4s ease,
+		opacity .4s ease,
+		visibility 0s linear;
 }
 .image-viewer.has-preview .image-viewer-preview {
 	opacity: 1;
 }
 .image-viewer.has-preview.image-ready .image-viewer-preview {
-	opacity: 0;
+	opacity: 1;
+	visibility: hidden;
+	transition-delay: 0s, 0s, .4s;
 }
 .image-viewer.loading:not(.has-preview) .image-viewer-img,
 .image-viewer.has-preview:not(.image-ready) .image-viewer-img {
