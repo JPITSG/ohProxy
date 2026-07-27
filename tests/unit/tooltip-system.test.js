@@ -127,6 +127,23 @@ describe('Shared tooltip system', () => {
 		assert.match(dvr, /liveBtn\.setAttribute\('aria-label', 'Jump to live'\);/);
 	});
 
+	it('expires touch-initiated tooltips after five seconds, including tap-driven focus', () => {
+		const js = read('public/ui-tooltips.js');
+
+		assert.match(js, /const TOUCH_VISIBLE_MS = 5000;/);
+		assert.match(js, /const TOUCH_FOCUS_MS = 750;/);
+		assert.match(js, /let lastTouchAt = -Infinity;/, 'touch clock must start stale so early autofocus is not misread as touch');
+		assert.ok(
+			(js.match(/lastTouchAt = performance\.now\(\);/g) || []).length >= 2,
+			'touch pointerdown and pointerup must both stamp the touch clock',
+		);
+		assert.ok(
+			(js.match(/touchTimer = setTimeout\(hide, TOUCH_VISIBLE_MS\);/g) || []).length >= 2,
+			'tap and tap-driven focus must both arm the touch auto-hide',
+		);
+		assert.match(js, /performance\.now\(\) - lastTouchAt < TOUCH_FOCUS_MS && activeTarget === target/);
+	});
+
 	it('makes weather semantics available to mouse, keyboard, touch, and assistive tech', () => {
 		const server = read('server.js');
 

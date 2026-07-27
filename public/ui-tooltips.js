@@ -7,7 +7,8 @@
 	const PLACEMENT_ATTRIBUTE = 'data-oh-tooltip-placement';
 	const TOOLTIP_SELECTOR = `[${TOOLTIP_ATTRIBUTE}]`;
 	const HOVER_DELAY_MS = 260;
-	const TOUCH_VISIBLE_MS = 2600;
+	const TOUCH_VISIBLE_MS = 5000;
+	const TOUCH_FOCUS_MS = 750;
 	const VIEWPORT_GAP_PX = 4;
 	const TARGET_GAP_PX = 8;
 
@@ -20,6 +21,7 @@
 	let showTimer = 0;
 	let touchTimer = 0;
 	let touchPointerId = null;
+	let lastTouchAt = -Infinity;
 	let touchStartX = 0;
 	let touchStartY = 0;
 	let touchMoved = false;
@@ -276,7 +278,14 @@
 
 	document.addEventListener('focusin', (event) => {
 		const target = closestTooltipTarget(event.target);
-		if (target) showNow(target, null, 'anchor');
+		if (!target) return;
+		showNow(target, null, 'anchor');
+		// A tap focuses after pointerup, so this focusin re-show would otherwise
+		// cancel the touch auto-hide (clearTimers) and pin the tooltip open.
+		// Keyboard focus stays persistent: its touch clock is stale.
+		if (performance.now() - lastTouchAt < TOUCH_FOCUS_MS && activeTarget === target) {
+			touchTimer = setTimeout(hide, TOUCH_VISIBLE_MS);
+		}
 	});
 
 	document.addEventListener('focusout', (event) => {
@@ -288,6 +297,7 @@
 	document.addEventListener('pointerdown', (event) => {
 		hide();
 		if (event.pointerType !== 'touch') return;
+		lastTouchAt = performance.now();
 		activeTouchPointers.add(event.pointerId);
 		if (activeTouchPointers.size > 1) {
 			touchGestureBlocked = true;
@@ -301,6 +311,7 @@
 
 	document.addEventListener('pointerup', (event) => {
 		if (event.pointerType !== 'touch') return;
+		lastTouchAt = performance.now();
 		const wasTracked = activeTouchPointers.delete(event.pointerId);
 		const wasPrimary = event.pointerId === touchPointerId;
 		const suppress = touchGestureBlocked || activeTouchPointers.size > 0 || (wasPrimary && touchMoved);
@@ -313,7 +324,7 @@
 		const target = closestTooltipTarget(event.target);
 		if (!target || target.getAttribute(TOUCH_ATTRIBUTE) !== 'true') return;
 		showNow(target, null, 'anchor');
-		touchTimer = setTimeout(hide, TOUCH_VISIBLE_MS);
+		if (activeTarget === target) touchTimer = setTimeout(hide, TOUCH_VISIBLE_MS);
 	}, true);
 	document.addEventListener('pointercancel', (event) => {
 		if (event.pointerType !== 'touch' || !activeTouchPointers.delete(event.pointerId)) return;
