@@ -35,10 +35,13 @@ describe('Video stream clock', () => {
 		assert.match(body, /if \(!hasFrameCallback \|\| frameCallbackPending\) return;\s*frameCallbackPending = true;\s*videoEl\.requestVideoFrameCallback\(onFrame\);/);
 		assert.doesNotMatch(body, /cancelVideoFrameCallback/);
 		// the displayed time is never advanced by wall-clock timers: the only
-		// textContent write sits in the frame callback, and the only timer is
-		// the stall watchdog, which just flags the alert class
+		// textContent writes (clock time + resolution label) sit in the frame
+		// callback, and the only timer is the stall watchdog, which just flags
+		// the alert class
 		assert.doesNotMatch(body, /setInterval|requestAnimationFrame/);
-		assert.strictEqual((body.match(/textContent = /g) || []).length, 1);
+		assert.strictEqual((body.match(/textContent = /g) || []).length, 2);
+		// the resolution chip rides the same presented-frame signal
+		assert.match(body, /const resolution = videoContainer\.querySelector\('\.video-resolution'\);\s*if \(resolution\) \{\s*const label = videoResolutionLabel\(videoEl\.videoWidth, videoEl\.videoHeight\);\s*if \(label\) \{\s*if \(resolution\.textContent !== label\) resolution\.textContent = label;\s*resolution\.classList\.remove\('hidden'\);\s*\} else \{\s*resolution\.classList\.add\('hidden'\);\s*\}\s*\}\s*schedule\(\);/);
 		assert.match(body, /stallTimer = setTimeout\(markClockStalled, VIDEO_CLOCK_STALL_MS\);/);
 		// an intentionally paused element (DVR pause) is not a stalled stream
 		assert.match(body, /const markClockStalled = \(\) => \{\s*stallTimer = null;[\s\S]*?if \(videoEl\.paused\) return;\s*const clock = videoContainer\.querySelector\('\.video-clock'\);\s*if \(clock && !clock\.classList\.contains\('hidden'\)\) clock\.classList\.add\('stalled'\);\s*\};/);
@@ -57,21 +60,32 @@ describe('Video stream clock', () => {
 		assert.match(css, /\.video-preview-age\.stale,\s*\.video-clock\.stalled \{\s*background: #8b0000;\s*\}/);
 	});
 
-	it('hides the clock whenever the stream resets to the preview state', () => {
+	it('hides the clock and resolution chip whenever the stream resets to the preview state', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
-		assert.match(app, /if \(!live\) \{\s*const clock = container\.querySelector\('\.video-clock'\);\s*if \(clock\) \{\s*clock\.classList\.add\('hidden'\);\s*clock\.classList\.remove\('stalled'\);\s*\}\s*\}/);
-		// created hidden; only a presented frame reveals it
+		assert.match(app, /if \(!live\) \{\s*const clock = container\.querySelector\('\.video-clock'\);\s*if \(clock\) \{\s*clock\.classList\.add\('hidden'\);\s*clock\.classList\.remove\('stalled'\);\s*\}\s*const resolution = container\.querySelector\('\.video-resolution'\);\s*if \(resolution\) resolution\.classList\.add\('hidden'\);\s*\}/);
+		// created hidden; only a presented frame reveals them
 		assert.match(app, /streamClock\.className = 'video-clock hidden';/);
+		assert.match(app, /resolutionBadge\.className = 'video-resolution hidden';/);
 		assert.match(app, /initVideoClock\(videoEl, videoContainer\);/);
 	});
 
 	it('styles the clock like the control buttons, black at 50% opacity, top right', () => {
 		const css = fs.readFileSync(STYLES_FILE, 'utf8');
-		const start = css.indexOf('.video-clock {');
+		// the badge row anchors both chips to the top right; the clock is the
+		// last flex child, so alone it hugs the corner exactly as it used to
+		const rowStart = css.indexOf('.video-stream-badges {');
+		assert.ok(rowStart > -1);
+		const rowBlock = css.slice(rowStart, css.indexOf('}', rowStart));
+		assert.match(rowBlock, /position: absolute;/);
+		assert.match(rowBlock, /top: 8px;/);
+		assert.match(rowBlock, /right: 8px;/);
+		assert.match(rowBlock, /z-index: 20;/);
+		assert.match(rowBlock, /gap: 8px;/);
+		assert.match(rowBlock, /pointer-events: none;/);
+		// clock and resolution chip share one box style
+		const start = css.indexOf('.video-clock,\n.video-resolution {');
 		assert.ok(start > -1);
 		const block = css.slice(start, css.indexOf('}', start));
-		assert.match(block, /top: 8px;/);
-		assert.match(block, /right: 8px;/);
 		assert.match(block, /height: 32px;/);
 		assert.match(block, /border-radius: 6\.4px;/);
 		assert.match(block, /background: #000000;/);
@@ -79,11 +93,12 @@ describe('Video stream clock', () => {
 		assert.match(block, /opacity: \.5;/);
 		assert.match(block, /font-variant-numeric: tabular-nums;/);
 		assert.match(block, /pointer-events: none;/);
-		// unlike preview/spinner/age badge, the clock stays visible in fullscreen
-		// (parity with the old burned-in overlay)
+		assert.match(css, /\.video-clock\.hidden,\n\.video-resolution\.hidden \{\s*display: none;\s*\}/);
+		// unlike preview/spinner/age badge, the clock, resolution chip and their
+		// row stay visible in fullscreen (parity with the old burned-in overlay)
 		const fsRuleStart = css.indexOf('/* Hide preview/spinner/age badge in fullscreen */');
 		assert.ok(fsRuleStart > -1);
 		const fsRule = css.slice(fsRuleStart, css.indexOf('}', fsRuleStart));
-		assert.doesNotMatch(fsRule, /video-clock/);
+		assert.doesNotMatch(fsRule, /video-clock|video-resolution|video-stream-badges/);
 	});
 });

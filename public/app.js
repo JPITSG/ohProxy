@@ -3025,6 +3025,8 @@ function setVideoStreamLive(videoEl, live) {
 			clock.classList.add('hidden');
 			clock.classList.remove('stalled');
 		}
+		const resolution = container.querySelector('.video-resolution');
+		if (resolution) resolution.classList.add('hidden');
 	}
 }
 
@@ -3036,6 +3038,41 @@ function setVideoStreamLive(videoEl, live) {
 // If no frame lands within this window while the clock is visible, the badge
 // switches to the alert background until frames resume.
 const VIDEO_CLOCK_STALL_MS = 3000;
+
+// Resolution chip shown beside the stream clock, updated from the same frame
+// callback so it always describes the stream actually on screen. Streams
+// rarely match a marketing resolution exactly, so the label snaps to the
+// nearest standard rung (up or down) on the log scale. The "p" rungs name
+// vertical lines in landscape and 4K/5K/8K name the 2160/2880/4320-line UHD
+// tiers, so both orientations compare the smaller dimension: a portrait
+// 1080x1920 phone stream still reads 1080p.
+const VIDEO_RESOLUTION_RUNGS = [
+	[144, '144p'],
+	[240, '240p'],
+	[360, '360p'],
+	[480, '480p'],
+	[720, '720p'],
+	[1080, '1080p'],
+	[1440, '1440p'],
+	[2160, '4K'],
+	[2880, '5K'],
+	[4320, '8K'],
+];
+
+function videoResolutionLabel(width, height) {
+	const lines = Math.min(width || 0, height || 0);
+	if (!(lines > 0)) return '';
+	let label = '';
+	let bestDistance = Infinity;
+	for (const [rungLines, rungLabel] of VIDEO_RESOLUTION_RUNGS) {
+		const distance = Math.abs(Math.log(lines / rungLines));
+		if (distance < bestDistance) {
+			bestDistance = distance;
+			label = rungLabel;
+		}
+	}
+	return label;
+}
 
 function initVideoClock(videoEl, videoContainer) {
 	if (videoEl.__clockInit) return;
@@ -3075,6 +3112,18 @@ function initVideoClock(videoEl, videoContainer) {
 			clock.classList.remove('stalled');
 			clock.classList.remove('hidden');
 			armClockStallWatchdog();
+		}
+		// The resolution chip rides the same presented-frame signal, so it
+		// reveals with the clock and follows mid-stream resolution changes.
+		const resolution = videoContainer.querySelector('.video-resolution');
+		if (resolution) {
+			const label = videoResolutionLabel(videoEl.videoWidth, videoEl.videoHeight);
+			if (label) {
+				if (resolution.textContent !== label) resolution.textContent = label;
+				resolution.classList.remove('hidden');
+			} else {
+				resolution.classList.add('hidden');
+			}
 		}
 		schedule();
 	};
@@ -10776,13 +10825,27 @@ function updateCard(card, w, info) {
 			ageBadge.className = 'video-preview-age hidden';
 			videoContainer.appendChild(ageBadge);
 		}
-		// Get or create the frame-driven stream clock (top right, replaces the
-		// ffmpeg drawtext overlay; revealed by the first presented frame)
+		// Get or create the top-right stream badge row: the resolution chip and
+		// the frame-driven stream clock (which replaces the ffmpeg drawtext
+		// overlay). Both are created hidden and revealed by the first presented
+		// frame; DOM order puts the resolution chip to the left of the clock.
+		let streamBadges = videoContainer.querySelector('.video-stream-badges');
+		if (!streamBadges) {
+			streamBadges = document.createElement('div');
+			streamBadges.className = 'video-stream-badges';
+			videoContainer.appendChild(streamBadges);
+		}
+		let resolutionBadge = videoContainer.querySelector('.video-resolution');
+		if (!resolutionBadge) {
+			resolutionBadge = document.createElement('div');
+			resolutionBadge.className = 'video-resolution hidden';
+			streamBadges.appendChild(resolutionBadge);
+		}
 		let streamClock = videoContainer.querySelector('.video-clock');
 		if (!streamClock) {
 			streamClock = document.createElement('div');
 			streamClock.className = 'video-clock hidden';
-			videoContainer.appendChild(streamClock);
+			streamBadges.appendChild(streamClock);
 		}
 		setVideoPreviewBackground(previewDiv, rawVideoUrl);
 
