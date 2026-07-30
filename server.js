@@ -6823,27 +6823,83 @@ function roundPresenceCoord(value) {
 	return Math.round(Number(value) * 10000000) / 10000000;
 }
 
-function presenceMarkerTooltip(timestamp) {
+// Human-readable span for a stacked pin, always with one decimal:
+// 32.0 mins, 2.3 hours, 2.0 days.
+function presenceDurationLabel(ms) {
+	if (!(ms > 0)) return '';
+	const mins = ms / 60000;
+	const format = (value, unit) => {
+		const text = value.toFixed(1);
+		return text + ' ' + (text === '1.0' ? unit : unit + 's');
+	};
+	if (mins < 90) return format(mins, 'min');
+	const hours = mins / 60;
+	if (hours < 48) return format(hours, 'hour');
+	return format(hours / 24, 'day');
+}
+
+// One timestamp renders the classic Date/Time tooltip. With endTimestamp the
+// pin represents several fixes collapsed onto one spot, so the tooltip becomes
+// a From/To range telling the user how long the position stayed static.
+function presenceMarkerTooltip(timestamp, endTimestamp) {
 	if (!timestamp) return '';
-	const d = new Date(timestamp);
-	const date = formatDT(d, liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY');
-	const time = formatDT(d, liveConfig.clientConfig?.timeFormat || 'H:mm:ss');
-	return '<div class="tt-date">' + date + '</div><div class="tt-time">' + time + '</div>';
+	const dateFormat = liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY';
+	const timeFormat = liveConfig.clientConfig?.timeFormat || 'H:mm:ss';
+	const from = new Date(timestamp);
+	const fromDate = formatDT(from, dateFormat);
+	const fromTime = formatDT(from, timeFormat);
+	if (endTimestamp) {
+		const to = new Date(endTimestamp);
+		const toDate = formatDT(to, dateFormat);
+		const toTime = formatDT(to, timeFormat);
+		const lengthRow = (() => {
+			const label = presenceDurationLabel(to - from);
+			return label ? '<div class="tt-time"><span class="tt-fromto">Length</span>' + label + '</div>' : '';
+		})();
+		if (fromDate !== toDate) {
+			// A stack spanning midnight: each side carries its own date.
+			return '<div class="tt-time"><span class="tt-fromto">From</span>' + fromDate + ' ' + fromTime + '</div>'
+				+ '<div class="tt-time"><span class="tt-fromto">To</span>' + toDate + ' ' + toTime + '</div>'
+				+ lengthRow;
+		}
+		if (fromTime !== toTime) {
+			return '<div class="tt-date">' + fromDate + '</div>'
+				+ '<div class="tt-time"><span class="tt-fromto">From</span>' + fromTime + '</div>'
+				+ '<div class="tt-time"><span class="tt-fromto">To</span>' + toTime + '</div>'
+				+ lengthRow;
+		}
+	}
+	return '<div class="tt-date">' + fromDate + '</div><div class="tt-time">' + fromTime + '</div>';
 }
 
 function buildPresenceMarkersFromRows(rows) {
-	const markers = [];
-	const seen = new Set();
+	// Rows arrive newest first. Fixes landing on the same (rounded) spot
+	// collapse into one pin: the first row seen is the stack's latest fix, each
+	// later duplicate pushes its earliest fix further back.
+	const stacks = new Map();
+	const order = [];
 	let first = true;
 	for (const row of rows || []) {
 		const lat = roundPresenceCoord(row.lat);
 		const lon = roundPresenceCoord(row.lon);
 		const key = lat + ',' + lon;
-		if (seen.has(key)) continue;
-		seen.add(key);
-		markers.push([lat, lon, first ? 'red' : 'blue', presenceMarkerTooltip(row.timestamp)]);
+		const existing = stacks.get(key);
+		if (existing) {
+			existing.earliest = row.timestamp;
+			existing.count++;
+			continue;
+		}
+		const stack = { lat, lon, color: first ? 'red' : 'blue', latest: row.timestamp, earliest: row.timestamp, count: 1 };
+		stacks.set(key, stack);
+		order.push(stack);
 		first = false;
 	}
+	const markers = order.map((stack) => [
+		stack.lat,
+		stack.lon,
+		stack.color,
+		stack.count > 1 ? presenceMarkerTooltip(stack.earliest, stack.latest) : presenceMarkerTooltip(stack.latest),
+	]);
 	markers.reverse();
 	return markers;
 }
@@ -11202,6 +11258,7 @@ ${proxyTiles
 	.tooltip{position:absolute;background:#f1f2f9;border:1px solid #ccccd1;border-radius:10px;padding:0.5rem 0.75rem;font-size:.7rem;line-height:1.5;font-family:'Rubik',sans-serif;color:#0f172a;pointer-events:none;user-select:none;z-index:100;white-space:nowrap;box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.08),0 4px 6px -4px rgb(0 0 0 / 0.05)}
 .tooltip .tt-date{font-weight:500}
 .tooltip .tt-time{font-weight:300;margin-top:0.125rem}
+.tooltip .tt-fromto{display:inline-block;width:4.5em;margin-right:0.375em;font-size:0.5625rem;font-weight:400;letter-spacing:0.08em;text-transform:uppercase;color:rgba(19,21,54,0.5)}
 #hover-tooltip{display:none}
 #preview-tooltip{display:none}
 .ctx-drag-handle{cursor:move;user-select:none}
