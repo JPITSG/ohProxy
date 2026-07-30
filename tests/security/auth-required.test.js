@@ -275,6 +275,9 @@ describe('Authentication Required Tests - HTML Mode', () => {
 			{ method: 'GET', path: '/search-index', description: 'Search index' },
 			{ method: 'GET', path: '/video-preview?url=rtsp://test', description: 'Video preview' },
 			{ method: 'GET', path: '/presence', description: 'GPS presence map' },
+			{ method: 'GET', path: '/tiles/15/16384/16383.png', description: 'Map tile proxy' },
+			{ method: 'HEAD', path: '/tiles/15/16384/16383.png', description: 'Map tile proxy (HEAD)' },
+			{ method: 'GET', path: '/tiles/0/0/0.png', description: 'Map tile proxy (root tile)' },
 			{ method: 'GET', path: '/proxy?url=http://test', description: 'Proxy endpoint' },
 			{ method: 'GET', path: '/app.v123.js', description: 'App JS (versioned)' },
 			{ method: 'GET', path: '/tailwind.v123.css', description: 'Tailwind CSS (versioned)' },
@@ -419,6 +422,7 @@ describe('Authentication Required Tests - Basic Auth Mode', () => {
 			{ method: 'GET', path: '/api/settings', description: 'User settings' },
 			{ method: 'GET', path: '/search-index', description: 'Search index' },
 			{ method: 'GET', path: '/presence', description: 'GPS presence map' },
+			{ method: 'GET', path: '/tiles/15/16384/16383.png', description: 'Map tile proxy' },
 			{ method: 'GET', path: '/proxy?url=http://test', description: 'Proxy endpoint' },
 		];
 

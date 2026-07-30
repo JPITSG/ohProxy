@@ -32,6 +32,7 @@ const { buildOpenhabClient } = require('./lib/openhab-client');
 const { getBackendRecoveryDelayMs } = require('./lib/backend-recovery-delay');
 const { createActiveUserCountWriter } = require('./lib/active-user-count');
 const { createOpenhabMapTransformer, defaultOpenhabTransformDir, MAX_MAP_PATTERN_LENGTH } = require('./lib/openhab-map-transform');
+const { parseTileCoords, tileKey, createTileCache, ROUTE_HIT } = require('./lib/map-tile-cache');
 
 const historyMapTransformer = createOpenhabMapTransformer({
 	transformDir: defaultOpenhabTransformDir(),
@@ -667,6 +668,10 @@ const WEATHERBIT_CACHE_DIR = path.join(__dirname, 'cache', 'weatherbit');
 const WEATHERBIT_FORECAST_FILE = path.join(WEATHERBIT_CACHE_DIR, 'forecast.json');
 const WEATHERBIT_ICONS_DIR = path.join(WEATHERBIT_CACHE_DIR, 'icons');
 const PROXY_CACHE_DIR = path.join(__dirname, 'cache', 'proxy');
+const TILE_CACHE_DIR = path.join(__dirname, 'cache', 'tiles');
+const MAP_TILES_CONFIG = SERVER_CONFIG.mapTiles || {};
+const MAP_TILES_ENABLED = MAP_TILES_CONFIG.enabled === true;
+const MAP_TILES_DEBUG_LOGGING = MAP_TILES_CONFIG.debugLogging === true;
 const MYSQL_CONFIG = SERVER_CONFIG.mysql || {};
 const MYSQL_RECONNECT_DELAY_MS = 5000;
 const CMDAPI_CONFIG = SERVER_CONFIG.cmdapi || {};
@@ -1498,6 +1503,16 @@ function validateAdminConfig(config) {
 		}
 	}
 
+	// Map tiles
+	if (isPlainObject(s.mapTiles)) {
+		if (s.mapTiles.enabled !== undefined && typeof s.mapTiles.enabled !== 'boolean') {
+			errors.push('server.mapTiles.enabled must be a boolean');
+		}
+		if (s.mapTiles.debugLogging !== undefined && typeof s.mapTiles.debugLogging !== 'boolean') {
+			errors.push('server.mapTiles.debugLogging must be a boolean');
+		}
+	}
+
 	// Binaries
 	if (isPlainObject(s.binaries)) {
 		ensureAbsolutePath(s.binaries.ffmpeg, 'server.binaries.ffmpeg', errors);
@@ -2239,6 +2254,10 @@ const liveConfig = {
 	videoPreviewPruneHours: VIDEO_PREVIEW_PRUNE_HOURS,
 	gpsHomeLat: Number.isFinite(parseFloat(SERVER_CONFIG.gps?.homeLat)) ? parseFloat(SERVER_CONFIG.gps?.homeLat) : NaN,
 	gpsHomeLon: Number.isFinite(parseFloat(SERVER_CONFIG.gps?.homeLon)) ? parseFloat(SERVER_CONFIG.gps?.homeLon) : NaN,
+	mapTilesEnabled: MAP_TILES_ENABLED,
+	mapTilesDebugLogging: MAP_TILES_DEBUG_LOGGING,
+	// Learned from the first proxied tile request; see rememberMapTilesReferer.
+	mapTilesReferer: '',
 };
 
 const unauthenticatedIpGuard = createUnauthenticatedIpGuard({
@@ -2467,6 +2486,11 @@ function reloadLiveConfig() {
 	const newGps = newServer.gps || {};
 	liveConfig.gpsHomeLat = Number.isFinite(parseFloat(newGps.homeLat)) ? parseFloat(newGps.homeLat) : NaN;
 	liveConfig.gpsHomeLon = Number.isFinite(parseFloat(newGps.homeLon)) ? parseFloat(newGps.homeLon) : NaN;
+
+	// Map tile proxy config
+	const newMapTiles = newServer.mapTiles || {};
+	liveConfig.mapTilesEnabled = newMapTiles.enabled === true;
+	liveConfig.mapTilesDebugLogging = newMapTiles.debugLogging === true;
 
 	// Session max age
 	const newMaxAge = configNumber(newServer.sessionMaxAgeDays, 14);
@@ -11061,6 +11085,13 @@ app.get('/presence', async (req, res) => {
 
 	const markersJson = JSON.stringify(markers).replace(/</g, '\\u003c');
 	const assetVersion = liveConfig.assetVersion || 'v1';
+	// When the tile proxy is enabled the browser only ever talks to this origin,
+	// so a single relative template replaces the a/b/c upstream rotation (which
+	// exists purely to work around per-host browser connection limits).
+	const proxyTiles = liveConfig.mapTilesEnabled === true;
+	const tileUrlsJson = proxyTiles
+		? '["/tiles/${z}/${x}/${y}.png"]'
+		: '["//a.tile.openstreetmap.org/${z}/${x}/${y}.png","//b.tile.openstreetmap.org/${z}/${x}/${y}.png","//c.tile.openstreetmap.org/${z}/${x}/${y}.png"]';
 
 	const html = `<!DOCTYPE html>
 <html data-theme="light">
@@ -11187,7 +11218,7 @@ app.get('/presence', async (req, res) => {
 	var singlePointMode=${singlePointMode ? 'true' : 'false'};
 
 	var map=new OpenLayers.Map("map",{theme:null});
-	map.addLayer(new OpenLayers.Layer.OSM("OSM",["//a.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//b.tile.openstreetmap.org/\${z}/\${x}/\${y}.png","//c.tile.openstreetmap.org/\${z}/\${x}/\${y}.png"]));
+	map.addLayer(new OpenLayers.Layer.OSM("OSM",${tileUrlsJson}));
 
 	var wgs84=new OpenLayers.Projection("EPSG:4326");
 	var proj=map.getProjectionObject();
@@ -12394,8 +12425,12 @@ else if(ctxDragEnded){e.preventDefault();ctxDragEnded=false}
 </body>
 </html>`;
 
-	// OSM tiles require a Referer; use origin-only on /presence so tile requests are accepted.
-	res.setHeader('Referrer-Policy', PRESENCE_TILE_REFERRER_POLICY);
+	// Direct tile requests need a Referer to be accepted upstream, so relax the
+	// policy to origin-only for that path. When tiles are proxied the browser
+	// never contacts the tile provider, so the stricter global policy applies.
+	if (!proxyTiles) {
+		res.setHeader('Referrer-Policy', PRESENCE_TILE_REFERRER_POLICY);
+	}
 	res.setHeader('Content-Type', 'text/html; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-store');
 	res.send(html);
@@ -12705,6 +12740,77 @@ app.get('/proxy', async (req, res, next) => {
 		logMessage(`openHAB proxy failed for ${proxyPath}: ${err.message || err}`);
 		sendStyledError(res, req, 502, 'Proxy error');
 	}
+});
+
+// --- Map tile proxy ---
+// Decider for /presence background tiles. A locally cached copy is served when
+// one exists; otherwise the tile is fetched upstream once, cached and served.
+// Only reachable while server.mapTiles.enabled is true; when disabled the
+// presence page points OpenLayers straight at the public tile service instead.
+const mapTileCache = createTileCache({
+	baseDir: TILE_CACHE_DIR,
+	fs,
+	log: (message) => logMessage(message),
+	fetchTile: (url) => fetchBinaryFromUrl(url, buildUpstreamTileHeaders(), 2),
+});
+
+// The tile policy asks proxies to identify themselves and not to blank the
+// Referer for web traffic. The Referer is derived from the configured openHAB
+// proxy user agent and the deployment's own origin rather than hardcoded, so no
+// deployment-specific hostname lives in the repository.
+function buildUpstreamTileHeaders() {
+	const headers = { Accept: 'image/png,image/*;q=0.8,*/*;q=0.5' };
+	const referer = safeText(liveConfig.mapTilesReferer || '').trim();
+	if (referer) headers.Referer = referer;
+	return headers;
+}
+
+function rememberMapTilesReferer(req) {
+	if (liveConfig.mapTilesReferer) return;
+	const host = safeText(req?.headers?.host || '').trim();
+	// Host is client-supplied, so only accept a plain hostname[:port] shape
+	// before reusing it in an outbound header.
+	if (!host || !/^[a-z0-9.-]{1,253}(?::\d{1,5})?$/i.test(host)) return;
+	liveConfig.mapTilesReferer = `${isSecureRequest(req) ? 'https' : 'http'}://${host}/`;
+}
+
+app.get(/^\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})\.png$/, async (req, res) => {
+	if (!req.ohProxyUser) {
+		return res.status(401).send('Unauthorized');
+	}
+	if (!req.ohProxyUserData?.trackgps) {
+		return res.status(403).send('GPS tracking not enabled');
+	}
+	if (!liveConfig.mapTilesEnabled) {
+		return res.status(404).send('Not found');
+	}
+
+	const match = req.path.match(/^\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})\.png$/);
+	const coords = match ? parseTileCoords(match[1], match[2], match[3]) : null;
+	if (!coords) {
+		if (liveConfig.mapTilesDebugLogging) {
+			logMessage(`[MapTiles] ${req.path} user=${req.ohProxyUser} -> rejected (invalid tile coordinates)`);
+		}
+		return res.status(400).send('Invalid tile coordinates');
+	}
+
+	rememberMapTilesReferer(req);
+
+	const result = await mapTileCache.get(coords);
+
+	if (liveConfig.mapTilesDebugLogging) {
+		logMessage(`[MapTiles] ${tileKey(coords)} user=${req.ohProxyUser} -> ${result.route} (${result.detail})`);
+	}
+
+	if (!result.body) {
+		res.setHeader('Cache-Control', 'no-store');
+		return res.status(result.status || 502).send('Tile unavailable');
+	}
+
+	res.setHeader('Content-Type', result.contentType);
+	res.setHeader('Cache-Control', 'public, max-age=604800');
+	res.setHeader('X-Tile-Cache', result.route === ROUTE_HIT ? 'hit' : 'miss');
+	res.send(result.body);
 });
 
 // --- Gated vendor assets ---

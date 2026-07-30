@@ -258,6 +258,26 @@ module.exports = {
 			homeLon: '',
 		},
 
+		// === Map Tiles ===
+		// Controls how the /presence map obtains its background tiles.
+		mapTiles: {
+			// Serve map tiles through ohProxy instead of letting the browser fetch
+			// them from the public tile service (true/false).
+			// When false, the map requests tiles directly from
+			// tile.openstreetmap.org, so every viewer's IP address, browser
+			// headers and tile-by-tile viewing pattern reach the tile provider.
+			// When true, ohProxy answers each tile request: a locally cached copy
+			// is served if one exists, otherwise the tile is fetched upstream
+			// once, cached under cache/tiles/ and served. Only the server ever
+			// contacts the provider, and repeat views cost no upstream requests.
+			enabled: false,
+			// Log every proxied tile request and the route taken (hit, miss,
+			// coalesced or error) to the ohProxy log file (true/false).
+			// Verbose: one line per tile. Intended for verifying cache behaviour,
+			// not for normal running.
+			debugLogging: false,
+		},
+
 		// === System ===
 		binaries: {
 			// FFmpeg binary path (used for RTSP streaming and video previews).

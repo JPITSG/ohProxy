@@ -9,6 +9,7 @@ cache/chart/
 cache/ai/
 cache/weatherbit/
 cache/proxy/
+cache/tiles/
 video-previews/
 *.log
 fullchain.pem

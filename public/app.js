@@ -6736,6 +6736,13 @@ const ADMIN_CONFIG_SCHEMA = [
 		],
 	},
 	{
+		id: 'map-tiles', group: 'server',
+		fields: [
+			{ key: 'server.mapTiles.enabled', type: 'toggle' },
+			{ key: 'server.mapTiles.debugLogging', type: 'toggle' },
+		],
+	},
+	{
 		id: 'system', group: 'server',
 		fields: [
 			{ key: 'server.binaries.ffmpeg', type: 'text' },

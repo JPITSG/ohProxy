@@ -108,6 +108,10 @@ function shouldHandleRequest(request, url) {
 	if (path.includes('/proxy')) return false;
 	if (path.includes('/search-index')) return false;
 	if (path.startsWith('/api/')) return false;
+	// Map tiles are cached server-side and by the HTTP cache. Keeping them out of
+	// the shell cache avoids bloating it and avoids discarding every tile each
+	// time the asset version changes.
+	if (path.startsWith('/tiles/')) return false;
 	if (path === '/sitemap-full' || path === '/video-preview' || path === '/weather') return false;
 	if (path.endsWith('/config.js')) return false; // User-specific, never cache
 	return true;
