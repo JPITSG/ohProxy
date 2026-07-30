@@ -271,11 +271,48 @@ module.exports = {
 			// once, cached under cache/tiles/ and served. Only the server ever
 			// contacts the provider, and repeat views cost no upstream requests.
 			enabled: false,
-			// Log every proxied tile request and the route taken (hit, miss,
-			// coalesced or error) to the ohProxy log file (true/false).
-			// Verbose: one line per tile. Intended for verifying cache behaviour,
-			// not for normal running.
+			// Log every proxied tile request and the route taken (render-hit,
+			// rendered, re-rendered, render-stale, raster-hit, miss, refreshed,
+			// stale, coalesced or error) to the ohProxy log file (true/false).
+			// Verbose: one line per tile. Intended for verifying cache
+			// behaviour, not for normal running.
 			debugLogging: false,
+			// Maximum age in days for all cached map data (integer 1-3650).
+			// Maps change; anything older is refreshed. The primer re-pulls
+			// vector data past this age on its daily run; the decider
+			// re-renders rendered tiles and re-fetches proxied raster tiles
+			// past it on view. A failed refresh always keeps serving the old
+			// copy. Also caps how long browsers may cache tiles.
+			maxAgeDays: 30,
+			// Vector tile primer: a background worker that keeps a local archive
+			// of map data (cache/mvt/) covering every GPS point in log_gps plus
+			// radiusKm around it. Primed areas render entirely locally (tier 1
+			// of the decider) and never contact the raster tile service.
+			prime: {
+				// Enable the periodic primer (true/false). Runs at startup when
+				// due, then every intervalMs. Fetches are byte-range reads from
+				// the PMTiles archive at sourceUrl, drip-fed, and only for tiles
+				// not already stored - steady-state runs cost almost nothing.
+				enabled: false,
+				// Buffer radius in kilometres around every visited coordinate (1-100).
+				radiusKm: 10,
+				// Interval between primer runs in milliseconds (>= 3600000; default 24h).
+				intervalMs: 86400000,
+				// PMTiles archive to prime from. 'auto' discovers the newest
+				// Protomaps daily planet build; or set an explicit http(s) URL
+				// (e.g. a self-built planetiler archive).
+				sourceUrl: 'auto',
+			},
+			// In-process tile rendering (tier 1 of the decider).
+			render: {
+				// Render primed areas locally instead of using the raster tiers
+				// (true/false). Disable to fall straight through to the cached /
+				// proxied raster path without touching primed data.
+				enabled: true,
+				// TrueType font used for map labels (absolute path). Labels are
+				// skipped if the file is missing.
+				fontFile: '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+			},
 		},
 
 		// === System ===

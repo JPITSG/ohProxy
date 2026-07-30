@@ -30,24 +30,33 @@ const SW_FILE = path.join(PROJECT_ROOT, 'public', 'sw.js');
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('body')]);
 
 // Minimal in-memory fs stand-in matching the calls createTileCache makes.
+// mtimes is exposed so tests can age files directly.
 function memoryFs(seed = {}) {
 	const files = new Map(Object.entries(seed));
+	const mtimes = new Map([...files.keys()].map((p) => [p, Date.now()]));
 	const dirs = new Set();
 	return {
 		files,
+		mtimes,
 		dirs,
 		existsSync: (p) => files.has(p) || dirs.has(p),
+		statSync: (p) => {
+			if (!files.has(p)) throw new Error(`ENOENT ${p}`);
+			return { size: files.get(p).length, mtimeMs: mtimes.get(p) ?? Date.now() };
+		},
 		readFileSync: (p) => {
 			if (!files.has(p)) throw new Error(`ENOENT ${p}`);
 			return files.get(p);
 		},
-		writeFileSync: (p, body) => { files.set(p, body); },
+		writeFileSync: (p, body) => { files.set(p, body); mtimes.set(p, Date.now()); },
 		mkdirSync: (p) => { dirs.add(p); },
 		renameSync: (from, to) => {
 			files.set(to, files.get(from));
+			mtimes.set(to, mtimes.get(from) ?? Date.now());
 			files.delete(from);
+			mtimes.delete(from);
 		},
-		unlinkSync: (p) => { files.delete(p); },
+		unlinkSync: (p) => { files.delete(p); mtimes.delete(p); },
 	};
 }
 
@@ -267,6 +276,152 @@ describe('Map Tile Cache Decider', () => {
 	});
 });
 
+describe('Map Tile Cache Aging', () => {
+	const coords = { z: 14, x: 8192, y: 8191 };
+	const target = tileCachePath('/cache/tiles', coords);
+	const OLD_PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('old')]);
+	const DAY_MS = 86400000;
+
+	function agedFs(ageMs) {
+		const store = memoryFs({ [target]: OLD_PNG });
+		store.mtimes.set(target, Date.now() - ageMs);
+		return store;
+	}
+
+	it('serves fresh tiles without contacting upstream', async () => {
+		let fetches = 0;
+		const cache = createTileCache({
+			baseDir: '/cache/tiles',
+			fs: agedFs(5 * DAY_MS),
+			maxAgeMs: 30 * DAY_MS,
+			fetchTile: async () => { fetches++; return { ok: true, status: 200, body: PNG }; },
+		});
+		const result = await cache.get(coords);
+		assert.equal(result.route, ROUTE_HIT);
+		assert.equal(fetches, 0);
+	});
+
+	it('refreshes tiles older than the max age and stores the new copy', async () => {
+		const store = agedFs(40 * DAY_MS);
+		const cache = createTileCache({
+			baseDir: '/cache/tiles',
+			fs: store,
+			maxAgeMs: 30 * DAY_MS,
+			fetchTile: async () => ({ ok: true, status: 200, body: PNG }),
+		});
+		const result = await cache.get(coords);
+		assert.equal(result.route, 'refreshed');
+		assert.deepEqual(result.body, PNG, 'the new tile is served');
+		assert.deepEqual(store.files.get(target), PNG, 'the new tile replaced the old one');
+
+		const again = await cache.get(coords);
+		assert.equal(again.route, ROUTE_HIT, 'the refreshed tile is fresh again');
+	});
+
+	it('serves the old copy when a refresh fails, leaving it in place', async () => {
+		const store = agedFs(40 * DAY_MS);
+		const logs = [];
+		const cache = createTileCache({
+			baseDir: '/cache/tiles',
+			fs: store,
+			log: (m) => logs.push(m),
+			maxAgeMs: 30 * DAY_MS,
+			fetchTile: async () => { throw new Error('ETIMEDOUT'); },
+		});
+		const result = await cache.get(coords);
+		assert.equal(result.route, 'stale');
+		assert.equal(result.status, 200);
+		assert.deepEqual(result.body, OLD_PNG, 'the stale copy is served');
+		assert.deepEqual(store.files.get(target), OLD_PNG, 'the stale copy stays on disk');
+		assert.ok(logs.some((m) => m.includes('upstream fetch failed')));
+	});
+
+	it('serves the old copy when the refresh returns an error status or junk', async () => {
+		for (const bad of [
+			async () => ({ ok: false, status: 503, body: Buffer.from('down') }),
+			async () => ({ ok: true, status: 200, body: Buffer.from('<html>not a png</html>') }),
+		]) {
+			const store = agedFs(40 * DAY_MS);
+			const cache = createTileCache({
+				baseDir: '/cache/tiles', fs: store, maxAgeMs: 30 * DAY_MS, fetchTile: bad,
+			});
+			const result = await cache.get(coords);
+			assert.equal(result.route, 'stale');
+			assert.deepEqual(result.body, OLD_PNG);
+			assert.deepEqual(store.files.get(target), OLD_PNG);
+		}
+	});
+
+	it('re-evaluates a live max age function on every request', async () => {
+		let maxAge = 100 * DAY_MS;
+		let fetches = 0;
+		const cache = createTileCache({
+			baseDir: '/cache/tiles',
+			fs: agedFs(40 * DAY_MS),
+			maxAgeMs: () => maxAge,
+			fetchTile: async () => { fetches++; return { ok: true, status: 200, body: PNG }; },
+		});
+		assert.equal((await cache.get(coords)).route, ROUTE_HIT, 'fresh under the wide limit');
+		maxAge = 30 * DAY_MS;
+		assert.equal((await cache.get(coords)).route, 'refreshed', 'stale after the limit tightens');
+		assert.equal(fetches, 1);
+	});
+
+	it('treats an age-fresh tile as stale when staleIf reports newer source data', async () => {
+		const store = agedFs(1 * DAY_MS);
+		let staleIfCalls = 0;
+		const cache = createTileCache({
+			baseDir: '/cache/tiles',
+			fs: store,
+			maxAgeMs: 30 * DAY_MS,
+			staleIf: (c, mtimeMs) => { staleIfCalls++; return typeof mtimeMs === 'number'; },
+			fetchTile: async () => ({ ok: true, status: 200, body: PNG }),
+		});
+		const result = await cache.get(coords);
+		assert.equal(result.route, 'refreshed', 'newer source data forces a refresh');
+		assert.deepEqual(store.files.get(target), PNG);
+		assert.ok(staleIfCalls >= 1);
+	});
+
+	it('keeps serving the hit when staleIf reports the source is not newer', async () => {
+		let fetches = 0;
+		const cache = createTileCache({
+			baseDir: '/cache/tiles',
+			fs: agedFs(1 * DAY_MS),
+			maxAgeMs: 30 * DAY_MS,
+			staleIf: () => false,
+			fetchTile: async () => { fetches++; return { ok: true, status: 200, body: PNG }; },
+		});
+		assert.equal((await cache.get(coords)).route, ROUTE_HIT);
+		assert.equal(fetches, 0);
+	});
+
+	it('serves the old copy when a staleIf-triggered refresh fails', async () => {
+		const store = agedFs(1 * DAY_MS);
+		const cache = createTileCache({
+			baseDir: '/cache/tiles',
+			fs: store,
+			maxAgeMs: 30 * DAY_MS,
+			staleIf: () => true,
+			fetchTile: async () => { throw new Error('render failed'); },
+		});
+		const result = await cache.get(coords);
+		assert.equal(result.route, 'stale');
+		assert.deepEqual(result.body, OLD_PNG);
+	});
+
+	it('never expires when no max age is configured', async () => {
+		let fetches = 0;
+		const cache = createTileCache({
+			baseDir: '/cache/tiles',
+			fs: agedFs(4000 * DAY_MS),
+			fetchTile: async () => { fetches++; return { ok: true, status: 200, body: PNG }; },
+		});
+		assert.equal((await cache.get(coords)).route, ROUTE_HIT);
+		assert.equal(fetches, 0);
+	});
+});
+
 describe('Map Tile Proxy Wiring', () => {
 	it('gates the tile route on auth, trackgps and the enabled toggle', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
@@ -319,15 +474,109 @@ describe('Map Tile Proxy Wiring', () => {
 		assert.match(server, /return res\.status\(400\)\.send\('Invalid tile coordinates'\);/);
 	});
 
-	it('serves tiles through the cache and marks the route in a response header', () => {
+	it('serves tiles through the cache and marks the tier in a response header', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(server, /const result = await mapTileCache\.get\(coords\);/);
-		assert.match(server, /res\.setHeader\('X-Tile-Cache', result\.route === ROUTE_HIT \? 'hit' : 'miss'\);/);
+		assert.match(server, /result = await mapTileCache\.get\(coords\);/);
+		assert.match(server, /res\.setHeader\('X-Tile-Cache', tier\);/);
+	});
+
+	it('runs the decider tiers in order: rendered, cached raster, upstream', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		const route = server.slice(server.indexOf('app.get(/^\\/tiles\\/'));
+		const body = route.slice(0, route.indexOf('\n});'));
+		const renderCheck = body.indexOf('mvtStore.renderSourceFor(coords.z, coords.x, coords.y)');
+		const renderGet = body.indexOf('await renderedTileCache.get(coords)');
+		const rasterGet = body.indexOf('await mapTileCache.get(coords)');
+		assert.ok(renderCheck > 0 && renderGet > 0 && rasterGet > 0);
+		assert.ok(renderCheck < renderGet, 'coverage check must precede the render');
+		assert.ok(renderGet < rasterGet, 'tier 1 (render) must precede tiers 2/3 (raster)');
+		assert.match(body, /liveConfig\.mapTilesRenderEnabled && mvtStore\.renderSourceFor/);
+		assert.match(body, /tier = rendered\.route === ROUTE_HIT \? 'render-hit'/);
+		assert.match(body, /: rendered\.route === ROUTE_REFRESHED \? 're-rendered'/);
+		assert.match(body, /: rendered\.route === ROUTE_STALE \? 'render-stale'/);
+		assert.match(body, /tier = result\.route === ROUTE_HIT \? 'raster-hit' : result\.route;/);
+	});
+
+	it('applies the shared max age to both caches, the primer and browser caching', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /const mapTilesMaxAgeMs = \(\) => liveConfig\.mapTilesMaxAgeDays \* 86400000;/);
+		const maxAgeWirings = server.match(/maxAgeMs: mapTilesMaxAgeMs,/g) || [];
+		assert.equal(maxAgeWirings.length, 2, 'both tile caches must age out');
+		assert.match(server, /maxAgeMs: liveConfig\.mapTilesMaxAgeDays \* 86400000,/, 'the primer must refresh stale vector data');
+		assert.match(server, /Math\.min\(604800, Math\.floor\(liveConfig\.mapTilesMaxAgeDays \* 86400\)\)/, 'browser cache must not outlive the max age');
+		assert.match(server, /staleIf: \(coords, renderMtimeMs\) => \{\s*const src = mvtStore\.renderSourceFor\(coords\.z, coords\.x, coords\.y\);/,
+			'renders must expire when their source vector tile is newer');
+		assert.match(server, /return sourceMtimeMs !== null && sourceMtimeMs > renderMtimeMs;/);
+		assert.match(server, /errors\.push\('server\.mapTiles\.maxAgeDays must be a number between 1 and 3650'\);/);
+		assert.match(server, /liveConfig\.mapTilesMaxAgeDays = configNumber\(newMapTiles\.maxAgeDays\) \|\| 30;/);
+
+		const defaults = fs.readFileSync(DEFAULTS_FILE, 'utf8');
+		assert.match(defaults, /maxAgeDays: 30,/);
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		assert.ok(app.includes("'server.mapTiles.maxAgeDays'"), 'admin modal must expose maxAgeDays');
+		const lang = fs.readFileSync(LANG_FILE, 'utf8');
+		assert.match(lang, /'server\.mapTiles\.maxAgeDays': 'Map Data Max Age \(days\)',/);
+	});
+
+	it('renders tier-1 misses from the local vector store, never the network', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		const cacheDef = server.slice(server.indexOf('const renderedTileCache = createTileCache({'));
+		const body = cacheDef.slice(0, cacheDef.indexOf('\n});'));
+		assert.match(body, /baseDir: RENDER_CACHE_DIR,/);
+		assert.match(body, /const src = mvtStore\.renderSourceFor\(coords\.z, coords\.x, coords\.y\);/);
+		assert.match(body, /const mvt = mvtStore\.read\(src\.z, src\.x, src\.y\);/);
+		assert.match(body, /getTileRenderer\(\)\.renderTile\(\{/);
+		assert.ok(!/fetchBinaryFromUrl/.test(body), 'the render path must not fetch from the network');
+	});
+
+	it('registers the primer as a background task gated on both toggles', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /registerBackgroundTask\('mvt-prime',\s*liveConfig\.mapTilesEnabled && liveConfig\.mapTilesPrimeEnabled \? liveConfig\.mapTilesPrimeIntervalMs : 0,\s*mvtPrimeTask\)/);
+		assert.match(server, /if \(!liveConfig\.mapTilesEnabled \|\| !liveConfig\.mapTilesPrimeEnabled\) return;/);
+		assert.match(server, /updateBackgroundTaskInterval\('mvt-prime',/);
+		assert.match(server, /shouldStop: \(\) => !liveConfig\.mapTilesEnabled \|\| !liveConfig\.mapTilesPrimeEnabled,/);
+	});
+
+	it('documents and validates the prime and render settings', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /errors\.push\('server\.mapTiles\.prime\.enabled must be a boolean'\);/);
+		assert.match(server, /errors\.push\('server\.mapTiles\.prime\.radiusKm must be a number between 1 and 100'\);/);
+		assert.match(server, /errors\.push\('server\.mapTiles\.prime\.intervalMs must be at least 3600000 \(1 hour\)'\);/);
+		assert.match(server, /errors\.push\('server\.mapTiles\.prime\.sourceUrl must be "auto" or an http\(s\) URL'\);/);
+		assert.match(server, /errors\.push\('server\.mapTiles\.render\.enabled must be a boolean'\);/);
+
+		const defaults = fs.readFileSync(DEFAULTS_FILE, 'utf8');
+		assert.match(defaults, /prime: \{/);
+		assert.match(defaults, /radiusKm: 10,/);
+		assert.match(defaults, /intervalMs: 86400000,/);
+		assert.match(defaults, /sourceUrl: 'auto',/);
+		assert.match(defaults, /render: \{/);
+		assert.match(defaults, /fontFile: '\/usr\/share\/fonts\/truetype\/dejavu\/DejaVuSans\.ttf',/);
+
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		for (const key of ['prime.enabled', 'prime.radiusKm', 'prime.intervalMs', 'prime.sourceUrl', 'render.enabled', 'render.fontFile']) {
+			assert.ok(app.includes(`'server.mapTiles.${key}'`), `admin modal must expose server.mapTiles.${key}`);
+		}
+		const lang = fs.readFileSync(LANG_FILE, 'utf8');
+		assert.match(lang, /'server\.mapTiles\.prime\.enabled': 'Prime Vector Tiles',/);
+		assert.match(lang, /'server\.mapTiles\.render\.fontFile': 'Map Label Font',/);
+	});
+
+	it('keeps the vector and render caches out of version control', () => {
+		const gitignore = fs.readFileSync(GITIGNORE_FILE, 'utf8').split(/\r?\n/);
+		assert.ok(gitignore.includes('cache/mvt/'), '.gitignore must list cache/mvt/');
+		assert.ok(gitignore.includes('cache/render/'), '.gitignore must list cache/render/');
+	});
+
+	it('shows the OSM attribution on the presence map instead of hiding it', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.ok(!server.includes('.olControlAttribution{display:none'), 'attribution must not be hidden');
+		assert.match(server, /\.olControlAttribution\{position:fixed/);
 	});
 
 	it('logs request and route only while debug logging is enabled', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(server, /if \(liveConfig\.mapTilesDebugLogging\) \{\s*logMessage\(`\[MapTiles\] \$\{tileKey\(coords\)\} user=\$\{req\.ohProxyUser\} -> \$\{result\.route\} \(\$\{result\.detail\}\)`\);/);
+		assert.match(server, /if \(liveConfig\.mapTilesDebugLogging\) \{\s*logMessage\(`\[MapTiles\] \$\{tileKey\(coords\)\} user=\$\{req\.ohProxyUser\} -> \$\{tier\} \(\$\{result\.detail\}\)`\);/);
 	});
 
 	it('points the presence map at the local route only when enabled', () => {

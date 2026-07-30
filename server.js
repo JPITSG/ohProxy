@@ -32,7 +32,11 @@ const { buildOpenhabClient } = require('./lib/openhab-client');
 const { getBackendRecoveryDelayMs } = require('./lib/backend-recovery-delay');
 const { createActiveUserCountWriter } = require('./lib/active-user-count');
 const { createOpenhabMapTransformer, defaultOpenhabTransformDir, MAX_MAP_PATTERN_LENGTH } = require('./lib/openhab-map-transform');
-const { parseTileCoords, tileKey, createTileCache, ROUTE_HIT } = require('./lib/map-tile-cache');
+const { parseTileCoords, tileKey, createTileCache, ROUTE_HIT, ROUTE_REFRESHED, ROUTE_STALE } = require('./lib/map-tile-cache');
+const { buildCoverageCells, enumerateNeededTiles, countNeededTiles } = require('./lib/mvt-coverage');
+const { createMvtStore, primeMissingTiles, resolveSourceUrl } = require('./lib/mvt-store');
+const { createBulkTileFetcher } = require('./lib/mvt-bulk-fetch');
+const { createTileRenderer, RENDER_STYLE_VERSION } = require('./lib/tile-renderer');
 
 const historyMapTransformer = createOpenhabMapTransformer({
 	transformDir: defaultOpenhabTransformDir(),
@@ -669,9 +673,21 @@ const WEATHERBIT_FORECAST_FILE = path.join(WEATHERBIT_CACHE_DIR, 'forecast.json'
 const WEATHERBIT_ICONS_DIR = path.join(WEATHERBIT_CACHE_DIR, 'icons');
 const PROXY_CACHE_DIR = path.join(__dirname, 'cache', 'proxy');
 const TILE_CACHE_DIR = path.join(__dirname, 'cache', 'tiles');
+const MVT_CACHE_DIR = path.join(__dirname, 'cache', 'mvt');
+const RENDER_CACHE_DIR = path.join(__dirname, 'cache', 'render', RENDER_STYLE_VERSION);
 const MAP_TILES_CONFIG = SERVER_CONFIG.mapTiles || {};
 const MAP_TILES_ENABLED = MAP_TILES_CONFIG.enabled === true;
 const MAP_TILES_DEBUG_LOGGING = MAP_TILES_CONFIG.debugLogging === true;
+const MAP_TILES_MAX_AGE_DAYS = configNumber(MAP_TILES_CONFIG.maxAgeDays) || 30;
+const MAP_TILES_PRIME_CONFIG = MAP_TILES_CONFIG.prime || {};
+const MAP_TILES_PRIME_ENABLED = MAP_TILES_PRIME_CONFIG.enabled === true;
+const MAP_TILES_PRIME_RADIUS_KM = configNumber(MAP_TILES_PRIME_CONFIG.radiusKm) || 10;
+const MAP_TILES_PRIME_INTERVAL_MS = configNumber(MAP_TILES_PRIME_CONFIG.intervalMs) || 86400000;
+const MAP_TILES_PRIME_SOURCE_URL = safeText(MAP_TILES_PRIME_CONFIG.sourceUrl).trim() || 'auto';
+const MAP_TILES_RENDER_CONFIG = MAP_TILES_CONFIG.render || {};
+const MAP_TILES_RENDER_ENABLED = MAP_TILES_RENDER_CONFIG.enabled !== false;
+const MAP_TILES_RENDER_FONT_FILE = safeText(MAP_TILES_RENDER_CONFIG.fontFile).trim()
+	|| '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
 const MYSQL_CONFIG = SERVER_CONFIG.mysql || {};
 const MYSQL_RECONNECT_DELAY_MS = 5000;
 const CMDAPI_CONFIG = SERVER_CONFIG.cmdapi || {};
@@ -1511,6 +1527,45 @@ function validateAdminConfig(config) {
 		if (s.mapTiles.debugLogging !== undefined && typeof s.mapTiles.debugLogging !== 'boolean') {
 			errors.push('server.mapTiles.debugLogging must be a boolean');
 		}
+		if (s.mapTiles.maxAgeDays !== undefined) {
+			const maxAge = Number(s.mapTiles.maxAgeDays);
+			if (!Number.isFinite(maxAge) || maxAge < 1 || maxAge > 3650) {
+				errors.push('server.mapTiles.maxAgeDays must be a number between 1 and 3650');
+			}
+		}
+		if (isPlainObject(s.mapTiles.prime)) {
+			const prime = s.mapTiles.prime;
+			if (prime.enabled !== undefined && typeof prime.enabled !== 'boolean') {
+				errors.push('server.mapTiles.prime.enabled must be a boolean');
+			}
+			if (prime.radiusKm !== undefined) {
+				const radius = Number(prime.radiusKm);
+				if (!Number.isFinite(radius) || radius < 1 || radius > 100) {
+					errors.push('server.mapTiles.prime.radiusKm must be a number between 1 and 100');
+				}
+			}
+			if (prime.intervalMs !== undefined) {
+				const interval = Number(prime.intervalMs);
+				if (!Number.isFinite(interval) || interval < 3600000) {
+					errors.push('server.mapTiles.prime.intervalMs must be at least 3600000 (1 hour)');
+				}
+			}
+			if (prime.sourceUrl !== undefined) {
+				const source = safeText(prime.sourceUrl).trim();
+				if (!source || (source.toLowerCase() !== 'auto' && !/^https?:\/\//i.test(source))) {
+					errors.push('server.mapTiles.prime.sourceUrl must be "auto" or an http(s) URL');
+				}
+			}
+		}
+		if (isPlainObject(s.mapTiles.render)) {
+			const render = s.mapTiles.render;
+			if (render.enabled !== undefined && typeof render.enabled !== 'boolean') {
+				errors.push('server.mapTiles.render.enabled must be a boolean');
+			}
+			if (render.fontFile !== undefined && render.fontFile !== '') {
+				ensureAbsolutePath(render.fontFile, 'server.mapTiles.render.fontFile', errors);
+			}
+		}
 	}
 
 	// Binaries
@@ -2256,6 +2311,13 @@ const liveConfig = {
 	gpsHomeLon: Number.isFinite(parseFloat(SERVER_CONFIG.gps?.homeLon)) ? parseFloat(SERVER_CONFIG.gps?.homeLon) : NaN,
 	mapTilesEnabled: MAP_TILES_ENABLED,
 	mapTilesDebugLogging: MAP_TILES_DEBUG_LOGGING,
+	mapTilesMaxAgeDays: MAP_TILES_MAX_AGE_DAYS,
+	mapTilesPrimeEnabled: MAP_TILES_PRIME_ENABLED,
+	mapTilesPrimeRadiusKm: MAP_TILES_PRIME_RADIUS_KM,
+	mapTilesPrimeIntervalMs: MAP_TILES_PRIME_INTERVAL_MS,
+	mapTilesPrimeSourceUrl: MAP_TILES_PRIME_SOURCE_URL,
+	mapTilesRenderEnabled: MAP_TILES_RENDER_ENABLED,
+	mapTilesRenderFontFile: MAP_TILES_RENDER_FONT_FILE,
 	// Learned from the first proxied tile request; see rememberMapTilesReferer.
 	mapTilesReferer: '',
 };
@@ -2491,6 +2553,18 @@ function reloadLiveConfig() {
 	const newMapTiles = newServer.mapTiles || {};
 	liveConfig.mapTilesEnabled = newMapTiles.enabled === true;
 	liveConfig.mapTilesDebugLogging = newMapTiles.debugLogging === true;
+	liveConfig.mapTilesMaxAgeDays = configNumber(newMapTiles.maxAgeDays) || 30;
+	const newMapTilesPrime = newMapTiles.prime || {};
+	liveConfig.mapTilesPrimeEnabled = newMapTilesPrime.enabled === true;
+	liveConfig.mapTilesPrimeRadiusKm = configNumber(newMapTilesPrime.radiusKm) || 10;
+	liveConfig.mapTilesPrimeIntervalMs = configNumber(newMapTilesPrime.intervalMs) || 86400000;
+	liveConfig.mapTilesPrimeSourceUrl = safeText(newMapTilesPrime.sourceUrl).trim() || 'auto';
+	const newMapTilesRender = newMapTiles.render || {};
+	liveConfig.mapTilesRenderEnabled = newMapTilesRender.enabled !== false;
+	liveConfig.mapTilesRenderFontFile = safeText(newMapTilesRender.fontFile).trim()
+		|| '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
+	updateBackgroundTaskInterval('mvt-prime',
+		liveConfig.mapTilesEnabled && liveConfig.mapTilesPrimeEnabled ? liveConfig.mapTilesPrimeIntervalMs : 0);
 
 	// Session max age
 	const newMaxAge = configNumber(newServer.sessionMaxAgeDays, 14);
@@ -11103,7 +11177,8 @@ app.get('/presence', async (req, res) => {
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-300.woff2') format('woff2');font-weight:300;font-style:normal;font-display:swap}
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-500.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
-.olControlAttribution{display:none!important}
+.olControlAttribution{position:fixed!important;top:auto!important;left:auto!important;bottom:6px!important;right:8px!important;z-index:90;font:300 10px/1.5 'Rubik',sans-serif;color:rgba(19,21,54,0.55);background:rgba(245,246,250,0.75);padding:1px 8px;border-radius:8px}
+	.olControlAttribution a{color:rgba(19,21,54,0.7);text-decoration:none}
 .olControlZoom{display:none!important}
 	#map-controls{position:fixed;top:16px;left:16px;z-index:150;background:rgb(245,246,250);border:1px solid rgba(150,150,150,0.3);border-radius:18px;box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:6px;display:flex;flex-direction:column;gap:4px}
 	@media(pointer:coarse){#map-controls{background:none;border:none;box-shadow:none;padding:0;gap:6px}}
@@ -12743,16 +12818,82 @@ app.get('/proxy', async (req, res, next) => {
 });
 
 // --- Map tile proxy ---
-// Decider for /presence background tiles. A locally cached copy is served when
-// one exists; otherwise the tile is fetched upstream once, cached and served.
+// Decider for /presence background tiles, in tier order:
+//   1. Vector data primed locally (cache/mvt)? Render the tile in-process
+//      (Skia/WASM, OSM-inspired style) and cache the PNG under cache/render.
+//   2. Previously cached raster tile on disk? Serve it.
+//   3. Otherwise fetch from the public tile service once, cache and serve.
 // Only reachable while server.mapTiles.enabled is true; when disabled the
 // presence page points OpenLayers straight at the public tile service instead.
+// Both tile caches age out via mapTiles.maxAgeDays: expired entries are
+// refreshed on access, and a failed refresh serves the old copy.
+const mapTilesMaxAgeMs = () => liveConfig.mapTilesMaxAgeDays * 86400000;
+
 const mapTileCache = createTileCache({
 	baseDir: TILE_CACHE_DIR,
 	fs,
 	log: (message) => logMessage(message),
+	maxAgeMs: mapTilesMaxAgeMs,
 	fetchTile: (url) => fetchBinaryFromUrl(url, buildUpstreamTileHeaders(), 2),
 });
+
+const mvtStore = createMvtStore({ baseDir: MVT_CACHE_DIR, fs, log: (message) => logMessage(message) });
+
+let tileRenderer = null;
+function getTileRenderer() {
+	if (!tileRenderer) {
+		tileRenderer = createTileRenderer({
+			fontFile: liveConfig.mapTilesRenderFontFile,
+			log: (message) => logMessage(message),
+		});
+	}
+	return tileRenderer;
+}
+
+// Tier-1 cache: rendered PNGs, keyed by style version so a style change
+// regenerates. Reuses the same hit/coalesce/atomic-write machinery as the
+// raster proxy - only the miss path differs (render instead of fetch).
+const renderedTileCache = createTileCache({
+	baseDir: RENDER_CACHE_DIR,
+	fs,
+	log: (message) => logMessage(message),
+	maxAgeMs: mapTilesMaxAgeMs,
+	// A render is also stale the moment its source vector tile is newer than
+	// it - otherwise a fresh-looking PNG could keep serving pre-refresh
+	// cartography for another full max-age window.
+	staleIf: (coords, renderMtimeMs) => {
+		const src = mvtStore.renderSourceFor(coords.z, coords.x, coords.y);
+		if (!src) return false;
+		const sourceMtimeMs = mvtStore.mtimeMs(src.z, src.x, src.y);
+		return sourceMtimeMs !== null && sourceMtimeMs > renderMtimeMs;
+	},
+	fetchTile: async (url, coords) => {
+		const src = mvtStore.renderSourceFor(coords.z, coords.x, coords.y);
+		if (!src) return { ok: false, status: 404, body: null };
+		const mvt = mvtStore.read(src.z, src.x, src.y);
+		if (!mvt) return { ok: false, status: 404, body: null };
+		const body = await getTileRenderer().renderTile({
+			mvt, z: coords.z, x: coords.x, y: coords.y, srcZ: src.z, srcX: src.x, srcY: src.y,
+		});
+		return { ok: true, status: 200, body, contentType: 'image/png' };
+	},
+});
+
+// Rendered tiles are keyed by style version; when the style changes, sibling
+// directories from previous versions are dead weight - drop them at boot.
+try {
+	const renderRoot = path.join(__dirname, 'cache', 'render');
+	if (fs.existsSync(renderRoot)) {
+		for (const entry of fs.readdirSync(renderRoot, { withFileTypes: true })) {
+			if (entry.isDirectory() && entry.name !== RENDER_STYLE_VERSION) {
+				fs.rmSync(path.join(renderRoot, entry.name), { recursive: true, force: true });
+				logMessage(`[MapTiles] Removed stale render cache ${entry.name} (current: ${RENDER_STYLE_VERSION})`);
+			}
+		}
+	}
+} catch (err) {
+	logMessage(`[MapTiles] Stale render cache cleanup failed: ${err.message || err}`);
+}
 
 // The tile policy asks proxies to identify themselves and not to blank the
 // Referer for web traffic. The Referer is derived from the configured openHAB
@@ -12796,10 +12937,30 @@ app.get(/^\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})\.png$/, async (req, res) => {
 
 	rememberMapTilesReferer(req);
 
-	const result = await mapTileCache.get(coords);
+	// Tier 1: local vector data -> render (or serve the cached render).
+	let result = null;
+	let tier = '';
+	if (liveConfig.mapTilesRenderEnabled && mvtStore.renderSourceFor(coords.z, coords.x, coords.y)) {
+		const rendered = await renderedTileCache.get(coords);
+		if (rendered && rendered.body) {
+			result = rendered;
+			tier = rendered.route === ROUTE_HIT ? 'render-hit'
+				: rendered.route === ROUTE_REFRESHED ? 're-rendered'
+					: rendered.route === ROUTE_STALE ? 'render-stale'
+						: 'rendered';
+		} else if (liveConfig.mapTilesDebugLogging) {
+			logMessage(`[MapTiles] ${tileKey(coords)} render unavailable (${rendered && rendered.detail}), falling back`);
+		}
+	}
+
+	// Tiers 2 and 3: cached raster, then the upstream tile service.
+	if (!result) {
+		result = await mapTileCache.get(coords);
+		tier = result.route === ROUTE_HIT ? 'raster-hit' : result.route;
+	}
 
 	if (liveConfig.mapTilesDebugLogging) {
-		logMessage(`[MapTiles] ${tileKey(coords)} user=${req.ohProxyUser} -> ${result.route} (${result.detail})`);
+		logMessage(`[MapTiles] ${tileKey(coords)} user=${req.ohProxyUser} -> ${tier} (${result.detail})`);
 	}
 
 	if (!result.body) {
@@ -12808,8 +12969,10 @@ app.get(/^\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})\.png$/, async (req, res) => {
 	}
 
 	res.setHeader('Content-Type', result.contentType);
-	res.setHeader('Cache-Control', 'public, max-age=604800');
-	res.setHeader('X-Tile-Cache', result.route === ROUTE_HIT ? 'hit' : 'miss');
+	// Browser caching must never outlive the configured server-side max age.
+	const browserMaxAgeSec = Math.max(60, Math.min(604800, Math.floor(liveConfig.mapTilesMaxAgeDays * 86400)));
+	res.setHeader('Cache-Control', `public, max-age=${browserMaxAgeSec}`);
+	res.setHeader('X-Tile-Cache', tier);
 	res.send(result.body);
 });
 
@@ -13298,6 +13461,74 @@ try {
 } catch (err) {
 	logMessage(`[Sessions] Failed to initialize database: ${err.message || err}`);
 }
+
+// Vector tile primer: keeps cache/mvt populated for every log_gps coordinate
+// plus the configured radius, so tier 1 of the tile decider can render those
+// areas without ever contacting the raster tile service. Fetches are byte-range
+// reads against a PMTiles archive (bulk-download-friendly), drip-fed, and only
+// for tiles not already on disk - so steady-state runs are close to free.
+let mvtPrimeRunning = false;
+async function mvtPrimeTask() {
+	if (!liveConfig.mapTilesEnabled || !liveConfig.mapTilesPrimeEnabled) return;
+	if (mvtPrimeRunning) return;
+	mvtPrimeRunning = true;
+	try {
+		// At boot this task can fire before the MySQL connection is up; wait
+		// briefly instead of losing the run to the next interval.
+		let conn = getMysqlConnection();
+		for (let attempt = 0; !conn && attempt < 12; attempt++) {
+			await new Promise((resolve) => setTimeout(resolve, 10000));
+			if (!liveConfig.mapTilesEnabled || !liveConfig.mapTilesPrimeEnabled) return;
+			conn = getMysqlConnection();
+		}
+		if (!conn) {
+			// Throw so the task framework does not record this as a completed
+			// run - otherwise a failed boot-time attempt pushes the next try a
+			// full interval away.
+			throw new Error('Database unavailable');
+		}
+		const rows = await queryWithTimeout(conn,
+			'SELECT DISTINCT ROUND(lat,3) AS lat, ROUND(lon,3) AS lon FROM log_gps WHERE lat IS NOT NULL AND lon IS NOT NULL', []);
+		if (!rows || !rows.length) {
+			logMessage('[MvtPrime] No GPS history, nothing to prime');
+			return;
+		}
+		const cells = buildCoverageCells(rows, liveConfig.mapTilesPrimeRadiusKm);
+		const tilesByZoom = enumerateNeededTiles(cells);
+		const total = countNeededTiles(tilesByZoom);
+
+		const fetchJson = async (url) => {
+			const response = await fetch(url, { headers: { 'User-Agent': liveConfig.userAgent } });
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			return response.json();
+		};
+		const sourceUrl = await resolveSourceUrl(liveConfig.mapTilesPrimeSourceUrl, fetchJson);
+		// Coalesced range reads: per-tile requests carry multi-second TTFB
+		// against the planet archive, so batches of tiles are resolved to byte
+		// ranges and fetched in large merged reads instead.
+		const bulkFetcher = createBulkTileFetcher({ sourceUrl, log: (message) => logMessage(message) });
+
+		logMessage(`[MvtPrime] Coverage: ${rows.length} coords -> ${cells.size} cells -> ${total} tiles (z0-15), source ${sourceUrl}`);
+		const stats = await primeMissingTiles({
+			store: mvtStore,
+			tilesByZoom,
+			fetchTileBatch: (tiles) => bulkFetcher.fetchBatch(tiles),
+			batchSize: 512,
+			delayMs: 500,
+			maxAgeMs: liveConfig.mapTilesMaxAgeDays * 86400000,
+			shouldStop: () => !liveConfig.mapTilesEnabled || !liveConfig.mapTilesPrimeEnabled,
+			log: (message) => logMessage(message),
+		});
+		logMessage(`[MvtPrime] Done: ${stats.fetched} fetched, ${stats.refreshed} refreshed, ${stats.kept} kept after empty refresh, ${stats.empty} empty, ${stats.skipped} fresh, ${stats.failed} failed${stats.stopped ? ' (stopped by config change)' : ''}`);
+	} catch (err) {
+		logMessage(`[MvtPrime] Failed: ${err.message || err}`);
+	} finally {
+		mvtPrimeRunning = false;
+	}
+}
+registerBackgroundTask('mvt-prime',
+	liveConfig.mapTilesEnabled && liveConfig.mapTilesPrimeEnabled ? liveConfig.mapTilesPrimeIntervalMs : 0,
+	mvtPrimeTask);
 
 // Daily session cleanup (24 hours)
 const SESSION_CLEANUP_MS = 24 * 60 * 60 * 1000;

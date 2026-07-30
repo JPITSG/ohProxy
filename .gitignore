@@ -10,6 +10,8 @@ cache/ai/
 cache/weatherbit/
 cache/proxy/
 cache/tiles/
+cache/mvt/
+cache/render/
 video-previews/
 *.log
 fullchain.pem

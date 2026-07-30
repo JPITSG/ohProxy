@@ -6740,6 +6740,13 @@ const ADMIN_CONFIG_SCHEMA = [
 		fields: [
 			{ key: 'server.mapTiles.enabled', type: 'toggle' },
 			{ key: 'server.mapTiles.debugLogging', type: 'toggle' },
+			{ key: 'server.mapTiles.maxAgeDays', type: 'number', min: 1, max: 3650 },
+			{ key: 'server.mapTiles.prime.enabled', type: 'toggle' },
+			{ key: 'server.mapTiles.prime.radiusKm', type: 'number', min: 1, max: 100 },
+			{ key: 'server.mapTiles.prime.intervalMs', type: 'number', min: 3600000 },
+			{ key: 'server.mapTiles.prime.sourceUrl', type: 'text' },
+			{ key: 'server.mapTiles.render.enabled', type: 'toggle' },
+			{ key: 'server.mapTiles.render.fontFile', type: 'text' },
 		],
 	},
 	{
