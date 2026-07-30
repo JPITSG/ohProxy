@@ -6873,26 +6873,38 @@ function presenceMarkerTooltip(timestamp, endTimestamp) {
 }
 
 function buildPresenceMarkersFromRows(rows) {
-	// Rows arrive newest first. Fixes landing on the same (rounded) spot
-	// collapse into one pin: the first row seen is the stack's latest fix, each
-	// later duplicate pushes its earliest fix further back.
+	// Rows arrive newest first. Consecutive fixes on the same (rounded) spot
+	// collapse into one pin whose range covers that stay: the first row seen is
+	// the stay's latest fix, each directly following duplicate pushes its
+	// earliest fix further back. A row at a different spot ends the stay -
+	// returning to a place later leaves the pin showing only the most recent
+	// stay there, not a range spanning the time spent away.
 	const stacks = new Map();
 	const order = [];
 	let first = true;
+	let prevKey = null;
 	for (const row of rows || []) {
 		const lat = roundPresenceCoord(row.lat);
 		const lon = roundPresenceCoord(row.lon);
 		const key = lat + ',' + lon;
 		const existing = stacks.get(key);
 		if (existing) {
-			existing.earliest = row.timestamp;
-			existing.count++;
+			if (prevKey === key && !existing.closed) {
+				existing.earliest = row.timestamp;
+				existing.count++;
+			} else {
+				// An older, separate visit to a spot already pinned: the pin
+				// keeps describing the latest stay only.
+				existing.closed = true;
+			}
+			prevKey = key;
 			continue;
 		}
-		const stack = { lat, lon, color: first ? 'red' : 'blue', latest: row.timestamp, earliest: row.timestamp, count: 1 };
+		const stack = { lat, lon, color: first ? 'red' : 'blue', latest: row.timestamp, earliest: row.timestamp, count: 1, closed: false };
 		stacks.set(key, stack);
 		order.push(stack);
 		first = false;
+		prevKey = key;
 	}
 	const markers = order.map((stack) => [
 		stack.lat,

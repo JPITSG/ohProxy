@@ -98,8 +98,9 @@ describe('Presence Stacked Pin Range Tooltips', () => {
 		);
 	});
 
-	it('collapses same-spot fixes into one pin spanning earliest to latest', () => {
-		// Newest first, like ORDER BY id DESC: three fixes at home, one on the move.
+	it('collapses only consecutive same-spot fixes into one pin', () => {
+		// Newest first, like ORDER BY id DESC: back at home since 09:30, a fix
+		// on the move at 09:00, and an older separate home visit at 08:00.
 		const rows = [
 			{ lat: 50.0000001, lon: 8.0000001, timestamp: '2026-07-30T10:00:00Z' },
 			{ lat: 50.0000001, lon: 8.0000001, timestamp: '2026-07-30T09:30:00Z' },
@@ -115,14 +116,62 @@ describe('Presence Stacked Pin Range Tooltips', () => {
 		assert.equal(single[2], 'blue');
 		assert.equal(single[3], '<div class="tt-date">D2026-7-30</div><div class="tt-time">T9:00</div>');
 
+		// The range covers the CURRENT stay only - the 08:00 fix belongs to an
+		// earlier visit interrupted by the 09:00 trip and must not stretch it.
 		assert.equal(stacked[2], 'red');
 		assert.equal(
 			stacked[3],
 			'<div class="tt-date">D2026-7-30</div>'
-			+ '<div class="tt-time"><span class="tt-fromto">From</span>T8:00</div>'
+			+ '<div class="tt-time"><span class="tt-fromto">From</span>T9:30</div>'
 			+ '<div class="tt-time"><span class="tt-fromto">To</span>T10:00</div>'
-			+ '<div class="tt-time"><span class="tt-fromto">Length</span>2.0 hours</div>'
+			+ '<div class="tt-time"><span class="tt-fromto">Length</span>30.0 mins</div>'
 		);
+	});
+
+	it('shows only the latest stay after leaving and returning (10h away 3h back 3h)', () => {
+		// 10 hours at home (00:00-10:00), 3 hours out (5 fixes), back home for
+		// 3 hours (13:00-16:00). Newest first.
+		const home = { lat: 50.0000001, lon: 8.0000001 };
+		const rows = [
+			{ ...home, timestamp: '2026-07-30T16:00:00Z' },
+			{ ...home, timestamp: '2026-07-30T14:30:00Z' },
+			{ ...home, timestamp: '2026-07-30T13:00:00Z' },
+			{ lat: 50.2, lon: 8.2, timestamp: '2026-07-30T12:00:00Z' },
+			{ lat: 50.3, lon: 8.3, timestamp: '2026-07-30T11:00:00Z' },
+			{ ...home, timestamp: '2026-07-30T10:00:00Z' },
+			{ ...home, timestamp: '2026-07-30T05:00:00Z' },
+			{ ...home, timestamp: '2026-07-30T00:00:00Z' },
+		];
+		const markers = buildPresenceMarkersFromRows(rows);
+		assert.equal(markers.length, 3, 'home collapses to one pin plus two trip pins');
+		const homePin = markers[markers.length - 1];
+		assert.equal(homePin[2], 'red');
+		assert.equal(
+			homePin[3],
+			'<div class="tt-date">D2026-7-30</div>'
+			+ '<div class="tt-time"><span class="tt-fromto">From</span>T13:00</div>'
+			+ '<div class="tt-time"><span class="tt-fromto">To</span>T16:00</div>'
+			+ '<div class="tt-time"><span class="tt-fromto">Length</span>3.0 hours</div>',
+			'the range is the 3-hour return stay, not 16 hours spanning the trip'
+		);
+	});
+
+	it('never lets an older interrupted stay reopen a closed stack', () => {
+		// A A B A A newest-first: after B closes the home stack, the two older
+		// home fixes are consecutive with each other but belong to the earlier
+		// stay and must not extend the pin.
+		const home = { lat: 50.0000001, lon: 8.0000001 };
+		const rows = [
+			{ ...home, timestamp: '2026-07-30T12:00:00Z' },
+			{ ...home, timestamp: '2026-07-30T11:30:00Z' },
+			{ lat: 50.1, lon: 8.1, timestamp: '2026-07-30T11:00:00Z' },
+			{ ...home, timestamp: '2026-07-30T10:00:00Z' },
+			{ ...home, timestamp: '2026-07-30T09:00:00Z' },
+		];
+		const markers = buildPresenceMarkersFromRows(rows);
+		const homePin = markers[markers.length - 1];
+		assert.ok(homePin[3].includes('From</span>T11:30'), 'range starts at the latest stay');
+		assert.ok(homePin[3].includes('Length</span>30.0 mins'));
 	});
 
 	it('keeps single-fix pins on the plain tooltip and preserves coordinates', () => {
