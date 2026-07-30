@@ -32,7 +32,7 @@ const { buildOpenhabClient } = require('./lib/openhab-client');
 const { getBackendRecoveryDelayMs } = require('./lib/backend-recovery-delay');
 const { createActiveUserCountWriter } = require('./lib/active-user-count');
 const { createOpenhabMapTransformer, defaultOpenhabTransformDir, MAX_MAP_PATTERN_LENGTH } = require('./lib/openhab-map-transform');
-const { parseTileCoords, tileKey, createTileCache, ROUTE_HIT, ROUTE_REFRESHED, ROUTE_STALE } = require('./lib/map-tile-cache');
+const { parseTileCoords, tileKey, tileCachePath, createTileCache, ROUTE_HIT, ROUTE_REFRESHED, ROUTE_STALE } = require('./lib/map-tile-cache');
 const { buildCoverageCells, enumerateNeededTiles, countNeededTiles } = require('./lib/mvt-coverage');
 const { createMvtStore, primeMissingTiles, resolveSourceUrl } = require('./lib/mvt-store');
 const { createBulkTileFetcher } = require('./lib/mvt-bulk-fetch');
@@ -11177,8 +11177,12 @@ app.get('/presence', async (req, res) => {
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-300.woff2') format('woff2');font-weight:300;font-style:normal;font-display:swap}
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-500.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
-.olControlAttribution{position:fixed!important;top:auto!important;left:auto!important;bottom:6px!important;right:8px!important;z-index:90;font:300 10px/1.5 'Rubik',sans-serif;color:rgba(19,21,54,0.55);background:rgba(245,246,250,0.75);padding:1px 8px;border-radius:8px}
-	.olControlAttribution a{color:rgba(19,21,54,0.7);text-decoration:none}
+${proxyTiles
+		? `.olControlAttribution{display:none!important}
+	#map-data-age{position:fixed;bottom:6px;right:8px;z-index:90;font:300 10px/1.5 'Rubik',sans-serif;color:rgba(19,21,54,0.55);background:rgba(245,246,250,0.75);padding:1px 8px;border-radius:8px;user-select:none;transition:color .3s ease}
+	#map-data-age.stale{color:#c62828;font-weight:400}`
+		: `.olControlAttribution{position:fixed!important;top:auto!important;left:auto!important;bottom:6px!important;right:8px!important;z-index:90;font:300 10px/1.5 'Rubik',sans-serif;color:rgba(19,21,54,0.55);background:rgba(245,246,250,0.75);padding:1px 8px;border-radius:8px}
+	.olControlAttribution a{color:rgba(19,21,54,0.7);text-decoration:none}`}
 .olControlZoom{display:none!important}
 	#map-controls{position:fixed;top:16px;left:16px;z-index:150;background:rgb(245,246,250);border:1px solid rgba(150,150,150,0.3);border-radius:18px;box-shadow:0 12px 20px rgba(0,0,0,0.1),3px 3px 0.5px -3.5px rgba(255,255,255,0.15) inset,-2px -2px 0.5px -2px rgba(255,255,255,0.1) inset,0 0 8px 1px rgba(255,255,255,0.06) inset,0 0 2px 0 rgba(0,0,0,0.18);padding:6px;display:flex;flex-direction:column;gap:4px}
 	@media(pointer:coarse){#map-controls{background:none;border:none;box-shadow:none;padding:0;gap:6px}}
@@ -11262,6 +11266,7 @@ app.get('/presence', async (req, res) => {
 	<div id="hover-tooltip" class="tooltip" role="tooltip" aria-hidden="true"></div>
 	<div id="preview-tooltip" class="tooltip" role="tooltip" aria-hidden="true"></div>
 	<div id="ctx-menu"></div>`}
+	${proxyTiles ? '<div id="map-data-age">map data …</div>' : ''}
 	<div id="map-controls">
 	<button class="map-ctrl-btn" id="zoom-in" type="button" data-oh-tooltip="Zoom in" aria-label="Zoom in">+</button>
 	<button class="map-ctrl-btn" id="zoom-home" type="button" data-oh-tooltip="Center map" aria-label="Center map"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></button>
@@ -11308,6 +11313,39 @@ vector.addFeatures(feature);
 	});
 
 	map.addLayer(vector);
+
+	${proxyTiles ? `// Data-age chip: shows how old the oldest map data in the current view
+	// is, red once anything on screen exceeds the configured maximum age.
+	var dataAgeEl=document.getElementById('map-data-age');
+	var dataAgeTimer=null;
+	function fmtDataAge(ms){
+	var h=ms/3600000;
+	if(h<1)return '<1h';
+	if(h<48)return Math.round(h)+'h';
+	return Math.round(h/24)+'d';
+	}
+	function refreshDataAge(){
+	if(!dataAgeEl||!map.getExtent())return;
+	var z=map.getZoom();
+	var ex=map.getExtent().clone().transform(proj,wgs84);
+	var n=Math.pow(2,z);
+	function tx(lon){return Math.max(0,Math.min(n-1,Math.floor((lon+180)/360*n)))}
+	function ty(lat){var lr=Math.max(-85.0511,Math.min(85.0511,lat))*Math.PI/180;return Math.max(0,Math.min(n-1,Math.floor((1-Math.log(Math.tan(lr)+1/Math.cos(lr))/Math.PI)/2*n)))}
+	fetch('/api/tiles/age?z='+z+'&x0='+tx(ex.left)+'&x1='+tx(ex.right)+'&y0='+ty(ex.top)+'&y1='+ty(ex.bottom))
+	.then(function(r){return r.json()})
+	.then(function(d){
+	if(!d||!d.ok||!dataAgeEl)return;
+	if(d.oldestAgeMs===null){dataAgeEl.textContent='map data \\u2026';dataAgeEl.classList.remove('stale');return}
+	dataAgeEl.textContent='map data '+fmtDataAge(d.oldestAgeMs)+' old';
+	dataAgeEl.classList.toggle('stale',d.oldestAgeMs>d.maxAgeMs);
+	})
+	.catch(function(){});
+	}
+	function queueDataAge(){clearTimeout(dataAgeTimer);dataAgeTimer=setTimeout(refreshDataAge,400)}
+	map.events.register('moveend',null,queueDataAge);
+	map.events.register('zoomend',null,queueDataAge);
+	map.layers[0].events.register('loadend',null,queueDataAge);
+	queueDataAge();` : ''}
 
 	var previewLayer=null;
 	if(!singlePointMode){
@@ -12974,6 +13012,62 @@ app.get(/^\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})\.png$/, async (req, res) => {
 	res.setHeader('Cache-Control', `public, max-age=${browserMaxAgeSec}`);
 	res.setHeader('X-Tile-Cache', tier);
 	res.send(result.body);
+});
+
+// Data age for a viewport tile rectangle: feeds the presence map's data-age
+// chip. Age is measured against the AUTHORITATIVE data for each tile - the
+// vector tile a render derives from when primed, else the cached raster copy.
+// Tiles not on disk yet are reported as unknown rather than fresh.
+app.get('/api/tiles/age', (req, res) => {
+	if (!req.ohProxyUser) {
+		return res.status(401).json({ ok: false, error: 'Unauthorized' });
+	}
+	if (!req.ohProxyUserData?.trackgps) {
+		return res.status(403).json({ ok: false, error: 'GPS tracking not enabled' });
+	}
+	if (!liveConfig.mapTilesEnabled) {
+		return res.status(404).json({ ok: false, error: 'Not found' });
+	}
+
+	const z = parseInt(req.query.z, 10);
+	const x0 = parseInt(req.query.x0, 10);
+	const x1 = parseInt(req.query.x1, 10);
+	const y0 = parseInt(req.query.y0, 10);
+	const y1 = parseInt(req.query.y1, 10);
+	const limit = Number.isInteger(z) && z >= 0 && z <= 19 ? 2 ** z : 0;
+	const valid = limit > 0
+		&& [x0, x1, y0, y1].every((v) => Number.isInteger(v) && v >= 0 && v < limit)
+		&& x0 <= x1 && y0 <= y1
+		&& (x1 - x0 + 1) * (y1 - y0 + 1) <= 1024;
+	if (!valid) {
+		return res.status(400).json({ ok: false, error: 'Invalid tile range' });
+	}
+
+	let oldestAgeMs = null;
+	let known = 0;
+	let unknown = 0;
+	for (let x = x0; x <= x1; x++) {
+		for (let y = y0; y <= y1; y++) {
+			let ageMs = null;
+			const src = mvtStore.renderSourceFor(z, x, y);
+			if (src) {
+				ageMs = mvtStore.ageMs(src.z, src.x, src.y);
+			} else {
+				try {
+					const stat = fs.statSync(tileCachePath(TILE_CACHE_DIR, { z, x, y }));
+					if (stat.size > 0) ageMs = Date.now() - stat.mtimeMs;
+				} catch {}
+			}
+			if (ageMs === null) unknown++;
+			else {
+				known++;
+				if (oldestAgeMs === null || ageMs > oldestAgeMs) oldestAgeMs = ageMs;
+			}
+		}
+	}
+
+	res.setHeader('Cache-Control', 'no-store');
+	res.json({ ok: true, oldestAgeMs, maxAgeMs: liveConfig.mapTilesMaxAgeDays * 86400000, known, unknown });
 });
 
 // --- Gated vendor assets ---

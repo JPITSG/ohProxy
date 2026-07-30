@@ -568,10 +568,41 @@ describe('Map Tile Proxy Wiring', () => {
 		assert.ok(gitignore.includes('cache/render/'), '.gitignore must list cache/render/');
 	});
 
-	it('shows the OSM attribution on the presence map instead of hiding it', () => {
+	it('shows the data-age chip while proxying and the attribution otherwise', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.ok(!server.includes('.olControlAttribution{display:none'), 'attribution must not be hidden');
-		assert.match(server, /\.olControlAttribution\{position:fixed/);
+		// Proxy mode: chip replaces the attribution (which stays for direct-OSM mode).
+		assert.match(server, /\$\{proxyTiles\s*\?\s*`\.olControlAttribution\{display:none!important\}/);
+		assert.match(server, /#map-data-age\{position:fixed;bottom:6px;right:8px/);
+		assert.match(server, /#map-data-age\.stale\{color:#c62828/);
+		assert.match(server, /: `\.olControlAttribution\{position:fixed/, 'attribution stays visible in direct-OSM mode');
+		assert.match(server, /\$\{proxyTiles \? '<div id="map-data-age">map data …<\/div>' : ''\}/);
+	});
+
+	it('wires the data-age chip to viewport changes and stale detection', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		assert.match(server, /fetch\('\/api\/tiles\/age\?z='\+z\+'&x0='\+tx\(ex\.left\)\+'&x1='\+tx\(ex\.right\)\+'&y0='\+ty\(ex\.top\)\+'&y1='\+ty\(ex\.bottom\)\)/);
+		assert.match(server, /dataAgeEl\.classList\.toggle\('stale',d\.oldestAgeMs>d\.maxAgeMs\);/);
+		assert.match(server, /map\.events\.register\('moveend',null,queueDataAge\);/);
+		assert.match(server, /map\.events\.register\('zoomend',null,queueDataAge\);/);
+		assert.match(server, /map\.layers\[0\]\.events\.register\('loadend',null,queueDataAge\);/);
+	});
+
+	it('gates the tile-age endpoint like the tile route and validates the rectangle', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		const routeIndex = server.indexOf("app.get('/api/tiles/age'");
+		const authIndex = server.indexOf('req.ohProxyUserData = user;');
+		assert.ok(routeIndex > authIndex, 'age endpoint must register after the auth middleware');
+		const body = server.slice(routeIndex, server.indexOf('\n});', routeIndex));
+		assert.match(body, /res\.status\(401\)\.json\(\{ ok: false, error: 'Unauthorized' \}\)/);
+		assert.match(body, /res\.status\(403\)\.json\(\{ ok: false, error: 'GPS tracking not enabled' \}\)/);
+		assert.match(body, /if \(!liveConfig\.mapTilesEnabled\)/);
+		assert.match(body, /\(x1 - x0 \+ 1\) \* \(y1 - y0 \+ 1\) <= 1024/);
+		assert.match(body, /res\.status\(400\)\.json\(\{ ok: false, error: 'Invalid tile range' \}\)/);
+		// Age comes from the authoritative data: vector source first, raster fallback.
+		assert.match(body, /const src = mvtStore\.renderSourceFor\(z, x, y\);/);
+		assert.match(body, /ageMs = mvtStore\.ageMs\(src\.z, src\.x, src\.y\);/);
+		assert.match(body, /tileCachePath\(TILE_CACHE_DIR, \{ z, x, y \}\)/);
+		assert.match(body, /maxAgeMs: liveConfig\.mapTilesMaxAgeDays \* 86400000/);
 	});
 
 	it('logs request and route only while debug logging is enabled', () => {
