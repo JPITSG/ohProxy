@@ -1432,6 +1432,9 @@
 			if (nextOffset === CHART_PERIOD_OFFSET) return;
 			haptic();
 			syncParentChartUrlState(nextOffset);
+			// Period navigation is a data-view change, not an initial load; window.name
+			// persists across the navigation so the next load skips the entry animation.
+			window.name = 'noanim';
 			window.location.assign(buildChartUrlForOffset(nextOffset));
 		}
 

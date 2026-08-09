@@ -4281,14 +4281,17 @@ let imageResizePending = false;
 
 const chartAnimSeen = new Set();
 
-function getChartAnimKey(chartUrl) {
+function getChartAnimKey(iframe, chartUrl) {
 	if (!chartUrl) return null;
 	try {
 		const url = new URL(chartUrl, window.location.origin);
 		const item = url.searchParams.get('item') || '';
 		const period = url.searchParams.get('period') || '';
 		if (!item || !period) return null;
-		return `${item}|${period}`;
+		// Include the widget identity so duplicate charts (same item/period on
+		// one page) each get their own first-load animation.
+		const widgetToken = iframe?.dataset?.animKey || '';
+		return `${widgetToken}|${item}|${period}`;
 	} catch (err) {
 		logJsError(`getChartAnimKey failed for ${chartUrl}`, err);
 		return null;
@@ -4296,7 +4299,7 @@ function getChartAnimKey(chartUrl) {
 }
 
 function setChartIframeAnimState(iframe, chartUrl) {
-	const key = getChartAnimKey(chartUrl);
+	const key = getChartAnimKey(iframe, chartUrl);
 	if (!key) {
 		iframe.name = 'chart';
 		return;
@@ -10756,6 +10759,7 @@ function updateCard(card, w, info) {
 		}
 		// Use iframe for HTML charts with 16:9 aspect ratio (or custom height if configured)
 		const { container: frameContainer, iframe: iframeEl } = getOrCreateIframe(controls, 'chart-frame-container', 'chart-frame', { scrolling: 'no' });
+		iframeEl.dataset.animKey = deltaKey(w);
 		applyIframeHeight(frameContainer, chartHeight);
 
 		const chartRefreshMs = parseInt(w?.refresh, 10);
@@ -13247,6 +13251,7 @@ function swapChartIframe(iframe, newSrc, baseUrl) {
 
 	const newIframe = document.createElement('iframe');
 	newIframe.className = iframe.className;
+	if (iframe.dataset.animKey) newIframe.dataset.animKey = iframe.dataset.animKey;
 	setChartIframeAnimState(newIframe, normalizedBaseUrl);
 	newIframe.setAttribute('frameborder', iframe.getAttribute('frameborder') || '0');
 	newIframe.setAttribute('scrolling', iframe.getAttribute('scrolling') || 'no');
