@@ -4052,13 +4052,6 @@ function clearImageTimer(el) {
 	el._ohTimer = null;
 }
 
-function clearImageTimers() {
-	for (const t of imageTimers) clearInterval(t);
-	imageTimers = [];
-	imageLoadQueue = [];
-	imageLoadProcessing = false;
-}
-
 function hasProxyImagesInView() {
 	const imgs = Array.from(document.querySelectorAll('.card-image'));
 	if (!imgs.length) return false;
@@ -12360,6 +12353,82 @@ function patchWidgets(widgets, nodes) {
 	}
 }
 
+function buildSectionHeader(w) {
+	const header = document.createElement('div');
+	header.className = 'sm:col-span-2 lg:col-span-3 mt-0 text-xs uppercase tracking-widest text-slate-400 section-header';
+	applySectionHeaderContent(header, w);
+	header.addEventListener('click', (e) => {
+		if ((e.ctrlKey || e.metaKey) && getUserRole() === 'admin') {
+			e.preventDefault();
+			openCardConfigModal(w, header);
+		}
+	});
+	header.addEventListener('contextmenu', (e) => {
+		if (state.isSlim) return;
+		if (getUserRole() !== 'admin') return;
+		e.preventDefault();
+		openCardConfigModal(w, header);
+	});
+	return header;
+}
+
+function removeGridNode(node) {
+	runCardCleanups(node);
+	if (node.querySelectorAll) {
+		node.querySelectorAll('img').forEach(clearImageTimer);
+	}
+	node.remove();
+}
+
+// Structural grid changes used to wipe and rebuild every card, which reloaded
+// live chart/webview/video iframes and cut chart entry animations mid-draw.
+// Reconcile by key instead: reuse existing nodes where the widget survives,
+// drop removed nodes first so survivors keep their relative order, and only
+// move a node when the new order genuinely demands it (re-parenting an iframe
+// reloads it, so an in-place node must never be touched).
+function reconcileWidgets(widgets, nodes) {
+	const pools = new Map();
+	for (const node of nodes) {
+		const key = node.classList && node.classList.contains('section-header')
+			? `s:${node.dataset.sectionSig || ''}`
+			: `w:${node.dataset.widgetKey || ''}`;
+		if (!pools.has(key)) pools.set(key, []);
+		pools.get(key).push(node);
+	}
+	const desired = widgets.map((w) => {
+		const key = w?.__section ? `s:${sectionSignature(w)}` : `w:${widgetKey(w)}`;
+		const pool = pools.get(key);
+		return { w, node: pool && pool.length ? pool.shift() : null };
+	});
+	for (const pool of pools.values()) {
+		for (const node of pool) removeGridNode(node);
+	}
+	let cursor = els.grid.firstChild;
+	for (const entry of desired) {
+		let node = entry.node;
+		if (!node) {
+			node = entry.w?.__section ? buildSectionHeader(entry.w) : buildCard(entry.w);
+		} else if (!entry.w?.__section) {
+			const info = getWidgetRenderInfo(entry.w);
+			if (node.dataset.renderSig !== info.signature && !updateCard(node, entry.w, info)) {
+				if (cursor === node) cursor = node.nextSibling;
+				removeGridNode(node);
+				node = buildCard(entry.w);
+			}
+		}
+		if (node === cursor) {
+			cursor = cursor.nextSibling;
+		} else {
+			els.grid.insertBefore(node, cursor);
+		}
+	}
+	while (cursor) {
+		const next = cursor.nextSibling;
+		removeGridNode(cursor);
+		cursor = next;
+	}
+}
+
 function buildHeaderTitleState(searchText = '') {
 	const sitemapTitle = getActiveSitemapTitle();
 	const siteName = CLIENT_CONFIG.siteName || sitemapTitle || state.rootPageTitle || state.pageTitle || 'openHAB';
@@ -12643,35 +12712,7 @@ function render(options = {}) {
 	if (canPatch) {
 		patchWidgets(widgets, nodes);
 	} else {
-		nodes.forEach(runCardCleanups);
-		clearImageTimers();
-		const fragment = document.createDocumentFragment();
-		for (const w of widgets) {
-			if (w?.__section) {
-				const header = document.createElement('div');
-				header.className = 'sm:col-span-2 lg:col-span-3 mt-0 text-xs uppercase tracking-widest text-slate-400 section-header';
-				applySectionHeaderContent(header, w);
-				header.addEventListener('click', (e) => {
-					if ((e.ctrlKey || e.metaKey) && getUserRole() === 'admin') {
-						e.preventDefault();
-						openCardConfigModal(w, header);
-					}
-				});
-				header.addEventListener('contextmenu', (e) => {
-					if (state.isSlim) return;
-					if (getUserRole() !== 'admin') return;
-					e.preventDefault();
-					openCardConfigModal(w, header);
-				});
-				fragment.appendChild(header);
-				continue;
-			}
-
-			const card = buildCard(w);
-			fragment.appendChild(card);
-		}
-		els.grid.innerHTML = '';
-		els.grid.appendChild(fragment);
+		reconcileWidgets(widgets, nodes);
 	}
 
 	if (q && !state.searchIndexReady) {
