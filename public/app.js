@@ -3954,6 +3954,30 @@ function normalizeChartRuntimeUrl(chartUrl) {
 	}
 }
 
+// Chart URLs for the same chart can differ only in query encoding: chartWidgetUrl
+// percent-encodes spaces (%20) while URLs echoed back by the chart page via
+// ohproxy-chart-url-state are serialized by URLSearchParams (+). Comparing those
+// strings raw misreads the encoding difference as a URL change, which reloads the
+// iframe (cutting the entry animation) and flags it noanim. Compare decoded
+// parameter values instead.
+function chartUrlsEquivalent(a, b) {
+	if (a === b) return true;
+	if (!a || !b) return false;
+	try {
+		const ua = new URL(a, window.location.origin);
+		const ub = new URL(b, window.location.origin);
+		if (ua.pathname !== ub.pathname) return false;
+		const keys = new Set([...ua.searchParams.keys(), ...ub.searchParams.keys()]);
+		for (const key of keys) {
+			if ((ua.searchParams.get(key) ?? '') !== (ub.searchParams.get(key) ?? '')) return false;
+		}
+		return true;
+	} catch (err) {
+		logJsError('chartUrlsEquivalent failed', err);
+		return false;
+	}
+}
+
 function chartWidgetUrl(widget) {
 	// Chart items use /chart?item=NAME&period=PERIOD&mode=light|dark&title=TITLE&service=SERVICE
 	const itemName = safeText(widget?.item?.name || '').trim();
@@ -10761,7 +10785,7 @@ function updateCard(card, w, info) {
 		iframeEl.dataset.refresh = chartRefreshVal;
 
 		const fullUrl = '/' + chartUrl;
-		const urlChanged = iframeEl.dataset.chartUrl !== fullUrl;
+		const urlChanged = !chartUrlsEquivalent(iframeEl.dataset.chartUrl, fullUrl);
 		if (urlChanged) {
 			setChartIframeAnimState(iframeEl, fullUrl);
 			iframeEl.dataset.chartUrl = fullUrl;
