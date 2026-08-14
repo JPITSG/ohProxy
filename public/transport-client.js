@@ -35,6 +35,11 @@
 		swHttpEnabled: TRANSPORT_CONFIG.swHttpEnabled !== false,
 		sharedWorkerEnabled: TRANSPORT_CONFIG.sharedWorkerEnabled !== false,
 		transportPaused: false,
+		lastLifecycleSignal: 'initializing',
+		lastLifecycleAt: Date.now(),
+		lastPauseAt: 0,
+		lastResumeAt: 0,
+		stalePauseRepairCount: 0,
 	};
 	window.__OH_TRANSPORT__ = state;
 
@@ -57,6 +62,12 @@
 		err.name = 'ServiceWorkerControllerChangeError';
 		err._ohReason = 'controllerchange';
 		return err;
+	}
+
+	function isTransportPausedError(err) {
+		return err?.transportPaused === true
+			|| err?._ohReason === 'Transport paused'
+			|| (err?.name === 'AbortError' && err?.message === 'Transport paused');
 	}
 
 	function toBase64(buffer) {
@@ -336,6 +347,10 @@
 			if (!isCandidateForSwFetch(request)) {
 				return state.nativeFetch(request);
 			}
+			// Browser lifecycle signals are not perfectly reliable on mobile. A
+			// visible page must never reject a user request because an earlier
+			// hidden/pagehide signal left the local transport latch behind.
+			reconcileTransportLifecycle('fetch-preflight');
 			if (state.transportPaused) {
 				// Intentional: while hidden/paused, block same-origin SW-candidate fetches.
 				// This pre-empts soft-restart work instead of allowing background churn.
@@ -345,7 +360,15 @@
 			try {
 				return await fetchViaServiceWorker(request);
 			} catch (err) {
+				const visible = reconcileTransportLifecycle('fetch-error');
 				if (state.transportPaused) throw createAbortError('Transport paused');
+				if (visible && isTransportPausedError(err)) {
+					// The worker retained a pause that the page no longer has. Reassert
+					// the resume state and complete this request natively; the rejected
+					// worker request was stopped before any upstream fetch began.
+					reconcileTransportLifecycle('fetch-worker-pause-repair', { forceWorkerSync: true });
+					return state.nativeFetch(fallbackRequest);
+				}
 				if (err && err.name === 'AbortError') throw err;
 				return state.nativeFetch(fallbackRequest);
 			}
@@ -407,6 +430,10 @@
 			if (!this.ensurePort()) return '';
 			const id = `${this.clientId}:${this.nextSocketId++}`;
 			this.sockets.set(id, socket);
+			// Keep this port's worker-side latch synchronized before opening. The
+			// two messages share a MessagePort, so the state update precedes open.
+			if (state.transportPaused) this.pause('Transport paused');
+			else this.resume();
 			if (!this.post({
 				type: 'transport-ws-open',
 				id,
@@ -424,15 +451,25 @@
 			this.sockets.delete(id);
 		},
 
+		postExisting(message) {
+			if (!this.port) return false;
+			try {
+				this.port.postMessage(message);
+				return true;
+			} catch {
+				return false;
+			}
+		},
+
 		pause(reason) {
-			this.post({
+			return this.postExisting({
 				type: 'transport-ws-pause',
 				reason: String(reason || 'Transport paused'),
 			});
 		},
 
 		resume() {
-			this.post({
+			return this.postExisting({
 				type: 'transport-ws-resume',
 			});
 		},
@@ -586,12 +623,8 @@
 		window.WebSocket = WorkerBackedWebSocket;
 	}
 
-	function setTransportPaused(paused, reason) {
-		const next = paused === true;
-		if (state.transportPaused === next) return;
-		state.transportPaused = next;
-		if (next) {
-			abortAllPendingSwRequests('Transport paused');
+	function syncWorkerPauseState(paused, reason) {
+		if (paused) {
 			postToServiceWorker({ type: 'transport-http-pause' });
 			wsManager.pause(reason || 'Page hidden');
 		} else {
@@ -600,9 +633,38 @@
 		}
 	}
 
-	function syncPauseStateFromVisibility() {
-		setTransportPaused(document.visibilityState !== 'visible', 'Visibility changed');
+	function setTransportPaused(paused, reason, options) {
+		const next = paused === true;
+		const changed = state.transportPaused !== next;
+		const forceWorkerSync = options?.forceWorkerSync === true;
+		if (!changed) {
+			if (forceWorkerSync) syncWorkerPauseState(next, reason);
+			return false;
+		}
+		state.transportPaused = next;
+		if (next) {
+			state.lastPauseAt = Date.now();
+			abortAllPendingSwRequests('Transport paused');
+		} else {
+			state.lastResumeAt = Date.now();
+		}
+		syncWorkerPauseState(next, reason);
+		return true;
 	}
+
+	function reconcileTransportLifecycle(source, options) {
+		const signal = String(source || 'lifecycle');
+		const shouldPause = document.visibilityState !== 'visible';
+		const repairingStalePause = !shouldPause && state.transportPaused;
+		state.lastLifecycleSignal = signal;
+		state.lastLifecycleAt = Date.now();
+		if (repairingStalePause) state.stalePauseRepairCount += 1;
+		setTransportPaused(shouldPause, signal, {
+			forceWorkerSync: options?.forceWorkerSync === true || repairingStalePause,
+		});
+		return !shouldPause;
+	}
+	state.reconcileLifecycle = (source, options) => reconcileTransportLifecycle(source, options);
 
 	if ('serviceWorker' in navigator) {
 		navigator.serviceWorker.addEventListener('controllerchange', () => {
@@ -615,12 +677,31 @@
 		});
 	}
 
-	document.addEventListener('visibilitychange', syncPauseStateFromVisibility);
-	window.addEventListener('pagehide', () => setTransportPaused(true, 'Page hidden'));
-	window.addEventListener('pageshow', syncPauseStateFromVisibility);
-	syncPauseStateFromVisibility();
-
-	window.addEventListener('beforeunload', () => {
-		setTransportPaused(true, 'Page unload');
-	}, { capture: true });
+	const lifecycleListenerOptions = { capture: true };
+	document.addEventListener('visibilitychange', () => {
+		reconcileTransportLifecycle('visibilitychange', { forceWorkerSync: true });
+	}, lifecycleListenerOptions);
+	document.addEventListener('freeze', () => {
+		state.lastLifecycleSignal = 'freeze';
+		state.lastLifecycleAt = Date.now();
+		setTransportPaused(true, 'freeze');
+	}, lifecycleListenerOptions);
+	document.addEventListener('resume', () => {
+		reconcileTransportLifecycle('resume', { forceWorkerSync: true });
+	}, lifecycleListenerOptions);
+	window.addEventListener('pagehide', () => {
+		state.lastLifecycleSignal = 'pagehide';
+		state.lastLifecycleAt = Date.now();
+		setTransportPaused(true, 'pagehide');
+	}, lifecycleListenerOptions);
+	window.addEventListener('pageshow', () => {
+		reconcileTransportLifecycle('pageshow', { forceWorkerSync: true });
+	}, lifecycleListenerOptions);
+	window.addEventListener('focus', () => {
+		reconcileTransportLifecycle('focus', { forceWorkerSync: true });
+	}, lifecycleListenerOptions);
+	window.addEventListener('online', () => {
+		reconcileTransportLifecycle('online', { forceWorkerSync: true });
+	}, lifecycleListenerOptions);
+	reconcileTransportLifecycle('initial-visibility');
 })();

@@ -274,7 +274,7 @@ describe('Active User Count Wiring', () => {
 	it('client heartbeats visibility while visible', () => {
 		const app = fs.readFileSync(path.join(PROJECT_ROOT, 'public', 'app.js'), 'utf8');
 		assert.match(app, /const FOCUS_HEARTBEAT_MS = 10000;/);
-		assert.match(app, /function sendFocusHeartbeat\(\) \{[\s\S]*?if \(!isClientFocused\(\)\) return;\s*sendClientState\(\{ focused: true \}\);/);
+		assert.match(app, /function sendFocusHeartbeat\(\) \{[\s\S]*?if \(!isClientFocused\(\)\) return;[\s\S]*?reconcilePageLifecycle\('focus-heartbeat'\);[\s\S]*?sendClientState\(\{ focused: true \}\);/);
 		assert.match(app, /focusHeartbeatTimer = setInterval\(sendFocusHeartbeat, FOCUS_HEARTBEAT_MS\);/);
 	});
 

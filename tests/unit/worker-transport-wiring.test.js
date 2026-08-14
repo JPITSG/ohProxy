@@ -47,9 +47,15 @@ describe('Worker transport wiring', () => {
 
 	it('shared worker handles pause/resume for websocket transport', () => {
 		const worker = read('public/transport.sharedworker.js');
+		const transportClient = read('public/transport-client.js');
 		assert.match(worker, /transport-ws-pause/, 'missing transport-ws-pause message handling');
 		assert.match(worker, /transport-ws-resume/, 'missing transport-ws-resume message handling');
 		assert.match(worker, /pausedPorts/, 'missing pausedPorts tracking');
+		assert.match(
+			transportClient,
+			/register\(socket, url, protocols\) \{[\s\S]*?if \(state\.transportPaused\) this\.pause\('Transport paused'\);\s*else this\.resume\(\);[\s\S]*?type: 'transport-ws-open'/,
+			'websocket open should synchronize the worker port pause state first',
+		);
 	});
 
 	it('default config defines worker transport settings', () => {

@@ -37,6 +37,52 @@ describe('PWA Soft Reset Resume', () => {
 		assert.match(app, /resumeVideoStreamsFromVisibility\(\);\s*noteActivity\(\);\s*startPolling\(\);\s*if \(!wsConnected && CLIENT_CONFIG\.websocketDisabled !== true\)/);
 	});
 
+	it('uses one idempotent lifecycle recovery path for mobile foreground signals', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		assert.equal((app.match(/function markPageHidden\(/g) || []).length, 1);
+		assert.equal((app.match(/function handlePageVisible\(/g) || []).length, 1);
+
+		const hiddenStart = app.indexOf('function markPageHidden(source)');
+		const visibleStart = app.indexOf('function handlePageVisible(source)');
+		const reconcileStart = app.indexOf('function reconcilePageLifecycle(source)');
+		assert.ok(hiddenStart >= 0 && visibleStart > hiddenStart && reconcileStart > visibleStart);
+		const hidden = app.slice(hiddenStart, visibleStart);
+		const visible = app.slice(visibleStart, reconcileStart);
+
+		assert.match(hidden, /if \(resumeReloadArmed\) return false;/);
+		assert.match(hidden, /stopPolling\(\);\s*stopPing\(\);\s*stopWs\(\);/);
+		assert.ok(
+			visible.indexOf('reconcileForegroundTransport(source);')
+				< visible.indexOf('if (!resumeReloadArmed) return false;'),
+			'transport must resume before foreground network work is gated',
+		);
+		assert.match(visible, /clearInflightFetches\(\);\s*wsFailCount = 0;\s*wsTimedOutToken = 0;/);
+		assert.match(visible, /void softReset\(\);/);
+		assert.match(visible, /void refresh\(false\);/);
+
+		assert.match(app, /document\.addEventListener\('visibilitychange', \(\) => \{\s*reconcilePageLifecycle\('visibilitychange'\);/);
+		assert.match(app, /document\.addEventListener\('freeze', \(\) => \{\s*markPageHidden\('freeze'\);/);
+		assert.match(app, /document\.addEventListener\('resume', \(\) => \{\s*reconcilePageLifecycle\('resume'\);/);
+		assert.match(app, /window\.addEventListener\('pagehide', \(\) => \{\s*markPageHidden\('pagehide'\);/);
+		assert.match(app, /window\.addEventListener\('pageshow', \(\) => \{\s*reconcilePageLifecycle\('pageshow'\);/);
+		assert.match(app, /window\.addEventListener\('focus', \(\) => \{\s*reconcilePageLifecycle\('focus'\);/);
+		assert.match(app, /resumeReloadArmed \|\| window\.__OH_TRANSPORT__\?\.transportPaused === true/);
+	});
+
+	it('ignores events from a websocket replaced during foreground recovery', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		const connectStart = app.indexOf('function connectWs()');
+		const closeStart = app.indexOf('function closeWs()', connectStart);
+		assert.ok(connectStart >= 0 && closeStart > connectStart);
+		const connect = app.slice(connectStart, closeStart);
+
+		assert.match(connect, /const socket = new WebSocket\(getWsUrl\(\)\);\s*wsConnection = socket;/);
+		assert.match(connect, /socket\.onopen = \(\) => \{\s*if \(wsConnection !== socket\)/);
+		assert.match(connect, /socket\.onmessage = \(event\) => \{\s*if \(wsConnection !== socket\) return;/);
+		assert.match(connect, /socket\.onclose = \(event\) => \{\s*if \(wsConnection !== socket\) return;/);
+		assert.match(connect, /socket\.onerror = \(err\) => \{\s*if \(wsConnection !== socket\) return;/);
+	});
+
 	it('completes soft reset through a settle window and hard timeout', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /markResumeSettling\(options\.settleMs\);/);

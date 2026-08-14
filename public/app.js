@@ -13221,6 +13221,10 @@ function armIdleTimer() {
 }
 
 function noteActivity() {
+	if (document.visibilityState === 'visible'
+		&& (resumeReloadArmed || window.__OH_TRANSPORT__?.transportPaused === true)) {
+		reconcilePageLifecycle('activity');
+	}
 	const now = Date.now();
 	const throttle = state.isSlim ? 1000 : ACTIVITY_THROTTLE_MS;
 	if (now - state.lastActivity < throttle) return;
@@ -14040,6 +14044,9 @@ function sendFocusHeartbeat() {
 	// Hidden tabs stay silent (their throttled timers are irrelevant); the
 	// server drops silent clients from the active user count via its TTL.
 	if (!isClientFocused()) return;
+	if (resumeReloadArmed || window.__OH_TRANSPORT__?.transportPaused === true) {
+		reconcilePageLifecycle('focus-heartbeat');
+	}
 	sendClientState({ focused: true });
 }
 
@@ -14048,6 +14055,9 @@ function initFocusTracking() {
 	focusListenersInitialized = true;
 	focusHeartbeatTimer = setInterval(sendFocusHeartbeat, FOCUS_HEARTBEAT_MS);
 	document.addEventListener('visibilitychange', sendFocusState);
+	document.addEventListener('resume', sendFocusState, { capture: true });
+	window.addEventListener('focus', sendFocusState, { capture: true });
+	window.addEventListener('pageshow', sendFocusState, { capture: true });
 	// Listen for external focus control via postMessage (e.g., from WebView2 container)
 	// Send ohProxyFocus: true/false to override, or ohProxyFocus: null to clear and use visibilityState
 	window.addEventListener('message', (e) => {
@@ -14071,14 +14081,15 @@ function connectWs() {
 	if (document.visibilityState !== 'visible') return;
 
 	try {
-		wsConnection = new WebSocket(getWsUrl());
+		const socket = new WebSocket(getWsUrl());
+		wsConnection = socket;
 		const connectToken = ++wsConnectToken;
-		wsConnection.__ohProxyToken = connectToken;
+		socket.__ohProxyToken = connectToken;
 		clearWsConnectTimer();
 		// Guard against sockets stuck in CONNECTING (no open/close events).
 		wsConnectTimer = setTimeout(() => {
-			if (!wsConnection || wsConnection.__ohProxyToken !== connectToken) return;
-			if (wsConnection.readyState !== WebSocket.CONNECTING) return;
+			if (wsConnection !== socket || socket.__ohProxyToken !== connectToken) return;
+			if (socket.readyState !== WebSocket.CONNECTING) return;
 			wsTimedOutToken = connectToken;
 			wsFailCount++;
 			if (wsFailCount >= WS_MAX_FAILURES) {
@@ -14090,7 +14101,11 @@ function connectWs() {
 			scheduleWsReconnect();
 		}, WS_CONNECT_TIMEOUT_MS);
 
-		wsConnection.onopen = () => {
+		socket.onopen = () => {
+			if (wsConnection !== socket) {
+				try { socket.close(); } catch (_) {}
+				return;
+			}
 			clearWsConnectTimer();
 			wsConnected = true;
 			wsFailCount = 0;
@@ -14114,7 +14129,8 @@ function connectWs() {
 			sendFocusState();
 		};
 
-		wsConnection.onmessage = (event) => {
+		socket.onmessage = (event) => {
+			if (wsConnection !== socket) return;
 			try {
 				const msg = JSON.parse(event.data);
 				if (msg.event === 'connected') {
@@ -14194,10 +14210,11 @@ function connectWs() {
 			}
 		};
 
-		wsConnection.onclose = (event) => {
+		socket.onclose = (event) => {
+			if (wsConnection !== socket) return;
 			clearWsConnectTimer();
 			const wasConnected = wsConnected;
-			const token = event?.target?.__ohProxyToken;
+			const token = socket.__ohProxyToken;
 			const timedOut = token && token === wsTimedOutToken;
 			const hidden = document.visibilityState !== 'visible';
 			if (timedOut) wsTimedOutToken = 0;
@@ -14218,7 +14235,8 @@ function connectWs() {
 			}
 		};
 
-		wsConnection.onerror = (err) => {
+		socket.onerror = (err) => {
+			if (wsConnection !== socket) return;
 			// Only log here - onclose will handle fail count and reconnection
 			console.warn('WebSocket error:', err);
 			logJsError('WebSocket error', err);
@@ -14266,6 +14284,84 @@ function restoreNormalPolling() {
 	if (state.pollInterval !== normalInterval) {
 		setPollInterval(normalInterval);
 	}
+}
+
+function getHiddenDuration() {
+	const now = Date.now();
+	if (lastHiddenTime) return Math.max(0, now - lastHiddenTime);
+	if (state.lastActivity) return Math.max(0, now - state.lastActivity);
+	return 0;
+}
+
+function reconcileForegroundTransport(source) {
+	const reconcile = window.__OH_TRANSPORT__?.reconcileLifecycle;
+	if (typeof reconcile !== 'function') return;
+	try {
+		reconcile(`app:${String(source || 'foreground')}`, { forceWorkerSync: true });
+	} catch (err) {
+		logJsError('foreground transport reconciliation failed', err);
+	}
+}
+
+function markPageHidden(source) {
+	stopGpsTracking();
+	if (resumeReloadArmed) return false;
+	resumeReloadArmed = true;
+	lastHiddenTime = Date.now();
+	state.lastActivity = lastHiddenTime;
+	wsSkipNextOpenRefresh = false;
+	stopPolling();
+	stopPing();
+	stopWs();
+	closeStatusNotification();
+	hideStatusTooltip();
+	if (isTouchDevice()) pauseVideoStreamsForVisibility();
+	return true;
+}
+
+function handlePageVisible(source) {
+	if (document.visibilityState !== 'visible') return false;
+	// The transport script is loaded first, but explicitly reconcile here so
+	// no refresh or socket open depends on browser event-listener ordering.
+	reconcileForegroundTransport(source);
+	if (!resumeReloadArmed) return false;
+
+	const hiddenDuration = getHiddenDuration();
+	resumeReloadArmed = false;
+	lastHiddenTime = 0;
+	videosPausedForVisibility = false;
+	clearInflightFetches();
+	wsFailCount = 0;
+	wsTimedOutToken = 0;
+
+	const minHiddenMs = CLIENT_CONFIG.touchReloadMinHiddenMs ?? 60000;
+	if (isTouchDevice() && hiddenDuration >= minHiddenMs) {
+		// Hidden long enough - soft reset to home. softReset has its own
+		// single-flight guard and begins its UI transition synchronously.
+		void softReset();
+	} else {
+		// Brief hide - resume where we left off.
+		resumeVideoStreamsFromVisibility();
+		noteActivity();
+		startPolling();
+		if (!wsConnected && CLIENT_CONFIG.websocketDisabled !== true) {
+			wsSkipNextOpenRefresh = true;
+		}
+		void refresh(false);
+		if (!wsConnection) connectWs();
+		startPingDelayed();
+		syncGpsTracking();
+	}
+	if (state.connectionOk) showStatusNotification();
+	return true;
+}
+
+function reconcilePageLifecycle(source) {
+	if (document.visibilityState !== 'visible') {
+		markPageHidden(source);
+		return false;
+	}
+	return handlePageVisible(source);
 }
 
 // --- Boot ---
@@ -14501,87 +14597,38 @@ function restoreNormalPolling() {
 	});
 	window.addEventListener('online', () => {
 		clearInflightFetches(); // Clear any timed-out requests before retrying
-		// Network back - trigger refresh to verify and restore connection
-		refresh(false);
-	});
-	// Helper to calculate time since page was last active
-	function getHiddenDuration() {
-		const now = Date.now();
-		// Prefer lastHiddenTime, fall back to lastActivity
-		if (lastHiddenTime) return now - lastHiddenTime;
-		if (state.lastActivity) return now - state.lastActivity;
-		return 0;
-	}
-
-	function markPageHidden() {
-		stopGpsTracking();
-		if (resumeReloadArmed) return;
-		resumeReloadArmed = true;
-		lastHiddenTime = Date.now();
-		// Also update lastActivity as backup timestamp
-		state.lastActivity = lastHiddenTime;
-		wsSkipNextOpenRefresh = false;
-		stopPolling();
-		stopPing();
-		closeStatusNotification();
-		hideStatusTooltip();
-		if (isTouchDevice()) pauseVideoStreamsForVisibility();
-	}
-
-	function handlePageVisible() {
-		resumeReloadArmed = false;
-		videosPausedForVisibility = false;
-		const minHiddenMs = CLIENT_CONFIG.touchReloadMinHiddenMs ?? 60000;
-		const hiddenDuration = getHiddenDuration();
-		if (isTouchDevice() && hiddenDuration >= minHiddenMs) {
-			// Hidden long enough - soft reset to home
-			softReset();
-		} else {
-			// Brief hide - resume where we left off
-			resumeVideoStreamsFromVisibility();
-			noteActivity();
-			startPolling();
-			if (!wsConnected && CLIENT_CONFIG.websocketDisabled !== true) {
-				wsSkipNextOpenRefresh = true;
-			}
-			refresh(false);
-			if (!wsConnection) connectWs();
-			startPingDelayed();
-			syncGpsTracking();
+		if (document.visibilityState !== 'visible') {
+			markPageHidden('online-hidden');
+			return;
 		}
-		if (state.connectionOk) showStatusNotification();
-	}
+		// A foreground recovery already performs its own refresh. If the page
+		// never went through a hidden transition, verify the connection here.
+		if (!reconcilePageLifecycle('online')) void refresh(false);
+	});
 
-	// Initialize lastHiddenTime if page loads while hidden
-	if (document.visibilityState === 'hidden') {
-		lastHiddenTime = Date.now();
-		resumeReloadArmed = true;
-	}
-
+	const lifecycleListenerOptions = { capture: true, passive: true };
+	if (document.visibilityState !== 'visible') markPageHidden('initial-hidden');
 	document.addEventListener('visibilitychange', () => {
-		if (document.visibilityState === 'hidden') {
-			markPageHidden();
-		} else {
-			handlePageVisible();
-		}
-	});
-
-	// pagehide is more reliable than visibilitychange on some mobile browsers
-	window.addEventListener('pagehide', () => markPageHidden());
-	window.addEventListener('beforeunload', () => closeStatusNotification());
-
-	// Handle bfcache restoration (browser killed and reopened)
-	window.addEventListener('pageshow', (event) => {
-		if (event.persisted && isTouchDevice()) {
-			const minHiddenMs = CLIENT_CONFIG.touchReloadMinHiddenMs ?? 60000;
-			const hiddenDuration = getHiddenDuration();
-			if (hiddenDuration >= minHiddenMs) {
-				softReset();
-			} else {
-				syncGpsTracking();
-			}
-		}
-	});
+		reconcilePageLifecycle('visibilitychange');
+	}, lifecycleListenerOptions);
+	document.addEventListener('freeze', () => {
+		markPageHidden('freeze');
+	}, lifecycleListenerOptions);
+	document.addEventListener('resume', () => {
+		reconcilePageLifecycle('resume');
+	}, lifecycleListenerOptions);
+	// pagehide/pageshow cover bfcache and are more reliable than
+	// visibilitychange on some mobile browsers. Focus repairs the observed
+	// Android case where the page becomes visible without a resume event.
+	window.addEventListener('pagehide', () => {
+		markPageHidden('pagehide');
+	}, lifecycleListenerOptions);
+	window.addEventListener('pageshow', () => {
+		reconcilePageLifecycle('pageshow');
+	}, lifecycleListenerOptions);
+	window.addEventListener('focus', () => {
+		reconcilePageLifecycle('focus');
+	}, lifecycleListenerOptions);
 	// Exit video fullscreen on fullscreenchange (browser ESC, back button, etc.)
 	document.addEventListener('fullscreenchange', () => {
 		if (!document.fullscreenElement) cleanupVideoFullscreen();

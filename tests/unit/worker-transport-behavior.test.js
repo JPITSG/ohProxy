@@ -208,6 +208,15 @@ function createTransportHarness(options = {}) {
 			document.visibilityState = state;
 			document.dispatchEvent({ type: 'visibilitychange' });
 		},
+		setVisibility(state) {
+			document.visibilityState = state;
+		},
+		dispatchDocumentEvent(type, extra = {}) {
+			document.dispatchEvent({ type, ...extra });
+		},
+		dispatchWindowEvent(type, extra = {}) {
+			windowEvents.dispatchEvent({ type, ...extra });
+		},
 		dispatchControllerChange() {
 			serviceWorker.dispatchEvent({ type: 'controllerchange' });
 		},
@@ -301,6 +310,118 @@ describe('Worker transport behavior', () => {
 
 		const resumed = await harness.window.fetch('https://app.test/rest/items?visible=1');
 		assert.equal(await resumed.text(), 'resumed-ok');
+	});
+
+	it('repairs a pagehide pause when a visible page receives focus', async () => {
+		let harness;
+		harness = createTransportHarness({
+			onControllerPostMessage(message) {
+				if (message.type !== 'transport-http-request') return;
+				harness.dispatchServiceWorkerMessage({
+					type: 'transport-http-response',
+					requestId: message.requestId,
+					status: 200,
+					statusText: 'OK',
+					headers: { 'content-type': 'text/plain' },
+					bodyBase64: toBase64('focus-recovered'),
+				});
+			},
+		});
+
+		harness.dispatchWindowEvent('pagehide');
+		assert.equal(harness.window.__OH_TRANSPORT__.transportPaused, true);
+		assert.equal(harness.window.__OH_TRANSPORT__.lastLifecycleSignal, 'pagehide');
+
+		harness.dispatchWindowEvent('focus');
+		assert.equal(harness.window.__OH_TRANSPORT__.transportPaused, false);
+		assert.equal(harness.window.__OH_TRANSPORT__.lastLifecycleSignal, 'focus');
+		assert.equal(harness.window.__OH_TRANSPORT__.stalePauseRepairCount, 1);
+		assert.ok(harness.controllerMessages.some((m) => m.type === 'transport-http-resume'));
+
+		const response = await harness.window.fetch('https://app.test/rest/items?focus=1');
+		assert.equal(await response.text(), 'focus-recovered');
+	});
+
+	it('uses a visible same-origin fetch as a final stale-pause repair', async () => {
+		let harness;
+		harness = createTransportHarness({
+			onControllerPostMessage(message) {
+				if (message.type !== 'transport-http-request') return;
+				harness.dispatchServiceWorkerMessage({
+					type: 'transport-http-response',
+					requestId: message.requestId,
+					status: 200,
+					statusText: 'OK',
+					headers: { 'content-type': 'text/plain' },
+					bodyBase64: toBase64('fetch-recovered'),
+				});
+			},
+		});
+
+		harness.dispatchWindowEvent('pagehide');
+		assert.equal(harness.window.__OH_TRANSPORT__.transportPaused, true);
+
+		const response = await harness.window.fetch('https://app.test/rest/items?toggle=1');
+		assert.equal(await response.text(), 'fetch-recovered');
+		assert.equal(harness.window.__OH_TRANSPORT__.transportPaused, false);
+		assert.equal(harness.window.__OH_TRANSPORT__.lastLifecycleSignal, 'fetch-preflight');
+		assert.equal(harness.window.__OH_TRANSPORT__.stalePauseRepairCount, 1);
+	});
+
+	it('repairs a worker-only pause and completes the rejected request natively', async () => {
+		let harness;
+		harness = createTransportHarness({
+			nativeFetchImpl: async () => new Response('native-after-worker-repair', { status: 200 }),
+			onControllerPostMessage(message) {
+				if (message.type !== 'transport-http-request') return;
+				harness.dispatchServiceWorkerMessage({
+					type: 'transport-http-error',
+					requestId: message.requestId,
+					name: 'AbortError',
+					error: 'Transport paused',
+				});
+			},
+		});
+		const resumeCountBefore = harness.controllerMessages
+			.filter((message) => message.type === 'transport-http-resume').length;
+
+		const response = await harness.window.fetch('https://app.test/rest/items?worker-paused=1');
+		assert.equal(await response.text(), 'native-after-worker-repair');
+		assert.equal(harness.nativeFetchCalls.length, 1);
+		assert.equal(harness.window.__OH_TRANSPORT__.transportPaused, false);
+		assert.equal(harness.window.__OH_TRANSPORT__.lastLifecycleSignal, 'fetch-worker-pause-repair');
+		assert.ok(
+			harness.controllerMessages.filter((message) => message.type === 'transport-http-resume').length
+				> resumeCountBefore,
+			'worker-only pause should force a resume message',
+		);
+	});
+
+	it('keeps transport paused when resume fires before the page becomes visible', async () => {
+		const harness = createTransportHarness();
+		harness.dispatchVisibility('hidden');
+		const pauseCount = harness.controllerMessages
+			.filter((message) => message.type === 'transport-http-pause').length;
+
+		harness.dispatchDocumentEvent('resume');
+		assert.equal(harness.window.__OH_TRANSPORT__.transportPaused, true);
+		assert.equal(harness.window.__OH_TRANSPORT__.lastLifecycleSignal, 'resume');
+		assert.equal(harness.window.__OH_TRANSPORT__.stalePauseRepairCount, 0);
+		assert.ok(
+			harness.controllerMessages.filter((message) => message.type === 'transport-http-pause').length > pauseCount,
+			'resume while hidden should reassert the worker pause',
+		);
+
+		await assert.rejects(
+			() => harness.window.fetch('https://app.test/rest/items?still-hidden=1'),
+			(err) => err?.name === 'AbortError' && err?.transportPaused === true,
+		);
+	});
+
+	it('does not latch transport on beforeunload alone', () => {
+		const harness = createTransportHarness();
+		harness.dispatchWindowEvent('beforeunload');
+		assert.equal(harness.window.__OH_TRANSPORT__.transportPaused, false);
 	});
 
 	it('flushes pending SW RPC calls on controllerchange and falls back quickly', async () => {

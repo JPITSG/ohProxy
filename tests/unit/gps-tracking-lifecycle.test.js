@@ -24,8 +24,8 @@ describe('GPS tracking lifecycle wiring', () => {
 		assert.match(app, /function handleGpsPositionError\(error, sessionToken\) \{\s*if \(sessionToken !== gpsSessionToken\) return;\s*clearGpsSendTimer\(\);\s*clearGpsLock\(\);\s*if \(error && error\.code === 1\) \{\s*stopGpsTracking\(\);\s*\}\s*\}/);
 		assert.match(app, /function stopGpsTracking\(\) \{\s*gpsSessionToken \+= 1;\s*clearGpsSendTimer\(\);\s*clearGpsWatch\(\);\s*clearGpsLock\(\);\s*\}/);
 		assert.match(app, /\(error\) => handleGpsPositionError\(error, sessionToken\)/);
-		assert.match(app, /function markPageHidden\(\) \{\s*stopGpsTracking\(\);/);
-		assert.match(app, /window\.addEventListener\('pagehide', \(\) => markPageHidden\(\)\);/);
+		assert.match(app, /function markPageHidden\(source\) \{\s*stopGpsTracking\(\);/);
+		assert.match(app, /window\.addEventListener\('pagehide', \(\) => \{\s*markPageHidden\('pagehide'\);/);
 	});
 
 	it('restarts GPS only after the visible session is ready again', () => {
@@ -33,8 +33,8 @@ describe('GPS tracking lifecycle wiring', () => {
 		assert.match(app, /function isGpsTrackingEligible\(\) \{[\s\S]*?if \(_softResetRunning\) return false;[\s\S]*?if \(!isClientFocused\(\)\) return false;/);
 		assert.match(app, /async function softReset\(\) \{[\s\S]*?_softResetRunning = true;[\s\S]*?stopGpsTracking\(\);[\s\S]*?hideStatusTooltip\(\);[\s\S]*?try \{/);
 		assert.match(app, /endResumeTransition\(\);\s*_softResetRunning = false;\s*syncGpsTracking\(\);/);
-		assert.match(app, /function handlePageVisible\(\) \{[\s\S]*?startPingDelayed\(\);\s*syncGpsTracking\(\);[\s\S]*?\}/);
-		assert.match(app, /window\.addEventListener\('pageshow', \(event\) => \{\s*if \(event\.persisted && isTouchDevice\(\)\) \{[\s\S]*?if \(hiddenDuration >= minHiddenMs\) \{\s*softReset\(\);\s*\} else \{\s*syncGpsTracking\(\);\s*\}/);
+		assert.match(app, /function handlePageVisible\(source\) \{[\s\S]*?startPingDelayed\(\);\s*syncGpsTracking\(\);[\s\S]*?\}/);
+		assert.match(app, /window\.addEventListener\('pageshow', \(\) => \{\s*reconcilePageLifecycle\('pageshow'\);/);
 		assert.match(app, /function sendFocusState\(\) \{[\s\S]*?syncWakeLock\(\);\s*syncGpsTracking\(\);\s*\}/);
 		assert.match(app, /\}\s*syncGpsTracking\(\);\s*\}\)\(\);/);
 		assert.doesNotMatch(app, /reportGps\(/);
