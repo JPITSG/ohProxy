@@ -1435,7 +1435,16 @@
 			// Period navigation is a data-view change, not an initial load; window.name
 			// persists across the navigation so the next load skips the entry animation.
 			window.name = 'noanim';
-			window.location.assign(buildChartUrlForOffset(nextOffset));
+			var nextUrl = buildChartUrlForOffset(nextOffset);
+			if (nextOffset === 0) {
+				// The parent keeps the latest-period server cache warm while this iframe
+				// shows history. Use a unique URL when returning so the browser cannot
+				// reuse the pre-history copy from its private HTTP cache.
+				var latestUrl = new URL(nextUrl, window.location.origin);
+				latestUrl.searchParams.set('_t', String(Date.now()));
+				nextUrl = latestUrl.pathname + latestUrl.search + latestUrl.hash;
+			}
+			window.location.assign(nextUrl);
 		}
 
 		function navigateChartPeriod(delta) {

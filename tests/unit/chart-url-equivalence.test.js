@@ -24,14 +24,35 @@ function extractFunction(source, name) {
 }
 
 const errors = [];
+const normalizeChartRuntimeUrl = Function(
+	'window', 'normalizeChartPeriodOffset', 'logJsError',
+	`return (${extractFunction(app, 'normalizeChartRuntimeUrl')});`
+)(
+	{ location: { origin: 'http://oh.test' } },
+	(value) => {
+		const parsed = Number.parseInt(String(value || ''), 10);
+		return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+	},
+	(msg) => errors.push(msg)
+);
+const chartLatestPeriodUrl = Function(
+	'window', 'normalizeChartRuntimeUrl', 'logJsError',
+	`return (${extractFunction(app, 'chartLatestPeriodUrl')});`
+)(
+	{ location: { origin: 'http://oh.test' } },
+	normalizeChartRuntimeUrl,
+	(msg) => errors.push(msg)
+);
 const chartUrlsEquivalent = Function(
 	'window', 'logJsError',
 	`return (${extractFunction(app, 'chartUrlsEquivalent')});`
 )({ location: { origin: 'http://oh.test' } }, (msg) => errors.push(msg));
 
 describe('chartUrlsEquivalent', () => {
-	it('card render uses equivalence, not raw string compare, for urlChanged', () => {
-		assert.match(app, /const urlChanged = !chartUrlsEquivalent\(iframeEl\.dataset\.chartUrl, fullUrl\);/);
+	it('card render compares the configured base URL independently of the runtime navigation URL', () => {
+		assert.match(app, /const previousBaseUrl = iframeEl\.dataset\.chartBaseUrl \|\| chartLatestPeriodUrl\(iframeEl\.dataset\.chartUrl\);/);
+		assert.match(app, /const urlChanged = !chartUrlsEquivalent\(previousBaseUrl, fullUrl\);/);
+		assert.match(app, /iframeEl\.dataset\.chartBaseUrl = fullUrl;/);
 	});
 
 	it('treats + and %20 title encodings as the same URL', () => {
@@ -69,5 +90,19 @@ describe('chartUrlsEquivalent', () => {
 		assert.strictEqual(chartUrlsEquivalent('', '/chart?item=A'), false);
 		assert.strictEqual(chartUrlsEquivalent(null, '/chart?item=A'), false);
 		assert.strictEqual(chartUrlsEquivalent('', ''), true);
+	});
+});
+
+describe('chartLatestPeriodUrl', () => {
+	it('removes runtime offset and cache-bust state while preserving chart configuration', () => {
+		assert.strictEqual(
+			chartLatestPeriodUrl('/chart?item=Power&period=D&mode=dark&title=Power+Use&offset=3&_t=old-hash'),
+			'/chart?item=Power&period=D&mode=dark&title=Power+Use'
+		);
+	});
+
+	it('normalizes offset zero and rejects non-chart URLs', () => {
+		assert.strictEqual(chartLatestPeriodUrl('/chart?item=A&period=h&offset=0'), '/chart?item=A&period=h');
+		assert.strictEqual(chartLatestPeriodUrl('/other?item=A&period=h&offset=2'), '');
 	});
 });

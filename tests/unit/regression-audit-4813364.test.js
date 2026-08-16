@@ -71,14 +71,17 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		assert.doesNotMatch(server, /window\._chartYAxisPattern=\$\{JSON\.stringify\(yAxisDecimalPattern \|\| null\)\};/);
 	});
 
-	it('chart hash polling includes interpolation, forceasitem, and historical offset suppression', () => {
+	it('chart hash polling refreshes latest data in the background without swapping historical periods', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		assert.match(app, /const interpolation = \(urlObj\.searchParams\.get\('interpolation'\) \|\| 'linear'\)\.toLowerCase\(\);/);
 		assert.match(app, /const service = urlObj\.searchParams\.get\('service'\) \|\| '';/);
-		assert.match(app, /const periodOffset = normalizeChartPeriodOffset\(urlObj\.searchParams\.get\('offset'\)\);/);
-		assert.match(app, /if \(periodOffset > 0\) continue;/);
+		assert.match(app, /const periodOffset = normalizeChartPeriodOffset\(runtimeUrlObj\.searchParams\.get\('offset'\)\);/);
+		assert.match(app, /const latestChartUrl = iframe\.dataset\.chartBaseUrl \|\| chartLatestPeriodUrl\(normalizedRuntimeUrl\);/);
+		assert.match(app, /const latestPeriodOffset = 0;/);
+		assert.match(app, /if \(periodOffset > 0\) \{[\s\S]*setBoundedCache\(chartHashes, cacheKey, data\.hash, MAX_CHART_HASHES\);[\s\S]*continue;[\s\S]*\}/);
+		assert.doesNotMatch(app, /if \(periodOffset > 0\) continue;/);
 		assert.match(app, /const forceAsItem = normalizeChartForceAsItem\(urlObj\.searchParams\.get\('forceasitem'\) \|\| urlObj\.searchParams\.get\('forceAsItem'\)\);/);
-		assert.match(app, /const cacheKey = `\$\{item\}\|\$\{period\}\|\$\{mode\}\|\$\{assetVersion\}\|\$\{title\}\|\$\{legend\}\|\$\{forceAsItem\}\|\$\{yAxisDecimalPattern\}\|\$\{interpolation\}\|\$\{service\}\|\$\{periodOffset\}`;/);
+		assert.match(app, /const cacheKey = `\$\{item\}\|\$\{period\}\|\$\{mode\}\|\$\{assetVersion\}\|\$\{title\}\|\$\{legend\}\|\$\{forceAsItem\}\|\$\{yAxisDecimalPattern\}\|\$\{interpolation\}\|\$\{service\}\|\$\{latestPeriodOffset\}`;/);
 		assert.match(app, /\(forceAsItem \? `&forceasitem=\$\{forceAsItem\}` : ''\)/);
 		assert.match(app, /\(interpolation === 'step' \? '&interpolation=step' : ''\)/);
 		assert.match(app, /\(service \? `&service=\$\{encodeURIComponent\(service\)\}` : ''\)/);
@@ -116,6 +119,7 @@ describe('Regression Guards for 4813364..HEAD', () => {
 		assert.match(app, /match\.iframe\.dataset\.lastHashCheck = '0';/);
 		assert.match(chart, /type: 'ohproxy-chart-url-state',/);
 		assert.match(chart, /chartUrl: buildChartUrlForOffset\(normalizedOffset\),/);
+		assert.match(chart, /if \(nextOffset === 0\) \{[\s\S]*latestUrl\.searchParams\.set\('_t', String\(Date\.now\(\)\)\);[\s\S]*\}/);
 	});
 
 	it('buttongrid allows button-level item binding when parent item is missing', () => {

@@ -3954,6 +3954,19 @@ function normalizeChartRuntimeUrl(chartUrl) {
 	}
 }
 
+function chartLatestPeriodUrl(chartUrl) {
+	const normalizedUrl = normalizeChartRuntimeUrl(chartUrl);
+	if (!normalizedUrl) return '';
+	try {
+		const url = new URL(normalizedUrl, window.location.origin);
+		url.searchParams.delete('offset');
+		return url.pathname + url.search;
+	} catch (err) {
+		logJsError(`chartLatestPeriodUrl failed for ${chartUrl}`, err);
+		return '';
+	}
+}
+
 // Chart URLs for the same chart can differ only in query encoding: chartWidgetUrl
 // percent-encodes spaces (%20) while URLs echoed back by the chart page via
 // ohproxy-chart-url-state are serialized by URLSearchParams (+). Comparing those
@@ -10785,7 +10798,12 @@ function updateCard(card, w, info) {
 		iframeEl.dataset.refresh = chartRefreshVal;
 
 		const fullUrl = '/' + chartUrl;
-		const urlChanged = !chartUrlsEquivalent(iframeEl.dataset.chartUrl, fullUrl);
+		// chartUrl is the configured/latest-period URL, while dataset.chartUrl follows
+		// in-iframe period navigation. Compare configuration against configuration so
+		// an ordinary card update cannot pull a historical chart back to offset 0.
+		const previousBaseUrl = iframeEl.dataset.chartBaseUrl || chartLatestPeriodUrl(iframeEl.dataset.chartUrl);
+		const urlChanged = !chartUrlsEquivalent(previousBaseUrl, fullUrl);
+		iframeEl.dataset.chartBaseUrl = fullUrl;
 		if (urlChanged) {
 			setChartIframeAnimState(iframeEl, fullUrl);
 			iframeEl.dataset.chartUrl = fullUrl;
@@ -13328,6 +13346,9 @@ function swapChartIframe(iframe, newSrc, baseUrl) {
 		newIframe.setAttribute('allowfullscreen', iframe.getAttribute('allowfullscreen'));
 	}
 	newIframe.dataset.chartUrl = normalizedBaseUrl;
+	newIframe.dataset.chartBaseUrl = iframe.dataset.chartBaseUrl || chartLatestPeriodUrl(normalizedBaseUrl);
+	newIframe.dataset.refresh = iframe.dataset.refresh || '';
+	newIframe.dataset.lastHashCheck = iframe.dataset.lastHashCheck || '0';
 	newIframe.style.opacity = '0';
 	newIframe.style.transition = `opacity ${CHART_IFRAME_CROSSFADE_MS}ms ease-out`;
 	newIframe.style.position = 'absolute';
@@ -13384,8 +13405,8 @@ async function checkChartHashes() {
 			// Setup interaction tracking on first encounter
 			setupChartInteractionTracking(iframe);
 
-			const chartUrl = iframe.dataset.chartUrl || '';
-			if (!chartUrl) continue;
+			const runtimeChartUrl = iframe.dataset.chartUrl || '';
+			if (!runtimeChartUrl) continue;
 
 			const refreshMs = parseInt(iframe.dataset.refresh, 10) || CHART_HASH_CHECK_MS;
 			const lastCheck = parseInt(iframe.dataset.lastHashCheck, 10) || 0;
@@ -13393,12 +13414,17 @@ async function checkChartHashes() {
 			if (now - lastCheck < refreshMs * 0.9) continue;
 			iframe.dataset.lastHashCheck = String(now);
 
-			// Parse item, period, title from URL: /chart?item=X&period=Y&title=Z&...
-			const normalizedChartUrl = normalizeChartRuntimeUrl(chartUrl) || chartUrl;
-			const urlObj = new URL(normalizedChartUrl, window.location.origin);
+			// The runtime URL may point at a frozen historical period. Always refresh
+			// the configured offset-0 chart in the server cache, but only swap the
+			// visible iframe when it is itself showing offset 0.
+			const normalizedRuntimeUrl = normalizeChartRuntimeUrl(runtimeChartUrl) || runtimeChartUrl;
+			const runtimeUrlObj = new URL(normalizedRuntimeUrl, window.location.origin);
+			const periodOffset = normalizeChartPeriodOffset(runtimeUrlObj.searchParams.get('offset'));
+			const latestChartUrl = iframe.dataset.chartBaseUrl || chartLatestPeriodUrl(normalizedRuntimeUrl);
+			if (!latestChartUrl) continue;
+			const urlObj = new URL(latestChartUrl, window.location.origin);
 			const item = urlObj.searchParams.get('item') || '';
 			const period = urlObj.searchParams.get('period') || '';
-			const periodOffset = normalizeChartPeriodOffset(urlObj.searchParams.get('offset'));
 			const title = urlObj.searchParams.get('title') || '';
 			const legend = normalizeChartLegendMode(urlObj.searchParams.get('legend'));
 			const forceAsItem = normalizeChartForceAsItem(urlObj.searchParams.get('forceasitem') || urlObj.searchParams.get('forceAsItem'));
@@ -13406,34 +13432,44 @@ async function checkChartHashes() {
 			const interpolation = (urlObj.searchParams.get('interpolation') || 'linear').toLowerCase();
 			const service = urlObj.searchParams.get('service') || '';
 			if (!item || !period) continue;
-			if (periodOffset > 0) continue;
 
-			// Cache key includes assetVersion to match server
-			const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${forceAsItem}|${yAxisDecimalPattern}|${interpolation}|${service}|${periodOffset}`;
+			// Hash polling always targets the latest period, so this cache entry is offset 0.
+			const latestPeriodOffset = 0;
+			const cacheKey = `${item}|${period}|${mode}|${assetVersion}|${title}|${legend}|${forceAsItem}|${yAxisDecimalPattern}|${interpolation}|${service}|${latestPeriodOffset}`;
 			const prevHash = chartHashes.get(cacheKey) || null;
 
-					try {
-								const hashUrl = `/api/chart-hash?item=${encodeURIComponent(item)}&period=${encodeURIComponent(period)}&mode=${mode}` +
-									(title ? `&title=${encodeURIComponent(title)}` : '') +
-									(legend !== 'auto' ? `&legend=${legend}` : '') +
-									(forceAsItem ? `&forceasitem=${forceAsItem}` : '') +
-									(yAxisDecimalPattern ? `&yAxisDecimalPattern=${encodeURIComponent(yAxisDecimalPattern)}` : '') +
-								(interpolation === 'step' ? '&interpolation=step' : '') +
-								(service ? `&service=${encodeURIComponent(service)}` : '');
+			try {
+				const hashUrl = `/api/chart-hash?item=${encodeURIComponent(item)}&period=${encodeURIComponent(period)}&mode=${mode}` +
+					(title ? `&title=${encodeURIComponent(title)}` : '') +
+					(legend !== 'auto' ? `&legend=${legend}` : '') +
+					(forceAsItem ? `&forceasitem=${forceAsItem}` : '') +
+					(yAxisDecimalPattern ? `&yAxisDecimalPattern=${encodeURIComponent(yAxisDecimalPattern)}` : '') +
+					(interpolation === 'step' ? '&interpolation=step' : '') +
+					(service ? `&service=${encodeURIComponent(service)}` : '');
 				const res = await fetch(hashUrl, { cache: 'no-store' });
 				if (!res.ok) continue;
 				const data = await res.json();
 				if (!data.hash) continue;
 
-					// On first check, read hash from iframe and compare
-					let swapped = false;
-					if (!prevHash) {
-						const iframeHash = readIframeChartHash(iframe);
-						if (iframeHash !== data.hash) {
-							// Skip if user is interacting with chart
-							if (!isChartBeingInteracted(iframe)) {
-								const newUrl = buildChartReloadUrl(chartUrl, data.hash);
-								swapChartIframe(iframe, newUrl, chartUrl);
+				if (periodOffset > 0) {
+					// /api/chart-hash has already regenerated the latest-period HTML when
+					// its appearance hash changed. Remember that hash without replacing
+					// the historical iframe the user deliberately selected.
+					if (MAX_CHART_HASHES > 0) {
+						setBoundedCache(chartHashes, cacheKey, data.hash, MAX_CHART_HASHES);
+					}
+					continue;
+				}
+
+				// On first check, read hash from iframe and compare
+				let swapped = false;
+				if (!prevHash) {
+					const iframeHash = readIframeChartHash(iframe);
+					if (iframeHash !== data.hash) {
+						// Skip if user is interacting with chart
+						if (!isChartBeingInteracted(iframe)) {
+							const newUrl = buildChartReloadUrl(runtimeChartUrl, data.hash);
+							swapChartIframe(iframe, newUrl, runtimeChartUrl);
 							swapped = true;
 						}
 					} else {
@@ -13442,8 +13478,8 @@ async function checkChartHashes() {
 				} else if (prevHash !== data.hash) {
 					// Skip if user is interacting with chart
 					if (!isChartBeingInteracted(iframe)) {
-						const newUrl = buildChartReloadUrl(chartUrl, data.hash);
-						swapChartIframe(iframe, newUrl, chartUrl);
+						const newUrl = buildChartReloadUrl(runtimeChartUrl, data.hash);
+						swapChartIframe(iframe, newUrl, runtimeChartUrl);
 						swapped = true;
 					}
 				} else {
