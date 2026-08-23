@@ -11060,6 +11060,119 @@ app.get('/api/presence', async (req, res) => {
 	res.json({ ok: true, markers: markers });
 });
 
+const NEARBY_DAYS_PAGE_SIZE = 5;
+// Bbox row count at which the endpoint switches from one GROUP BY over the bbox
+// to the timestamp-index day walk; the probe scan is capped at this + 1 rows.
+const NEARBY_DAYS_SPARSE_ROW_CAP = 20000;
+// Day-walk cost grows with offset (one step per day walked over), so absurd
+// offsets fall back to the flat-cost aggregate even over a dense bbox.
+const NEARBY_DAYS_DEEP_OFFSET_CAP = 250;
+const NEARBY_DAYS_WALK_START_MS = 4102444800000; // 2100-01-01T00:00:00Z
+
+function nearbyDayKeyFromValue(value) {
+	if (value instanceof Date) {
+		return value.getFullYear() + '-' + String(value.getMonth() + 1).padStart(2, '0') + '-' + String(value.getDate()).padStart(2, '0');
+	}
+	return String(value).slice(0, 10);
+}
+
+// Local-time day bounds, matching how MySQL's DATE(timestamp) buckets rows
+// (mysql2 serializes Date params in the connection's local timezone).
+function nearbyDayBounds(ts) {
+	return {
+		start: new Date(ts.getFullYear(), ts.getMonth(), ts.getDate()),
+		next: new Date(ts.getFullYear(), ts.getMonth(), ts.getDate() + 1),
+	};
+}
+
+// Sparse path: the bbox holds few enough rows that a single exact aggregation
+// over the (username, lat, lon) index is milliseconds. Returns every day, so
+// paging is a plain slice.
+async function computeNearbyDaysAggregate(runQuery, ctx) {
+	const { username, offset, bboxArgs, circleArgs } = ctx;
+	const rows = await runQuery(
+		'SELECT DATE(timestamp) AS day_date, COUNT(*) AS cnt, MAX(timestamp) AS newest_ts FROM log_gps WHERE username = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND ST_Distance_Sphere(POINT(lon, lat), POINT(?, ?)) <= ? GROUP BY day_date ORDER BY day_date DESC',
+		[username, ...bboxArgs, ...circleArgs]
+	);
+	const days = [];
+	for (const row of rows.slice(offset, offset + NEARBY_DAYS_PAGE_SIZE)) {
+		const pointRows = await runQuery(
+			'SELECT lat, lon FROM log_gps WHERE username = ? AND timestamp = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND ST_Distance_Sphere(POINT(lon, lat), POINT(?, ?)) <= ? LIMIT 1',
+			[username, row.newest_ts, ...bboxArgs, ...circleArgs]
+		);
+		const point = pointRows[0] || {};
+		days.push({ key: nearbyDayKeyFromValue(row.day_date), count: Number(row.cnt), lat: point.lat, lon: point.lon, timestamp: row.newest_ts });
+	}
+	return { days, hasMore: rows.length > offset + NEARBY_DAYS_PAGE_SIZE };
+}
+
+// Dense path: aggregating the whole bbox would scan every row in it (~0.5s over
+// a dense cluster), so instead walk (username, timestamp) newest-first - each step lands
+// on the newest qualifying row of the next-older day, costing rows-per-step, not
+// rows-in-bbox. FORCE INDEX keeps the optimizer off the bbox index, whose range
+// covers most of the table in exactly the cases that reach this path.
+async function computeNearbyDaysDenseWalk(runQuery, ctx) {
+	const { username, offset, bboxArgs, circleArgs } = ctx;
+	const oldestRows = await runQuery(
+		'SELECT timestamp AS ts FROM log_gps FORCE INDEX (idx_username_timestamp) WHERE username = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND ST_Distance_Sphere(POINT(lon, lat), POINT(?, ?)) <= ? ORDER BY timestamp ASC LIMIT 1',
+		[username, ...bboxArgs, ...circleArgs]
+	);
+	if (!oldestRows.length) {
+		return { days: [], hasMore: false };
+	}
+	// Oldest qualifying row bounds the walk: once the boundary passes it there are
+	// no older days, which also spares the terminal full-index step.
+	const oldestTs = oldestRows[0].ts;
+	const wanted = offset + NEARBY_DAYS_PAGE_SIZE;
+	const found = [];
+	let boundary = new Date(NEARBY_DAYS_WALK_START_MS);
+	while (found.length < wanted && boundary > oldestTs) {
+		const stepRows = await runQuery(
+			'SELECT timestamp AS ts, lat, lon FROM log_gps FORCE INDEX (idx_username_timestamp) WHERE username = ? AND timestamp < ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND ST_Distance_Sphere(POINT(lon, lat), POINT(?, ?)) <= ? ORDER BY timestamp DESC LIMIT 1',
+			[username, boundary, ...bboxArgs, ...circleArgs]
+		);
+		if (!stepRows.length) break;
+		found.push(stepRows[0]);
+		boundary = nearbyDayBounds(stepRows[0].ts).start;
+	}
+	const days = [];
+	for (const row of found.slice(offset, offset + NEARBY_DAYS_PAGE_SIZE)) {
+		const bounds = nearbyDayBounds(row.ts);
+		const cntRows = await runQuery(
+			'SELECT COUNT(*) AS cnt FROM log_gps WHERE username = ? AND timestamp >= ? AND timestamp < ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND ST_Distance_Sphere(POINT(lon, lat), POINT(?, ?)) <= ?',
+			[username, bounds.start, bounds.next, ...bboxArgs, ...circleArgs]
+		);
+		days.push({ key: nearbyDayKeyFromValue(row.ts), count: cntRows[0] ? Number(cntRows[0].cnt) : 0, lat: row.lat, lon: row.lon, timestamp: row.ts });
+	}
+	// After the loop `boundary` is the start of the last found day; a qualifying
+	// row before it means at least one older day exists.
+	return { days, hasMore: found.length >= wanted && oldestTs < boundary };
+}
+
+async function computeNearbyDays(runQuery, params) {
+	const { username, lat, lon, radius, offset } = params;
+	const latDelta = radius / 111111;
+	const cosLat = Math.cos(lat * Math.PI / 180);
+	const lonDelta = cosLat > 1e-6 ? latDelta / cosLat : 360;
+	const ctx = {
+		username,
+		offset,
+		bboxArgs: [lat - latDelta, lat + latDelta, lon - lonDelta, lon + lonDelta],
+		circleArgs: [lon, lat, radius],
+	};
+	// Bounded index-only probe: the inner LIMIT caps the scan itself, so this is
+	// a few ms at any density and decides which strategy is cheap here.
+	const probeRows = await runQuery(
+		'SELECT COUNT(*) AS c FROM (SELECT 1 FROM log_gps WHERE username = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? LIMIT ' + (NEARBY_DAYS_SPARSE_ROW_CAP + 1) + ') t',
+		[username, ...ctx.bboxArgs]
+	);
+	const bboxRows = probeRows[0] ? Number(probeRows[0].c) : 0;
+	if (bboxRows <= NEARBY_DAYS_SPARSE_ROW_CAP || offset > NEARBY_DAYS_DEEP_OFFSET_CAP) {
+		return computeNearbyDaysAggregate(runQuery, ctx);
+	}
+	return computeNearbyDaysDenseWalk(runQuery, ctx);
+}
+
 app.get('/api/presence/nearby-days', async (req, res) => {
 	const username = req.ohProxyUser;
 	if (!username) {
@@ -11091,52 +11204,25 @@ app.get('/api/presence/nearby-days', async (req, res) => {
 		return res.status(400).json({ ok: false, error: 'Invalid radius' });
 	}
 
-	const latDelta = radius / 111111;
-	const cosLat = Math.cos(lat * Math.PI / 180);
-	const lonDelta = cosLat > 1e-6 ? latDelta / cosLat : 360;
-	const latMin = lat - latDelta;
-	const latMax = lat + latDelta;
-	const lonMin = lon - lonDelta;
-	const lonMax = lon + lonDelta;
-
-	let rows;
+	let result;
 	try {
-		rows = await queryWithTimeout(conn, 'SELECT lat, lon, timestamp, DATE(timestamp) AS day_date FROM log_gps WHERE username = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT 5000', [username, latMin, latMax, lonMin, lonMax]);
+		result = await computeNearbyDays((sql, sqlParams) => queryWithTimeout(conn, sql, sqlParams), { username, lat, lon, radius, offset });
 	} catch (err) {
 		logMessage(`[Nearby Days API] Query failed: ${err.message || err}`);
 		return res.status(504).json({ ok: false, error: 'Query failed' });
 	}
 
-	const toRad = (deg) => deg * Math.PI / 180;
-	const R = 6371000;
-	const dayData = {};
-	for (const row of rows) {
-		const dLat = toRad(row.lat - lat);
-		const dLon = toRad(row.lon - lon);
-		const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat)) * Math.cos(toRad(row.lat)) * Math.sin(dLon / 2) ** 2;
-		const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-		if (dist <= radius) {
-			const key = row.day_date instanceof Date ? row.day_date.getFullYear() + '-' + String(row.day_date.getMonth() + 1).padStart(2, '0') + '-' + String(row.day_date.getDate()).padStart(2, '0') : String(row.day_date);
-			if (!dayData[key]) {
-				dayData[key] = { count: 0, lat: row.lat, lon: row.lon, timestamp: row.timestamp };
-			}
-			dayData[key].count++;
-		}
-	}
-
-	const sorted = Object.entries(dayData).sort((a, b) => b[0].localeCompare(a[0]));
-	const page = sorted.slice(offset, offset + 5);
 	const dateFormat = liveConfig.clientConfig?.dateFormat || 'MMM Do, YYYY';
 	const timeFormat = liveConfig.clientConfig?.timeFormat || 'H:mm:ss';
-	const days = page.map(([dateStr, data]) => {
-		const parts = dateStr.split('-');
-		const d = data.timestamp instanceof Date ? data.timestamp : new Date(data.timestamp);
-		const formattedDate = formatDT(d, dateFormat);
-		const formattedTime = formatDT(d, timeFormat);
-		return { year: parseInt(parts[0], 10), month: parseInt(parts[1], 10) - 1, day: parseInt(parts[2], 10), label: dateStr, count: data.count, lat: data.lat, lon: data.lon, tooltip: '<div class="tt-date">' + formattedDate + '</div><div class="tt-time">' + formattedTime + '</div>' };
+	const days = result.days.map((d) => {
+		const parts = d.key.split('-');
+		const dt = d.timestamp instanceof Date ? d.timestamp : new Date(d.timestamp);
+		const formattedDate = formatDT(dt, dateFormat);
+		const formattedTime = formatDT(dt, timeFormat);
+		return { year: parseInt(parts[0], 10), month: parseInt(parts[1], 10) - 1, day: parseInt(parts[2], 10), label: d.key, count: d.count, lat: d.lat, lon: d.lon, tooltip: '<div class="tt-date">' + formattedDate + '</div><div class="tt-time">' + formattedTime + '</div>' };
 	});
 
-	res.json({ ok: true, days, hasMore: sorted.length > offset + 5 });
+	res.json({ ok: true, days, hasMore: result.hasMore });
 });
 
 app.get('/presence', async (req, res) => {
@@ -12354,7 +12440,7 @@ var ctxMenu=document.getElementById('ctx-menu');
 var ctxLat=0,ctxLon=0,ctxOffset=0,ctxRadius=100,ctxWheelNavUntil=0;
 var ctxMenuOffsetX=0,ctxMenuOffsetY=0;
 
-function closeCtxMenu(){ctxMenu.style.display='none';ctxWheelNavUntil=0;previewLayer.removeAllFeatures();hidePreviewTooltip();document.getElementById('map').style.cursor=''}
+function closeCtxMenu(){abortNearbyDaysRequest();ctxMenu.style.display='none';ctxWheelNavUntil=0;previewLayer.removeAllFeatures();hidePreviewTooltip();document.getElementById('map').style.cursor=''}
 
 function getCtxMenuPosition(){return{x:parseInt(ctxMenu.style.left,10)||0,y:parseInt(ctxMenu.style.top,10)||0}}
 
@@ -12485,6 +12571,8 @@ syncCtxMenuOffsetToAnchor();
 },true);
 document.addEventListener('mouseup',function(){ctxDragActive=false},true)
 
+var ctxReqSeq=0,ctxReqCtl=null;
+function abortNearbyDaysRequest(){ctxReqSeq++;if(ctxReqCtl){ctxReqCtl.abort();ctxReqCtl=null}}
 function loadNearbyDays(options){
 options=options||{};
 if(!options.preserveEntries&&!ctxDragging){
@@ -12492,7 +12580,11 @@ renderCtxMenuBody('<div class="ctx-loading">Loading\\u2026</div>');
 }
 ctxMenu.style.display='block';
 positionCtxMenuFromAnchor();
-fetch('/api/presence/nearby-days?lat='+ctxLat+'&lon='+ctxLon+'&offset='+ctxOffset+'&radius='+ctxRadius).then(function(r){return r.json()}).then(function(data){
+if(ctxReqCtl)ctxReqCtl.abort();
+ctxReqCtl=window.AbortController?new AbortController():null;
+var seq=++ctxReqSeq;
+fetch('/api/presence/nearby-days?lat='+ctxLat+'&lon='+ctxLon+'&offset='+ctxOffset+'&radius='+ctxRadius,ctxReqCtl?{signal:ctxReqCtl.signal}:undefined).then(function(r){return r.json()}).then(function(data){
+if(seq!==ctxReqSeq)return;
 if(!data.ok){renderCtxMenuBody('<div class="ctx-empty">'+(data.error||'Request failed')+'</div>');positionCtxMenuFromAnchor();previewLayer.removeAllFeatures();return}
 var html='';
 if(!data.days.length){renderCtxMenuBody('<div class="ctx-empty">No entries nearby</div>');positionCtxMenuFromAnchor();previewLayer.removeAllFeatures();return}
@@ -12528,7 +12620,9 @@ if(newerBtn)newerBtn.addEventListener('click',function(e){e.stopPropagation();ct
 var olderBtn=ctxMenu.querySelector('.ctx-older');
 if(olderBtn)olderBtn.addEventListener('click',function(e){e.stopPropagation();ctxOffset+=5;loadNearbyDays({preserveEntries:true})});
 positionCtxMenuFromAnchor();
-}).catch(function(){renderCtxMenuBody('<div class="ctx-empty">Request failed</div>');positionCtxMenuFromAnchor();previewLayer.removeAllFeatures()});
+}).catch(function(){
+if(seq!==ctxReqSeq)return;
+renderCtxMenuBody('<div class="ctx-empty">Request failed</div>');positionCtxMenuFromAnchor();previewLayer.removeAllFeatures()});
 }
 
 function loadDayFromCtx(month,day,year){
