@@ -11354,6 +11354,9 @@ ${proxyTiles
 	html,body{width:100%;height:100%;overscroll-behavior:none}
 	html,body,#presence-root,#map{overscroll-behavior:none}
 	.tooltip{position:absolute;background:#f1f2f9;border:1px solid #ccccd1;border-radius:10px;padding:0.5rem 0.75rem;font-size:.7rem;line-height:1.5;font-family:'Rubik',sans-serif;color:#0f172a;pointer-events:none;user-select:none;z-index:100;white-space:nowrap;box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.08),0 4px 6px -4px rgb(0 0 0 / 0.05)}
+	.map-anchored{transition:opacity 120ms ease}
+	#presence-root.map-zooming .map-anchored{visibility:hidden;opacity:0;transition:none}
+	#presence-root.map-zooming .map-anchored.zoom-hold-exempt{visibility:visible;opacity:1}
 .tooltip .tt-date{font-weight:500}
 .tooltip .tt-time{font-weight:300;margin-top:0.125rem}
 .tooltip .tt-fromto{display:inline-block;width:4.5em;margin-right:0.375em;font-size:0.5625rem;font-weight:400;letter-spacing:0.08em;text-transform:uppercase;color:rgba(19,21,54,0.5)}
@@ -11417,10 +11420,10 @@ ${proxyTiles
 	<body>
 	<div id="presence-root">
 	<div id="map"></div>
-	${singlePointMode ? '' : `<div id="red-tooltip" class="tooltip" role="tooltip" aria-hidden="true"></div>
-	<div id="hover-tooltip" class="tooltip" role="tooltip" aria-hidden="true"></div>
+	${singlePointMode ? '' : `<div id="red-tooltip" class="tooltip map-anchored" role="tooltip" aria-hidden="true"></div>
+	<div id="hover-tooltip" class="tooltip map-anchored" role="tooltip" aria-hidden="true"></div>
 	<div id="preview-tooltip" class="tooltip" role="tooltip" aria-hidden="true"></div>
-	<div id="ctx-menu"></div>`}
+	<div id="ctx-menu" class="map-anchored"></div>`}
 	${proxyTiles ? '<div id="map-data-age">map data …</div>' : ''}
 	<div id="map-controls">
 	<button class="map-ctrl-btn" id="zoom-in" type="button" data-oh-tooltip="Zoom in" aria-label="Zoom in">+</button>
@@ -11934,6 +11937,58 @@ showBlueAndHandleClick(f,null,true);
 	map.events.register('moveend',map,syncZoomButtonState);
 	map.events.register('zoomend',map,syncZoomButtonState);
 	map.events.register('updatesize',map,syncZoomButtonState);
+
+	// Zoom overlay hold: OL 2.13's zoomTo tween only CSS-scales the layer
+	// container and fires no map events until it settles, so viewport-anchored
+	// overlays would sit at stale pixels through the animation. Hide them the
+	// moment a zoom starts, then reposition and fade back in once it settles.
+	// Pointer-follow tooltips are dismissed outright; a ctx menu being dragged
+	// is cursor-glued, not map-anchored, so it stays visible.
+	var ZOOM_HOLD_WATCHDOG_MS=2000,ZOOM_HOLD_REVEAL_MS=120;
+	var zoomHoldRoot=document.getElementById('presence-root');
+	var zoomHoldActive=false,zoomHoldWatchdog=0,zoomHoldReveal=0;
+	function armZoomHoldWatchdog(){
+	clearTimeout(zoomHoldWatchdog);
+	zoomHoldWatchdog=setTimeout(endZoomOverlayHold,ZOOM_HOLD_WATCHDOG_MS);
+	}
+	function beginZoomOverlayHold(){
+	if(singlePointMode)return;
+	clearTimeout(zoomHoldReveal);zoomHoldReveal=0;
+	armZoomHoldWatchdog();
+	if(zoomHoldActive)return;
+	zoomHoldActive=true;
+	hidePreviewTooltip();
+	if(!blueTooltipPinned)hideTooltip(hoverTooltip);
+	if(ctxMenu&&(ctxDragging||ctxDragActive))ctxMenu.classList.add('zoom-hold-exempt');
+	zoomHoldRoot.classList.add('map-zooming');
+	}
+	function endZoomOverlayHold(){
+	clearTimeout(zoomHoldWatchdog);zoomHoldWatchdog=0;
+	clearTimeout(zoomHoldReveal);zoomHoldReveal=0;
+	if(!zoomHoldActive)return;
+	zoomHoldActive=false;
+	updateAnchoredTooltips();
+	zoomHoldRoot.classList.remove('map-zooming');
+	if(ctxMenu)ctxMenu.classList.remove('zoom-hold-exempt');
+	}
+	function scheduleZoomOverlayReveal(){
+	if(!zoomHoldActive)return;
+	clearTimeout(zoomHoldReveal);
+	zoomHoldReveal=setTimeout(endZoomOverlayHold,ZOOM_HOLD_REVEAL_MS);
+	}
+	var zoomToWithoutHold=map.zoomTo;
+	map.zoomTo=function(zoom){
+	if(map.isValidZoomLevel(zoom)&&zoom!==map.getZoom())beginZoomOverlayHold();
+	return zoomToWithoutHold.apply(map,arguments);
+	};
+	map.events.register('zoomend',map,scheduleZoomOverlayReveal);
+	map.events.register('moveend',map,scheduleZoomOverlayReveal);
+	mapEl.addEventListener('touchstart',function(e){
+	if(e.touches&&e.touches.length>=2)beginZoomOverlayHold();
+	},{passive:true,capture:true});
+	mapEl.addEventListener('touchmove',function(e){
+	if(zoomHoldActive&&e.touches&&e.touches.length>=2)armZoomHoldWatchdog();
+	},{passive:true,capture:true});
 
 function zoomToMarkers(){
 var extent=vector.getDataExtent();

@@ -30,7 +30,7 @@ describe('Presence Single-Point Mode', () => {
 
 	it('conditionally removes search and context UI in single-point mode', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(server, /\$\{singlePointMode \? '' : `<div id="red-tooltip" class="tooltip" role="tooltip" aria-hidden="true"><\/div>/);
+		assert.match(server, /\$\{singlePointMode \? '' : `<div id="red-tooltip" class="tooltip map-anchored" role="tooltip" aria-hidden="true"><\/div>/);
 		assert.match(server, /\$\{singlePointMode \? '' : `<div id="search-modal">/);
 		assert.match(server, /if\(!singlePointMode\)\{\s*var presenceRoot=document\.getElementById\('presence-root'\);\s*var searchModal=document\.getElementById\('search-modal'\);/);
 		assert.match(server, /searchModal\.addEventListener\('keydown'/);

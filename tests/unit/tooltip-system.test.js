@@ -113,7 +113,7 @@ describe('Shared tooltip system', () => {
 		const server = read('server.js');
 
 		assert.match(server, /id="chartNavTooltip"/);
-		assert.match(server, /id="hover-tooltip" class="tooltip"/);
+		assert.match(server, /id="hover-tooltip" class="tooltip map-anchored"/);
 		assert.match(server, /data-tooltip-message="No earlier data"/);
 		assert.match(app, /setControlTooltip\(el, text, \{ overflowSelector: '\.mapping-text' \}\);/);
 		assert.match(app, /setControlTooltip\(el, text\);\s*\n\s*\};/);
