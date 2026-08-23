@@ -293,6 +293,8 @@ module.exports = {
 				// due, then every intervalMs. Fetches are byte-range reads from
 				// the PMTiles archive at sourceUrl, drip-fed, and only for tiles
 				// not already stored - steady-state runs cost almost nothing.
+				// The presence map's manual "refresh map data" button triggers
+				// a one-off run even while this is disabled.
 				enabled: false,
 				// Buffer radius in kilometres around every visited coordinate (1-100).
 				radiusKm: 10,

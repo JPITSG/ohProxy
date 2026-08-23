@@ -41,6 +41,10 @@ describe('Input Surface Coverage', () => {
 			/const\s+visibility\s*=\s*safeText\(req\.body\.visibility\)\.trim\(\)\.toLowerCase\(\)\s*;/,
 			/const\s+visibilityUsersResult\s*=\s*normalizeVisibilityUsersInput\(req\.body\.visibilityUsers\)\s*;/,
 			/const\s+\{\s*command\s*\}\s*=\s*req\.body\s*;/,
+			// Tile viewport rectangle (age + manual refresh endpoints): parsed to
+			// integers and validated as a whole (zoom 0-19, in-grid bounds,
+			// ordered, <=1024 tiles) inside parseTileRectQuery before use.
+			/const\s+rect\s*=\s*parseTileRectQuery\(req\.query\)\s*;/,
 			/if\s*\(!Buffer\.isBuffer\(req\.body\)\s*\|\|\s*req\.body\.length\s*===\s*0\)/,
 			/ws\.send\(req\.body\)\s*;/,
 			/const\s+rawTheme\s*=\s*req\.query\?\.theme\s*;/,
@@ -69,13 +73,6 @@ describe('Input Surface Coverage', () => {
 			/const\s+month\s*=\s*parseInt\(req\.query\.month,\s*10\)\s*;/,
 			/const\s+day\s*=\s*parseInt\(req\.query\.day,\s*10\)\s*;/,
 			/const\s+year\s*=\s*parseInt\(req\.query\.year,\s*10\)\s*;/,
-			// Tile-age viewport rectangle: parsed to integers, then validated as a
-			// whole (zoom 0-19, in-grid bounds, ordered, <=1024 tiles) before use.
-			/const\s+z\s*=\s*parseInt\(req\.query\.z,\s*10\)\s*;/,
-			/const\s+x0\s*=\s*parseInt\(req\.query\.x0,\s*10\)\s*;/,
-			/const\s+x1\s*=\s*parseInt\(req\.query\.x1,\s*10\)\s*;/,
-			/const\s+y0\s*=\s*parseInt\(req\.query\.y0,\s*10\)\s*;/,
-			/const\s+y1\s*=\s*parseInt\(req\.query\.y1,\s*10\)\s*;/,
 			/const\s+lat\s*=\s*parseFloat\(req\.query\.lat\)\s*;/,
 			/const\s+lon\s*=\s*parseFloat\(req\.query\.lon\)\s*;/,
 			/const\s+offset\s*=\s*parseInt\(req\.query\.offset,\s*10\)\s*\|\|\s*0\s*;/,

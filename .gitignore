@@ -10,6 +10,7 @@ cache/ai/
 cache/weatherbit/
 cache/proxy/
 cache/tiles/
+cache/tiles-epoch
 cache/mvt/
 cache/render/
 video-previews/

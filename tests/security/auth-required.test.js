@@ -279,6 +279,7 @@ describe('Authentication Required Tests - HTML Mode', () => {
 			{ method: 'HEAD', path: '/tiles/15/16384/16383.png', description: 'Map tile proxy (HEAD)' },
 			{ method: 'GET', path: '/tiles/0/0/0.png', description: 'Map tile proxy (root tile)' },
 			{ method: 'GET', path: '/api/tiles/age?z=15&x0=0&x1=1&y0=0&y1=1', description: 'Tile data age API' },
+			{ method: 'POST', path: '/api/tiles/refresh?z=15&x0=0&x1=1&y0=0&y1=1', description: 'Tile data refresh API' },
 			{ method: 'GET', path: '/proxy?url=http://test', description: 'Proxy endpoint' },
 			{ method: 'GET', path: '/app.v123.js', description: 'App JS (versioned)' },
 			{ method: 'GET', path: '/tailwind.v123.css', description: 'Tailwind CSS (versioned)' },

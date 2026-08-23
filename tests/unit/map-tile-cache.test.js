@@ -532,9 +532,9 @@ describe('Map Tile Proxy Wiring', () => {
 	it('registers the primer as a background task gated on both toggles', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /registerBackgroundTask\('mvt-prime',\s*liveConfig\.mapTilesEnabled && liveConfig\.mapTilesPrimeEnabled \? liveConfig\.mapTilesPrimeIntervalMs : 0,\s*mvtPrimeTask\)/);
-		assert.match(server, /if \(!liveConfig\.mapTilesEnabled \|\| !liveConfig\.mapTilesPrimeEnabled\) return;/);
+		assert.match(server, /if \(!liveConfig\.mapTilesEnabled \|\| \(!liveConfig\.mapTilesPrimeEnabled && !forced\)\) return;/);
 		assert.match(server, /updateBackgroundTaskInterval\('mvt-prime',/);
-		assert.match(server, /shouldStop: \(\) => !liveConfig\.mapTilesEnabled \|\| !liveConfig\.mapTilesPrimeEnabled,/);
+		assert.match(server, /shouldStop: \(\) => !liveConfig\.mapTilesEnabled \|\| \(!liveConfig\.mapTilesPrimeEnabled && !forced\),/);
 	});
 
 	it('documents and validates the prime and render settings', () => {
@@ -573,15 +573,18 @@ describe('Map Tile Proxy Wiring', () => {
 		// Proxy mode: chip replaces the attribution (which stays for direct-OSM mode).
 		assert.match(server, /\$\{proxyTiles\s*\?\s*`\.olControlAttribution\{display:none!important\}/);
 		assert.match(server, /#map-data-age\{position:fixed;bottom:6px;right:8px/);
-		assert.match(server, /#map-data-age\.stale\{color:#c62828/);
+		assert.match(server, /#map-data-age\.fresh\{background:rgba\(78,183,128,0\.22\);color:#1c6b40\}/);
+		assert.match(server, /#map-data-age\.stale\{background:rgba\(198,40,40,0\.16\);color:#c62828/);
 		assert.match(server, /: `\.olControlAttribution\{position:fixed/, 'attribution stays visible in direct-OSM mode');
-		assert.match(server, /\$\{proxyTiles \? '<div id="map-data-age">map data …<\/div>' : ''\}/);
+		assert.match(server, /\$\{proxyTiles \? '<div id="map-data-age"><button id="map-data-refresh" type="button"/);
+		assert.match(server, /<span id="map-data-age-text">map data …<\/span><\/div>' : ''\}/);
 	});
 
 	it('wires the data-age chip to viewport changes and stale detection', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(server, /fetch\('\/api\/tiles\/age\?z='\+z\+'&x0='\+tx\(ex\.left\)\+'&x1='\+tx\(ex\.right\)\+'&y0='\+ty\(ex\.top\)\+'&y1='\+ty\(ex\.bottom\)\)/);
-		assert.match(server, /dataAgeEl\.classList\.toggle\('stale',d\.oldestAgeMs>d\.maxAgeMs\);/);
+		assert.match(server, /return 'z='\+z\+'&x0='\+tx\(ex\.left\)\+'&x1='\+tx\(ex\.right\)\+'&y0='\+ty\(ex\.top\)\+'&y1='\+ty\(ex\.bottom\);/);
+		assert.match(server, /fetch\('\/api\/tiles\/age\?'\+qs\)/);
+		assert.match(server, /dataAgeEl\.classList\.toggle\('stale',dataStale\);\s*dataAgeEl\.classList\.toggle\('fresh',!dataStale\);/);
 		assert.match(server, /map\.events\.register\('moveend',null,queueDataAge\);/);
 		assert.match(server, /map\.events\.register\('zoomend',null,queueDataAge\);/);
 		assert.match(server, /map\.layers\[0\]\.events\.register\('loadend',null,queueDataAge\);/);
@@ -596,8 +599,9 @@ describe('Map Tile Proxy Wiring', () => {
 		assert.match(body, /res\.status\(401\)\.json\(\{ ok: false, error: 'Unauthorized' \}\)/);
 		assert.match(body, /res\.status\(403\)\.json\(\{ ok: false, error: 'GPS tracking not enabled' \}\)/);
 		assert.match(body, /if \(!liveConfig\.mapTilesEnabled\)/);
-		assert.match(body, /\(x1 - x0 \+ 1\) \* \(y1 - y0 \+ 1\) <= 1024/);
+		assert.match(body, /const rect = parseTileRectQuery\(req\.query\);/);
 		assert.match(body, /res\.status\(400\)\.json\(\{ ok: false, error: 'Invalid tile range' \}\)/);
+		assert.match(server, /function parseTileRectQuery\(query\) \{[\s\S]*?\(x1 - x0 \+ 1\) \* \(y1 - y0 \+ 1\) <= 1024[\s\S]*?\}/);
 		// Age comes from the authoritative data: vector source first, raster fallback.
 		assert.match(body, /const src = mvtStore\.renderSourceFor\(z, x, y\);/);
 		assert.match(body, /ageMs = mvtStore\.ageMs\(src\.z, src\.x, src\.y\);/);
@@ -613,7 +617,7 @@ describe('Map Tile Proxy Wiring', () => {
 	it('points the presence map at the local route only when enabled', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /const proxyTiles = liveConfig\.mapTilesEnabled === true;/);
-		assert.match(server, /\? '\["\/tiles\/\$\{z\}\/\$\{x\}\/\$\{y\}\.png"\]'/);
+		assert.match(server, /\? '\["\/tiles\/\$\{z\}\/\$\{x\}\/\$\{y\}\.png\?e=' \+ tilesEpoch \+ '"\]'/);
 		assert.match(server, /: '\["\/\/a\.tile\.openstreetmap\.org\/\$\{z\}\/\$\{x\}\/\$\{y\}\.png"/);
 		assert.match(server, /map\.addLayer\(new OpenLayers\.Layer\.OSM\("OSM",\$\{tileUrlsJson\}\)\);/);
 	});

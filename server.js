@@ -2731,6 +2731,17 @@ function updateBackgroundTaskInterval(name, intervalMs) {
 	return true;
 }
 
+function triggerBackgroundTaskNow(name) {
+	const task = backgroundTasks.find((entry) => entry.name === name);
+	if (!task || task.running) return false;
+	if (task.timer) {
+		clearTimeout(task.timer);
+		task.timer = null;
+	}
+	runBackgroundTask(task);
+	return true;
+}
+
 function scheduleBackgroundTask(task, delayMs) {
 	if (!task || !task.intervalMs || task.intervalMs <= 0) return;
 	if (task.timer) clearTimeout(task.timer);
@@ -11318,7 +11329,7 @@ app.get('/presence', async (req, res) => {
 	// exists purely to work around per-host browser connection limits).
 	const proxyTiles = liveConfig.mapTilesEnabled === true;
 	const tileUrlsJson = proxyTiles
-		? '["/tiles/${z}/${x}/${y}.png"]'
+		? '["/tiles/${z}/${x}/${y}.png?e=' + tilesEpoch + '"]'
 		: '["//a.tile.openstreetmap.org/${z}/${x}/${y}.png","//b.tile.openstreetmap.org/${z}/${x}/${y}.png","//c.tile.openstreetmap.org/${z}/${x}/${y}.png"]';
 
 	const html = `<!DOCTYPE html>
@@ -11333,8 +11344,13 @@ app.get('/presence', async (req, res) => {
 @font-face{font-family:'Rubik';src:url('/fonts/rubik-500.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
 ${proxyTiles
 		? `.olControlAttribution{display:none!important}
-	#map-data-age{position:fixed;bottom:6px;right:8px;z-index:90;font:300 10px/1.5 'Rubik',sans-serif;color:rgba(19,21,54,0.55);background:rgba(245,246,250,0.75);padding:1px 8px;border-radius:8px;user-select:none;transition:color .3s ease}
-	#map-data-age.stale{color:#c62828;font-weight:400}`
+	#map-data-age{position:fixed;bottom:6px;right:8px;z-index:90;font:300 10px/1.5 'Rubik',sans-serif;color:rgba(19,21,54,0.55);background:rgba(245,246,250,0.75);padding:1px 8px;border-radius:8px;user-select:none;transition:color .3s ease,background-color .3s ease;display:flex;align-items:center;gap:5px}
+	#map-data-age.fresh{background:rgba(78,183,128,0.22);color:#1c6b40}
+	#map-data-age.stale{background:rgba(198,40,40,0.16);color:#c62828;font-weight:400}
+	#map-data-refresh{background:none;border:none;padding:3px;margin:-3px 0;cursor:pointer;color:inherit;display:flex;align-items:center}
+	#map-data-refresh svg{width:11px;height:11px;fill:currentColor}
+	#map-data-refresh.spinning svg{animation:map-data-spin .8s ease}
+	@keyframes map-data-spin{to{transform:rotate(360deg)}}`
 		: `.olControlAttribution{position:fixed!important;top:auto!important;left:auto!important;bottom:6px!important;right:8px!important;z-index:90;font:300 10px/1.5 'Rubik',sans-serif;color:rgba(19,21,54,0.55);background:rgba(245,246,250,0.75);padding:1px 8px;border-radius:8px}
 	.olControlAttribution a{color:rgba(19,21,54,0.7);text-decoration:none}`}
 .olControlZoom{display:none!important}
@@ -11427,7 +11443,7 @@ ${proxyTiles
 	<div id="hover-tooltip" class="tooltip map-anchored" role="tooltip" aria-hidden="true"></div>
 	<div id="preview-tooltip" class="tooltip" role="tooltip" aria-hidden="true"></div>
 	<div id="ctx-menu" class="map-anchored"></div>`}
-	${proxyTiles ? '<div id="map-data-age">map data …</div>' : ''}
+	${proxyTiles ? '<div id="map-data-age"><button id="map-data-refresh" type="button" data-oh-tooltip="Refresh map data for this area" aria-label="Refresh map data for this area"><svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></svg></button><span id="map-data-age-text">map data …</span></div>' : ''}
 	<div id="map-controls">
 	<button class="map-ctrl-btn" id="zoom-in" type="button" data-oh-tooltip="Zoom in" aria-label="Zoom in">+</button>
 	<button class="map-ctrl-btn" id="zoom-home" type="button" data-oh-tooltip="Center map" aria-label="Center map"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></button>
@@ -11481,8 +11497,13 @@ vector.addFeatures(feature);
 	map.addLayer(vector);
 
 	${proxyTiles ? `// Data-age chip: shows how old the oldest map data in the current view
-	// is, red once anything on screen exceeds the configured maximum age.
+	// is - green while everything on screen is within the configured maximum
+	// age, red once anything exceeds it. The refresh button marks the visible
+	// area stale server-side, so the backend re-pulls it and the next page
+	// load refetches the tiles; the marked age shows red until fresh data lands.
 	var dataAgeEl=document.getElementById('map-data-age');
+	var dataAgeText=document.getElementById('map-data-age-text');
+	var dataAgeRefreshBtn=document.getElementById('map-data-refresh');
 	var dataAgeTimer=null;
 	function fmtDataAge(ms){
 	var h=ms/3600000;
@@ -11490,24 +11511,43 @@ vector.addFeatures(feature);
 	if(h<48)return Math.round(h)+'h';
 	return Math.round(h/24)+'d';
 	}
-	function refreshDataAge(){
-	if(!dataAgeEl||!map.getExtent())return;
+	function dataAgeTileRect(){
+	if(!map.getExtent())return null;
 	var z=map.getZoom();
 	var ex=map.getExtent().clone().transform(proj,wgs84);
 	var n=Math.pow(2,z);
 	function tx(lon){return Math.max(0,Math.min(n-1,Math.floor((lon+180)/360*n)))}
 	function ty(lat){var lr=Math.max(-85.0511,Math.min(85.0511,lat))*Math.PI/180;return Math.max(0,Math.min(n-1,Math.floor((1-Math.log(Math.tan(lr)+1/Math.cos(lr))/Math.PI)/2*n)))}
-	fetch('/api/tiles/age?z='+z+'&x0='+tx(ex.left)+'&x1='+tx(ex.right)+'&y0='+ty(ex.top)+'&y1='+ty(ex.bottom))
+	return 'z='+z+'&x0='+tx(ex.left)+'&x1='+tx(ex.right)+'&y0='+ty(ex.top)+'&y1='+ty(ex.bottom);
+	}
+	function refreshDataAge(){
+	if(!dataAgeEl)return;
+	var qs=dataAgeTileRect();
+	if(!qs)return;
+	fetch('/api/tiles/age?'+qs)
 	.then(function(r){return r.json()})
 	.then(function(d){
 	if(!d||!d.ok||!dataAgeEl)return;
-	if(d.oldestAgeMs===null){dataAgeEl.textContent='map data \\u2026';dataAgeEl.classList.remove('stale');return}
-	dataAgeEl.textContent='map data '+fmtDataAge(d.oldestAgeMs)+' old';
-	dataAgeEl.classList.toggle('stale',d.oldestAgeMs>d.maxAgeMs);
+	if(d.oldestAgeMs===null){dataAgeText.textContent='map data \\u2026';dataAgeEl.classList.remove('stale');dataAgeEl.classList.remove('fresh');return}
+	dataAgeText.textContent='map data '+fmtDataAge(d.oldestAgeMs)+' old';
+	var dataStale=d.oldestAgeMs>d.maxAgeMs;
+	dataAgeEl.classList.toggle('stale',dataStale);
+	dataAgeEl.classList.toggle('fresh',!dataStale);
 	})
 	.catch(function(){});
 	}
 	function queueDataAge(){clearTimeout(dataAgeTimer);dataAgeTimer=setTimeout(refreshDataAge,400)}
+	if(dataAgeRefreshBtn)dataAgeRefreshBtn.addEventListener('click',function(){
+	var qs=dataAgeTileRect();
+	if(!qs||dataAgeRefreshBtn.classList.contains('spinning'))return;
+	dataAgeRefreshBtn.classList.add('spinning');
+	setTimeout(function(){dataAgeRefreshBtn.classList.remove('spinning')},850);
+	fetch('/api/tiles/refresh?'+qs,{method:'POST'}).then(function(r){return r.json()}).then(function(){
+	refreshDataAge();
+	setTimeout(refreshDataAge,5000);
+	setTimeout(refreshDataAge,20000);
+	}).catch(function(){});
+	});
 	map.events.register('moveend',null,queueDataAge);
 	map.events.register('zoomend',null,queueDataAge);
 	map.layers[0].events.register('loadend',null,queueDataAge);
@@ -13396,6 +13436,24 @@ const mapTileCache = createTileCache({
 
 const mvtStore = createMvtStore({ baseDir: MVT_CACHE_DIR, fs, log: (message) => logMessage(message) });
 
+// Tile URL epoch: embedded in the presence map's tile URLs (?e=N) and bumped by
+// manual map-data refreshes, so browsers drop their long-lived cached tiles on
+// the next page load. Persisted so a restart cannot resurrect stale caches.
+const TILES_EPOCH_FILE = path.join(__dirname, 'cache', 'tiles-epoch');
+let tilesEpoch = 0;
+try {
+	tilesEpoch = parseInt(fs.readFileSync(TILES_EPOCH_FILE, 'utf8'), 10) || 0;
+} catch {}
+function bumpTilesEpoch() {
+	tilesEpoch += 1;
+	try {
+		fs.writeFileSync(TILES_EPOCH_FILE, String(tilesEpoch));
+	} catch (err) {
+		logMessage(`[MapTiles] Failed to persist tile epoch: ${err.message || err}`);
+	}
+	return tilesEpoch;
+}
+
 let tileRenderer = null;
 function getTileRenderer() {
 	if (!tileRenderer) {
@@ -13533,6 +13591,21 @@ app.get(/^\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})\.png$/, async (req, res) => {
 	res.send(result.body);
 });
 
+// Viewport tile rectangle shared by the data-age and manual-refresh endpoints.
+function parseTileRectQuery(query) {
+	const z = parseInt(query.z, 10);
+	const x0 = parseInt(query.x0, 10);
+	const x1 = parseInt(query.x1, 10);
+	const y0 = parseInt(query.y0, 10);
+	const y1 = parseInt(query.y1, 10);
+	const limit = Number.isInteger(z) && z >= 0 && z <= 19 ? 2 ** z : 0;
+	const valid = limit > 0
+		&& [x0, x1, y0, y1].every((v) => Number.isInteger(v) && v >= 0 && v < limit)
+		&& x0 <= x1 && y0 <= y1
+		&& (x1 - x0 + 1) * (y1 - y0 + 1) <= 1024;
+	return valid ? { z, x0, x1, y0, y1 } : null;
+}
+
 // Data age for a viewport tile rectangle: feeds the presence map's data-age
 // chip. Age is measured against the AUTHORITATIVE data for each tile - the
 // vector tile a render derives from when primed, else the cached raster copy.
@@ -13548,19 +13621,11 @@ app.get('/api/tiles/age', (req, res) => {
 		return res.status(404).json({ ok: false, error: 'Not found' });
 	}
 
-	const z = parseInt(req.query.z, 10);
-	const x0 = parseInt(req.query.x0, 10);
-	const x1 = parseInt(req.query.x1, 10);
-	const y0 = parseInt(req.query.y0, 10);
-	const y1 = parseInt(req.query.y1, 10);
-	const limit = Number.isInteger(z) && z >= 0 && z <= 19 ? 2 ** z : 0;
-	const valid = limit > 0
-		&& [x0, x1, y0, y1].every((v) => Number.isInteger(v) && v >= 0 && v < limit)
-		&& x0 <= x1 && y0 <= y1
-		&& (x1 - x0 + 1) * (y1 - y0 + 1) <= 1024;
-	if (!valid) {
+	const rect = parseTileRectQuery(req.query);
+	if (!rect) {
 		return res.status(400).json({ ok: false, error: 'Invalid tile range' });
 	}
+	const { z, x0, x1, y0, y1 } = rect;
 
 	let oldestAgeMs = null;
 	let known = 0;
@@ -13587,6 +13652,64 @@ app.get('/api/tiles/age', (req, res) => {
 
 	res.setHeader('Cache-Control', 'no-store');
 	res.json({ ok: true, oldestAgeMs, maxAgeMs: liveConfig.mapTilesMaxAgeDays * 86400000, known, unknown });
+});
+
+// Manual refresh for a viewport tile rectangle: backdates the authoritative
+// data for each tile past the configured max age, so the raster tier refreshes
+// on next serve and a forced primer run re-pulls the vector sources (renders
+// follow automatically once their source is newer). The epoch bump makes
+// browsers drop their cached tiles on the next page load.
+app.post('/api/tiles/refresh', (req, res) => {
+	if (!req.ohProxyUser) {
+		return res.status(401).json({ ok: false, error: 'Unauthorized' });
+	}
+	if (!req.ohProxyUserData?.trackgps) {
+		return res.status(403).json({ ok: false, error: 'GPS tracking not enabled' });
+	}
+	if (!liveConfig.mapTilesEnabled) {
+		return res.status(404).json({ ok: false, error: 'Not found' });
+	}
+
+	const rect = parseTileRectQuery(req.query);
+	if (!rect) {
+		return res.status(400).json({ ok: false, error: 'Invalid tile range' });
+	}
+
+	const staleTime = new Date(Date.now() - (liveConfig.mapTilesMaxAgeDays + 1) * 86400000);
+	const backdatedSources = new Set();
+	let invalidated = 0;
+	let vectorTouched = false;
+	for (let x = rect.x0; x <= rect.x1; x++) {
+		for (let y = rect.y0; y <= rect.y1; y++) {
+			const src = mvtStore.renderSourceFor(rect.z, x, y);
+			if (src) {
+				// Overzoom maps many viewport tiles onto one source tile.
+				const key = `${src.z}/${src.x}/${src.y}`;
+				if (backdatedSources.has(key)) continue;
+				backdatedSources.add(key);
+				try {
+					fs.utimesSync(mvtStore.tilePath(src.z, src.x, src.y), staleTime, staleTime);
+					invalidated++;
+					vectorTouched = true;
+				} catch {}
+			} else {
+				try {
+					fs.utimesSync(tileCachePath(TILE_CACHE_DIR, { z: rect.z, x, y }), staleTime, staleTime);
+					invalidated++;
+				} catch {}
+			}
+		}
+	}
+
+	const epoch = bumpTilesEpoch();
+	let primerStarted = false;
+	if (vectorTouched) {
+		mvtPrimeForceNext = true;
+		primerStarted = triggerBackgroundTaskNow('mvt-prime');
+	}
+	logMessage(`[MapTiles] Manual refresh: z${rect.z} rect ${(rect.x1 - rect.x0 + 1) * (rect.y1 - rect.y0 + 1)} tiles, ${invalidated} invalidated, epoch ${epoch}${primerStarted ? ', primer started' : ''}`);
+	res.setHeader('Cache-Control', 'no-store');
+	res.json({ ok: true, invalidated, epoch, primerStarted });
 });
 
 // --- Gated vendor assets ---
@@ -14081,8 +14204,13 @@ try {
 // reads against a PMTiles archive (bulk-download-friendly), drip-fed, and only
 // for tiles not already on disk - so steady-state runs are close to free.
 let mvtPrimeRunning = false;
+// Set by the manual map-data refresh endpoint: the next primer run proceeds
+// even while the periodic primer is disabled in config.
+let mvtPrimeForceNext = false;
 async function mvtPrimeTask() {
-	if (!liveConfig.mapTilesEnabled || !liveConfig.mapTilesPrimeEnabled) return;
+	const forced = mvtPrimeForceNext;
+	mvtPrimeForceNext = false;
+	if (!liveConfig.mapTilesEnabled || (!liveConfig.mapTilesPrimeEnabled && !forced)) return;
 	if (mvtPrimeRunning) return;
 	mvtPrimeRunning = true;
 	try {
@@ -14091,7 +14219,7 @@ async function mvtPrimeTask() {
 		let conn = getMysqlConnection();
 		for (let attempt = 0; !conn && attempt < 12; attempt++) {
 			await new Promise((resolve) => setTimeout(resolve, 10000));
-			if (!liveConfig.mapTilesEnabled || !liveConfig.mapTilesPrimeEnabled) return;
+			if (!liveConfig.mapTilesEnabled || (!liveConfig.mapTilesPrimeEnabled && !forced)) return;
 			conn = getMysqlConnection();
 		}
 		if (!conn) {
@@ -14129,7 +14257,7 @@ async function mvtPrimeTask() {
 			batchSize: 512,
 			delayMs: 500,
 			maxAgeMs: liveConfig.mapTilesMaxAgeDays * 86400000,
-			shouldStop: () => !liveConfig.mapTilesEnabled || !liveConfig.mapTilesPrimeEnabled,
+			shouldStop: () => !liveConfig.mapTilesEnabled || (!liveConfig.mapTilesPrimeEnabled && !forced),
 			log: (message) => logMessage(message),
 		});
 		logMessage(`[MvtPrime] Done: ${stats.fetched} fetched, ${stats.refreshed} refreshed, ${stats.kept} kept after empty refresh, ${stats.empty} empty, ${stats.skipped} fresh, ${stats.failed} failed${stats.stopped ? ' (stopped by config change)' : ''}`);
