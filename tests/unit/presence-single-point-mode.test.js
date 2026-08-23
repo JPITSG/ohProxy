@@ -47,7 +47,7 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /function focusRedMarkerAtDefaultZoom\(\)\{\s*var target=getHomeTarget\(\);\s*if\(!target\)return;\s*map\.setCenter\(target\.center,target\.zoom\);\s*\}/);
 		assert.match(server, /zoomToMarkers\(\);\s*captureDefaultHomeZoom\(\);\s*focusRedMarkerAtDefaultZoom\(\);\s*if\(!singlePointMode\)setTimeout\(updateAnchoredTooltips,100\);/);
 		assert.match(server, /setTooltipHtml\(redTooltip,red\[3\]\);\s*zoomToMarkers\(\);\s*captureDefaultHomeZoom\(\);\s*focusRedMarkerAtDefaultZoom\(\);\s*syncZoomButtonState\(\);\s*setTimeout\(updateAnchoredTooltips,100\);/);
-		assert.match(server, /zoomHomeBtn\.addEventListener\('click',function\(\)\{\s*if\(zoomHomeBtn\.disabled\)return;\s*if\(!singlePointMode\)clearPresenceMapPopups\(\);\s*focusRedMarkerAtDefaultZoom\(\);\s*syncZoomButtonState\(\);\s*setTimeout\(syncZoomButtonState,0\);\s*\}\);/);
+		assert.match(server, /zoomHomeBtn\.addEventListener\('click',function\(\)\{\s*if\(zoomHomeBtn\.disabled\)return;\s*if\(!singlePointMode\)clearPresenceMapPopups\(\);\s*resetRotorInstant\(\);\s*focusRedMarkerAtDefaultZoom\(\);\s*syncZoomButtonState\(\);\s*setTimeout\(syncZoomButtonState,0\);\s*\}\);/);
 	});
 
 	it('adds fullscreen touch rotate control that resets on fullscreen exit', () => {

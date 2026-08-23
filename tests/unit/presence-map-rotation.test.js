@@ -238,6 +238,12 @@ describe('Rotor wiring', () => {
 		assert.match(source, /function zoomToMarkers\(\)\{\s*resetRotorInstant\(\);/);
 	});
 
+	it('the center-map button reverts to north before recentring', () => {
+		assert.match(source, /if\(!singlePointMode\)clearPresenceMapPopups\(\);\s*resetRotorInstant\(\);\s*focusRedMarkerAtDefaultZoom\(\);/);
+		assert.match(source, /if\(rotorTheta!==0\)return false;/, 'rotation alone must keep the home button enabled');
+		assert.match(source, /updateCompass\(\);\s*syncZoomButtonState\(\);\s*scheduleZoomOverlayReveal\(\);/, 'rotation changes resync the control state');
+	});
+
 	it('markers stay upright: creation carries the counter-rotation and settles redraw', () => {
 		assert.match(source, /graphicYOffset:-41,rotation:-rotorTheta\}/);
 		assert.match(source, /function uprightMapMarkers\(\)\{[\s\S]*?feats\[i\]\.style\.rotation=deg;[\s\S]*?defaultStyle\.rotation=deg;[\s\S]*?layer\.redraw\(\);/);

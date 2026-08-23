@@ -11758,6 +11758,8 @@ vector.addFeatures(feature);
 	function shouldDisableHomeButton(){
 	var target=getHomeTarget();
 	if(!target)return true;
+	// A rotated map is never "already home" - the button also resets to north.
+	if(rotorTheta!==0)return false;
 	var center=map.getCenter();
 	return !!(center&&sameMapCenter(center,target.center)&&map.getZoom()===target.zoom);
 	}
@@ -12145,6 +12147,7 @@ showBlueAndHandleClick(f,null,true);
 	setRotorOversize(rotorTheta!==0);
 	uprightMapMarkers();
 	updateCompass();
+	syncZoomButtonState();
 	scheduleZoomOverlayReveal();
 	}
 	function animateRotorTo(target){
@@ -12177,6 +12180,7 @@ showBlueAndHandleClick(f,null,true);
 	setRotorOversize(false);
 	uprightMapMarkers();
 	updateCompass();
+	syncZoomButtonState();
 	}
 	if(compassBtn)compassBtn.addEventListener('click',function(){
 	if(rotorTheta!==0&&!rotorGesture)animateRotorTo(0);
@@ -12318,6 +12322,7 @@ zoomOutBtn.addEventListener('click',function(){if(zoomOutBtn.disabled)return;map
 	zoomHomeBtn.addEventListener('click',function(){
 	if(zoomHomeBtn.disabled)return;
 	if(!singlePointMode)clearPresenceMapPopups();
+	resetRotorInstant();
 	focusRedMarkerAtDefaultZoom();
 	syncZoomButtonState();
 	setTimeout(syncZoomButtonState,0);
