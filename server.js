@@ -11347,6 +11347,9 @@ ${proxyTiles
 	.map-ctrl-btn:disabled,.map-ctrl-btn.is-disabled{background:rgba(19,21,54,0.05);border-color:rgba(19,21,54,0.12);box-shadow:none;color:rgba(19,21,54,0.32);cursor:default;opacity:.72}
 	@media(hover:hover){.map-ctrl-btn:disabled:hover,.map-ctrl-btn.is-disabled:hover{background:rgba(19,21,54,0.05);border-color:rgba(19,21,54,0.12);box-shadow:none}}
 	.map-ctrl-btn svg{width:16px;height:16px;fill:currentColor}
+	#map-compass{display:none}
+	#map-compass.visible{display:flex}
+	#map-compass svg{transition:transform 160ms ease}
 	#presence-root{position:fixed;top:0;left:0;width:100vw;height:100vh;overflow:hidden;transform-origin:center center}
 	#presence-root.presence-rotated{top:50%;left:50%;width:100vh;height:100vw;transform:translate(-50%,-50%) rotate(90deg)}
 	#map{position:absolute;top:0;left:0;right:0;bottom:0;z-index:0}
@@ -11430,6 +11433,7 @@ ${proxyTiles
 	<button class="map-ctrl-btn" id="zoom-home" type="button" data-oh-tooltip="Center map" aria-label="Center map"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></button>
 	<button class="map-ctrl-btn" id="map-fullscreen" type="button" data-oh-tooltip="Enter fullscreen" aria-label="Enter fullscreen"><svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4z"/></svg></button>
 	<button class="map-ctrl-btn" id="map-rotate" type="button" data-oh-tooltip="Rotate map" aria-label="Rotate map" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.96-.7 2.8l1.46 1.46A7.944 7.944 0 0 0 20 13c0-4.42-3.58-8-8-8zM6.7 9.2 5.24 7.74A7.944 7.944 0 0 0 4 13c0 4.42 3.58 8 8 8v3l4-4-4-4v3c-3.31 0-6-2.69-6-6 0-1.01.25-1.96.7-2.8z"/></svg></button>
+	<button class="map-ctrl-btn" id="map-compass" type="button" data-oh-tooltip="Point north" aria-label="Point north"><svg viewBox="0 0 24 24"><path d="M12 2 L15.5 12 h-7 Z" fill="#e04a3f"/><path d="M12 22 L8.5 12 h7 Z" fill="#8a91a2"/></svg></button>
 	<button class="map-ctrl-btn" id="zoom-out" type="button" data-oh-tooltip="Zoom out" aria-label="Zoom out">&minus;</button>
 	</div>
 	${singlePointMode ? '' : `<div id="search-modal">
@@ -11454,6 +11458,10 @@ ${proxyTiles
 	(function(){
 	var markers=${markersJson};
 	var singlePointMode=${singlePointMode ? 'true' : 'false'};
+
+	// Two-finger map rotation state. Declared before map/marker setup because the
+	// input remap and style paths read it from the first frame (0 = north-up).
+	var rotorTheta=0,rotorGesture=null,rotorMapOversized=false,rotorAnimating=false;
 
 	var map=new OpenLayers.Map("map",{theme:null});
 	map.addLayer(new OpenLayers.Layer.OSM("OSM",${tileUrlsJson}));
@@ -11556,28 +11564,38 @@ vector.addFeatures(feature);
 	function isRotatedViewportMode(){
 	return presenceFullscreenActive&&presenceRotated;
 	}
-	function clientToMapPixel(clientX,clientY){
-	var rect=mapEl.getBoundingClientRect();
+	// Client coords -> presence-root local coords. The root's bounding rect is the
+	// stable reference (the map div itself may be oversized and CSS-rotated); the
+	// fullscreen 90-degree mode inverts here exactly as it always did.
+	function clientToRootPoint(clientX,clientY){
+	var rect=zoomHoldRoot.getBoundingClientRect();
 	var rectW=rect.width||1;
 	var rectH=rect.height||1;
-	var localW=mapEl.clientWidth||rectW;
-	var localH=mapEl.clientHeight||rectH;
+	var localW=zoomHoldRoot.clientWidth||rectW;
+	var localH=zoomHoldRoot.clientHeight||rectH;
 	var relX=Math.max(0,Math.min(rectW,clientX-rect.left));
 	var relY=Math.max(0,Math.min(rectH,clientY-rect.top));
-	var x=(relX/rectW)*localW;
-	var y=(relY/rectH)*localH;
 	if(isRotatedViewportMode()){
 	// Inverse of CSS rotate(90deg): screen x follows local y, screen y follows inverted local x.
-	var mappedX=(relY/rectH)*localW;
-	var mappedY=((rectW-relX)/rectW)*localH;
-	x=mappedX;
-	y=mappedY;
+	return{x:(relY/rectH)*localW,y:((rectW-relX)/rectW)*localH};
 	}
-	return new OpenLayers.Pixel(x,y);
+	return{x:(relX/rectW)*localW,y:(relY/rectH)*localH};
+	}
+	function clientToMapPixel(clientX,clientY){
+	var p=clientToRootPoint(clientX,clientY);
+	var m=rotorRootPointToMapPx(p.x,p.y,rotorTheta,mapEl.clientWidth,mapEl.clientHeight,zoomHoldRoot.clientWidth,zoomHoldRoot.clientHeight);
+	return new OpenLayers.Pixel(m.x,m.y);
+	}
+	// Map pixel -> presence-root point, for writing overlay left/top. Identity in
+	// the everyday north-up, viewport-sized state.
+	function mapPixelToRootPoint(px){
+	if(!px||(rotorTheta===0&&!rotorMapOversized))return px;
+	var p=rotorMapPxToRootPoint(px.x,px.y,rotorTheta,mapEl.clientWidth,mapEl.clientHeight,zoomHoldRoot.clientWidth,zoomHoldRoot.clientHeight);
+	return new OpenLayers.Pixel(p.x,p.y);
 	}
 	var originalGetMousePosition=map.events.getMousePosition;
 	map.events.getMousePosition=function(evt){
-	if(isRotatedViewportMode()&&evt&&typeof evt.clientX==='number'&&typeof evt.clientY==='number'){
+	if((isRotatedViewportMode()||rotorTheta!==0||rotorGesture)&&evt&&typeof evt.clientX==='number'&&typeof evt.clientY==='number'){
 	return clientToMapPixel(evt.clientX,evt.clientY);
 	}
 	return originalGetMousePosition.call(this,evt);
@@ -11605,8 +11623,10 @@ vector.addFeatures(feature);
 	rotatedPanLastY=y;
 	if(!dx&&!dy)return;
 	rotatedPanMoved=true;
-	// Remap touch movement to match rotated (90deg) viewport direction.
-	map.pan(-dy,dx,{animate:false});
+	// Remap touch movement into map space: the fullscreen mode contributes a fixed
+	// 90deg and any gesture rotation adds on top.
+	var panVec=rotateVecDeg(-90-rotorTheta,dx,dy);
+	map.pan(Math.round(-panVec.x),Math.round(-panVec.y),{animate:false});
 	e.preventDefault();
 	e.stopPropagation();
 	},{passive:false,capture:true});
@@ -11658,8 +11678,9 @@ vector.addFeatures(feature);
 
 	function positionTooltip(el,px,offset){
 	if(!el||!px||!offset)return;
-	el.style.left=(px.x+offset.x)+'px';
-	el.style.top=(px.y+offset.y)+'px';
+	var p=mapPixelToRootPoint(px);
+	el.style.left=(p.x+offset.x)+'px';
+	el.style.top=(p.y+offset.y)+'px';
 	}
 
 	function getFeaturePixel(f){
@@ -11990,7 +12011,281 @@ showBlueAndHandleClick(f,null,true);
 	if(zoomHoldActive&&e.touches&&e.touches.length>=2)armZoomHoldWatchdog();
 	},{passive:true,capture:true});
 
+	// ---- Two-finger map rotation (Google-Maps style) ----
+	// OL2 cannot rotate, so the map div itself is CSS-rotated and every
+	// coordinate crossing the boundary goes through the rotor transforms above.
+	// The whole two-finger gesture (pan + pinch + rotate) is owned here: OL's own
+	// PinchZoom is deactivated, the live gesture is one CSS matrix on the map div
+	// (pure GPU, no OL state), and the end state is committed to OL in one step
+	// with the invariant that the content grabbed by the fingers stays under them.
+	var ROTOR_ENGAGE_DEG=20;
+	var ROTOR_ENGAGE_ROTATED_DEG=8;
+	var ROTOR_ZOOM_PENALTY_DEG=40;
+	var ROTOR_ZOOM_LOCK_STEPS=0.75;
+	var ROTOR_SNAP_DEG=7;
+	function normalizeDeg(a){
+	a=a%360;
+	if(a>180)a-=360;
+	if(a<-180)a+=360;
+	return a;
+	}
+	function rotateVecDeg(deg,x,y){
+	var r=deg*Math.PI/180,c=Math.cos(r),s=Math.sin(r);
+	return{x:c*x-s*y,y:s*x+c*y};
+	}
+	function rotorRootPointToMapPx(x,y,theta,mw,mh,W,H){
+	var v=rotateVecDeg(-theta,x-W/2,y-H/2);
+	return{x:v.x+mw/2,y:v.y+mh/2};
+	}
+	function rotorMapPxToRootPoint(x,y,theta,mw,mh,W,H){
+	var v=rotateVecDeg(theta,x-mw/2,y-mh/2);
+	return{x:v.x+W/2,y:v.y+H/2};
+	}
+	// Live gesture as translate/rotate/scale about the div centre: content under
+	// the start centroid G0 tracks the current centroid G1 at scale s, angle dTheta.
+	function computeRotorLiveTransform(theta0,s,dTheta,G0x,G0y,G1x,G1y,Sx,Sy){
+	var v=rotateVecDeg(dTheta,Sx-G0x,Sy-G0y);
+	return{tx:G1x-Sx+s*v.x,ty:G1y-Sy+s*v.y,rot:theta0+dTheta,scale:s};
+	}
+	// End-of-gesture commit: snap scale to an integer zoom and recompute the map
+	// centre so the projected point that started under the fingers stays under
+	// them through the snap (projected y grows north while pixel y grows down).
+	function computeRotorCommit(p){
+	var theta1=normalizeDeg(p.theta0+p.dTheta);
+	var z1=Math.max(p.minZoom,Math.min(p.maxZoom,Math.round(p.zoom0+Math.log(p.s)/Math.LN2)));
+	var res1=p.resForZoom(z1);
+	var m0=rotateVecDeg(-p.theta0,p.G0x-p.Sx,p.G0y-p.Sy);
+	var pgx=p.cx0+m0.x*p.res0;
+	var pgy=p.cy0-m0.y*p.res0;
+	var m1=rotateVecDeg(-theta1,p.G1x-p.Sx,p.G1y-p.Sy);
+	return{cx:pgx-m1.x*res1,cy:pgy+m1.y*res1,zoom:z1,theta:theta1};
+	}
+	// Rotation gating: starting a rotation must be clearly deliberate. The twist
+	// must exceed the engage threshold PLUS a penalty proportional to how much
+	// the gesture has already zoomed (fingers naturally arc while pinching), and
+	// a gesture that has clearly zoomed first is locked as zoom-only for its
+	// remainder. Engaging re-zeroes at the crossing point so rotation starts
+	// without a jump. Already-rotated maps use a smaller base threshold.
+	function rotorRotationStep(g,angleNow,sNow){
+	var da=normalizeDeg(angleNow-g.aPrev);
+	g.aPrev=angleNow;
+	g.acc+=da;
+	if(!g.engaged&&!g.zoomLocked){
+	var zoomSteps=Math.abs(Math.log(sNow)/Math.LN2);
+	if(zoomSteps>=g.zoomLockSteps){
+	g.zoomLocked=true;
+	}else if(Math.abs(g.acc)>=g.engageDeg+g.zoomPenaltyDeg*zoomSteps){
+	g.engaged=true;
+	g.accAtEngage=g.acc;
+	}
+	}
+	g.dTheta=g.engaged?g.acc-g.accAtEngage:0;
+	return g;
+	}
+	var navControl=map.getControlsByClass('OpenLayers.Control.Navigation')[0]||null;
+	var navDragPan=navControl&&navControl.dragPan?navControl.dragPan:null;
+	if(navControl&&navControl.pinchZoom)navControl.pinchZoom.deactivate();
+	var compassBtn=document.getElementById('map-compass');
+	var compassNeedle=compassBtn?compassBtn.querySelector('svg'):null;
+	function updateCompassNeedle(deg,liveVisible){
+	if(compassNeedle)compassNeedle.style.transform='rotate('+deg+'deg)';
+	if(compassBtn)compassBtn.classList.toggle('visible',!!liveVisible||rotorTheta!==0);
+	}
+	function updateCompass(){updateCompassNeedle(rotorTheta,false)}
+	function applyRotorBaseTransform(){
+	mapEl.style.transform=rotorTheta===0?'':'translate(0px, 0px) rotate('+rotorTheta+'deg) scale(1)';
+	}
+	// While rotated the map div grows to the viewport diagonal so the rotated
+	// square always covers the screen; north-up restores the normal cheap size.
+	function setRotorOversize(on){
+	if(!on&&!rotorMapOversized)return;
+	var center=map.getCenter();
+	var zoom=map.getZoom();
+	if(on){
+	var W=zoomHoldRoot.clientWidth,H=zoomHoldRoot.clientHeight;
+	var D=Math.ceil(Math.sqrt(W*W+H*H));
+	if(rotorMapOversized&&mapEl.style.width===D+'px')return;
+	mapEl.style.left=Math.round((W-D)/2)+'px';
+	mapEl.style.top=Math.round((H-D)/2)+'px';
+	mapEl.style.right='auto';
+	mapEl.style.bottom='auto';
+	mapEl.style.width=D+'px';
+	mapEl.style.height=D+'px';
+	}else{
+	mapEl.style.left='';
+	mapEl.style.top='';
+	mapEl.style.right='';
+	mapEl.style.bottom='';
+	mapEl.style.width='';
+	mapEl.style.height='';
+	}
+	rotorMapOversized=on;
+	map.updateSize();
+	if(center)map.setCenter(center,zoom);
+	}
+	window.addEventListener('resize',function(){if(rotorMapOversized)setRotorOversize(true)});
+	// Counter-rotate marker graphics so pins stay upright while the map rotates.
+	var rotorLastUprightDeg=0;
+	function uprightMapMarkers(){
+	var deg=-rotorTheta;
+	if(deg===rotorLastUprightDeg)return;
+	rotorLastUprightDeg=deg;
+	[vector,previewLayer].forEach(function(layer){
+	if(!layer)return;
+	var feats=layer.features||[];
+	for(var i=0;i<feats.length;i++){
+	if(feats[i]&&feats[i].style)feats[i].style.rotation=deg;
+	}
+	var ds=layer.styleMap&&layer.styleMap.styles&&layer.styleMap.styles['default'];
+	if(ds&&ds.defaultStyle)ds.defaultStyle.rotation=deg;
+	layer.redraw();
+	});
+	}
+	function afterRotorChange(){
+	setRotorOversize(rotorTheta!==0);
+	uprightMapMarkers();
+	updateCompass();
+	scheduleZoomOverlayReveal();
+	}
+	function animateRotorTo(target){
+	if(rotorTheta===target)return;
+	beginZoomOverlayHold();
+	rotorAnimating=true;
+	mapEl.style.transition='transform 260ms ease';
+	rotorTheta=target;
+	mapEl.style.transform='translate(0px, 0px) rotate('+target+'deg) scale(1)';
+	setTimeout(function(){
+	if(!rotorAnimating)return;
+	rotorAnimating=false;
+	mapEl.style.transition='';
+	applyRotorBaseTransform();
+	afterRotorChange();
+	},320);
+	}
+	// Day loads refit the marker extent to the viewport, which assumes a north-up,
+	// normal-sized map - reset the rotor first.
+	function resetRotorInstant(){
+	if(rotorGesture){
+	rotorGesture=null;
+	if(navDragPan)navDragPan.activate();
+	}
+	if(rotorTheta===0&&!rotorAnimating&&!rotorMapOversized)return;
+	rotorAnimating=false;
+	mapEl.style.transition='';
+	rotorTheta=0;
+	applyRotorBaseTransform();
+	setRotorOversize(false);
+	uprightMapMarkers();
+	updateCompass();
+	}
+	if(compassBtn)compassBtn.addEventListener('click',function(){
+	if(rotorTheta!==0&&!rotorGesture)animateRotorTo(0);
+	});
+	function rotorPointsFromTouches(touches){
+	var pts=[];
+	for(var i=0;i<touches.length&&i<2;i++){
+	pts.push(clientToRootPoint(touches[i].clientX,touches[i].clientY));
+	}
+	return pts;
+	}
+	function currentRotorVisualTheta(){
+	// Mid-animation the committed theta is ahead of what is on screen; read the
+	// interpolated matrix so a new gesture starts from the visible angle. String
+	// parsing instead of a regex: this code ships inside a server template
+	// literal, which strips regex backslash escapes.
+	var t=getComputedStyle(mapEl).transform;
+	if(!t||t==='none')return rotorTheta;
+	var open=t.indexOf('(');
+	if(open<0)return rotorTheta;
+	var parts=t.slice(open+1).split(',');
+	var a=parseFloat(parts[0]),b=parseFloat(parts[1]);
+	if(!isFinite(a)||!isFinite(b))return rotorTheta;
+	return Math.atan2(b,a)*180/Math.PI;
+	}
+	function rotorGestureStart(e){
+	if(rotorGesture)return;
+	if(!e.touches||e.touches.length<2)return;
+	var c=map.getCenter();
+	if(!c)return;
+	if(rotorAnimating){
+	rotorTheta=normalizeDeg(currentRotorVisualTheta());
+	rotorAnimating=false;
+	}
+	mapEl.style.transition='';
+	applyRotorBaseTransform();
+	var pts=rotorPointsFromTouches(e.touches);
+	var dx=pts[1].x-pts[0].x,dy=pts[1].y-pts[0].y;
+	var maxZoom=map.getNumZoomLevels()-1;
+	rotorGesture={
+	G0x:(pts[0].x+pts[1].x)/2,G0y:(pts[0].y+pts[1].y)/2,
+	d0:Math.max(1,Math.sqrt(dx*dx+dy*dy)),
+	theta0:rotorTheta,
+	cx0:c.lon,cy0:c.lat,res0:map.getResolution(),zoom0:map.getZoom(),
+	engaged:false,zoomLocked:false,acc:0,accAtEngage:0,
+	aPrev:Math.atan2(dy,dx)*180/Math.PI,dTheta:0,
+	engageDeg:rotorTheta!==0?ROTOR_ENGAGE_ROTATED_DEG:ROTOR_ENGAGE_DEG,
+	zoomPenaltyDeg:ROTOR_ZOOM_PENALTY_DEG,zoomLockSteps:ROTOR_ZOOM_LOCK_STEPS,
+	sMin:Math.pow(2,-map.getZoom()),sMax:Math.pow(2,maxZoom-map.getZoom()),
+	s:1,G1x:0,G1y:0
+	};
+	rotorGesture.G1x=rotorGesture.G0x;
+	rotorGesture.G1y=rotorGesture.G0y;
+	if(navDragPan)navDragPan.deactivate();
+	beginZoomOverlayHold();
+	}
+	function rotorGestureMove(e){
+	var g=rotorGesture;
+	if(!g||!e.touches||e.touches.length<2)return;
+	var pts=rotorPointsFromTouches(e.touches);
+	var dx=pts[1].x-pts[0].x,dy=pts[1].y-pts[0].y;
+	g.s=Math.max(g.sMin,Math.min(g.sMax,Math.max(1,Math.sqrt(dx*dx+dy*dy))/g.d0));
+	rotorRotationStep(g,Math.atan2(dy,dx)*180/Math.PI,g.s);
+	g.G1x=(pts[0].x+pts[1].x)/2;
+	g.G1y=(pts[0].y+pts[1].y)/2;
+	var t=computeRotorLiveTransform(g.theta0,g.s,g.dTheta,g.G0x,g.G0y,g.G1x,g.G1y,zoomHoldRoot.clientWidth/2,zoomHoldRoot.clientHeight/2);
+	mapEl.style.transform='translate('+t.tx+'px, '+t.ty+'px) rotate('+t.rot+'deg) scale('+t.scale+')';
+	updateCompassNeedle(normalizeDeg(g.theta0+g.dTheta),g.engaged);
+	e.preventDefault();
+	}
+	function commitRotorGesture(){
+	var g=rotorGesture;
+	rotorGesture=null;
+	if(!g)return;
+	if(navDragPan)navDragPan.activate();
+	var r=computeRotorCommit({
+	theta0:g.theta0,s:g.s,dTheta:g.dTheta,
+	G0x:g.G0x,G0y:g.G0y,G1x:g.G1x,G1y:g.G1y,
+	Sx:zoomHoldRoot.clientWidth/2,Sy:zoomHoldRoot.clientHeight/2,
+	cx0:g.cx0,cy0:g.cy0,res0:g.res0,zoom0:g.zoom0,
+	minZoom:0,maxZoom:map.getNumZoomLevels()-1,
+	resForZoom:function(z){return map.getResolutionForZoom(z)}
+	});
+	rotorTheta=r.theta;
+	applyRotorBaseTransform();
+	map.setCenter(new OpenLayers.LonLat(r.cx,r.cy),r.zoom);
+	afterRotorChange();
+	if(rotorTheta!==0&&Math.abs(rotorTheta)<=ROTOR_SNAP_DEG)animateRotorTo(0);
+	}
+	function rotorGestureEnd(e){
+	if(!rotorGesture)return;
+	if(e.touches&&e.touches.length>=2)return;
+	commitRotorGesture();
+	}
+	mapEl.addEventListener('touchstart',function(e){
+	if(e.touches&&e.touches.length>=2)rotorGestureStart(e);
+	},{passive:true,capture:true});
+	mapEl.addEventListener('touchmove',function(e){
+	if(rotorGesture)rotorGestureMove(e);
+	},{passive:false,capture:true});
+	mapEl.addEventListener('touchend',rotorGestureEnd,{passive:true,capture:true});
+	mapEl.addEventListener('touchcancel',rotorGestureEnd,{passive:true,capture:true});
+	window.__presenceMapDebug=function(){
+	var c=map.getCenter();
+	return{theta:rotorTheta,zoom:map.getZoom(),center:c?{x:c.lon,y:c.lat}:null,oversized:rotorMapOversized,gesture:!!rotorGesture,animating:rotorAnimating};
+	};
+
 function zoomToMarkers(){
+resetRotorInstant();
 var extent=vector.getDataExtent();
 if(!extent)return;
 if(markers.length===1){map.setCenter(new OpenLayers.LonLat(red[1],red[0]).transform(wgs84,proj),15);return}
@@ -12356,7 +12651,7 @@ function addPlaybackMarkerFeature(m,idx,color){
 vector.addFeatures(new OpenLayers.Feature.Vector(
 new OpenLayers.Geometry.Point(m[1],m[0]).transform(wgs84,proj),
 {timestamp:m[3],index:idx,color:color},
-{externalGraphic:'/images/marker-'+color+'.png',graphicHeight:41,graphicWidth:25,graphicXOffset:-12,graphicYOffset:-41}
+{externalGraphic:'/images/marker-'+color+'.png',graphicHeight:41,graphicWidth:25,graphicXOffset:-12,graphicYOffset:-41,rotation:-rotorTheta}
 ));
 }
 
@@ -12507,7 +12802,7 @@ ctxMenu.style.top=Math.round(y)+'px';
 function getCtxAnchorPixel(){
 if(!isFinite(ctxLat)||!isFinite(ctxLon))return null;
 var lonlat=new OpenLayers.LonLat(ctxLon,ctxLat).transform(wgs84,proj);
-return map.getPixelFromLonLat(lonlat);
+return mapPixelToRootPoint(map.getPixelFromLonLat(lonlat));
 }
 
 function syncCtxMenuOffsetToAnchor(){
@@ -12700,7 +12995,8 @@ lonlat=lonlat.transform(proj,wgs84);
 ctxLat=lonlat.lat;ctxLon=lonlat.lon;
 ctxMenuOffsetX=0;
 ctxMenuOffsetY=0;
-setCtxMenuPosition(px.x,px.y);
+var rootPx=mapPixelToRootPoint(px);
+setCtxMenuPosition(rootPx.x,rootPx.y);
 if(ctxMenu.style.display==='block'){
 clampCtxMenu();
 if(persistOffset)syncCtxMenuOffsetToAnchor();

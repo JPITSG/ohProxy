@@ -66,10 +66,10 @@ describe('Presence Single-Point Mode', () => {
 		assert.match(server, /var rectH=rect\.height\|\|1;/);
 		assert.match(server, /var relX=Math\.max\(0,Math\.min\(rectW,clientX-rect\.left\)\);/);
 		assert.match(server, /var relY=Math\.max\(0,Math\.min\(rectH,clientY-rect\.top\)\);/);
-		assert.match(server, /if\(isRotatedViewportMode\(\)\)\{\s*\/\/ Inverse of CSS rotate\(90deg\): screen x follows local y, screen y follows inverted local x\.\s*var mappedX=\(relY\/rectH\)\*localW;\s*var mappedY=\(\(rectW-relX\)\/rectW\)\*localH;\s*x=mappedX;\s*y=mappedY;\s*\}/);
+		assert.match(server, /if\(isRotatedViewportMode\(\)\)\{\s*\/\/ Inverse of CSS rotate\(90deg\): screen x follows local y, screen y follows inverted local x\.\s*return\{x:\(relY\/rectH\)\*localW,y:\(\(rectW-relX\)\/rectW\)\*localH\};\s*\}/);
 		assert.match(server, /var originalGetMousePosition=map\.events\.getMousePosition;/);
-		assert.match(server, /map\.events\.getMousePosition=function\(evt\)\{\s*if\(isRotatedViewportMode\(\)&&evt&&typeof evt\.clientX==='number'&&typeof evt\.clientY==='number'\)\{\s*return clientToMapPixel\(evt\.clientX,evt\.clientY\);\s*\}\s*return originalGetMousePosition\.call\(this,evt\);/);
-		assert.match(server, /map\.pan\(-dy,dx,\{animate:false\}\);/);
+		assert.match(server, /map\.events\.getMousePosition=function\(evt\)\{\s*if\(\(isRotatedViewportMode\(\)\|\|rotorTheta!==0\|\|rotorGesture\)&&evt&&typeof evt\.clientX==='number'&&typeof evt\.clientY==='number'\)\{\s*return clientToMapPixel\(evt\.clientX,evt\.clientY\);\s*\}\s*return originalGetMousePosition\.call\(this,evt\);/);
+		assert.match(server, /var panVec=rotateVecDeg\(-90-rotorTheta,dx,dy\);\s*map\.pan\(Math\.round\(-panVec\.x\),Math\.round\(-panVec\.y\),\{animate:false\}\);/);
 		assert.match(server, /presenceFullscreenActive=fsActive;/);
 		assert.match(server, /if\(!fsActive\)\{\s*isRotated=false;\s*applyRotation\(\);\s*\}/);
 		assert.match(server, /function eventToPixel\(e\)\{\s*return clientToMapPixel\(e\.clientX,e\.clientY\);\s*\}/);
