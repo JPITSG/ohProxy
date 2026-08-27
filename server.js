@@ -11500,7 +11500,8 @@ vector.addFeatures(feature);
 	// is - green while everything on screen is within the configured maximum
 	// age, red once anything exceeds it. The refresh button marks the visible
 	// area stale server-side, so the backend re-pulls it and the next page
-	// load refetches the tiles; the marked age shows red until fresh data lands.
+	// load refetches the tiles; while that renewal is pending the chip shows a
+	// neutral refreshing state instead of the backdated age.
 	var dataAgeEl=document.getElementById('map-data-age');
 	var dataAgeText=document.getElementById('map-data-age-text');
 	var dataAgeRefreshBtn=document.getElementById('map-data-refresh');
@@ -11528,6 +11529,7 @@ vector.addFeatures(feature);
 	.then(function(r){return r.json()})
 	.then(function(d){
 	if(!d||!d.ok||!dataAgeEl)return;
+	if(d.refreshing>0){dataAgeText.textContent='map data refreshing\\u2026';dataAgeEl.classList.remove('stale');dataAgeEl.classList.remove('fresh');clearTimeout(dataAgeTimer);dataAgeTimer=setTimeout(refreshDataAge,5000);return}
 	if(d.oldestAgeMs===null){dataAgeText.textContent='map data \\u2026';dataAgeEl.classList.remove('stale');dataAgeEl.classList.remove('fresh');return}
 	dataAgeText.textContent='map data '+fmtDataAge(d.oldestAgeMs)+' old';
 	var dataStale=d.oldestAgeMs>d.maxAgeMs;
@@ -13606,6 +13608,21 @@ function parseTileRectQuery(query) {
 	return valid ? { z, x0, x1, y0, y1 } : null;
 }
 
+// Manual refreshes work by backdating file mtimes past the max age, which
+// would otherwise make the data-age chip report that artificial age ("31d
+// old", red) until fresh data lands. Track the backdated paths here so the
+// age endpoint can report those tiles as refreshing instead. An entry clears
+// once the file's mtime moves past the mark (fresh data landed) or after the
+// TTL (renewal never came - fall back to the honest backdated age).
+const MANUAL_TILE_REFRESH_TTL_MS = 5 * 60 * 1000;
+const manualTileRefreshes = new Map();
+function pruneManualTileRefreshes() {
+	const cutoff = Date.now() - MANUAL_TILE_REFRESH_TTL_MS;
+	for (const [filePath, markedAt] of manualTileRefreshes) {
+		if (markedAt < cutoff) manualTileRefreshes.delete(filePath);
+	}
+}
+
 // Data age for a viewport tile rectangle: feeds the presence map's data-age
 // chip. Age is measured against the AUTHORITATIVE data for each tile - the
 // vector tile a render derives from when primed, else the cached raster copy.
@@ -13627,20 +13644,32 @@ app.get('/api/tiles/age', (req, res) => {
 	}
 	const { z, x0, x1, y0, y1 } = rect;
 
+	pruneManualTileRefreshes();
 	let oldestAgeMs = null;
 	let known = 0;
 	let unknown = 0;
+	let refreshing = 0;
 	for (let x = x0; x <= x1; x++) {
 		for (let y = y0; y <= y1; y++) {
 			let ageMs = null;
+			let authPath = null;
 			const src = mvtStore.renderSourceFor(z, x, y);
 			if (src) {
+				authPath = mvtStore.tilePath(src.z, src.x, src.y);
 				ageMs = mvtStore.ageMs(src.z, src.x, src.y);
 			} else {
+				authPath = tileCachePath(TILE_CACHE_DIR, { z, x, y });
 				try {
-					const stat = fs.statSync(tileCachePath(TILE_CACHE_DIR, { z, x, y }));
+					const stat = fs.statSync(authPath);
 					if (stat.size > 0) ageMs = Date.now() - stat.mtimeMs;
 				} catch {}
+			}
+			const markedAt = manualTileRefreshes.get(authPath);
+			if (markedAt !== undefined && ageMs !== null) {
+				// mtime past the mark means the renewal landed; otherwise the
+				// age is still the artificial backdate, not a real age.
+				if (Date.now() - ageMs >= markedAt) manualTileRefreshes.delete(authPath);
+				else { refreshing++; continue; }
 			}
 			if (ageMs === null) unknown++;
 			else {
@@ -13651,7 +13680,7 @@ app.get('/api/tiles/age', (req, res) => {
 	}
 
 	res.setHeader('Cache-Control', 'no-store');
-	res.json({ ok: true, oldestAgeMs, maxAgeMs: liveConfig.mapTilesMaxAgeDays * 86400000, known, unknown });
+	res.json({ ok: true, oldestAgeMs, maxAgeMs: liveConfig.mapTilesMaxAgeDays * 86400000, known, unknown, refreshing });
 });
 
 // Manual refresh for a viewport tile rectangle: backdates the authoritative
@@ -13675,7 +13704,9 @@ app.post('/api/tiles/refresh', (req, res) => {
 		return res.status(400).json({ ok: false, error: 'Invalid tile range' });
 	}
 
-	const staleTime = new Date(Date.now() - (liveConfig.mapTilesMaxAgeDays + 1) * 86400000);
+	pruneManualTileRefreshes();
+	const markedAt = Date.now();
+	const staleTime = new Date(markedAt - (liveConfig.mapTilesMaxAgeDays + 1) * 86400000);
 	const backdatedSources = new Set();
 	let invalidated = 0;
 	let vectorTouched = false;
@@ -13687,14 +13718,18 @@ app.post('/api/tiles/refresh', (req, res) => {
 				const key = `${src.z}/${src.x}/${src.y}`;
 				if (backdatedSources.has(key)) continue;
 				backdatedSources.add(key);
+				const srcPath = mvtStore.tilePath(src.z, src.x, src.y);
 				try {
-					fs.utimesSync(mvtStore.tilePath(src.z, src.x, src.y), staleTime, staleTime);
+					fs.utimesSync(srcPath, staleTime, staleTime);
+					manualTileRefreshes.set(srcPath, markedAt);
 					invalidated++;
 					vectorTouched = true;
 				} catch {}
 			} else {
+				const rasterPath = tileCachePath(TILE_CACHE_DIR, { z: rect.z, x, y });
 				try {
-					fs.utimesSync(tileCachePath(TILE_CACHE_DIR, { z: rect.z, x, y }), staleTime, staleTime);
+					fs.utimesSync(rasterPath, staleTime, staleTime);
+					manualTileRefreshes.set(rasterPath, markedAt);
 					invalidated++;
 				} catch {}
 			}

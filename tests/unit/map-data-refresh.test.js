@@ -62,10 +62,16 @@ describe('Manual map-data refresh wiring', () => {
 	});
 
 	it('backdates the authoritative data past the configured max age', () => {
-		assert.match(body, /const staleTime = new Date\(Date\.now\(\) - \(liveConfig\.mapTilesMaxAgeDays \+ 1\) \* 86400000\);/);
-		assert.match(body, /fs\.utimesSync\(mvtStore\.tilePath\(src\.z, src\.x, src\.y\), staleTime, staleTime\);/);
-		assert.match(body, /fs\.utimesSync\(tileCachePath\(TILE_CACHE_DIR, \{ z: rect\.z, x, y \}\), staleTime, staleTime\);/);
+		assert.match(body, /const staleTime = new Date\(markedAt - \(liveConfig\.mapTilesMaxAgeDays \+ 1\) \* 86400000\);/);
+		assert.match(body, /const srcPath = mvtStore\.tilePath\(src\.z, src\.x, src\.y\);\s*try \{\s*fs\.utimesSync\(srcPath, staleTime, staleTime\);/);
+		assert.match(body, /const rasterPath = tileCachePath\(TILE_CACHE_DIR, \{ z: rect\.z, x, y \}\);\s*try \{\s*fs\.utimesSync\(rasterPath, staleTime, staleTime\);/);
 		assert.match(body, /backdatedSources\.has\(key\)/, 'overzoomed source tiles are backdated once');
+	});
+
+	it('records each backdated path so the age endpoint can report it as refreshing', () => {
+		assert.match(body, /manualTileRefreshes\.set\(srcPath, markedAt\);/);
+		assert.match(body, /manualTileRefreshes\.set\(rasterPath, markedAt\);/);
+		assert.match(body, /pruneManualTileRefreshes\(\);/);
 	});
 
 	it('bumps the persisted tile epoch and kicks a forced primer run', () => {
@@ -85,6 +91,29 @@ describe('Manual map-data refresh wiring', () => {
 	});
 });
 
+describe('Pending manual-refresh tracking', () => {
+	const pruneFactory = new Function(
+		'manualTileRefreshes',
+		'MANUAL_TILE_REFRESH_TTL_MS',
+		`${extractFunction(source, 'pruneManualTileRefreshes')}; return pruneManualTileRefreshes;`
+	);
+
+	it('prunes entries older than the TTL and keeps recent ones', () => {
+		const pending = new Map([['expired', Date.now() - 301000], ['recent', Date.now() - 1000]]);
+		pruneFactory(pending, 300000)();
+		assert.deepStrictEqual([...pending.keys()], ['recent']);
+	});
+
+	it('the age endpoint reports pending tiles as refreshing, not backdated-old', () => {
+		const ageIndex = source.indexOf("app.get('/api/tiles/age'");
+		const ageBody = source.slice(ageIndex, source.indexOf('\n});', ageIndex));
+		assert.match(ageBody, /pruneManualTileRefreshes\(\);/);
+		assert.match(ageBody, /const markedAt = manualTileRefreshes\.get\(authPath\);/);
+		assert.match(ageBody, /if \(Date\.now\(\) - ageMs >= markedAt\) manualTileRefreshes\.delete\(authPath\);\s*else \{ refreshing\+\+; continue; \}/);
+		assert.match(ageBody, /known, unknown, refreshing \}\);/);
+	});
+});
+
 describe('Data-age chip client wiring', () => {
 	it('text updates target the span so the refresh button survives', () => {
 		assert.match(source, /var dataAgeText=document\.getElementById\('map-data-age-text'\);/);
@@ -94,6 +123,10 @@ describe('Data-age chip client wiring', () => {
 
 	it('unknown age clears both state classes', () => {
 		assert.match(source, /dataAgeEl\.classList\.remove\('stale'\);dataAgeEl\.classList\.remove\('fresh'\);/);
+	});
+
+	it('a pending refresh shows the neutral refreshing text instead of a red backdated age', () => {
+		assert.match(source, /if\(d\.refreshing>0\)\{dataAgeText\.textContent='map data refreshing\\\\u2026';dataAgeEl\.classList\.remove\('stale'\);dataAgeEl\.classList\.remove\('fresh'\);clearTimeout\(dataAgeTimer\);dataAgeTimer=setTimeout\(refreshDataAge,5000\);return\}/);
 	});
 
 	it('the refresh button posts the current viewport rect, spins, and re-polls', () => {
