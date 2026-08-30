@@ -1217,9 +1217,13 @@ async function enterVideoFullscreen(videoEl, videoContainer) {
 		setControlTooltip(fsBtn, tooltipLabel('exitFullscreen', 'Exit fullscreen'));
 	}
 
-	// On mobile with landscape video, rotate to landscape orientation
+	// On mobile with landscape video, rotate to landscape orientation. Only
+	// when the fullscreen surface is actually portrait (a phone held upright):
+	// touch-capable landscape screens (touchscreen laptops) must not rotate -
+	// the video already fills the screen in its natural orientation.
 	const landscape = await isVideoLandscape(videoEl);
-	if (landscape && isTouchDevice() && videoFullscreenActive) {
+	const portraitScreen = window.innerHeight > window.innerWidth;
+	if (landscape && isTouchDevice() && portraitScreen && videoFullscreenActive) {
 		if (!fake) {
 			try {
 				await screen.orientation.lock('landscape');

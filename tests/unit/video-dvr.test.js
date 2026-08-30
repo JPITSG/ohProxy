@@ -163,6 +163,12 @@ describe('Video timeshift (DVR) wiring', () => {
 		assert.match(app, /if \(staleVideo && staleVideo\.__dvr\) staleVideo\.__dvr\.destroy\(\);/);
 	});
 
+	it('only rotates fullscreen video on a portrait touch screen, not touch laptops', () => {
+		const app = fs.readFileSync(APP_FILE, 'utf8');
+		assert.match(app, /const portraitScreen = window\.innerHeight > window\.innerWidth;/);
+		assert.match(app, /if \(landscape && isTouchDevice\(\) && portraitScreen && videoFullscreenActive\) \{/);
+	});
+
 	it('rotates the DVR bar together with fs-rotated fullscreen video', () => {
 		const app = fs.readFileSync(APP_FILE, 'utf8');
 		const css = fs.readFileSync(STYLES_FILE, 'utf8');
