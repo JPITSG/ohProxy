@@ -462,7 +462,6 @@ window.ohLang = {
 		historySearchClearLabel: 'Clear history search',
 		historySearchNewerBtn: 'Newer matches',
 		historySearchOlderBtn: 'Search older',
-		historySearching: 'Searching history\u2026',
 		historyNoRecent: 'No recent history',
 		historyNoMatches: 'No matching states found',
 		historyNoMatchesRange: 'No matches in this range',

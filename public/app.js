@@ -5590,12 +5590,16 @@ function renderHistoryRows(container, entries, formatState) {
 function setHistorySearchLoading(loading) {
 	historySearchLoading = !!loading;
 	const form = cardConfigModal?.querySelector('.history-search-form');
+	const container = cardConfigModal?.querySelector('.history-entries');
+	const navButtons = cardConfigModal?.querySelectorAll('.history-nav button') || [];
 	const submit = form?.querySelector('.history-search-submit');
 	if (submit) submit.disabled = historySearchLoading;
-	if (form) {
-		if (historySearchLoading) form.setAttribute('aria-busy', 'true');
-		else form.removeAttribute('aria-busy');
+	for (const element of [form, container]) {
+		if (!element) continue;
+		if (historySearchLoading) element.setAttribute('aria-busy', 'true');
+		else element.removeAttribute('aria-busy');
 	}
+	for (const button of navButtons) button.disabled = historySearchLoading;
 }
 
 function setHistorySearchAvailability(available) {
@@ -5611,23 +5615,20 @@ function resetHistorySearchForItem() {
 	historySearchGeneration += 1;
 	historySearchAvailable = false;
 	historySearchActive = false;
-	historySearchLoading = false;
 	historySearchPages = [];
 	historySearchPageIndex = -1;
 	historySearchScanState = null;
 	historySearchGroupFormatters.clear();
 	const form = cardConfigModal?.querySelector('.history-search-form');
 	const input = form?.querySelector('.history-search-input');
-	const submit = form?.querySelector('.history-search-submit');
 	if (form) {
 		form.hidden = true;
-		form.removeAttribute('aria-busy');
 	}
 	if (input) {
 		input.value = '';
 		syncSearchClearButton(input);
 	}
-	if (submit) submit.disabled = false;
+	setHistorySearchLoading(false);
 }
 
 function formatHistorySearchEntry(entry) {
@@ -5718,8 +5719,6 @@ async function loadNextHistorySearchPage() {
 	if (!section || !container || !nav) return;
 	const generation = historySearchGeneration;
 	setHistorySearchLoading(true);
-	container.innerHTML = '<div class="history-loading">' + ohLang.cardConfig.historySearching + '</div>';
-	nav.style.display = 'none';
 	if (historyAbort) historyAbort.abort();
 	historyAbort = new AbortController();
 	const signal = historyAbort.signal;
@@ -5775,6 +5774,7 @@ async function loadNextHistorySearchPage() {
 		renderHistorySearchPage(historySearchPages.length - 1);
 	} catch (error) {
 		if (error.name === 'AbortError' || generation !== historySearchGeneration) return;
+		nav.style.display = 'none';
 		container.innerHTML = '';
 		const failed = document.createElement('div');
 		failed.className = 'history-empty history-error';
@@ -5815,16 +5815,14 @@ function clearHistorySearch() {
 	if (historyAbort) { historyAbort.abort(); historyAbort = null; }
 	historySearchGeneration += 1;
 	historySearchActive = false;
-	historySearchLoading = false;
 	historySearchPages = [];
 	historySearchPageIndex = -1;
 	historySearchScanState = null;
 	historySearchGroupFormatters.clear();
 	const input = cardConfigModal?.querySelector('.history-search-input');
-	const submit = cardConfigModal?.querySelector('.history-search-submit');
 	if (input && input.value) input.value = '';
 	syncSearchClearButton(input);
-	if (submit) submit.disabled = false;
+	setHistorySearchLoading(false);
 	if (!wasActive || !historyCurrentItemName) return;
 	historyOffsetStack = [];
 	historyCursorStack = [];

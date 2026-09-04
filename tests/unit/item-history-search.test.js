@@ -149,8 +149,11 @@ describe('Item history search', () => {
 		assert.match(app, /const HISTORY_SEARCH_PAGE_SIZE = 3;/);
 		assert.match(app, /const HISTORY_SEARCH_MAX_SAMPLES_PER_ACTION = 5000;/);
 		assert.match(app, /consumeHistorySearchEntries\(historySearchScanState, data\.entries/);
+		assert.match(app, /setHistorySearchLoading\(true\);\s*if \(historyAbort\)/);
+		assert.doesNotMatch(app, /setHistorySearchLoading\(true\);\s*container\.innerHTML/);
+		assert.match(app, /const navButtons = cardConfigModal\?\.querySelectorAll\('\.history-nav button'\)[\s\S]*?button\.disabled = historySearchLoading;/);
 		assert.doesNotMatch(app, /historySearchThrough|historySearchSummary|history-search-status|setHistorySearchStatus/);
-		assert.doesNotMatch(lang, /historySearchSummary|historySearchMatch/);
+		assert.doesNotMatch(lang, /historySearchSummary|historySearchMatch|historySearching/);
 		assert.doesNotMatch(styles, /history-search-status/);
 		assert.match(styles, /\.history-nav \{[^}]*margin-top: -6px;/);
 		assert.match(app, /event\.key !== 'Escape'[\s\S]*?event\.preventDefault\(\);\s*event\.stopPropagation\(\);[\s\S]*?clearHistorySearch\(\);/);
