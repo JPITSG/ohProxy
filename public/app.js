@@ -4411,7 +4411,7 @@ let historySearchPages = [];
 let historySearchPageIndex = -1;
 let historySearchScanState = null;
 let historySearchGroupFormatters = new Map();
-const HISTORY_SEARCH_PAGE_SIZE = 5;
+const HISTORY_SEARCH_PAGE_SIZE = 3;
 const HISTORY_SEARCH_MAX_SAMPLES_PER_ACTION = 5000;
 let cardConfigInitialStateJson = null;
 
@@ -5670,15 +5670,13 @@ function formatHistorySearchEntry(entry) {
 	};
 }
 
-function historySearchSummary(count, through) {
-	if (!through) return '';
+function historySearchSummary(count) {
 	const matches = count === 1
 		? ohLang.cardConfig.historySearchMatch
 		: ohLang.cardConfig.historySearchMatches;
 	return ohLang.cardConfig.historySearchSummary
 		.replace('{count}', String(count))
-		.replace('{matches}', matches)
-		.replace('{time}', formatHistoryTime(through));
+		.replace('{matches}', matches);
 }
 
 function renderHistorySearchPage(index) {
@@ -5769,7 +5767,6 @@ async function loadNextHistorySearchPage() {
 			}
 			const previousCursor = historySearchScanState.cursor;
 			historySearchScanState.cursor = data.nextCursor || null;
-			historySearchScanState.through = data.through || historySearchScanState.through || null;
 			const scanned = Math.max(0, Number(data.scanned) || 0);
 			scannedThisAction += scanned;
 			historySearchScanState.scannedTotal = (historySearchScanState.scannedTotal || 0) + scanned;
@@ -5790,10 +5787,7 @@ async function loadNextHistorySearchPage() {
 		if (generation !== historySearchGeneration || !historySearchActive) return;
 		const entries = historySearchScanState.bufferedMatches.splice(0, HISTORY_SEARCH_PAGE_SIZE);
 		const hasOlder = historySearchScanState.bufferedMatches.length > 0 || !historySearchScanState.done;
-		const through = historySearchScanState.through;
-		const status = entries.length
-			? historySearchSummary(entries.length, through)
-			: through ? ohLang.cardConfig.historySearchThrough.replace('{time}', formatHistoryTime(through)) : '';
+		const status = entries.length ? historySearchSummary(entries.length) : '';
 		historySearchPages.push({
 			entries,
 			hasOlder,
@@ -5838,7 +5832,6 @@ function startHistorySearch() {
 	historySearchScanState = createHistorySearchScanState(query);
 	historySearchScanState.cursor = null;
 	historySearchScanState.scannedTotal = 0;
-	historySearchScanState.through = null;
 	loadNextHistorySearchPage();
 }
 

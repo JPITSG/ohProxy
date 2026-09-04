@@ -145,9 +145,11 @@ describe('Item history search', () => {
 		assert.match(server, /searchAvailable: isHistorySearchAvailable\(conn\)/);
 		assert.doesNotMatch(server, /searchAvailable:[^\n]*(?:password|username|database|host|socket)/i);
 		assert.match(app, /class="history-search-form"[\s\S]*?class="history-search-input"[\s\S]*?class="history-search-submit"/);
-		assert.match(app, /const HISTORY_SEARCH_PAGE_SIZE = 5;/);
+		assert.match(app, /const HISTORY_SEARCH_PAGE_SIZE = 3;/);
 		assert.match(app, /const HISTORY_SEARCH_MAX_SAMPLES_PER_ACTION = 5000;/);
 		assert.match(app, /consumeHistorySearchEntries\(historySearchScanState, data\.entries/);
+		assert.match(app, /const status = entries\.length \? historySearchSummary\(entries\.length\) : '';/);
+		assert.doesNotMatch(app, /historySearchThrough|historySearchSummary\(entries\.length, through\)/);
 		assert.match(app, /event\.key !== 'Escape'[\s\S]*?event\.preventDefault\(\);\s*event\.stopPropagation\(\);[\s\S]*?clearHistorySearch\(\);/);
 		assert.match(app, /const hasNav = navFrag\.childNodes\.length > 0;\s*nav\.innerHTML = '';\s*nav\.appendChild\(navFrag\);\s*nav\.style\.display = hasNav \? 'flex' : 'none';/);
 		assert.match(styles, /@media \(max-width: 639px\), \(hover: none\), \(pointer: coarse\)[\s\S]*?\.history-search-input,[\s\S]*?height: 44px;/);
