@@ -152,6 +152,7 @@ describe('Item history search', () => {
 		assert.doesNotMatch(app, /historySearchThrough|historySearchSummary|history-search-status|setHistorySearchStatus/);
 		assert.doesNotMatch(lang, /historySearchSummary|historySearchMatch/);
 		assert.doesNotMatch(styles, /history-search-status/);
+		assert.match(styles, /\.history-nav \{[^}]*margin-top: -6px;/);
 		assert.match(app, /event\.key !== 'Escape'[\s\S]*?event\.preventDefault\(\);\s*event\.stopPropagation\(\);[\s\S]*?clearHistorySearch\(\);/);
 		assert.match(app, /const hasNav = navFrag\.childNodes\.length > 0;\s*nav\.innerHTML = '';\s*nav\.appendChild\(navFrag\);\s*nav\.style\.display = hasNav \? 'flex' : 'none';/);
 		assert.match(styles, /@media \(max-width: 639px\), \(hover: none\), \(pointer: coarse\)[\s\S]*?\.history-search-input,[\s\S]*?height: 44px;/);

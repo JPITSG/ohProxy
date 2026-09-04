@@ -2880,7 +2880,7 @@ body.theme-light .history-search-input:focus {
 	padding: 6px 0;
 }
 .history-empty.history-error { color: var(--color-status-error); }
-.history-nav { display: flex; gap: 6px; }
+.history-nav { display: flex; gap: 6px; margin-top: -6px; }
 html.no-flex-gap .history-nav > * + * { margin-left: 6px; }
 .history-older, .history-newer {
 	flex: 1;
