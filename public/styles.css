@@ -2741,6 +2741,103 @@ html.no-flex-gap .iframe-height-section > * + *,
 html.no-flex-gap .proxy-cache-section > * + * {
 	margin-top: 8px;
 }
+.history-search-form {
+	display: flex;
+	align-items: stretch;
+	gap: 6px;
+	width: 100%;
+	min-width: 0;
+}
+.history-search-form[hidden],
+.history-search-status[hidden] {
+	display: none;
+}
+html.no-flex-gap .history-search-form > * + * { margin-left: 6px; }
+.history-search-field {
+	position: relative;
+	display: flex;
+	align-items: center;
+	flex: 1 1 auto;
+	min-width: 0;
+}
+.history-search-field .search-clear-wrap {
+	flex: 1 1 auto;
+	width: 100%;
+}
+.history-search-icon {
+	position: absolute;
+	left: 10px;
+	top: 50%;
+	transform: translateY(-50%);
+	z-index: 1;
+	width: 15px;
+	height: 15px;
+	color: var(--color-text-muted);
+	pointer-events: none;
+}
+.history-search-input {
+	box-sizing: border-box;
+	width: 100%;
+	height: 38px;
+	min-width: 0;
+	margin: 0;
+	padding: 0 36px 0 32px !important;
+	font-size: .75rem;
+	line-height: 36px;
+	color: var(--color-text-primary);
+	background: rgba(30, 33, 54, 0.7);
+	backdrop-filter: blur(6px);
+	-webkit-backdrop-filter: blur(6px);
+	border: var(--glass-border-width) solid var(--color-control-off-border);
+	border-radius: 10px;
+	outline: none;
+	box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.45), inset 0 1px 3px rgba(0, 0, 0, 0.35);
+	transition: border-color .2s ease, box-shadow .2s ease;
+}
+.history-search-input::placeholder { color: rgba(255, 255, 255, 0.38); }
+.history-search-input:focus {
+	border-color: rgba(118, 214, 152, 0.5);
+	box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.45), inset 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 10px rgba(118, 214, 152, 0.3);
+}
+.history-search-field .search-clear-btn {
+	right: 0;
+	width: 36px;
+	height: 100%;
+}
+.history-search-submit {
+	flex: 0 0 auto;
+	min-width: 68px;
+	height: 38px;
+	padding: 0 11px;
+	font-size: .75rem;
+	line-height: 1;
+	border-radius: 10px;
+	cursor: pointer;
+	background-color: var(--color-control-off-bg);
+	color: var(--color-control-off-text);
+	border: var(--glass-border-width) solid var(--color-control-off-border);
+	box-shadow: 0 0 8px var(--color-control-off-shadow);
+	transition: background-color .4s ease, border-color .4s ease, box-shadow .4s ease, opacity .2s ease;
+}
+.history-search-submit:disabled {
+	opacity: .45;
+	cursor: default;
+}
+.history-search-status {
+	min-height: 1em;
+	font-size: .68rem;
+	font-weight: 300;
+	color: var(--color-text-muted);
+}
+body.theme-light .history-search-input {
+	background: rgba(255, 255, 255, 0.72);
+	box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.18), inset 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+body.theme-light .history-search-input::placeholder { color: rgba(105, 112, 130, 0.72); }
+body.theme-light .history-search-input:focus {
+	border-color: rgba(78, 183, 128, 0.5);
+	box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.18), inset 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 10px rgba(78, 183, 128, 0.28);
+}
 .history-entries { display: flex; flex-direction: column; margin-top: -6px; }
 .history-entry {
 	display: flex;
@@ -2783,6 +2880,13 @@ html.no-flex-gap .proxy-cache-section > * + * {
 	color: var(--color-text-muted);
 	padding: 6px 0;
 }
+.history-empty {
+	font-size: .75rem;
+	font-weight: 300;
+	color: var(--color-text-muted);
+	padding: 6px 0;
+}
+.history-empty.history-error { color: var(--color-status-error); }
 .history-nav { display: flex; gap: 6px; }
 html.no-flex-gap .history-nav > * + * { margin-left: 6px; }
 .history-older, .history-newer {
@@ -2833,6 +2937,24 @@ html.no-flex-gap .history-nav > * + * { margin-left: 6px; }
 .history-newer::after {
 	top: 1px;
 	transform: rotate(180deg);
+}
+@media (hover: hover) and (pointer: fine) {
+	.history-search-submit:hover,
+	.history-older:hover,
+	.history-newer:hover {
+		border-color: rgba(118, 214, 152, 0.42);
+		box-shadow: 0 0 10px rgba(118, 214, 152, 0.2);
+	}
+}
+@media (max-width: 639px), (hover: none), (pointer: coarse) {
+	.history-search-input,
+	.history-search-submit {
+		height: 44px;
+	}
+	.history-search-input { line-height: 42px; }
+	.history-search-field .search-clear-btn {
+		width: 42px;
+	}
 }
 .glow-rule-row,
 .admin-list-row {

@@ -47,6 +47,7 @@ const {
 	widgetType, widgetLink, widgetPageLink, widgetIconName,
 	deltaKey, splitLabelState, widgetKey, cardWidthKey, widgetConfigLookupKeys, filterVisibleSearchEntries, normalizeMapping, normalizeButtongridButtons,
 	buildHistoryStateFormatter, resolveStateDisplayPattern, formatSetpointStepCommand,
+	createHistorySearchScanState, consumeHistorySearchEntries,
 } = window.WidgetNormalizer;
 
 function logJsError(message, error) {
@@ -4400,6 +4401,18 @@ let historyStateFormatter = null;
 let historyStatePattern = '';
 let historyAbort = null;
 let historyWheelNavUntil = 0;
+let historyCurrentItemName = '';
+let historyCurrentIsGroup = false;
+let historySearchAvailable = false;
+let historySearchActive = false;
+let historySearchLoading = false;
+let historySearchGeneration = 0;
+let historySearchPages = [];
+let historySearchPageIndex = -1;
+let historySearchScanState = null;
+let historySearchGroupFormatters = new Map();
+const HISTORY_SEARCH_PAGE_SIZE = 5;
+const HISTORY_SEARCH_MAX_SAMPLES_PER_ACTION = 5000;
 let cardConfigInitialStateJson = null;
 
 let alertModal = null;
@@ -4796,6 +4809,16 @@ function ensureCardConfigModal() {
 			<div class="card-config-body oh-modal-body">
 				<div class="history-section" style="display:none;">
 					<div class="item-config-section-header">${cc.historyHeader}</div>
+					<form class="history-search-form" role="search" aria-label="${cc.historySearchLabel}" hidden>
+						<div class="history-search-field">
+							<svg class="history-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+								<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>
+							</svg>
+							<input type="search" class="history-search-input" maxlength="100" autocomplete="off" spellcheck="false" placeholder="${cc.historySearchPlaceholder}" aria-label="${cc.historySearchLabel}">
+						</div>
+						<button type="submit" class="history-search-submit">${cc.historySearchBtn}</button>
+					</form>
+					<div class="history-search-status" role="status" aria-live="polite" hidden></div>
 					<div class="history-entries"></div>
 					<div class="history-nav" style="display:none;"></div>
 				</div>
@@ -4884,6 +4907,29 @@ function ensureCardConfigModal() {
 			if (!section || section.style.display === 'none') return;
 			if (triggerHistoryNavFromWheel(section, e.deltaY)) e.preventDefault();
 		}, { passive: false });
+	}
+	const historySearchForm = wrap.querySelector('.history-search-form');
+	const historySearchInput = wrap.querySelector('.history-search-input');
+	if (historySearchForm && historySearchInput) {
+		attachSearchClearButton(historySearchInput);
+		const clearButton = historySearchForm.querySelector('.search-clear-btn');
+		if (clearButton) setControlTooltip(clearButton, cc.historySearchClearLabel);
+		historySearchForm.addEventListener('submit', event => {
+			event.preventDefault();
+			haptic();
+			startHistorySearch();
+		});
+		historySearchInput.addEventListener('input', () => {
+			if (!historySearchInput.value && historySearchActive) clearHistorySearch();
+		});
+		historySearchInput.addEventListener('keydown', event => {
+			if (event.key !== 'Escape' || !historySearchInput.value) return;
+			event.preventDefault();
+			event.stopPropagation();
+			historySearchInput.value = '';
+			syncSearchClearButton(historySearchInput);
+			if (historySearchActive) clearHistorySearch();
+		});
 	}
 	const cardUsersVisibilityRadio = wrap.querySelector('input[name="visibility"][value="users"]');
 	const cardUsersVisibilityLabel = cardUsersVisibilityRadio?.closest('.item-config-radio') || null;
@@ -5416,6 +5462,9 @@ function openCardConfigModal(widget, card) {
 	const itemName = widget?.item?.name || '';
 	const historySection = cardConfigModal.querySelector('.history-section');
 	historyStatePattern = '';
+	historyCurrentItemName = itemName;
+	historyCurrentIsGroup = !!(itemName && GROUP_ITEMS_SET.has(itemName));
+	resetHistorySearchForItem();
 	if (historySection) {
 		if (itemName && !isSection) {
 			historySection.style.display = '';
@@ -5428,7 +5477,7 @@ function openCardConfigModal(widget, card) {
 			if (hContainer) hContainer.innerHTML = '';
 			if (hNav) { hNav.innerHTML = ''; hNav.style.display = 'none'; }
 			if (historyAbort) historyAbort.abort();
-			if (GROUP_ITEMS_SET.has(itemName)) {
+			if (historyCurrentIsGroup) {
 				historyMappings = [];
 				historyStateFormatter = null;
 				loadGroupHistoryEntries(itemName, null);
@@ -5502,6 +5551,320 @@ function formatRawState(rawState) {
 	return /^[A-Z][A-Z_]+$/.test(rawState) ? rawState.split('_').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ') : rawState;
 }
 
+function renderHistoryRows(container, entries, formatState) {
+	const frag = document.createDocumentFragment();
+	for (const entry of entries) {
+		const row = document.createElement('div');
+		row.className = 'history-entry';
+		const timeSpan = document.createElement('span');
+		timeSpan.textContent = formatHistoryTime(entry.time);
+		const stateSpan = document.createElement('span');
+		stateSpan.className = 'history-state';
+		const rawState = safeText(entry.state);
+		stateSpan.textContent = formatState(entry, rawState);
+		setControlTooltip(stateSpan, stateSpan.textContent, {
+			ariaLabel: false,
+			overflowSelector: 'self',
+		});
+		row.appendChild(timeSpan);
+		if (historyGlowColor) {
+			const color = historyGlowColor(rawState);
+			if (color) {
+				const solid = colorToRgba(color, 1);
+				const glow = colorToRgba(color, 0.6);
+				if (solid && glow) {
+					const dot = document.createElement('span');
+					dot.className = 'history-glow-dot';
+					dot.style.setProperty('--glow-solid', solid);
+					dot.style.setProperty('--glow-color', glow);
+					row.appendChild(dot);
+				}
+			}
+		}
+		row.appendChild(stateSpan);
+		frag.appendChild(row);
+	}
+	container.innerHTML = '';
+	container.appendChild(frag);
+}
+
+function setHistorySearchStatus(text) {
+	const status = cardConfigModal?.querySelector('.history-search-status');
+	if (!status) return;
+	status.textContent = text || '';
+	status.hidden = !text;
+}
+
+function setHistorySearchLoading(loading) {
+	historySearchLoading = !!loading;
+	const form = cardConfigModal?.querySelector('.history-search-form');
+	const submit = form?.querySelector('.history-search-submit');
+	if (submit) submit.disabled = historySearchLoading;
+	if (form) {
+		if (historySearchLoading) form.setAttribute('aria-busy', 'true');
+		else form.removeAttribute('aria-busy');
+	}
+}
+
+function setHistorySearchAvailability(available) {
+	historySearchAvailable = available === true;
+	const form = cardConfigModal?.querySelector('.history-search-form');
+	if (form) form.hidden = !historySearchAvailable;
+	if (!historySearchAvailable) {
+		historySearchActive = false;
+		setHistorySearchStatus('');
+	}
+}
+
+function resetHistorySearchForItem() {
+	historySearchGeneration += 1;
+	historySearchAvailable = false;
+	historySearchActive = false;
+	historySearchLoading = false;
+	historySearchPages = [];
+	historySearchPageIndex = -1;
+	historySearchScanState = null;
+	historySearchGroupFormatters.clear();
+	const form = cardConfigModal?.querySelector('.history-search-form');
+	const input = form?.querySelector('.history-search-input');
+	const submit = form?.querySelector('.history-search-submit');
+	if (form) {
+		form.hidden = true;
+		form.removeAttribute('aria-busy');
+	}
+	if (input) {
+		input.value = '';
+		syncSearchClearButton(input);
+	}
+	if (submit) submit.disabled = false;
+	setHistorySearchStatus('');
+}
+
+function formatHistorySearchEntry(entry) {
+	const rawState = safeText(entry?.state);
+	const transformedState = entry && Object.prototype.hasOwnProperty.call(entry, 'transformedState')
+		? entry.transformedState
+		: undefined;
+	if (!historyCurrentIsGroup) {
+		const displayState = historyStateFormatter
+			? historyStateFormatter(rawState, transformedState)
+			: transformedState !== undefined ? safeText(transformedState) : formatRawState(rawState);
+		return { displayState, renderedState: displayState };
+	}
+
+	const pattern = safeText(entry?.statePattern);
+	let formatter = historySearchGroupFormatters.get(pattern);
+	if (!formatter) {
+		formatter = buildHistoryStateFormatter(
+			{ item: { stateDescription: { pattern } } },
+			[],
+			formatRawState
+		);
+		historySearchGroupFormatters.set(pattern, formatter);
+	}
+	const displayState = formatter(rawState, transformedState);
+	const member = safeText(entry?.member || entry?.memberName);
+	return {
+		displayState,
+		renderedState: member ? member + ' \u00B7 ' + displayState : displayState,
+	};
+}
+
+function historySearchSummary(count, through) {
+	if (!through) return '';
+	const matches = count === 1
+		? ohLang.cardConfig.historySearchMatch
+		: ohLang.cardConfig.historySearchMatches;
+	return ohLang.cardConfig.historySearchSummary
+		.replace('{count}', String(count))
+		.replace('{matches}', matches)
+		.replace('{time}', formatHistoryTime(through));
+}
+
+function renderHistorySearchPage(index) {
+	const page = historySearchPages[index];
+	const section = cardConfigModal?.querySelector('.history-section');
+	const container = section?.querySelector('.history-entries');
+	const nav = section?.querySelector('.history-nav');
+	if (!page || !section || !container || !nav) return;
+	historySearchPageIndex = index;
+	section.style.display = '';
+	if (page.entries.length) {
+		renderHistoryRows(container, page.entries, entry => safeText(entry.renderedState));
+	} else {
+		container.innerHTML = '';
+		const empty = document.createElement('div');
+		empty.className = 'history-empty';
+		empty.textContent = page.emptyText;
+		container.appendChild(empty);
+	}
+	setHistorySearchStatus(page.status);
+
+	const navFrag = document.createDocumentFragment();
+	if (index > 0) {
+		const newer = document.createElement('button');
+		newer.type = 'button';
+		newer.className = 'history-newer';
+		newer.textContent = ohLang.cardConfig.historySearchNewerBtn;
+		newer.addEventListener('click', () => {
+			haptic();
+			renderHistorySearchPage(historySearchPageIndex - 1);
+		});
+		navFrag.appendChild(newer);
+	}
+	if (page.hasOlder) {
+		const older = document.createElement('button');
+		older.type = 'button';
+		older.className = 'history-older';
+		older.textContent = ohLang.cardConfig.historySearchOlderBtn;
+		older.addEventListener('click', () => {
+			haptic();
+			if (historySearchPageIndex + 1 < historySearchPages.length) {
+				renderHistorySearchPage(historySearchPageIndex + 1);
+			} else {
+				loadNextHistorySearchPage();
+			}
+		});
+		navFrag.appendChild(older);
+	}
+	const hasNav = navFrag.childNodes.length > 0;
+	nav.innerHTML = '';
+	nav.appendChild(navFrag);
+	nav.style.display = hasNav ? 'flex' : 'none';
+}
+
+async function loadNextHistorySearchPage() {
+	if (!historySearchActive || !historySearchAvailable || !historySearchScanState || historySearchLoading) return;
+	const section = cardConfigModal?.querySelector('.history-section');
+	const container = section?.querySelector('.history-entries');
+	const nav = section?.querySelector('.history-nav');
+	if (!section || !container || !nav) return;
+	const generation = historySearchGeneration;
+	setHistorySearchLoading(true);
+	container.innerHTML = '<div class="history-loading">' + ohLang.cardConfig.historySearching + '</div>';
+	nav.style.display = 'none';
+	setHistorySearchStatus('');
+	if (historyAbort) historyAbort.abort();
+	historyAbort = new AbortController();
+	const signal = historyAbort.signal;
+	let scannedThisAction = 0;
+
+	try {
+		while (
+			historySearchScanState.bufferedMatches.length < HISTORY_SEARCH_PAGE_SIZE
+			&& !historySearchScanState.done
+			&& scannedThisAction < HISTORY_SEARCH_MAX_SAMPLES_PER_ACTION
+		) {
+			const params = new URLSearchParams();
+			if (historySearchScanState.cursor) params.set('cursor', historySearchScanState.cursor);
+			if (!historyCurrentIsGroup && historyStatePattern) params.set('statePattern', historyStatePattern);
+			const query = params.toString();
+			const url = '/api/card-config/' + encodeURIComponent(historyCurrentItemName) + '/history-search' + (query ? '?' + query : '');
+			const response = await fetch(url, { signal });
+			const data = await response.json();
+			if (generation !== historySearchGeneration || !historySearchActive) return;
+			if (!response.ok || !data.ok || data.searchAvailable !== true) {
+				if (data.searchAvailable === false) setHistorySearchAvailability(false);
+				throw new Error(data.error || 'History search failed');
+			}
+			const previousCursor = historySearchScanState.cursor;
+			historySearchScanState.cursor = data.nextCursor || null;
+			historySearchScanState.through = data.through || historySearchScanState.through || null;
+			const scanned = Math.max(0, Number(data.scanned) || 0);
+			scannedThisAction += scanned;
+			historySearchScanState.scannedTotal = (historySearchScanState.scannedTotal || 0) + scanned;
+			consumeHistorySearchEntries(historySearchScanState, data.entries, {
+				formatEntry: formatHistorySearchEntry,
+				seriesKey: entry => historyCurrentIsGroup ? entry.memberName : '',
+				done: data.done === true,
+			});
+			if (data.done !== true && (!data.nextCursor || data.nextCursor === previousCursor || scanned === 0)) {
+				consumeHistorySearchEntries(historySearchScanState, [], {
+					formatEntry: formatHistorySearchEntry,
+					seriesKey: entry => historyCurrentIsGroup ? entry.memberName : '',
+					done: true,
+				});
+			}
+		}
+
+		if (generation !== historySearchGeneration || !historySearchActive) return;
+		const entries = historySearchScanState.bufferedMatches.splice(0, HISTORY_SEARCH_PAGE_SIZE);
+		const hasOlder = historySearchScanState.bufferedMatches.length > 0 || !historySearchScanState.done;
+		const through = historySearchScanState.through;
+		const status = entries.length
+			? historySearchSummary(entries.length, through)
+			: through ? ohLang.cardConfig.historySearchThrough.replace('{time}', formatHistoryTime(through)) : '';
+		historySearchPages.push({
+			entries,
+			hasOlder,
+			status,
+			emptyText: historySearchScanState.done
+				? ohLang.cardConfig.historyNoMatches
+				: ohLang.cardConfig.historyNoMatchesRange,
+		});
+		renderHistorySearchPage(historySearchPages.length - 1);
+	} catch (error) {
+		if (error.name === 'AbortError' || generation !== historySearchGeneration) return;
+		container.innerHTML = '';
+		const failed = document.createElement('div');
+		failed.className = 'history-empty history-error';
+		failed.textContent = ohLang.cardConfig.historySearchFailed;
+		container.appendChild(failed);
+		setHistorySearchStatus('');
+	} finally {
+		if (generation === historySearchGeneration) setHistorySearchLoading(false);
+	}
+}
+
+function startHistorySearch() {
+	if (!historySearchAvailable || !historyCurrentItemName) return;
+	const input = cardConfigModal?.querySelector('.history-search-input');
+	const query = safeText(input?.value).trim();
+	if (!query) {
+		clearHistorySearch();
+		return;
+	}
+	if (input) {
+		input.value = query;
+		syncSearchClearButton(input);
+		input.blur();
+	}
+	if (historyAbort) historyAbort.abort();
+	historySearchGeneration += 1;
+	historySearchActive = true;
+	historySearchPages = [];
+	historySearchPageIndex = -1;
+	historySearchGroupFormatters.clear();
+	historySearchScanState = createHistorySearchScanState(query);
+	historySearchScanState.cursor = null;
+	historySearchScanState.scannedTotal = 0;
+	historySearchScanState.through = null;
+	loadNextHistorySearchPage();
+}
+
+function clearHistorySearch() {
+	const wasActive = historySearchActive;
+	if (historyAbort) { historyAbort.abort(); historyAbort = null; }
+	historySearchGeneration += 1;
+	historySearchActive = false;
+	historySearchLoading = false;
+	historySearchPages = [];
+	historySearchPageIndex = -1;
+	historySearchScanState = null;
+	historySearchGroupFormatters.clear();
+	const input = cardConfigModal?.querySelector('.history-search-input');
+	const submit = cardConfigModal?.querySelector('.history-search-submit');
+	if (input && input.value) input.value = '';
+	syncSearchClearButton(input);
+	if (submit) submit.disabled = false;
+	setHistorySearchStatus('');
+	if (!wasActive || !historyCurrentItemName) return;
+	historyOffsetStack = [];
+	historyCursorStack = [];
+	if (historyCurrentIsGroup) loadGroupHistoryEntries(historyCurrentItemName, null);
+	else loadHistoryEntries(historyCurrentItemName, 0);
+}
+
 function triggerHistoryNavFromWheel(section, deltaY) {
 	const btn = section?.querySelector(deltaY > 0 ? '.history-older' : '.history-newer');
 	if (!btn) return false;
@@ -5528,44 +5891,26 @@ async function loadHistoryEntriesShared(itemName, token, config) {
 	try {
 		const resp = await fetch(buildUrl(itemName, token), { signal });
 		const data = await resp.json();
-		if (!data.ok || !data.entries.length) {
+		if (!data.ok) {
+			setHistorySearchAvailability(false);
 			section.style.display = 'none';
 			return;
 		}
-		const frag = document.createDocumentFragment();
-		for (const entry of data.entries) {
-			const row = document.createElement('div');
-			row.className = 'history-entry';
-			const timeSpan = document.createElement('span');
-			timeSpan.textContent = formatHistoryTime(entry.time);
-			const stateSpan = document.createElement('span');
-			stateSpan.className = 'history-state';
-			const rawState = entry.state;
-			stateSpan.textContent = formatState(entry, rawState);
-			setControlTooltip(stateSpan, stateSpan.textContent, {
-				ariaLabel: false,
-				overflowSelector: 'self',
-			});
-			row.appendChild(timeSpan);
-			if (historyGlowColor) {
-				const color = historyGlowColor(rawState);
-				if (color) {
-					const solid = colorToRgba(color, 1);
-					const glow = colorToRgba(color, 0.6);
-					if (solid && glow) {
-						const dot = document.createElement('span');
-						dot.className = 'history-glow-dot';
-						dot.style.setProperty('--glow-solid', solid);
-						dot.style.setProperty('--glow-color', glow);
-						row.appendChild(dot);
-					}
-				}
+		setHistorySearchAvailability(data.searchAvailable === true);
+		if (!Array.isArray(data.entries) || !data.entries.length) {
+			nav.style.display = 'none';
+			if (!historySearchAvailable) {
+				section.style.display = 'none';
+				return;
 			}
-			row.appendChild(stateSpan);
-			frag.appendChild(row);
+			container.innerHTML = '';
+			const empty = document.createElement('div');
+			empty.className = 'history-empty';
+			empty.textContent = ohLang.cardConfig.historyNoRecent;
+			container.appendChild(empty);
+			return;
 		}
-		container.innerHTML = '';
-		container.appendChild(frag);
+		renderHistoryRows(container, data.entries, formatState);
 		const navFrag = document.createDocumentFragment();
 		if (data.hasNewer || data.hasOlder) {
 			if (data.hasNewer) {
@@ -5600,6 +5945,7 @@ async function loadHistoryEntriesShared(itemName, token, config) {
 		}
 	} catch (e) {
 		if (e.name === 'AbortError') return;
+		setHistorySearchAvailability(false);
 		section.style.display = 'none';
 	}
 }
@@ -6436,6 +6782,15 @@ function closeCardConfigModal() {
 	}
 	// Abort any in-flight history fetches
 	if (historyAbort) { historyAbort.abort(); historyAbort = null; }
+	historySearchGeneration += 1;
+	historySearchActive = false;
+	historySearchLoading = false;
+	historySearchPages = [];
+	historySearchPageIndex = -1;
+	historySearchScanState = null;
+	historySearchGroupFormatters.clear();
+	historyCurrentItemName = '';
+	historyCurrentIsGroup = false;
 	// Close any open select menus (removes scroll listeners) then remove from body
 	cardConfigModal.querySelectorAll('.glow-select-wrap, .visibility-users-wrap').forEach(w => {
 		if (typeof w._closeMenu === 'function') w._closeMenu();

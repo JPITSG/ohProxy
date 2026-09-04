@@ -82,6 +82,7 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawCommands\s*=\s*typeof\s+req\.query\.commands\s*===\s*'string'\s*\?\s*req\.query\.commands\s*:\s*''\s*;/,
 			/const\s+rawStatePattern\s*=\s*typeof\s+req\.query\.statePattern\s*===\s*'string'\s*\?\s*req\.query\.statePattern\s*:\s*''\s*;/,
 			/const\s+rawBefore\s*=\s*typeof\s+req\.query\.before\s*===\s*'string'\s*\?\s*req\.query\.before\s*:\s*''\s*;/,
+			/const\s+rawCursor\s*=\s*typeof\s+req\.query\.cursor\s*===\s*'string'\s*\?\s*req\.query\.cursor\s*:\s*''\s*;/,
 			/const\s+rawOffset\s*=\s*req\.query\.offset\s*;/,
 			/const\s+rawRadius\s*=\s*req\.query\.radius\s*;/,
 			/const\s+rawLegend\s*=\s*req\.query\?\.legend\s*;/,

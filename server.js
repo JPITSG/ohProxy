@@ -32,6 +32,11 @@ const { buildOpenhabClient } = require('./lib/openhab-client');
 const { getBackendRecoveryDelayMs } = require('./lib/backend-recovery-delay');
 const { createActiveUserCountWriter } = require('./lib/active-user-count');
 const { createOpenhabMapTransformer, defaultOpenhabTransformDir, MAX_MAP_PATTERN_LENGTH } = require('./lib/openhab-map-transform');
+const {
+	decodeHistorySearchCursor,
+	encodeHistorySearchCursor,
+	isSaneMysqlHistoryConfig,
+} = require('./lib/item-history-search');
 const { parseTileCoords, tileKey, tileCachePath, createTileCache, ROUTE_HIT, ROUTE_REFRESHED, ROUTE_STALE } = require('./lib/map-tile-cache');
 const { buildCoverageCells, enumerateNeededTiles, countNeededTiles } = require('./lib/mvt-coverage');
 const { createMvtStore, primeMissingTiles, resolveSourceUrl } = require('./lib/mvt-store');
@@ -7118,7 +7123,11 @@ async function refreshGroupMemberMap() {
 				if (!m || !m.name) continue;
 				if (!newReverseMap.has(m.name)) newReverseMap.set(m.name, new Set());
 				newReverseMap.get(m.name).add(groupName);
-				members.push({ name: m.name, label: safeText(m.label || m.name) });
+				members.push({
+					name: m.name,
+					label: safeText(m.label || m.name),
+					statePattern: safeText(m.stateDescription?.pattern || ''),
+				});
 			}
 			newForwardMap.set(groupName, members);
 		} catch {
@@ -9586,6 +9595,17 @@ function applyHistoryStateTransforms(entries, statePattern) {
 	});
 }
 
+const HISTORY_SEARCH_BATCH_SIZE = 500;
+
+function isHistorySearchAvailable(conn = getMysqlConnection()) {
+	return !!conn && isSaneMysqlHistoryConfig(MYSQL_CONFIG);
+}
+
+function historyEntryTime(value) {
+	const date = value instanceof Date ? value : new Date(value);
+	return Number.isFinite(date.getTime()) ? date.toISOString() : safeText(value);
+}
+
 app.get('/api/card-config/:itemName/history', requireAdmin, async (req, res) => {
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
@@ -9619,7 +9639,7 @@ app.get('/api/card-config/:itemName/history', requireAdmin, async (req, res) => 
 		if (groupToMembers.has(rawItemName)) {
 			const members = groupToMembers.get(rawItemName);
 			if (!members || !members.length) {
-				return res.json({ ok: true, entries: [], hasNewer: false, hasOlder: false, isGroup: true });
+				return res.json({ ok: true, entries: [], hasNewer: false, hasOlder: false, isGroup: true, searchAvailable: false });
 			}
 			// Batch-lookup ItemIds for all member names
 			const memberNames = members.map(m => m.name);
@@ -9694,16 +9714,17 @@ app.get('/api/card-config/:itemName/history', requireAdmin, async (req, res) => 
 				hasOlder,
 				nextCursor,
 				isGroup: true,
+				searchAvailable: isHistorySearchAvailable(conn) && memberIdMap.size > 0,
 			});
 		}
 		// Look up ItemId from the items mapping table
 		const itemRows = await queryWithTimeout(conn, 'SELECT ItemId FROM items WHERE ItemName = ? LIMIT 1', [rawItemName]);
 		if (!itemRows.length) {
-			return res.json({ ok: true, entries: [], hasNewer: false, hasOlder: false });
+			return res.json({ ok: true, entries: [], hasNewer: false, hasOlder: false, searchAvailable: false });
 		}
 		const itemId = parseInt(itemRows[0].ItemId, 10);
 		if (!Number.isFinite(itemId) || itemId < 0) {
-			return res.json({ ok: true, entries: [], hasNewer: false, hasOlder: false });
+			return res.json({ ok: true, entries: [], hasNewer: false, hasOlder: false, searchAvailable: false });
 		}
 		// Fetch batches and find transition points (oldest occurrence of each state run)
 		const tableName = 'Item' + itemId;
@@ -9759,10 +9780,140 @@ app.get('/api/card-config/:itemName/history', requireAdmin, async (req, res) => 
 			hasNewer: offset > 0,
 			hasOlder,
 			nextOffset,
+			searchAvailable: isHistorySearchAvailable(conn),
 		});
 	} catch (err) {
 		logMessage(`[History API] Query failed for ${rawItemName}: ${err.message || err}`);
 		res.status(504).json({ ok: false, error: 'Query failed' });
+	}
+});
+
+app.get('/api/card-config/:itemName/history-search', requireAdmin, async (req, res) => {
+	res.setHeader('Content-Type', 'application/json; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache');
+	const rawItemName = req.params.itemName;
+	if (typeof rawItemName !== 'string' || !/^[a-zA-Z0-9_]{1,50}$/.test(rawItemName)) {
+		res.status(400).json({ ok: false, searchAvailable: false, error: 'Invalid item name' });
+		return;
+	}
+	const rawStatePattern = typeof req.query.statePattern === 'string' ? req.query.statePattern : '';
+	if (rawStatePattern.length > MAX_MAP_PATTERN_LENGTH || hasAnyControlChars(rawStatePattern)) {
+		res.status(400).json({ ok: false, searchAvailable: false, error: 'Invalid state pattern' });
+		return;
+	}
+	const statePattern = rawStatePattern.trim();
+	const rawCursor = typeof req.query.cursor === 'string' ? req.query.cursor : '';
+	const cursor = rawCursor ? decodeHistorySearchCursor(rawCursor) : null;
+	if (rawCursor && !cursor) {
+		res.status(400).json({ ok: false, searchAvailable: false, error: 'Invalid search cursor' });
+		return;
+	}
+	const conn = getMysqlConnection();
+	if (!isHistorySearchAvailable(conn)) {
+		res.status(503).json({ ok: false, searchAvailable: false, error: 'History search unavailable' });
+		return;
+	}
+
+	try {
+		let rawRows = [];
+		let isGroup = false;
+		let memberMeta = null;
+		if (groupToMembers.has(rawItemName)) {
+			isGroup = true;
+			const members = groupToMembers.get(rawItemName) || [];
+			if (!members.length) {
+				return res.json({ ok: true, searchAvailable: false, entries: [], scanned: 0, done: true, nextCursor: null, through: null, isGroup: true });
+			}
+			const memberNames = members.map(member => member.name);
+			const placeholders = memberNames.map(() => '?').join(',');
+			const idRows = await queryWithTimeout(conn, 'SELECT ItemName, ItemId FROM items WHERE ItemName IN (' + placeholders + ')', memberNames);
+			const memberIds = new Map();
+			for (const row of idRows) {
+				const id = parseInt(row.ItemId, 10);
+				if (Number.isFinite(id) && id >= 0) memberIds.set(safeText(row.ItemName), id);
+			}
+			const searchableMembers = members
+				.filter(member => memberIds.has(member.name))
+				.slice()
+				.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+			if (!searchableMembers.length) {
+				return res.json({ ok: true, searchAvailable: false, entries: [], scanned: 0, done: true, nextCursor: null, through: null, isGroup: true });
+			}
+			if (cursor && (!cursor.member || !memberIds.has(cursor.member))) {
+				return res.status(400).json({ ok: false, searchAvailable: true, error: 'Invalid search cursor' });
+			}
+			memberMeta = new Map(searchableMembers.map(member => [member.name, member]));
+			const unionParts = [];
+			const params = [];
+			for (const member of searchableMembers) {
+				const itemId = memberIds.get(member.name);
+				let where = '';
+				params.push(member.name);
+				if (cursor) {
+					where = member.name > cursor.member ? ' WHERE Time <= ?' : ' WHERE Time < ?';
+					params.push(new Date(cursor.time));
+				}
+				unionParts.push('(SELECT Time, Value, ? AS MemberName FROM `Item' + itemId + '`' + where + ' ORDER BY Time DESC LIMIT ' + (HISTORY_SEARCH_BATCH_SIZE + 1) + ')');
+			}
+			const sql = 'SELECT Time, Value, MemberName FROM (' + unionParts.join(' UNION ALL ') + ') AS history_rows ORDER BY Time DESC, BINARY MemberName ASC LIMIT ' + (HISTORY_SEARCH_BATCH_SIZE + 1);
+			rawRows = await queryWithTimeout(conn, sql, params);
+		} else {
+			if (cursor && cursor.member) {
+				return res.status(400).json({ ok: false, searchAvailable: true, error: 'Invalid search cursor' });
+			}
+			const itemRows = await queryWithTimeout(conn, 'SELECT ItemId FROM items WHERE ItemName = ? LIMIT 1', [rawItemName]);
+			if (!itemRows.length) {
+				return res.json({ ok: true, searchAvailable: false, entries: [], scanned: 0, done: true, nextCursor: null, through: null, isGroup: false });
+			}
+			const itemId = parseInt(itemRows[0].ItemId, 10);
+			if (!Number.isFinite(itemId) || itemId < 0) {
+				return res.json({ ok: true, searchAvailable: false, entries: [], scanned: 0, done: true, nextCursor: null, through: null, isGroup: false });
+			}
+			const sql = cursor
+				? 'SELECT Time, Value FROM `Item' + itemId + '` WHERE Time < ? ORDER BY Time DESC LIMIT ' + (HISTORY_SEARCH_BATCH_SIZE + 1)
+				: 'SELECT Time, Value FROM `Item' + itemId + '` ORDER BY Time DESC LIMIT ' + (HISTORY_SEARCH_BATCH_SIZE + 1);
+			rawRows = await queryWithTimeout(conn, sql, cursor ? [new Date(cursor.time)] : []);
+		}
+
+		const done = rawRows.length <= HISTORY_SEARCH_BATCH_SIZE;
+		const pageRows = rawRows.slice(0, HISTORY_SEARCH_BATCH_SIZE);
+		const lastRow = pageRows.length ? pageRows[pageRows.length - 1] : null;
+		const entries = [];
+		for (const row of pageRows) {
+			const state = safeText(row.Value).trim();
+			if (!state || state === 'NULL' || state === 'UNDEF') continue;
+			const entry = {
+				time: historyEntryTime(row.Time),
+				state,
+			};
+			let pattern = statePattern;
+			if (isGroup) {
+				const memberName = safeText(row.MemberName);
+				const meta = memberMeta.get(memberName);
+				if (!meta) continue;
+				entry.memberName = memberName;
+				entry.member = safeText(meta.label || memberName);
+				entry.statePattern = safeText(meta.statePattern).trim();
+				pattern = entry.statePattern;
+			}
+			const transformedState = pattern ? historyMapTransformer.transform(pattern, state) : null;
+			if (transformedState !== null) entry.transformedState = transformedState;
+			entries.push(entry);
+		}
+		const lastMember = isGroup && lastRow ? safeText(lastRow.MemberName) : '';
+		res.json({
+			ok: true,
+			searchAvailable: true,
+			entries,
+			scanned: pageRows.length,
+			done,
+			nextCursor: lastRow ? encodeHistorySearchCursor(lastRow.Time, lastMember) : null,
+			through: lastRow ? historyEntryTime(lastRow.Time) : null,
+			isGroup,
+		});
+	} catch (err) {
+		logMessage(`[History Search API] Query failed for ${rawItemName}: ${err.message || err}`);
+		res.status(504).json({ ok: false, searchAvailable: true, error: 'Query failed' });
 	}
 });
 
