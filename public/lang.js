@@ -467,9 +467,6 @@ window.ohLang = {
 		historyNoMatches: 'No matching states found',
 		historyNoMatchesRange: 'No matches in this range',
 		historySearchFailed: 'History search failed',
-		historySearchSummary: '{count} {matches}',
-		historySearchMatch: 'match',
-		historySearchMatches: 'matches',
 
 		loading: 'Loading\u2026',
 		savedOk: 'Saved successfully',

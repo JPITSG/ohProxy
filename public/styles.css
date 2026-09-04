@@ -2748,8 +2748,7 @@ html.no-flex-gap .proxy-cache-section > * + * {
 	width: 100%;
 	min-width: 0;
 }
-.history-search-form[hidden],
-.history-search-status[hidden] {
+.history-search-form[hidden] {
 	display: none;
 }
 html.no-flex-gap .history-search-form > * + * { margin-left: 6px; }
@@ -2822,12 +2821,6 @@ html.no-flex-gap .history-search-form > * + * { margin-left: 6px; }
 .history-search-submit:disabled {
 	opacity: .45;
 	cursor: default;
-}
-.history-search-status {
-	min-height: 1em;
-	font-size: .68rem;
-	font-weight: 300;
-	color: var(--color-text-muted);
 }
 body.theme-light .history-search-input {
 	background: rgba(255, 255, 255, 0.72);

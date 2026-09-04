@@ -138,6 +138,7 @@ describe('Item history search', () => {
 	it('wires a gated, bounded and responsive search through the modal and server', () => {
 		const server = fs.readFileSync(path.join(PROJECT_ROOT, 'server.js'), 'utf8');
 		const app = fs.readFileSync(path.join(PROJECT_ROOT, 'public', 'app.js'), 'utf8');
+		const lang = fs.readFileSync(path.join(PROJECT_ROOT, 'public', 'lang.js'), 'utf8');
 		const styles = fs.readFileSync(path.join(PROJECT_ROOT, 'public', 'styles.css'), 'utf8');
 
 		assert.match(server, /app\.get\('\/api\/card-config\/:itemName\/history-search', requireAdmin/);
@@ -148,8 +149,9 @@ describe('Item history search', () => {
 		assert.match(app, /const HISTORY_SEARCH_PAGE_SIZE = 3;/);
 		assert.match(app, /const HISTORY_SEARCH_MAX_SAMPLES_PER_ACTION = 5000;/);
 		assert.match(app, /consumeHistorySearchEntries\(historySearchScanState, data\.entries/);
-		assert.match(app, /const status = entries\.length \? historySearchSummary\(entries\.length\) : '';/);
-		assert.doesNotMatch(app, /historySearchThrough|historySearchSummary\(entries\.length, through\)/);
+		assert.doesNotMatch(app, /historySearchThrough|historySearchSummary|history-search-status|setHistorySearchStatus/);
+		assert.doesNotMatch(lang, /historySearchSummary|historySearchMatch/);
+		assert.doesNotMatch(styles, /history-search-status/);
 		assert.match(app, /event\.key !== 'Escape'[\s\S]*?event\.preventDefault\(\);\s*event\.stopPropagation\(\);[\s\S]*?clearHistorySearch\(\);/);
 		assert.match(app, /const hasNav = navFrag\.childNodes\.length > 0;\s*nav\.innerHTML = '';\s*nav\.appendChild\(navFrag\);\s*nav\.style\.display = hasNav \? 'flex' : 'none';/);
 		assert.match(styles, /@media \(max-width: 639px\), \(hover: none\), \(pointer: coarse\)[\s\S]*?\.history-search-input,[\s\S]*?height: 44px;/);

@@ -4818,7 +4818,6 @@ function ensureCardConfigModal() {
 						</div>
 						<button type="submit" class="history-search-submit">${cc.historySearchBtn}</button>
 					</form>
-					<div class="history-search-status" role="status" aria-live="polite" hidden></div>
 					<div class="history-entries"></div>
 					<div class="history-nav" style="display:none;"></div>
 				</div>
@@ -5588,13 +5587,6 @@ function renderHistoryRows(container, entries, formatState) {
 	container.appendChild(frag);
 }
 
-function setHistorySearchStatus(text) {
-	const status = cardConfigModal?.querySelector('.history-search-status');
-	if (!status) return;
-	status.textContent = text || '';
-	status.hidden = !text;
-}
-
 function setHistorySearchLoading(loading) {
 	historySearchLoading = !!loading;
 	const form = cardConfigModal?.querySelector('.history-search-form');
@@ -5612,7 +5604,6 @@ function setHistorySearchAvailability(available) {
 	if (form) form.hidden = !historySearchAvailable;
 	if (!historySearchAvailable) {
 		historySearchActive = false;
-		setHistorySearchStatus('');
 	}
 }
 
@@ -5637,7 +5628,6 @@ function resetHistorySearchForItem() {
 		syncSearchClearButton(input);
 	}
 	if (submit) submit.disabled = false;
-	setHistorySearchStatus('');
 }
 
 function formatHistorySearchEntry(entry) {
@@ -5670,15 +5660,6 @@ function formatHistorySearchEntry(entry) {
 	};
 }
 
-function historySearchSummary(count) {
-	const matches = count === 1
-		? ohLang.cardConfig.historySearchMatch
-		: ohLang.cardConfig.historySearchMatches;
-	return ohLang.cardConfig.historySearchSummary
-		.replace('{count}', String(count))
-		.replace('{matches}', matches);
-}
-
 function renderHistorySearchPage(index) {
 	const page = historySearchPages[index];
 	const section = cardConfigModal?.querySelector('.history-section');
@@ -5696,8 +5677,6 @@ function renderHistorySearchPage(index) {
 		empty.textContent = page.emptyText;
 		container.appendChild(empty);
 	}
-	setHistorySearchStatus(page.status);
-
 	const navFrag = document.createDocumentFragment();
 	if (index > 0) {
 		const newer = document.createElement('button');
@@ -5741,7 +5720,6 @@ async function loadNextHistorySearchPage() {
 	setHistorySearchLoading(true);
 	container.innerHTML = '<div class="history-loading">' + ohLang.cardConfig.historySearching + '</div>';
 	nav.style.display = 'none';
-	setHistorySearchStatus('');
 	if (historyAbort) historyAbort.abort();
 	historyAbort = new AbortController();
 	const signal = historyAbort.signal;
@@ -5787,11 +5765,9 @@ async function loadNextHistorySearchPage() {
 		if (generation !== historySearchGeneration || !historySearchActive) return;
 		const entries = historySearchScanState.bufferedMatches.splice(0, HISTORY_SEARCH_PAGE_SIZE);
 		const hasOlder = historySearchScanState.bufferedMatches.length > 0 || !historySearchScanState.done;
-		const status = entries.length ? historySearchSummary(entries.length) : '';
 		historySearchPages.push({
 			entries,
 			hasOlder,
-			status,
 			emptyText: historySearchScanState.done
 				? ohLang.cardConfig.historyNoMatches
 				: ohLang.cardConfig.historyNoMatchesRange,
@@ -5804,7 +5780,6 @@ async function loadNextHistorySearchPage() {
 		failed.className = 'history-empty history-error';
 		failed.textContent = ohLang.cardConfig.historySearchFailed;
 		container.appendChild(failed);
-		setHistorySearchStatus('');
 	} finally {
 		if (generation === historySearchGeneration) setHistorySearchLoading(false);
 	}
@@ -5850,7 +5825,6 @@ function clearHistorySearch() {
 	if (input && input.value) input.value = '';
 	syncSearchClearButton(input);
 	if (submit) submit.disabled = false;
-	setHistorySearchStatus('');
 	if (!wasActive || !historyCurrentItemName) return;
 	historyOffsetStack = [];
 	historyCursorStack = [];
