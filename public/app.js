@@ -5732,6 +5732,7 @@ async function loadNextHistorySearchPage() {
 		) {
 			const params = new URLSearchParams();
 			if (historySearchScanState.cursor) params.set('cursor', historySearchScanState.cursor);
+			if (historyCurrentIsGroup) params.set('memberQuery', historySearchScanState.query);
 			if (!historyCurrentIsGroup && historyStatePattern) params.set('statePattern', historyStatePattern);
 			const query = params.toString();
 			const url = '/api/card-config/' + encodeURIComponent(historyCurrentItemName) + '/history-search' + (query ? '?' + query : '');

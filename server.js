@@ -36,6 +36,7 @@ const {
 	decodeHistorySearchCursor,
 	encodeHistorySearchCursor,
 	isSaneMysqlHistoryConfig,
+	selectHistorySearchMembers,
 } = require('./lib/item-history-search');
 const { parseTileCoords, tileKey, tileCachePath, createTileCache, ROUTE_HIT, ROUTE_REFRESHED, ROUTE_STALE } = require('./lib/map-tile-cache');
 const { buildCoverageCells, enumerateNeededTiles, countNeededTiles } = require('./lib/mvt-coverage');
@@ -9792,6 +9793,10 @@ app.get('/api/card-config/:itemName/history-search', requireAdmin, async (req, r
 	res.setHeader('Content-Type', 'application/json; charset=utf-8');
 	res.setHeader('Cache-Control', 'no-cache');
 	const rawItemName = req.params.itemName;
+	const memberQuery = req.query.memberQuery === undefined ? '' : req.query.memberQuery;
+	if (typeof memberQuery !== 'string' || memberQuery.length > 100 || hasAnyControlChars(memberQuery)) {
+		return res.status(400).json({ ok: false, error: 'Invalid member query' });
+	}
 	if (typeof rawItemName !== 'string' || !/^[a-zA-Z0-9_]{1,50}$/.test(rawItemName)) {
 		res.status(400).json({ ok: false, searchAvailable: false, error: 'Invalid item name' });
 		return;
@@ -9832,14 +9837,14 @@ app.get('/api/card-config/:itemName/history-search', requireAdmin, async (req, r
 				const id = parseInt(row.ItemId, 10);
 				if (Number.isFinite(id) && id >= 0) memberIds.set(safeText(row.ItemName), id);
 			}
-			const searchableMembers = members
+			const searchableMembers = selectHistorySearchMembers(members, memberQuery)
 				.filter(member => memberIds.has(member.name))
 				.slice()
 				.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 			if (!searchableMembers.length) {
 				return res.json({ ok: true, searchAvailable: false, entries: [], scanned: 0, done: true, nextCursor: null, through: null, isGroup: true });
 			}
-			if (cursor && (!cursor.member || !memberIds.has(cursor.member))) {
+			if (cursor && (!cursor.member || !searchableMembers.some(member => member.name === cursor.member))) {
 				return res.status(400).json({ ok: false, searchAvailable: true, error: 'Invalid search cursor' });
 			}
 			memberMeta = new Map(searchableMembers.map(member => [member.name, member]));

@@ -83,6 +83,8 @@ describe('Input Surface Coverage', () => {
 			/const\s+rawStatePattern\s*=\s*typeof\s+req\.query\.statePattern\s*===\s*'string'\s*\?\s*req\.query\.statePattern\s*:\s*''\s*;/,
 			/const\s+rawBefore\s*=\s*typeof\s+req\.query\.before\s*===\s*'string'\s*\?\s*req\.query\.before\s*:\s*''\s*;/,
 			/const\s+rawCursor\s*=\s*typeof\s+req\.query\.cursor\s*===\s*'string'\s*\?\s*req\.query\.cursor\s*:\s*''\s*;/,
+			// History member query: bounded string, matched against labels in memory.
+			/const memberQuery = req\.query\.memberQuery === undefined \? '' : req\.query\.memberQuery;/,
 			/const\s+rawOffset\s*=\s*req\.query\.offset\s*;/,
 			/const\s+rawRadius\s*=\s*req\.query\.radius\s*;/,
 			/const\s+rawLegend\s*=\s*req\.query\?\.legend\s*;/,
@@ -172,6 +174,7 @@ describe('Input Validation Coverage', () => {
 		assert.ok(content.includes("/^[a-zA-Z0-9_]{1,50}$/"), 'Missing itemName regex validation');
 		assert.ok(content.includes('offset > 100000'), 'Missing history offset upper bound');
 		assert.ok(content.includes('rawStatePattern.length > MAX_MAP_PATTERN_LENGTH'), 'Missing history state pattern length validation');
+		assert.ok(content.includes("typeof memberQuery !== 'string' || memberQuery.length > 100 || hasAnyControlChars(memberQuery)"), 'Missing history member query validation');
 	});
 });
 

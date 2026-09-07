@@ -9,6 +9,7 @@ const {
 	decodeHistorySearchCursor,
 	encodeHistorySearchCursor,
 	isSaneMysqlHistoryConfig,
+	selectHistorySearchMembers,
 } = require('../../lib/item-history-search');
 const {
 	buildHistoryStateFormatter,
@@ -20,6 +21,19 @@ const { createOpenhabMapTransformer } = require('../../lib/openhab-map-transform
 const PROJECT_ROOT = path.join(__dirname, '..', '..');
 
 describe('Item history search', () => {
+	it('scopes member-name searches to matching members and retains all members for state searches', () => {
+		const members = [
+			{ name: 'A', label: 'Utility Window' },
+			{ name: 'B', label: 'Hall Window' },
+			{ name: 'C', label: 'Hall Door' },
+		];
+		assert.deepStrictEqual(selectHistorySearchMembers(members, ' UTILITY '), [members[0]]);
+		assert.deepStrictEqual(selectHistorySearchMembers(members, 'window'), members.slice(0, 2));
+		assert.strictEqual(selectHistorySearchMembers(members, 'Closed'), members);
+		assert.strictEqual(selectHistorySearchMembers(members, ''), members);
+		assert.strictEqual(selectHistorySearchMembers(members, 'missing'), members);
+	});
+
 	it('only enables the capability for complete, sane MySQL settings', () => {
 		assert.strictEqual(isSaneMysqlHistoryConfig({
 			host: 'db-host',
@@ -133,6 +147,42 @@ describe('Item history search', () => {
 			'Window \u00B7 Open',
 			'Door \u00B7 Open',
 		]);
+	});
+
+	it('matches group member labels and MAP states across chunks without merging member transitions', () => {
+		const transformer = createOpenhabMapTransformer();
+		const options = {
+			seriesKey: entry => entry.memberName,
+			formatEntry: entry => {
+				const displayState = transformer.transform('MAP(|0=Shut;1=Ajar):%s', entry.state);
+				return { displayState, renderedState: entry.member + ' · ' + displayState };
+			},
+		};
+		const chunks = [
+			[
+				{ time: '2026-09-08T10:05:00Z', state: '1', memberName: 'A', member: 'Utility Window' },
+				{ time: '2026-09-08T10:04:00Z', state: '1', memberName: 'B', member: 'Hall Door' },
+			],
+			[
+				{ time: '2026-09-08T10:03:00Z', state: '1', memberName: 'A', member: 'Utility Window' },
+				{ time: '2026-09-08T10:02:00Z', state: '0', memberName: 'A', member: 'Utility Window' },
+				{ time: '2026-09-08T10:01:00Z', state: '0', memberName: 'B', member: 'Hall Door' },
+			],
+		];
+		const search = query => {
+			const scan = createHistorySearchScanState(query);
+			consumeHistorySearchEntries(scan, chunks[0], options);
+			consumeHistorySearchEntries(scan, chunks[1], { ...options, done: true });
+			return scan.bufferedMatches;
+		};
+		assert.deepStrictEqual(search('  uTiLiTy  ').map(entry => [entry.time, entry.renderedState]), [
+			['2026-09-08T10:03:00Z', 'Utility Window · Ajar'],
+			['2026-09-08T10:02:00Z', 'Utility Window · Shut'],
+		]);
+		assert.deepStrictEqual(search('ajar').map(entry => entry.memberName), ['B', 'A']);
+		assert.strictEqual(search('Utility Window · Shut').length, 1);
+		assert.deepStrictEqual(search('1'), []);
+		assert.deepStrictEqual(search('missing member'), []);
 	});
 
 	it('wires a gated, bounded and responsive search through the modal and server', () => {
