@@ -5464,8 +5464,6 @@ function renderWeatherWidget(weatherData, mode, slim, updatedAtMs) {
 	--chip-bg: ${isDark ? 'rgba(255,255,255,0.065)' : 'rgba(22,26,52,0.045)'};
 	--chip-bd: ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(22,26,52,0.09)'};
 	--card-hover: ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.55)'};
-	--today-bg: ${isDark ? 'rgba(255,255,255,0.055)' : 'rgba(255,255,255,0.5)'};
-	--today-bd: ${isDark ? 'rgba(255,255,255,0.13)' : 'rgba(255,255,255,0.7)'};
 	--track-bg: ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(22,26,52,0.10)'};
 	--sky-a: ${skyA};
 	--sky-b: ${skyB};
@@ -5665,11 +5663,6 @@ html, body {
 @keyframes riseIn {
 	from { opacity: 0; transform: translateY(8px); }
 	to { opacity: 1; transform: translateY(0); }
-}
-.forecast-day.today {
-	background: var(--today-bg);
-	border-color: var(--today-bd);
-	box-shadow: 0 4px 16px ${isDark ? 'rgba(5,8,20,0.25)' : 'rgba(90,110,170,0.18)'};
 }
 @media (hover: hover) and (pointer: fine) {
 	.forecast-day:hover {
