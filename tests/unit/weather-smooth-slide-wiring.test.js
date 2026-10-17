@@ -46,7 +46,7 @@ describe('Weather Smooth Slide Wiring', () => {
 
 	it('renders a hero band with current conditions and inline SVG scene', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
-		assert.match(server, /<div class="hero-scene">\$\{sceneSvg\}<\/div>/);
+		assert.match(server, /<div class="hero-scene"\$\{heroDesc \? [^\n]*\}>\$\{sceneSvg\}<\/div>/);
 		assert.match(server, /<span class="hero-temp-val">\$\{currentTempStr\}<\/span>/);
 		assert.match(server, /<div class="hero-chips">\$\{chipsHtml\}<\/div>/);
 		// Hero text values are escaped at the interpolation site
@@ -67,6 +67,35 @@ describe('Weather Smooth Slide Wiring', () => {
 		assert.match(server, /function weatherIconSvg\(group, opts = \{\}\) \{/);
 		assert.match(server, /<div class="day-icon"[^>]*>\$\{dayIconSvg\}<\/div>/);
 		assert.doesNotMatch(server, /<img class="weather-icon"/);
+	});
+
+	it('draws the night moon in its own coordinates with the lunation phase', () => {
+		const server = fs.readFileSync(SERVER_FILE, 'utf8');
+		const start = server.indexOf('function weatherIconSvg(group, opts = {}) {');
+		const end = server.indexOf('\n}\n', start) + 3;
+		assert.ok(start >= 0 && end > start);
+		const weatherIconSvg = new Function(`${server.slice(start, end)}; return weatherIconSvg;`)();
+		const moonPath = (opts) => {
+			const svg = weatherIconSvg('clear', { night: true, ...opts });
+			const match = svg.match(/<path d="(M0 -11\.5A11\.5 11\.5 0 0 [01] 0 11\.5A[^"]+)" fill="url\(#wxMoon\)"([^>]*)\/>/);
+			assert.ok(match, svg);
+			return { d: match[1], attrs: match[2] };
+		};
+
+		assert.doesNotMatch(server, /wxCrescent|mask="url\(#wx/);
+		// Waxing: lit limb on the right (sweep 1); crescent terminator bulges right, gibbous left
+		assert.equal(moonPath({ moonLunation: 0.12 }).d, 'M0 -11.5A11.5 11.5 0 0 1 0 11.5A8.38 11.5 0 0 0 0 -11.5Z');
+		assert.equal(moonPath({ moonLunation: 0.25 }).d, 'M0 -11.5A11.5 11.5 0 0 1 0 11.5A0 11.5 0 0 1 0 -11.5Z');
+		assert.equal(moonPath({ moonLunation: 0.37 }).d, 'M0 -11.5A11.5 11.5 0 0 1 0 11.5A7.87 11.5 0 0 1 0 -11.5Z');
+		// Full moon: both halves lit
+		assert.equal(moonPath({ moonLunation: 0.5 }).d, 'M0 -11.5A11.5 11.5 0 0 0 0 11.5A11.5 11.5 0 0 0 0 -11.5Z');
+		// Waning: lit limb on the left (sweep 0)
+		assert.equal(moonPath({ moonLunation: 0.62 }).d, 'M0 -11.5A11.5 11.5 0 0 0 0 11.5A8.38 11.5 0 0 0 0 -11.5Z');
+		assert.equal(moonPath({ moonLunation: 0.88 }).d, 'M0 -11.5A11.5 11.5 0 0 0 0 11.5A8.38 11.5 0 0 1 0 -11.5Z');
+		// Southern hemisphere mirrors the lit side; northern does not
+		assert.equal(moonPath({ moonLunation: 0.12 }).attrs, '');
+		assert.equal(moonPath({ moonLunation: 0.12, southern: true }).attrs, ' transform="scale(-1 1)"');
+		assert.match(server, /southern: Number\(forecastData\?\.lat\) < 0,/);
 	});
 
 	it('disables animation and transitions in slim mode', () => {

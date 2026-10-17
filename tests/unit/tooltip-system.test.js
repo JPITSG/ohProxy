@@ -151,6 +151,7 @@ describe('Shared tooltip system', () => {
 		assert.match(server, /class="forecast-day\$\{isToday \? ' today' : ''\}" role="group" aria-label=/);
 		assert.match(server, /class="day-icon" role="img" tabindex="0" data-oh-tooltip="\$\{escapeHtml\(conditionLabel\)\}" data-oh-tooltip-touch="true" aria-label="\$\{escapeHtml\(conditionLabel\)\}"/);
 		assert.doesNotMatch(server, /class="forecast-day[^"]*"[^>]*data-oh-tooltip=/);
+		assert.match(server, /<div class="hero-scene"\$\{heroDesc \? ` role="img" tabindex="0" data-oh-tooltip="\$\{escapeHtml\(heroDesc\)\}" data-oh-tooltip-touch="true" aria-label="\$\{escapeHtml\(heroDesc\)\}"` : ''\}>\$\{sceneSvg\}<\/div>/);
 		assert.match(server, /data-oh-tooltip-touch="true"/);
 		assert.match(server, /Low \$\{lowTemp\} degrees, high \$\{highTemp\} degrees/);
 		assert.match(server, /\$\{pop\}% chance of precipitation/);

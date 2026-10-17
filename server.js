@@ -5108,13 +5108,11 @@ function weatherIconDefs(isDark) {
 <linearGradient id="wxCloudGrey" x1="0" y1="16" x2="0" y2="50" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${cloudGreyA}"/><stop offset="1" stop-color="${cloudGreyB}"/></linearGradient>
 <linearGradient id="wxCloudDeep" x1="0" y1="14" x2="0" y2="52" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${cloudDeepA}"/><stop offset="1" stop-color="${cloudDeepB}"/></linearGradient>
 <linearGradient id="wxBolt" x1="0" y1="36" x2="0" y2="62" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffe45e"/><stop offset="1" stop-color="#ffb02e"/></linearGradient>
-<mask id="wxCrescentA" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="#fff"/><circle cx="37" cy="24.5" r="10.5" fill="#000"/></mask>
-<mask id="wxCrescentB" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="#fff"/><circle cx="27" cy="24.5" r="10.5" fill="#000"/></mask>
 </defs></svg>`;
 }
 
 // Build one inline weather icon SVG for an icon group.
-// opts: { night, animated, moonLunation }
+// opts: { night, animated, isDark, moonLunation, southern }
 function weatherIconSvg(group, opts = {}) {
 	const night = !!opts.night;
 	const animated = !!opts.animated;
@@ -5146,13 +5144,23 @@ function weatherIconSvg(group, opts = {}) {
 			`</g>`;
 	};
 
+	// Lit part drawn as a path in the moon's local coordinates: the outer limb is a
+	// half circle and the terminator a half ellipse whose width follows the phase.
+	// A faint full disc keeps the moon visible near new moon.
 	const moonAt = (x, y, r, lunation) => {
-		const lun = Number.isFinite(lunation) ? lunation : 0.25;
-		const full = lun > 0.46 && lun < 0.54;
-		const mask = full ? '' : ` mask="url(#${lun < 0.5 ? 'wxCrescentA' : 'wxCrescentB'})"`;
+		const lun = Number.isFinite(lunation) ? ((lunation % 1) + 1) % 1 : 0.25;
+		const waxing = lun < 0.5;
+		const crescent = lun < 0.25 || lun > 0.75;
+		const tx = +(Math.abs(Math.cos(2 * Math.PI * lun)) * r).toFixed(2);
+		const limbSweep = waxing ? 1 : 0;
+		const termSweep = waxing === crescent ? 0 : 1;
+		const lit = `M0 ${-r}A${r} ${r} 0 0 ${limbSweep} 0 ${r}A${tx} ${r} 0 0 ${termSweep} 0 ${-r}Z`;
+		// Waxing is lit on the right north of the equator, on the left south of it
+		const flip = opts.southern ? ' transform="scale(-1 1)"' : '';
 		return `<g transform="translate(${x} ${y})">` +
 			`<circle class="wx-glow" r="${r + 7}" fill="url(#wxMoonGlow)"/>` +
-			`<circle r="${r}" fill="url(#wxMoon)"${mask}/>` +
+			`<circle r="${r}" fill="${opts.isDark === false ? '#8d9ad0' : '#aab7ee'}" opacity="0.28"/>` +
+			`<path d="${lit}" fill="url(#wxMoon)"${flip}/>` +
 			`</g>`;
 	};
 
@@ -5352,6 +5360,7 @@ function renderWeatherWidget(weatherData, mode, slim, updatedAtMs) {
 		animated: !slim,
 		isDark,
 		moonLunation: Number(today?.moon_phase_lunation),
+		southern: Number(forecastData?.lat) < 0,
 	});
 
 	// Condition chips from today's data (humidity, wind, UV, sun times)
@@ -5877,7 +5886,7 @@ ${weatherIconDefs(isDark)}
 <div class="weather-card">
 	<div class="hero">
 		<div class="hero-main">
-			<div class="hero-scene">${sceneSvg}</div>
+			<div class="hero-scene"${heroDesc ? ` role="img" tabindex="0" data-oh-tooltip="${escapeHtml(heroDesc)}" data-oh-tooltip-touch="true" aria-label="${escapeHtml(heroDesc)}"` : ''}>${sceneSvg}</div>
 			<div class="hero-temp"><span class="hero-temp-val">${currentTempStr}</span><span class="hero-temp-unit">°${unitSymbol}</span></div>
 			<div class="hero-meta">
 				<div class="hero-desc" data-oh-tooltip="${escapeHtml(heroDesc)}" data-oh-tooltip-overflow="self">${escapeHtml(heroDesc)}</div>
