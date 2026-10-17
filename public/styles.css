@@ -367,6 +367,16 @@ header {
 .grid > .glass {
 	min-width: 0;
 }
+/* Grid cards only ever sit over the fixed page background, an opaque smooth
+   gradient that also hides the dot grid, so blurring their backdrop changes
+   nothing visible. It is not free though: every backdrop-filter card is its own
+   GPU render pass that the compositor redraws on every scrolled frame. On the
+   wall tablets that alone pushed frames past the 16.7ms budget (~45fps while
+   scrolling); without it scrolling holds 60fps. Header controls keep theirs. */
+#grid .glass {
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
 
 /* Button hover effect when hovering anywhere on click-anywhere cards */
 @media (hover: hover) and (pointer: fine) {
