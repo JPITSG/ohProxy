@@ -5404,7 +5404,6 @@ function renderWeatherWidget(weatherData, mode, slim, updatedAtMs) {
 		const forecastAria = [
 			dayName,
 			dateLabel,
-			conditionLabel,
 			`Low ${lowTemp} degrees, high ${highTemp} degrees`,
 			pop > 0 ? `${pop}% chance of precipitation` : '',
 		].filter(Boolean).join(', ');
@@ -5416,10 +5415,10 @@ function renderWeatherWidget(weatherData, mode, slim, updatedAtMs) {
 		const rangeStyle = `left:${leftPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%;background-image:${weekGradient};background-size:${bgSize}% 100%;background-position-x:${bgPos}%`;
 
 		return `
-			<div class="forecast-day${isToday ? ' today' : ''}" role="group" tabindex="0" data-oh-tooltip="${escapeHtml(conditionLabel)}" data-oh-tooltip-touch="true" aria-label="${escapeHtml(forecastAria)}">
+			<div class="forecast-day${isToday ? ' today' : ''}" role="group" aria-label="${escapeHtml(forecastAria)}">
 				<div class="day-name">${dayName}</div>
 				<div class="day-date">${dateLabel}</div>
-				<div class="day-icon">${dayIconSvg}</div>
+				<div class="day-icon" role="img" tabindex="0" data-oh-tooltip="${escapeHtml(conditionLabel)}" data-oh-tooltip-touch="true" aria-label="${escapeHtml(conditionLabel)}">${dayIconSvg}</div>
 				<div class="day-pop">${popSlot}</div>
 				<div class="day-temps"><span class="t-low">${lowTemp}°</span><span class="t-high">${highTemp}°</span></div>
 				<div class="day-range"><span class="day-range-fill" style="${rangeStyle}"></span></div>

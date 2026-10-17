@@ -65,7 +65,7 @@ describe('Weather Smooth Slide Wiring', () => {
 	it('uses inline SVG icons instead of remote icon images', () => {
 		const server = fs.readFileSync(SERVER_FILE, 'utf8');
 		assert.match(server, /function weatherIconSvg\(group, opts = \{\}\) \{/);
-		assert.match(server, /<div class="day-icon">\$\{dayIconSvg\}<\/div>/);
+		assert.match(server, /<div class="day-icon"[^>]*>\$\{dayIconSvg\}<\/div>/);
 		assert.doesNotMatch(server, /<img class="weather-icon"/);
 	});
 
